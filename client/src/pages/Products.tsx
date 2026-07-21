@@ -1,0 +1,122 @@
+import { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { api } from '../api/client';
+import type { Product } from '../types';
+import { Button, Input, Textarea, Select, Field, PageHeader, EmptyState, ErrorText, Modal, Card } from '../components/ui';
+
+export const UNITS = ['unit', 'kg', 'tonne', 'per 1000', 'meter', 'litre', 'set', 'box'];
+
+const empty: Omit<Product, 'id'> = {
+  name: '', description: '', hsn_code: '', unit: 'unit', unit_price: 0, country_of_origin: 'India',
+};
+
+export default function ProductsPage() {
+  const queryClient = useQueryClient();
+  const [q, setQ] = useState('');
+  const [editing, setEditing] = useState<Product | Omit<Product, 'id'> | null>(null);
+  const { data: products = [] } = useQuery({
+    queryKey: ['products', q],
+    queryFn: () => api.get<Product[]>(`/api/products?q=${encodeURIComponent(q)}`),
+  });
+
+  const save = useMutation({
+    mutationFn: (p: Product | Omit<Product, 'id'>) =>
+      'id' in p ? api.put<Product>(`/api/products/${p.id}`, p) : api.post<Product>('/api/products', p),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['products'] });
+      setEditing(null);
+    },
+  });
+
+  const remove = useMutation({
+    mutationFn: (id: number) => api.del(`/api/products/${id}`),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['products'] }),
+  });
+
+  const set = (patch: Partial<Product>) => setEditing((prev) => (prev ? { ...prev, ...patch } : prev));
+
+  return (
+    <div>
+      <PageHeader
+        title="Products"
+        subtitle={`${products.length} product${products.length === 1 ? '' : 's'} in catalog`}
+        actions={<Button onClick={() => { save.reset(); setEditing({ ...empty }); }}>+ New Product</Button>}
+      />
+      <div className="mb-3 max-w-xs">
+        <Input placeholder="Search by name or HSN…" value={q} onChange={(e) => setQ(e.target.value)} />
+      </div>
+      <ErrorText error={remove.error} />
+      <Card className="overflow-x-auto">
+        {products.length === 0 ? (
+          <EmptyState message="No products yet. Add products to pick them quickly when building documents." />
+        ) : (
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-slate-200 text-left text-xs uppercase text-slate-500">
+                <th className="pb-2 pr-3">Name</th>
+                <th className="pb-2 pr-3">HSN</th>
+                <th className="pb-2 pr-3">Unit</th>
+                <th className="pb-2 pr-3 text-right">Default Price</th>
+                <th className="pb-2 pr-3">Origin</th>
+                <th className="pb-2" />
+              </tr>
+            </thead>
+            <tbody>
+              {products.map((p) => (
+                <tr key={p.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50">
+                  <td className="py-2 pr-3 font-medium">{p.name}</td>
+                  <td className="py-2 pr-3">{p.hsn_code || '—'}</td>
+                  <td className="py-2 pr-3">{p.unit}</td>
+                  <td className="py-2 pr-3 text-right">{p.unit_price ? p.unit_price.toLocaleString('en-IN') : '—'}</td>
+                  <td className="py-2 pr-3">{p.country_of_origin}</td>
+                  <td className="py-2 text-right whitespace-nowrap">
+                    <Button variant="ghost" onClick={() => { save.reset(); setEditing(p); }}>Edit</Button>
+                    <Button
+                      variant="danger"
+                      className="ml-1 border-0"
+                      onClick={() => { if (confirm(`Delete product "${p.name}"?`)) remove.mutate(p.id); }}
+                    >
+                      Delete
+                    </Button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </Card>
+
+      {editing && (
+        <Modal title={'id' in editing ? `Edit ${editing.name}` : 'New Product'} onClose={() => setEditing(null)}>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Product Name *" className="col-span-2">
+              <Input value={editing.name} onChange={(e) => set({ name: e.target.value })} />
+            </Field>
+            <Field label="Description (shown on documents)" className="col-span-2">
+              <Textarea rows={2} value={editing.description} onChange={(e) => set({ description: e.target.value })} />
+            </Field>
+            <Field label="HSN Code"><Input value={editing.hsn_code} onChange={(e) => set({ hsn_code: e.target.value })} /></Field>
+            <Field label="Unit of Measure">
+              <Select value={editing.unit} onChange={(e) => set({ unit: e.target.value })}>
+                {UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
+              </Select>
+            </Field>
+            <Field label="Default Unit Price">
+              <Input type="number" min={0} step="any" value={editing.unit_price || ''} onChange={(e) => set({ unit_price: Number(e.target.value) })} />
+            </Field>
+            <Field label="Country of Origin"><Input value={editing.country_of_origin} onChange={(e) => set({ country_of_origin: e.target.value })} /></Field>
+          </div>
+          <div className="mt-4 space-y-2">
+            <ErrorText error={save.error} />
+            <div className="flex justify-end gap-2">
+              <Button variant="secondary" onClick={() => setEditing(null)}>Cancel</Button>
+              <Button onClick={() => save.mutate(editing)} disabled={save.isPending || !editing.name.trim()}>
+                {'id' in editing ? 'Save Changes' : 'Create Product'}
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}

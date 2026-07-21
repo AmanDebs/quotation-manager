@@ -1,0 +1,255 @@
+PRAGMA journal_mode = WAL;
+PRAGMA foreign_keys = ON;
+
+CREATE TABLE IF NOT EXISTS users (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  email TEXT NOT NULL UNIQUE,
+  password_hash TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS settings (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  company_name TEXT NOT NULL DEFAULT '',
+  address TEXT NOT NULL DEFAULT '',
+  city TEXT NOT NULL DEFAULT '',
+  state TEXT NOT NULL DEFAULT '',
+  country TEXT NOT NULL DEFAULT 'India',
+  pincode TEXT NOT NULL DEFAULT '',
+  phone TEXT NOT NULL DEFAULT '',
+  email TEXT NOT NULL DEFAULT '',
+  website TEXT NOT NULL DEFAULT '',
+  gstin TEXT NOT NULL DEFAULT '',
+  pan TEXT NOT NULL DEFAULT '',
+  iec TEXT NOT NULL DEFAULT '',
+  logo TEXT NOT NULL DEFAULT '',
+  signature TEXT NOT NULL DEFAULT '',
+  default_terms TEXT NOT NULL DEFAULT '',
+  quote_prefix TEXT NOT NULL DEFAULT 'QT',
+  pi_prefix TEXT NOT NULL DEFAULT 'PI',
+  inv_prefix TEXT NOT NULL DEFAULT 'INV',
+  pl_prefix TEXT NOT NULL DEFAULT 'PL',
+  bank_accounts TEXT NOT NULL DEFAULT '[]'
+);
+INSERT OR IGNORE INTO settings (id) VALUES (1);
+
+CREATE TABLE IF NOT EXISTS customers (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  contact_person TEXT NOT NULL DEFAULT '',
+  email TEXT NOT NULL DEFAULT '',
+  phone TEXT NOT NULL DEFAULT '',
+  address TEXT NOT NULL DEFAULT '',
+  city TEXT NOT NULL DEFAULT '',
+  country TEXT NOT NULL DEFAULT 'India',
+  gstin TEXT NOT NULL DEFAULT '',
+  currency TEXT NOT NULL DEFAULT 'INR',
+  consignee TEXT NOT NULL DEFAULT '',
+  notify_party TEXT NOT NULL DEFAULT '',
+  notes TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS products (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  hsn_code TEXT NOT NULL DEFAULT '',
+  unit TEXT NOT NULL DEFAULT 'unit',
+  unit_price REAL NOT NULL DEFAULT 0,
+  country_of_origin TEXT NOT NULL DEFAULT 'India',
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS enquiries (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  customer_id INTEGER NOT NULL REFERENCES customers(id),
+  date TEXT NOT NULL,
+  notes TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','quoted','lost')),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS quotations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  number TEXT NOT NULL,
+  revision INTEGER NOT NULL DEFAULT 0,
+  date TEXT NOT NULL,
+  enquiry_id INTEGER REFERENCES enquiries(id),
+  customer_id INTEGER NOT NULL REFERENCES customers(id),
+  currency TEXT NOT NULL DEFAULT 'INR',
+  validity_date TEXT NOT NULL DEFAULT '',
+  payment_terms TEXT NOT NULL DEFAULT '',
+  delivery_terms TEXT NOT NULL DEFAULT '',
+  notes TEXT NOT NULL DEFAULT '',
+  tax_type TEXT NOT NULL DEFAULT 'none' CHECK (tax_type IN ('none','cgst_sgst','igst')),
+  status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','sent','negotiating','accepted','rejected','expired')),
+  subtotal REAL NOT NULL DEFAULT 0,
+  tax_total REAL NOT NULL DEFAULT 0,
+  grand_total REAL NOT NULL DEFAULT 0,
+  superseded_by INTEGER REFERENCES quotations(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS quotation_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  quotation_id INTEGER NOT NULL REFERENCES quotations(id) ON DELETE CASCADE,
+  product_id INTEGER REFERENCES products(id),
+  description TEXT NOT NULL DEFAULT '',
+  hsn_code TEXT NOT NULL DEFAULT '',
+  qty REAL,
+  unit TEXT NOT NULL DEFAULT 'unit',
+  unit_price REAL NOT NULL DEFAULT 0,
+  tax_pct REAL NOT NULL DEFAULT 0,
+  amount REAL NOT NULL DEFAULT 0,
+  sort_order INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS proforma_invoices (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  number TEXT NOT NULL,
+  date TEXT NOT NULL,
+  quotation_id INTEGER REFERENCES quotations(id),
+  customer_id INTEGER NOT NULL REFERENCES customers(id),
+  consignee TEXT NOT NULL DEFAULT '',
+  notify_party TEXT NOT NULL DEFAULT '',
+  currency TEXT NOT NULL DEFAULT 'INR',
+  freight REAL NOT NULL DEFAULT 0,
+  insurance REAL NOT NULL DEFAULT 0,
+  lead_time TEXT NOT NULL DEFAULT '',
+  bank_account TEXT NOT NULL DEFAULT '',
+  inco_terms TEXT NOT NULL DEFAULT '',
+  payment_terms TEXT NOT NULL DEFAULT '',
+  delivery_terms TEXT NOT NULL DEFAULT '',
+  validity_date TEXT NOT NULL DEFAULT '',
+  is_export INTEGER NOT NULL DEFAULT 0,
+  country_of_origin TEXT NOT NULL DEFAULT '',
+  port_of_loading TEXT NOT NULL DEFAULT '',
+  port_of_discharge TEXT NOT NULL DEFAULT '',
+  final_destination TEXT NOT NULL DEFAULT '',
+  container_count TEXT NOT NULL DEFAULT '',
+  partial_shipment TEXT NOT NULL DEFAULT 'Not Allowed',
+  po_number TEXT NOT NULL DEFAULT '',
+  po_date TEXT NOT NULL DEFAULT '',
+  remarks TEXT NOT NULL DEFAULT '',
+  tax_type TEXT NOT NULL DEFAULT 'none' CHECK (tax_type IN ('none','cgst_sgst','igst')),
+  status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','sent','order_confirmed','advance_received','in_production','cancelled')),
+  subtotal REAL NOT NULL DEFAULT 0,
+  tax_total REAL NOT NULL DEFAULT 0,
+  grand_total REAL NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS pi_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  pi_id INTEGER NOT NULL REFERENCES proforma_invoices(id) ON DELETE CASCADE,
+  product_id INTEGER REFERENCES products(id),
+  description TEXT NOT NULL DEFAULT '',
+  hsn_code TEXT NOT NULL DEFAULT '',
+  qty REAL,
+  unit TEXT NOT NULL DEFAULT 'unit',
+  unit_price REAL NOT NULL DEFAULT 0,
+  tax_pct REAL NOT NULL DEFAULT 0,
+  amount REAL NOT NULL DEFAULT 0,
+  sort_order INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS commercial_invoices (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  number TEXT NOT NULL,
+  date TEXT NOT NULL,
+  pi_id INTEGER REFERENCES proforma_invoices(id),
+  customer_id INTEGER NOT NULL REFERENCES customers(id),
+  consignee TEXT NOT NULL DEFAULT '',
+  notify_party TEXT NOT NULL DEFAULT '',
+  currency TEXT NOT NULL DEFAULT 'INR',
+  freight REAL NOT NULL DEFAULT 0,
+  insurance REAL NOT NULL DEFAULT 0,
+  shipping_details TEXT NOT NULL DEFAULT '',
+  bank_account TEXT NOT NULL DEFAULT '',
+  inco_terms TEXT NOT NULL DEFAULT '',
+  payment_terms TEXT NOT NULL DEFAULT '',
+  is_export INTEGER NOT NULL DEFAULT 0,
+  country_of_origin TEXT NOT NULL DEFAULT '',
+  port_of_loading TEXT NOT NULL DEFAULT '',
+  port_of_discharge TEXT NOT NULL DEFAULT '',
+  final_destination TEXT NOT NULL DEFAULT '',
+  remarks TEXT NOT NULL DEFAULT '',
+  tax_type TEXT NOT NULL DEFAULT 'none' CHECK (tax_type IN ('none','cgst_sgst','igst')),
+  status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','final','dispatched','paid')),
+  subtotal REAL NOT NULL DEFAULT 0,
+  tax_total REAL NOT NULL DEFAULT 0,
+  grand_total REAL NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS invoice_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  invoice_id INTEGER NOT NULL REFERENCES commercial_invoices(id) ON DELETE CASCADE,
+  product_id INTEGER REFERENCES products(id),
+  description TEXT NOT NULL DEFAULT '',
+  hsn_code TEXT NOT NULL DEFAULT '',
+  qty REAL,
+  unit TEXT NOT NULL DEFAULT 'unit',
+  unit_price REAL NOT NULL DEFAULT 0,
+  tax_pct REAL NOT NULL DEFAULT 0,
+  amount REAL NOT NULL DEFAULT 0,
+  sort_order INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS packing_lists (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  number TEXT NOT NULL,
+  date TEXT NOT NULL,
+  invoice_id INTEGER REFERENCES commercial_invoices(id),
+  customer_id INTEGER NOT NULL REFERENCES customers(id),
+  shipping_marks TEXT NOT NULL DEFAULT '',
+  remarks TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS packing_list_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  packing_list_id INTEGER NOT NULL REFERENCES packing_lists(id) ON DELETE CASCADE,
+  description TEXT NOT NULL DEFAULT '',
+  qty REAL,
+  unit TEXT NOT NULL DEFAULT 'unit',
+  packages TEXT NOT NULL DEFAULT '',
+  dimensions TEXT NOT NULL DEFAULT '',
+  gross_weight REAL NOT NULL DEFAULT 0,
+  net_weight REAL NOT NULL DEFAULT 0,
+  sort_order INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS followups (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  doc_type TEXT NOT NULL CHECK (doc_type IN ('enquiry','quotation','proforma','invoice','general')),
+  doc_id INTEGER,
+  customer_id INTEGER REFERENCES customers(id),
+  due_date TEXT NOT NULL,
+  note TEXT NOT NULL DEFAULT '',
+  done INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS payments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  pi_id INTEGER REFERENCES proforma_invoices(id),
+  invoice_id INTEGER REFERENCES commercial_invoices(id),
+  customer_id INTEGER REFERENCES customers(id),
+  date TEXT NOT NULL,
+  amount REAL NOT NULL,
+  currency TEXT NOT NULL DEFAULT 'INR',
+  method TEXT NOT NULL DEFAULT '',
+  reference TEXT NOT NULL DEFAULT '',
+  notes TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS sequences (
+  doc_type TEXT NOT NULL,
+  year INTEGER NOT NULL,
+  next_num INTEGER NOT NULL DEFAULT 1,
+  PRIMARY KEY (doc_type, year)
+);

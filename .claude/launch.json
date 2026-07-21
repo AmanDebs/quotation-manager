@@ -1,0 +1,19 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "api",
+      "runtimeExecutable": "C:\\Program Files\\nodejs\\npm.cmd",
+      "runtimeArgs": ["run", "dev"],
+      "cwd": "server",
+      "port": 4000
+    },
+    {
+      "name": "app",
+      "runtimeExecutable": "C:\\Program Files\\nodejs\\npm.cmd",
+      "runtimeArgs": ["run", "dev"],
+      "cwd": "client",
+      "port": 5173
+    }
+  ]
+}

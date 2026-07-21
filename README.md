@@ -1,0 +1,47 @@
+# Quotation Manager
+
+A complete order-to-dispatch document management system for a manufacturing/export business.
+
+**Enquiry → Quotation → Proforma Invoice → Commercial Invoice + Packing List**
+
+Each document is created from the previous one with all details carried forward, so nothing is retyped and totals are always computed by the system — no manual math, no missed follow-ups, and every data point stored for analysis.
+
+## Features
+
+- **Quotations** with revisions (R1, R2…) to track negotiation history, validity dates, and a status workflow (draft → sent → negotiating → accepted/rejected/expired)
+- **Proforma Invoices** with HSN codes, freight & insurance, INCO terms (CIF/FOB/…), bank details, production lead time, and full export block (country of origin, ports, containers, partial shipment)
+- **Commercial Invoices** created from a PI at dispatch — final quantities are checked against the 10% variance clause automatically
+- **Packing Lists** with cartons, dimensions, net/gross weights and shipping marks
+- **Branded PDFs** for all four documents (logo, signature/stamp, amount in words, GST or export layout)
+- **Buyer PO capture** on the proforma invoice (PO number/date, printed on the PI PDF)
+- **Payment tracking** — record advances against the PI and balance payments against the invoice; balance due appears on screen, on the invoice PDF, and as receivables per currency on the dashboard
+- **Follow-up reminders** on any document — overdue/today/upcoming on the dashboard
+- **Dashboard** — conversion funnel, quotations by status, monthly quoted vs invoiced value per currency, top customers and products
+- **Multi-currency** (INR/USD/EUR at the customer's option) and **GST support** (CGST+SGST / IGST / no tax for exports)
+- Customer & product catalogs, simple team login
+
+## Running the app
+
+Double-click **`start-app.bat`** — it starts both servers and opens the app at http://localhost:5173.
+
+Or manually, in two terminals:
+
+```
+cd server && npm run dev     # API on http://localhost:4000
+cd client && npm run dev     # Web app on http://localhost:5173
+```
+
+On first launch the app asks you to create the first user account, then head to **Settings** to fill in your company profile, logo, bank accounts and GSTIN — these appear on every PDF.
+
+## Tech notes
+
+- **Server:** Node.js + Express + TypeScript. Data is stored in a single SQLite file at `server/data/app.db` (uses Node's built-in `node:sqlite`, no database install needed). Back up that file to back up everything. Set the `DATA_DIR` environment variable to relocate the data folder.
+- **Client:** React + Vite + TypeScript + Tailwind CSS + TanStack Query, charts with Recharts.
+- **PDFs:** generated server-side with pdfmake.
+- **Auth:** email + password (bcrypt), JWT in an httpOnly cookie.
+- All money math happens server-side in `server/src/services/totals.ts` (single source of truth).
+- Document numbers (QT-2026-0001, PI-…, INV-…, PL-…) are per-type yearly sequences; prefixes configurable in Settings.
+
+### Moving to the cloud later
+
+The app is a standard Express API + static React build: deploy the server to any Node host, run `npm run build` in `client/` and serve `client/dist`, and swap SQLite for PostgreSQL when multi-user concurrency demands it.
