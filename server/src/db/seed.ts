@@ -28,11 +28,18 @@ const iso = (d: Date) => d.toISOString().slice(0, 10);
 const daysFromNow = (n: number) => iso(new Date(Date.now() + n * 86400000));
 
 const users = db.prepare('SELECT COUNT(*) AS c FROM users').get() as { c: number };
+let managerId: number;
+let employeeId: number;
 if (users.c === 0) {
-  db.prepare('INSERT INTO users (name, email, password_hash) VALUES (?, ?, ?)').run(
-    'Demo User', 'demo@example.com', bcrypt.hashSync('demo1234', 10)
-  );
-  console.log('Created login  →  demo@example.com / demo1234');
+  const mk = (name: string, email: string, pw: string, role: string) =>
+    Number(db.prepare('INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, ?, ?)').run(name, email, bcrypt.hashSync(pw, 10), role).lastInsertRowid);
+  managerId = mk('Demo Manager', 'manager@example.com', 'demo1234', 'manager');
+  employeeId = mk('Demo Employee', 'employee@example.com', 'demo1234', 'employee');
+  console.log('Created logins →  manager@example.com / demo1234   and   employee@example.com / demo1234');
+} else {
+  managerId = Number((db.prepare("SELECT id FROM users WHERE role = 'manager' ORDER BY id LIMIT 1").get() as { id: number } | undefined)?.id
+    ?? (db.prepare('SELECT id FROM users ORDER BY id LIMIT 1').get() as { id: number }).id);
+  employeeId = Number((db.prepare("SELECT id FROM users WHERE role = 'employee' ORDER BY id LIMIT 1").get() as { id: number } | undefined)?.id ?? managerId);
 }
 
 const settings = db.prepare('SELECT company_name FROM settings WHERE id = 1').get() as { company_name: string };
@@ -55,19 +62,21 @@ if (!settings.company_name) {
   console.log('Filled in demo company profile (Settings)');
 }
 
+// Customers are split between the manager and the employee so the access rules are visible.
 const insertCustomer = db.prepare(
-  `INSERT INTO customers (name, contact_person, email, phone, address, city, country, gstin, currency, consignee, notify_party)
-   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  `INSERT INTO customers (name, contact_person, email, phone, address, city, country, gstin, currency, consignee, notify_party, notify_party_2, owner_id, is_export)
+   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 );
 const customers = {
   bharat: Number(insertCustomer.run('Bharat Engineering Works', 'Rajesh Kumar', 'purchase@bharatengg.example', '+91 99887 66554',
-    '14 MIDC Industrial Estate, Andheri East', 'Mumbai', 'India', '27AAACB9876K1Z3', 'INR', '', '').lastInsertRowid),
+    '14 MIDC Industrial Estate, Andheri East', 'Mumbai', 'India', '27AAACB9876K1Z3', 'INR', '', '', '', employeeId, 0).lastInsertRowid),
   shakti: Number(insertCustomer.run('Shakti Fabricators', 'Priya Nair', 'priya@shaktifab.example', '+91 98765 43210',
-    '7 Howrah Industrial Belt', 'Howrah', 'India', '19AABCS5432L1Z8', 'INR', '', '').lastInsertRowid),
+    '7 Howrah Industrial Belt', 'Howrah', 'India', '19AABCS5432L1Z8', 'INR', '', '', '', employeeId, 0).lastInsertRowid),
   acme: Number(insertCustomer.run('Acme Maschinenbau GmbH', 'Stefan Weber', 'einkauf@acme-mb.example', '+49 30 1234567',
-    'Industriestrasse 12', 'Berlin', 'Germany', '', 'EUR', 'Acme Warehouse GmbH\nHafenstrasse 8, Hamburg, Germany', 'Global Freight Forwarders, Hamburg').lastInsertRowid),
+    'Industriestrasse 12', 'Berlin', 'Germany', '', 'EUR', 'Acme Warehouse GmbH\nHafenstrasse 8, Hamburg, Germany',
+    'Global Freight Forwarders, Hamburg', 'Nordbank Trade Services, Ebene Cybercity, Mauritius', managerId, 1).lastInsertRowid),
   titan: Number(insertCustomer.run('Titan Industrial Supply LLC', 'Mike Ross', 'mike@titansupply.example', '+1 713 555 0142',
-    '2400 Port Rd, Houston, TX', 'Houston', 'USA', '', 'USD', '', '').lastInsertRowid),
+    '2400 Port Rd, Houston, TX', 'Houston', 'USA', '', 'USD', '', '', '', managerId, 1).lastInsertRowid),
 };
 
 const insertProduct = db.prepare(
@@ -84,17 +93,19 @@ type Item = LineItemInput;
 function createQuotation(opts: {
   customer: number; date: string; currency: string; taxType: 'none' | 'cgst_sgst' | 'igst';
   status: string; validity?: string; payment?: string; delivery?: string; items: Item[];
-  number?: string; revision?: number; enquiry?: number;
+  number?: string; revision?: number; isExport?: boolean; createdBy?: number; approval?: string;
 }): { id: number; number: string } {
   return transaction(() => {
     const number = opts.number ?? nextNumber('quotation');
-    const totals = computeTotals(opts.items, opts.taxType);
+    const totals = computeTotals(opts.items, opts.taxType, 0, 0, opts.currency);
+    const approval = opts.approval ?? (opts.status === 'draft' ? 'not_submitted' : 'approved');
     const info = db.prepare(
-      `INSERT INTO quotations (number, revision, date, customer_id, enquiry_id, currency, validity_date, payment_terms, delivery_terms, tax_type, status, subtotal, tax_total, grand_total)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(number, opts.revision ?? 0, opts.date, opts.customer, opts.enquiry ?? null, opts.currency,
+      `INSERT INTO quotations (number, revision, date, customer_id, currency, validity_date, payment_terms, delivery_terms, tax_type, status, is_export, created_by, approval_status, subtotal, tax_total, grand_total)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(number, opts.revision ?? 0, opts.date, opts.customer, opts.currency,
       opts.validity ?? daysFromNow(30), opts.payment ?? '50% advance, balance before dispatch',
       opts.delivery ?? '4-6 weeks from advance', opts.taxType, opts.status,
+      opts.isExport ? 1 : 0, opts.createdBy ?? managerId, approval,
       totals.subtotal, totals.tax_total, totals.grand_total);
     const id = Number(info.lastInsertRowid);
     const ins = db.prepare(
@@ -116,28 +127,21 @@ const forgingEUR: Item = { description: 'Alloy Steel Die Forging, EN19, machined
 const flangeEUR: Item = { description: 'MS Forged Flange, DIN 2633, DN 100 PN16', hsn_code: '7307', qty: 2000, unit: 'unit', unit_price: 5.4, color: 'Silver', packs: 6, pcs_per_pack: 334, total_pcs: 2000 };
 const barUSD: Item = { description: 'Carbon Steel Round Bar, EN8, 63mm dia', hsn_code: '7214', qty: 18, unit: 'tonne', unit_price: 780 };
 
-// Enquiries
-const insertEnquiry = db.prepare('INSERT INTO enquiries (customer_id, date, notes, status) VALUES (?, ?, ?, ?)');
-const enqAcme = Number(insertEnquiry.run(customers.acme, daysFromNow(-95), 'Requirement for machined die forgings + flanges, annual contract possible', 'quoted').lastInsertRowid);
-const enqBharat = Number(insertEnquiry.run(customers.bharat, daysFromNow(-70), 'Flanges DN100/DN150 for refinery piping project', 'quoted').lastInsertRowid);
-insertEnquiry.run(customers.titan, daysFromNow(-40), 'EN8 round bar, monthly requirement approx 18-20 T', 'quoted');
-insertEnquiry.run(customers.shakti, daysFromNow(-6), 'SS fasteners for structural job — needs quote this week', 'open');
-insertEnquiry.run(customers.shakti, daysFromNow(-55), 'One-off requirement for alloy forgings', 'lost');
-
-// Quotations across months and statuses
-createQuotation({ customer: customers.bharat, enquiry: enqBharat, date: daysFromNow(-65), currency: 'INR', taxType: 'igst', status: 'accepted', items: [flangeSmall, flangeBig, bar] });
-const qAcme = createQuotation({ customer: customers.acme, enquiry: enqAcme, date: daysFromNow(-88), currency: 'EUR', taxType: 'none', status: 'sent', items: [forgingEUR, flangeEUR] });
+// Quotations across months, statuses, owners and export/domestic
+createQuotation({ customer: customers.bharat, date: daysFromNow(-65), currency: 'INR', taxType: 'igst', status: 'accepted', createdBy: employeeId, items: [flangeSmall, flangeBig, bar] });
+const qAcme = createQuotation({ customer: customers.acme, date: daysFromNow(-88), currency: 'EUR', taxType: 'none', status: 'sent', isExport: true, items: [forgingEUR, flangeEUR] });
 // Negotiation: Acme pushed price from 2.60 to 2.45 — revision 1 accepted
 const qAcmeR1 = createQuotation({
-  customer: customers.acme, date: daysFromNow(-80), currency: 'EUR', taxType: 'none', status: 'accepted',
+  customer: customers.acme, date: daysFromNow(-80), currency: 'EUR', taxType: 'none', status: 'accepted', isExport: true,
   number: qAcme.number, revision: 1, items: [{ ...forgingEUR, unit_price: 2.45 }, flangeEUR],
 });
 db.prepare('UPDATE quotations SET superseded_by = ?, status = ? WHERE id = ?').run(qAcmeR1.id, 'negotiating', qAcme.id);
-createQuotation({ customer: customers.titan, date: daysFromNow(-35), currency: 'USD', taxType: 'none', status: 'negotiating', items: [barUSD] });
-createQuotation({ customer: customers.shakti, date: daysFromNow(-20), currency: 'INR', taxType: 'cgst_sgst', status: 'sent', items: [bolts] });
-createQuotation({ customer: customers.bharat, date: daysFromNow(-4), currency: 'INR', taxType: 'igst', status: 'draft', items: [bar, bolts] });
-createQuotation({ customer: customers.shakti, date: daysFromNow(-100), currency: 'INR', taxType: 'cgst_sgst', status: 'expired', items: [{ ...bolts, qty: 5 }] });
-createQuotation({ customer: customers.titan, date: daysFromNow(-58), currency: 'USD', taxType: 'none', status: 'rejected', items: [{ ...barUSD, qty: 10, unit_price: 815 }] });
+createQuotation({ customer: customers.titan, date: daysFromNow(-35), currency: 'USD', taxType: 'none', status: 'negotiating', isExport: true, items: [barUSD] });
+// Waiting on the manager — shows the approval queue in action.
+createQuotation({ customer: customers.shakti, date: daysFromNow(-20), currency: 'INR', taxType: 'cgst_sgst', status: 'draft', createdBy: employeeId, approval: 'pending', items: [bolts] });
+createQuotation({ customer: customers.bharat, date: daysFromNow(-4), currency: 'INR', taxType: 'igst', status: 'draft', createdBy: employeeId, approval: 'pending', items: [bar, bolts] });
+createQuotation({ customer: customers.shakti, date: daysFromNow(-100), currency: 'INR', taxType: 'cgst_sgst', status: 'expired', createdBy: employeeId, items: [{ ...bolts, qty: 5 }] });
+createQuotation({ customer: customers.titan, date: daysFromNow(-58), currency: 'USD', taxType: 'none', status: 'rejected', isExport: true, items: [{ ...barUSD, qty: 10, unit_price: 815 }] });
 
 // Proforma from the accepted Acme revision — export order with PO and advance
 const piTotals = computeTotals([{ ...forgingEUR, unit_price: 2.45 }, flangeEUR], 'none', 1800, 420);
@@ -148,8 +152,8 @@ const piId = transaction(() => {
        lead_time, bank_account, inco_terms, payment_terms, delivery_terms, validity_date, is_export,
        country_of_origin, port_of_loading, port_of_discharge, final_destination, container_count, partial_shipment,
        po_number, po_date, notify_party_2, method_of_despatch, quantity_tolerance, hs_code, prepared_by,
-       remarks, tax_type, status, subtotal, tax_total, grand_total)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       remarks, tax_type, status, created_by, approval_status, subtotal, tax_total, grand_total)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     number, daysFromNow(-72), qAcmeR1.id, customers.acme,
     'Acme Warehouse GmbH\nHafenstrasse 8, Hamburg, Germany', 'Global Freight Forwarders, Hamburg',
@@ -160,7 +164,7 @@ const piId = transaction(() => {
     'ACME-PO-2311', daysFromNow(-74),
     'Nordbank Trade Services\nEbene Cybercity, Mauritius', 'By Sea', '(±) 10% in value and quantity', '7326', 'Meisha',
     'Material test certificates (EN 10204 3.1) to accompany shipment.',
-    'none', 'in_production', piTotals.subtotal, piTotals.tax_total, piTotals.grand_total
+    'none', 'in_production', managerId, 'approved', piTotals.subtotal, piTotals.tax_total, piTotals.grand_total
   );
   const id = Number(info.lastInsertRowid);
   const ins = db.prepare(
@@ -184,8 +188,8 @@ const invId = transaction(() => {
     `INSERT INTO commercial_invoices (number, date, pi_id, customer_id, consignee, notify_party, currency, freight, insurance,
        shipping_details, bank_account, inco_terms, payment_terms, is_export, country_of_origin, port_of_loading,
        port_of_discharge, final_destination, notify_party_2, method_of_despatch, lot_no, prepared_by,
-       remarks, tax_type, status, subtotal, tax_total, grand_total)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       remarks, tax_type, status, created_by, approval_status, subtotal, tax_total, grand_total)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     number, daysFromNow(-15), piId, customers.acme,
     'Acme Warehouse GmbH\nHafenstrasse 8, Hamburg, Germany', 'Global Freight Forwarders, Hamburg',
@@ -193,7 +197,7 @@ const invId = transaction(() => {
     'HDFC Bank, Park Street Branch\nA/C 5020 0098 7654 32\nSWIFT: HDFCINBBXXX',
     'CIF', '30% advance, balance against BL copy', 1, 'India', 'Nhava Sheva, India', 'Hamburg, Germany', 'Berlin, Germany',
     'Nordbank Trade Services\nEbene Cybercity, Mauritius', 'By Sea', '42/2026', 'Meisha',
-    'Quantity variance within agreed 10% clause.', 'none', 'dispatched',
+    'Quantity variance within agreed 10% clause.', 'none', 'dispatched', managerId, 'approved',
     invTotals.subtotal, invTotals.tax_total, invTotals.grand_total
   );
   const id = Number(info.lastInsertRowid);
@@ -213,9 +217,9 @@ db.prepare('INSERT INTO payments (invoice_id, customer_id, date, amount, currenc
 transaction(() => {
   const number = nextNumber('packing_list');
   const info = db.prepare(
-    `INSERT INTO packing_lists (number, date, invoice_id, customer_id, shipping_marks, lot_no, remarks)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`
-  ).run(number, daysFromNow(-15), invId, customers.acme, 'ACME / HAMBURG / PO-2311 / 1-24', '42/2026', 'Seaworthy wooden crates, VCI wrapped.');
+    `INSERT INTO packing_lists (number, date, invoice_id, customer_id, shipping_marks, lot_no, remarks, created_by)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(number, daysFromNow(-15), invId, customers.acme, 'ACME / HAMBURG / PO-2311 / 1-24', '42/2026', 'Seaworthy wooden crates, VCI wrapped.', managerId);
   const id = Number(info.lastInsertRowid);
   const ins = db.prepare(
     `INSERT INTO packing_list_items (packing_list_id, description, hsn_code, qty, unit, packages, dimensions, gross_weight, net_weight, sort_order)

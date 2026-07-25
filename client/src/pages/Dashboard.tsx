@@ -6,6 +6,7 @@ import {
 } from 'recharts';
 import { api } from '../api/client';
 import type { Followup } from '../types';
+import { useIsManager } from '../App';
 import { Card, Select, PageHeader } from '../components/ui';
 import { fmtDate, fmtMoney, today } from '../lib/format';
 
@@ -17,7 +18,7 @@ const GRID = '#e1e0d9';
 const MUTED = '#898781';
 
 interface DashboardData {
-  counts: { enquiries: number; quotations: number; orders: number; invoices: number };
+  counts: { quotations: number; orders: number; invoices: number; pendingApprovals: number };
   quotationsByStatus: { status: string; count: number }[];
   quotedByMonth: { month: string; currency: string; total: number }[];
   invoicedByMonth: { month: string; currency: string; total: number }[];
@@ -25,7 +26,7 @@ interface DashboardData {
   topProducts: { name: string; times_quoted: number }[];
   currencyTotals: { currency: string; accepted_value: number; quoted_value: number }[];
   followups: { overdue: Followup[]; today: Followup[]; upcoming: Followup[] };
-  funnel: { enquiries: number; quoted: number; accepted: number; invoiced: number };
+  funnel: { quoted: number; accepted: number; orders: number; invoiced: number };
   receivables: { currency: string; invoiced: number; received: number; outstanding: number }[];
 }
 
@@ -37,6 +38,7 @@ const RANGES = [
 ];
 
 export default function DashboardPage() {
+  const isManager = useIsManager();
   const queryClient = useQueryClient();
   const [rangeIdx, setRangeIdx] = useState(3);
   const [currency, setCurrency] = useState('');
@@ -89,9 +91,9 @@ export default function DashboardPage() {
   if (!data) return <div className="text-slate-400">Loading dashboard…</div>;
 
   const funnelStages = [
-    { label: 'Enquiries', value: data.funnel.enquiries },
     { label: 'Quoted', value: data.funnel.quoted },
     { label: 'Accepted', value: data.funnel.accepted },
+    { label: 'Orders', value: data.funnel.orders },
     { label: 'Invoiced', value: data.funnel.invoiced },
   ];
   const funnelMax = Math.max(1, ...funnelStages.map((s) => s.value));
@@ -115,13 +117,17 @@ export default function DashboardPage() {
       {/* Stat tiles */}
       <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
         {[
-          { label: 'Enquiries', value: data.counts.enquiries, to: '/enquiries' },
           { label: 'Quotations', value: data.counts.quotations, to: '/quotations' },
           { label: 'Confirmed Orders', value: data.counts.orders, to: '/proformas' },
           { label: 'Invoices', value: data.counts.invoices, to: '/invoices' },
+          { label: 'Awaiting Approval', value: data.counts.pendingApprovals, to: isManager ? '/approvals' : '/quotations', highlight: !!data.counts.pendingApprovals },
         ].map((t) => (
-          <Link key={t.label} to={t.to} className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm transition-shadow hover:shadow">
-            <div className="text-3xl font-bold text-slate-800">{t.value}</div>
+          <Link
+            key={t.label}
+            to={t.to}
+            className={`rounded-lg border bg-white p-4 shadow-sm transition-shadow hover:shadow ${t.highlight ? 'border-amber-300' : 'border-slate-200'}`}
+          >
+            <div className={`text-3xl font-bold ${t.highlight ? 'text-amber-600' : 'text-slate-800'}`}>{t.value}</div>
             <div className="mt-1 text-sm text-slate-500">{t.label}</div>
           </Link>
         ))}

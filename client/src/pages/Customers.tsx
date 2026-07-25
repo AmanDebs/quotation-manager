@@ -1,21 +1,30 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
-import type { Customer } from '../types';
-import { Button, Input, Textarea, Select, Field, PageHeader, EmptyState, ErrorText, Modal, Card } from '../components/ui';
+import type { Customer, User } from '../types';
+import { useIsManager } from '../App';
+import { Button, Input, Textarea, Select, Field, PageHeader, EmptyState, ErrorText, Modal, Card, ExportTabs } from '../components/ui';
 
 const empty: Omit<Customer, 'id'> = {
   name: '', contact_person: '', email: '', phone: '', address: '', city: '', country: 'India',
   gstin: '', currency: 'INR', consignee: '', notify_party: '', notify_party_2: '', notes: '',
+  is_export: 0,
 };
 
 export default function CustomersPage() {
   const queryClient = useQueryClient();
+  const isManager = useIsManager();
   const [q, setQ] = useState('');
+  const [exportFilter, setExportFilter] = useState('');
   const [editing, setEditing] = useState<Customer | Omit<Customer, 'id'> | null>(null);
   const { data: customers = [] } = useQuery({
-    queryKey: ['customers', q],
-    queryFn: () => api.get<Customer[]>(`/api/customers?q=${encodeURIComponent(q)}`),
+    queryKey: ['customers', q, exportFilter],
+    queryFn: () => api.get<Customer[]>(`/api/customers?q=${encodeURIComponent(q)}${exportFilter ? `&export=${exportFilter}` : ''}`),
+  });
+  const { data: users = [] } = useQuery({
+    queryKey: ['users'],
+    queryFn: () => api.get<User[]>('/api/users'),
+    enabled: isManager,
   });
 
   const save = useMutation({
@@ -41,8 +50,9 @@ export default function CustomersPage() {
         subtitle={`${customers.length} customer${customers.length === 1 ? '' : 's'}`}
         actions={<Button onClick={() => { save.reset(); setEditing({ ...empty }); }}>+ New Customer</Button>}
       />
-      <div className="mb-3 max-w-xs">
-        <Input placeholder="Search by name, contact or country…" value={q} onChange={(e) => setQ(e.target.value)} />
+      <div className="mb-3 flex flex-wrap items-center gap-3">
+        <ExportTabs value={exportFilter} onChange={setExportFilter} />
+        <Input placeholder="Search by name, contact or country…" value={q} onChange={(e) => setQ(e.target.value)} className="max-w-xs" />
       </div>
       <ErrorText error={remove.error} />
       <Card className="overflow-x-auto">
@@ -55,8 +65,9 @@ export default function CustomersPage() {
                 <th className="pb-2 pr-3">Name</th>
                 <th className="pb-2 pr-3">Contact</th>
                 <th className="pb-2 pr-3">Country</th>
+                <th className="pb-2 pr-3">Type</th>
                 <th className="pb-2 pr-3">Currency</th>
-                <th className="pb-2 pr-3">GSTIN</th>
+                {isManager && <th className="pb-2 pr-3">Owner</th>}
                 <th className="pb-2" />
               </tr>
             </thead>
@@ -66,8 +77,9 @@ export default function CustomersPage() {
                   <td className="py-2 pr-3 font-medium">{c.name}</td>
                   <td className="py-2 pr-3">{c.contact_person || c.email || '—'}</td>
                   <td className="py-2 pr-3">{c.country}</td>
+                  <td className="py-2 pr-3 text-xs">{c.is_export ? '🌍 Export' : '🇮🇳 Domestic'}</td>
                   <td className="py-2 pr-3">{c.currency}</td>
-                  <td className="py-2 pr-3">{c.gstin || '—'}</td>
+                  {isManager && <td className="py-2 pr-3">{c.owner_name ?? '—'}</td>}
                   <td className="py-2 text-right whitespace-nowrap">
                     <Button variant="ghost" onClick={() => { save.reset(); setEditing(c); }}>Edit</Button>
                     <Button
@@ -98,7 +110,29 @@ export default function CustomersPage() {
             <Field label="Address" className="col-span-2">
               <Textarea rows={2} value={editing.address} onChange={(e) => set({ address: e.target.value })} />
             </Field>
-            <Field label="Country"><Input value={editing.country} onChange={(e) => set({ country: e.target.value })} /></Field>
+            <Field label="Country">
+              <Input
+                value={editing.country}
+                onChange={(e) => {
+                  const country = e.target.value;
+                  set({ country, is_export: country.trim().toLowerCase() !== 'india' && country ? 1 : 0 });
+                }}
+              />
+            </Field>
+            <Field label="Business Type">
+              <Select value={editing.is_export ? '1' : '0'} onChange={(e) => set({ is_export: Number(e.target.value) })}>
+                <option value="0">🇮🇳 Domestic (GST applies)</option>
+                <option value="1">🌍 Export</option>
+              </Select>
+            </Field>
+            {isManager && (
+              <Field label="Assigned To (owner)">
+                <Select value={editing.owner_id ?? ''} onChange={(e) => set({ owner_id: e.target.value ? Number(e.target.value) : null })}>
+                  <option value="">— me —</option>
+                  {users.map((u) => <option key={u.id} value={u.id}>{u.name} ({u.role})</option>)}
+                </Select>
+              </Field>
+            )}
             <Field label="Preferred Currency">
               <Select value={editing.currency} onChange={(e) => set({ currency: e.target.value })}>
                 <option value="INR">INR — Indian Rupee</option>

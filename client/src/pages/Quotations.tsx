@@ -3,15 +3,29 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Quotation } from '../types';
-import { Button, Select, PageHeader, EmptyState, Card, StatusBadge } from '../components/ui';
+import { Button, Select, PageHeader, EmptyState, Card, StatusBadge, ExportTabs } from '../components/ui';
+import NewDocumentDialog from '../components/NewDocumentDialog';
 import { fmtDate, fmtMoney } from '../lib/format';
+
+const approvalBadge: Record<string, { cls: string; label: string }> = {
+  pending: { cls: 'bg-amber-100 text-amber-700', label: 'Awaiting approval' },
+  rejected: { cls: 'bg-red-100 text-red-700', label: 'Rejected' },
+  not_submitted: { cls: 'bg-slate-100 text-slate-500', label: 'Not submitted' },
+};
 
 export default function QuotationsPage() {
   const navigate = useNavigate();
   const [statusFilter, setStatusFilter] = useState('');
+  const [exportFilter, setExportFilter] = useState('');
+  const [creating, setCreating] = useState(false);
   const { data: quotations = [] } = useQuery({
-    queryKey: ['quotations', statusFilter],
-    queryFn: () => api.get<Quotation[]>(`/api/quotations${statusFilter ? `?status=${statusFilter}` : ''}`),
+    queryKey: ['quotations', statusFilter, exportFilter],
+    queryFn: () => {
+      const params = new URLSearchParams();
+      if (statusFilter) params.set('status', statusFilter);
+      if (exportFilter) params.set('export', exportFilter);
+      return api.get<Quotation[]>(`/api/quotations${params.toString() ? `?${params}` : ''}`);
+    },
   });
 
   return (
@@ -19,10 +33,12 @@ export default function QuotationsPage() {
       <PageHeader
         title="Quotations"
         subtitle="“This is our price.”"
-        actions={<Button onClick={() => navigate('/quotations/new')}>+ New Quotation</Button>}
+        actions={<Button onClick={() => setCreating(true)}>+ New Quotation</Button>}
       />
-      <div className="mb-3 max-w-45">
-        <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+      {creating && <NewDocumentDialog basePath="/quotations" title="New Quotation" onClose={() => setCreating(false)} />}
+      <div className="mb-3 flex flex-wrap items-center gap-3">
+        <ExportTabs value={exportFilter} onChange={setExportFilter} />
+        <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="max-w-45">
           <option value="">All statuses</option>
           {['draft', 'sent', 'negotiating', 'accepted', 'rejected', 'expired'].map((s) => (
             <option key={s} value={s}>{s[0].toUpperCase() + s.slice(1)}</option>
@@ -39,9 +55,10 @@ export default function QuotationsPage() {
                 <th className="pb-2 pr-3">Number</th>
                 <th className="pb-2 pr-3">Date</th>
                 <th className="pb-2 pr-3">Customer</th>
-                <th className="pb-2 pr-3">Valid Until</th>
+                <th className="pb-2 pr-3">Type</th>
                 <th className="pb-2 pr-3 text-right">Total</th>
                 <th className="pb-2 pr-3">Status</th>
+                <th className="pb-2 pr-3">Approval</th>
               </tr>
             </thead>
             <tbody>
@@ -52,9 +69,18 @@ export default function QuotationsPage() {
                   </td>
                   <td className="py-2 pr-3 whitespace-nowrap">{fmtDate(q.date)}</td>
                   <td className="py-2 pr-3">{q.customer_name}</td>
-                  <td className="py-2 pr-3 whitespace-nowrap">{fmtDate(q.validity_date)}</td>
+                  <td className="py-2 pr-3 text-xs">{q.is_export ? '🌍 Export' : '🇮🇳 Domestic'}</td>
                   <td className="py-2 pr-3 text-right tabular-nums">{q.grand_total ? fmtMoney(q.grand_total, q.currency) : '—'}</td>
                   <td className="py-2 pr-3"><StatusBadge status={q.status} /></td>
+                  <td className="py-2 pr-3">
+                    {q.approval_status === 'approved' ? (
+                      <span className="text-xs text-green-700">✓ Approved</span>
+                    ) : (
+                      <span className={`rounded-full px-2 py-0.5 text-xs ${approvalBadge[q.approval_status]?.cls ?? ''}`}>
+                        {approvalBadge[q.approval_status]?.label ?? q.approval_status}
+                      </span>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>

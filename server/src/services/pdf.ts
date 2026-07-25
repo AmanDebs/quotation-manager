@@ -229,6 +229,76 @@ function baseDoc(content: Content[]): TDocumentDefinitions {
 const th = (s: Row, text: string): Cell => ({ text, bold: true, fontSize: 7.5, color: '#ffffff', fillColor: s.theme, alignment: 'center' });
 
 /* ------------------------------------------------------------------ */
+/* Column-driven items table                                           */
+/* ------------------------------------------------------------------ */
+
+export interface ColumnSpec {
+  key: string;
+  label: string;
+  width: number | '*';
+  align?: 'left' | 'right' | 'center';
+  /** Cell text for an item; return '' to count as empty for auto-hide. */
+  value: (it: Row, index: number) => string;
+  /** Always keep this column, even when every value is empty. */
+  always?: boolean;
+}
+
+export interface ColumnConfig {
+  hidden?: string[];
+  custom?: string[];
+}
+
+/**
+ * Builds the line-items table honouring the document's column_config:
+ * explicitly hidden columns are dropped, columns with no data anywhere are
+ * dropped automatically, and up to three named custom columns are appended.
+ */
+function itemsTable(s: Row, items: Row[], specs: ColumnSpec[], cfg: ColumnConfig) {
+  const hidden = new Set(cfg.hidden ?? []);
+  const customNames = (cfg.custom ?? []).slice(0, 3);
+
+  const columns = specs.filter((c) => {
+    if (hidden.has(c.key)) return false;
+    if (c.always) return true;
+    return items.some((it) => {
+      const v = c.value(it, 0);
+      return v !== '' && v !== '—';
+    });
+  });
+
+  customNames.forEach((name, i) => {
+    if (!name) return;
+    const key = `custom${i + 1}`;
+    if (hidden.has(key)) return;
+    columns.push({
+      key,
+      label: name,
+      width: 55,
+      align: 'center',
+      value: (it) => String(it[key] ?? ''),
+      always: true,
+    });
+  });
+
+  const body: Cell[][] = [
+    columns.map((c) => ({ ...th(s, c.label), alignment: c.key === 'description' ? 'left' : 'center' })),
+    ...items.map((it, i) =>
+      columns.map((c) => ({
+        text: c.value(it, i),
+        fontSize: 8,
+        alignment: c.align ?? 'left',
+        fillColor: i % 2 ? '#f7f5f4' : undefined,
+      }))
+    ),
+  ];
+
+  return {
+    table: { headerRows: 1, widths: columns.map((c) => c.width), body },
+    layout: gridLayout,
+  } as Content;
+}
+
+/* ------------------------------------------------------------------ */
 /* QUOTATION — modeled on the Sanya Industries sample                  */
 /* ------------------------------------------------------------------ */
 export function buildQuotationPdf(id: number): TDocumentDefinitions {
@@ -240,8 +310,8 @@ export function buildQuotationPdf(id: number): TDocumentDefinitions {
 
   const cur = q.currency;
   const showTax = q.tax_type !== 'none';
-  const hasPacking = items.some((it) => it.packs != null || it.pcs_per_pack != null || it.total_pcs != null);
   const hasQty = items.some((it) => it.qty != null);
+  const cfg: ColumnConfig = JSON.parse(String(q.column_config || '{}'));
 
   const meta: Content = {
     columns: [
@@ -276,33 +346,20 @@ export function buildQuotationPdf(id: number): TDocumentDefinitions {
     margin: [0, 0, 0, 8] as any,
   };
 
-  const header: Cell[] = [th(s, 'SL'), { ...th(s, 'Product Description'), alignment: 'left' }, th(s, 'Unit Price'), th(s, 'UOM')];
-  const widths: any[] = [18, '*', 48, 52];
-  if (hasPacking) { header.push(th(s, 'Pcs/Box'), th(s, 'Boxes'), th(s, 'Total Qty')); widths.push(42, 40, 55); }
-  if (items.some((i) => i.color)) { header.push(th(s, 'Color')); widths.push(48); }
-  if (showTax) { header.push(th(s, 'Tax %')); widths.push(30); }
-  header.push(th(s, `Total (${cur})`)); widths.push(62);
-
-  const body: Cell[][] = [header];
-  items.forEach((it, i) => {
-    const row: Cell[] = [
-      { text: String(i + 1), fontSize: 8, alignment: 'center' },
-      { text: it.description + (it.hsn_code ? `\nHSN: ${it.hsn_code}` : ''), fontSize: 8 },
-      { text: fmtNum(it.unit_price, 3), fontSize: 8, alignment: 'right' },
-      { text: uomLabel(cur, it.unit), fontSize: 8, alignment: 'center' },
-    ];
-    if (hasPacking) {
-      row.push(
-        { text: fmtNum(it.pcs_per_pack, 0), fontSize: 8, alignment: 'right' },
-        { text: fmtNum(it.packs, 0), fontSize: 8, alignment: 'right' },
-        { text: fmtNum(it.total_pcs, 0), fontSize: 8, alignment: 'right' },
-      );
-    }
-    if (items.some((x) => x.color)) row.push({ text: it.color || '—', fontSize: 8, alignment: 'center' });
-    if (showTax) row.push({ text: `${it.tax_pct ?? 0}%`, fontSize: 8, alignment: 'right' });
-    row.push({ text: it.qty != null ? fmtMoney(it.amount, cur) : 'price only', fontSize: 8, alignment: 'right' });
-    body.push(row.map((cell, ci) => ({ ...cell, fillColor: i % 2 ? '#f7f5f4' : undefined })));
-  });
+  const specs: ColumnSpec[] = [
+    { key: 'sl', label: 'SL', width: 18, align: 'center', always: true, value: (_it, i) => String(i + 1) },
+    { key: 'description', label: 'Product Description', width: '*', always: true, value: (it) => String(it.description) },
+    { key: 'hsn', label: 'HSN', width: 45, align: 'center', value: (it) => String(it.hsn_code || '') },
+    { key: 'unit_price', label: 'Unit Price', width: 48, align: 'right', always: true, value: (it) => fmtNum(it.unit_price, 3) },
+    { key: 'uom', label: 'UOM', width: 52, align: 'center', always: true, value: (it) => uomLabel(cur, it.unit) },
+    { key: 'pcs_per_pack', label: 'Pcs/Box', width: 42, align: 'right', value: (it) => (it.pcs_per_pack != null ? fmtNum(it.pcs_per_pack, 0) : '') },
+    { key: 'packs', label: 'Boxes', width: 40, align: 'right', value: (it) => (it.packs != null ? fmtNum(it.packs, 0) : '') },
+    { key: 'total_pcs', label: 'Total Qty', width: 55, align: 'right', value: (it) => (it.total_pcs != null ? fmtNum(it.total_pcs, 0) : '') },
+    { key: 'qty', label: 'Qty', width: 50, align: 'right', value: (it) => (it.qty != null ? `${fmtNum(it.qty)} ${it.unit}` : '') },
+    { key: 'color', label: 'Color', width: 48, align: 'center', value: (it) => String(it.color || '') },
+    ...(showTax ? [{ key: 'tax', label: 'Tax %', width: 30, align: 'right' as const, value: (it: Row) => `${it.tax_pct ?? 0}%` }] : []),
+    { key: 'amount', label: `Total (${cur})`, width: 62, align: 'right', always: true, value: (it) => (it.qty != null ? fmtMoney(it.amount, cur) : 'price only') },
+  ];
 
   const grandLabel = q.inco_terms
     ? `TOTAL PRICE IN ${q.inco_terms}${q.container_count ? ` (${q.container_count})` : ''}`
@@ -312,7 +369,7 @@ export function buildQuotationPdf(id: number): TDocumentDefinitions {
     ...companyHeader(s),
     docTitle(s, 'QUOTATION'),
     meta,
-    { table: { headerRows: 1, widths, body }, layout: gridLayout },
+    itemsTable(s, items, specs, cfg),
     ...(hasQty
       ? [totalsBand(s, q, cur, grandLabel), amountWords(q, cur)]
       : [{ text: 'Note: Quantities to be confirmed by the customer. Prices are as stated above.', fontSize: 8, italics: true, margin: [0, 6, 0, 0] as any }]),
@@ -337,8 +394,7 @@ export function buildProformaPdf(id: number): TDocumentDefinitions {
 
   const cur = pi.currency;
   const showTax = pi.tax_type !== 'none';
-  const hasColor = items.some((i) => i.color);
-  const hasPcs = items.some((i) => i.total_pcs != null);
+  const cfg: ColumnConfig = JSON.parse(String(pi.column_config || '{}'));
 
   const sectionHead = (t: string): Cell => ({ text: t, bold: true, fontSize: 8, color: '#ffffff', fillColor: s.theme });
 
@@ -403,31 +459,18 @@ export function buildProformaPdf(id: number): TDocumentDefinitions {
     margin: [0, 0, 0, 8] as any,
   };
 
-  const header: Cell[] = [th(s, 'SL'), { ...th(s, 'Description of Goods'), alignment: 'left' }, th(s, 'Qty'), th(s, `Price ${cur}`)];
-  const widths: any[] = [16, '*', 52, 46];
-  if (hasColor) { header.push(th(s, 'Color')); widths.push(48); }
-  if (hasPcs) { header.push(th(s, 'Total Qty (Pcs)'), th(s, `${cur}/1000 Pcs`)); widths.push(52, 46); }
-  if (showTax) { header.push(th(s, 'Tax %')); widths.push(28); }
-  header.push(th(s, `Amount (${cur})`)); widths.push(60);
-
-  const body: Cell[][] = [header];
-  items.forEach((it, i) => {
-    const per1000 = it.total_pcs ? round2((it.amount / it.total_pcs) * 1000) : null;
-    const row: Cell[] = [
-      { text: String(i + 1), fontSize: 8, alignment: 'center' },
-      { text: it.description + (it.hsn_code ? `\nHSN: ${it.hsn_code}` : ''), fontSize: 8 },
-      { text: it.qty != null ? `${fmtNum(it.qty)} ${it.unit}` : '—', fontSize: 8, alignment: 'right' },
-      { text: `${fmtNum(it.unit_price, 3)} /${it.unit === 'per 1000' ? '1000' : it.unit}`, fontSize: 8, alignment: 'right' },
-    ];
-    if (hasColor) row.push({ text: it.color || '—', fontSize: 8, alignment: 'center' });
-    if (hasPcs) row.push(
-      { text: fmtNum(it.total_pcs, 0), fontSize: 8, alignment: 'right' },
-      { text: per1000 != null ? fmtNum(per1000, 2) : '—', fontSize: 8, alignment: 'right' },
-    );
-    if (showTax) row.push({ text: `${it.tax_pct ?? 0}%`, fontSize: 8, alignment: 'right' });
-    row.push({ text: fmtMoney(it.amount, cur), fontSize: 8, alignment: 'right' });
-    body.push(row.map((cell) => ({ ...cell, fillColor: i % 2 ? '#f7f5f4' : undefined })));
-  });
+  const specs: ColumnSpec[] = [
+    { key: 'sl', label: 'SL', width: 16, align: 'center', always: true, value: (_it, i) => String(i + 1) },
+    { key: 'description', label: 'Description of Goods', width: '*', always: true, value: (it) => it.description + (it.hsn_code ? `\nHSN: ${it.hsn_code}` : '') },
+    { key: 'qty', label: 'Qty', width: 52, align: 'right', always: true, value: (it) => (it.qty != null ? `${fmtNum(it.qty)} ${it.unit}` : '—') },
+    { key: 'unit_price', label: `Price ${cur}`, width: 46, align: 'right', always: true, value: (it) => `${fmtNum(it.unit_price, 3)} /${it.unit === 'per 1000' ? '1000' : it.unit}` },
+    { key: 'color', label: 'Color', width: 48, align: 'center', value: (it) => String(it.color || '') },
+    { key: 'packs', label: 'Boxes', width: 40, align: 'right', value: (it) => (it.packs != null ? fmtNum(it.packs, 0) : '') },
+    { key: 'total_pcs', label: 'Total Qty (Pcs)', width: 52, align: 'right', value: (it) => (it.total_pcs != null ? fmtNum(it.total_pcs, 0) : '') },
+    { key: 'per_1000', label: `${cur}/1000 Pcs`, width: 46, align: 'right', value: (it) => (it.total_pcs ? fmtNum(round2((it.amount / it.total_pcs) * 1000), 2) : '') },
+    ...(showTax ? [{ key: 'tax', label: 'Tax %', width: 28, align: 'right' as const, value: (it: Row) => `${it.tax_pct ?? 0}%` }] : []),
+    { key: 'amount', label: `Amount (${cur})`, width: 60, align: 'right', always: true, value: (it) => fmtMoney(it.amount, cur) },
+  ];
 
   const grandLabel = pi.inco_terms && pi.port_of_discharge
     ? `TOTAL PRICE ${cur} ${pi.inco_terms} ${pi.port_of_discharge.split(',')[0].toUpperCase()}`
@@ -437,7 +480,7 @@ export function buildProformaPdf(id: number): TDocumentDefinitions {
     ...companyHeader(s),
     docTitle(s, 'PROFORMA INVOICE'),
     infoGrid,
-    { table: { headerRows: 1, widths, body }, layout: gridLayout },
+    itemsTable(s, items, specs, cfg),
     totalsBand(s, pi, cur, grandLabel),
     amountWords(pi, cur),
     ...(pi.remarks ? [{ text: 'REMARKS:', fontSize: 9, bold: true, color: s.theme, margin: [0, 8, 0, 2] as any }, { text: pi.remarks, fontSize: 8 }] : []),
@@ -531,7 +574,7 @@ export function buildInvoicePdf(id: number): TDocumentDefinitions {
 
   const cur = inv.currency;
   const showTax = inv.tax_type !== 'none';
-  const hasColor = items.some((i) => i.color);
+  const cfg: ColumnConfig = JSON.parse(String(inv.column_config || '{}'));
 
   const paymentRows = (inv.pi_id
     ? db.prepare('SELECT amount FROM payments WHERE invoice_id = ? OR pi_id = ?').all(id, Number(inv.pi_id))
@@ -563,29 +606,17 @@ export function buildInvoicePdf(id: number): TDocumentDefinitions {
     buyer: c,
   });
 
-  const header: Cell[] = [th(s, 'SL'), { ...th(s, 'Description of Goods'), alignment: 'left' }, th(s, 'Quantity'), th(s, `Rate`)];
-  const widths: any[] = [16, '*', 58, 55];
-  if (hasColor) { header.push(th(s, 'Color')); widths.push(46); }
-  header.push(th(s, 'HSN Code'));
-  widths.push(45);
-  if (showTax) { header.push(th(s, 'Tax %')); widths.push(28); }
-  header.push(th(s, `Amount ${cur}${inv.inco_terms ? ` (${inv.inco_terms.split(' ')[0]})` : ''}`));
-  widths.push(62);
-
-  const body: Cell[][] = [header];
-  items.forEach((it, i) => {
-    const row: Cell[] = [
-      { text: String(i + 1), fontSize: 8, alignment: 'center' },
-      { text: it.description, fontSize: 8 },
-      { text: it.qty != null ? `${fmtNum(it.qty)} ${it.unit}` : '—', fontSize: 8, alignment: 'right' },
-      { text: `${fmtNum(it.unit_price, 3)}/${it.unit === 'per 1000' ? '1000' : it.unit}`, fontSize: 8, alignment: 'right' },
-    ];
-    if (hasColor) row.push({ text: it.color || '—', fontSize: 8, alignment: 'center' });
-    row.push({ text: it.hsn_code || '—', fontSize: 8, alignment: 'center' });
-    if (showTax) row.push({ text: `${it.tax_pct ?? 0}%`, fontSize: 8, alignment: 'right' });
-    row.push({ text: fmtMoney(it.amount, cur), fontSize: 8, alignment: 'right' });
-    body.push(row.map((cell) => ({ ...cell, fillColor: i % 2 ? '#f7f5f4' : undefined })));
-  });
+  const specs: ColumnSpec[] = [
+    { key: 'sl', label: 'SL', width: 16, align: 'center', always: true, value: (_it, i) => String(i + 1) },
+    { key: 'description', label: 'Description of Goods', width: '*', always: true, value: (it) => String(it.description) },
+    { key: 'qty', label: 'Quantity', width: 58, align: 'right', always: true, value: (it) => (it.qty != null ? `${fmtNum(it.qty)} ${it.unit}` : '—') },
+    { key: 'unit_price', label: 'Rate', width: 55, align: 'right', always: true, value: (it) => `${fmtNum(it.unit_price, 3)}/${it.unit === 'per 1000' ? '1000' : it.unit}` },
+    { key: 'color', label: 'Color', width: 46, align: 'center', value: (it) => String(it.color || '') },
+    { key: 'packs', label: 'Boxes', width: 40, align: 'right', value: (it) => (it.packs != null ? fmtNum(it.packs, 0) : '') },
+    { key: 'hsn', label: 'HSN Code', width: 45, align: 'center', value: (it) => String(it.hsn_code || '') },
+    ...(showTax ? [{ key: 'tax', label: 'Tax %', width: 28, align: 'right' as const, value: (it: Row) => `${it.tax_pct ?? 0}%` }] : []),
+    { key: 'amount', label: `Amount ${cur}${inv.inco_terms ? ` (${String(inv.inco_terms).split(' ')[0]})` : ''}`, width: 62, align: 'right', always: true, value: (it) => fmtMoney(it.amount, cur) },
+  ];
 
   // Payment status rows appended to the band via a second small table
   const paymentBand: Content[] = received > 0
@@ -644,7 +675,7 @@ export function buildInvoicePdf(id: number): TDocumentDefinitions {
     ...companyHeader(s),
     docTitle(s, 'COMMERCIAL INVOICE'),
     grid,
-    { table: { headerRows: 1, widths, body }, layout: gridLayout },
+    itemsTable(s, items, specs, cfg),
     totalsBand(s, inv, cur, grandLabel),
     ...paymentBand,
     amountWords(inv, cur),
@@ -695,47 +726,34 @@ export function buildPackingListPdf(id: number): TDocumentDefinitions {
     buyer: c,
   });
 
-  const showThousand = items.some((it) => it.qty != null && ['unit', 'pcs'].includes((it.unit || '').toLowerCase()));
+  const cfg: ColumnConfig = JSON.parse(String(pl.column_config || '{}'));
+  const inPieces = (it: Row) => it.qty != null && ['unit', 'pcs'].includes(String(it.unit || '').toLowerCase());
 
-  const header: Cell[] = [
-    th(s, 'SL'), { ...th(s, 'Description of Goods'), alignment: 'left' }, th(s, 'Qty in Boxes'), th(s, 'HSN Code'), th(s, 'Quantity'),
+  const specs: ColumnSpec[] = [
+    { key: 'sl', label: 'SL', width: 16, align: 'center', always: true, value: (_it, i) => String(i + 1) },
+    { key: 'description', label: 'Description of Goods', width: '*', always: true, value: (it) => it.description + (it.dimensions ? `\nDim: ${it.dimensions}` : '') },
+    { key: 'packages', label: 'Qty in Boxes', width: 55, align: 'center', value: (it) => String(it.packages || '') },
+    { key: 'hsn', label: 'HSN Code', width: 45, align: 'center', value: (it) => String(it.hsn_code || '') },
+    { key: 'qty', label: 'Quantity', width: 55, align: 'right', always: true, value: (it) => (it.qty != null ? `${fmtNum(it.qty, 0)} ${it.unit === 'unit' ? 'pcs' : it.unit}` : '—') },
+    { key: 'thousand_pcs', label: 'Thousand Pcs', width: 48, align: 'right', value: (it) => (inPieces(it) ? fmtNum(it.qty / 1000, 2) : '') },
+    { key: 'net_weight', label: 'Net Wt (kg)', width: 48, align: 'right', value: (it) => (it.net_weight ? fmtNum(it.net_weight) : '') },
+    { key: 'gross_weight', label: 'Gross Wt (kg)', width: 48, align: 'right', value: (it) => (it.gross_weight ? fmtNum(it.gross_weight) : '') },
   ];
-  const widths: any[] = [16, '*', 55, 45, 55];
-  if (showThousand) { header.push(th(s, 'Thousand Pcs')); widths.push(48); }
-  header.push(th(s, 'Net Wt (kg)'), th(s, 'Gross Wt (kg)'));
-  widths.push(48, 48);
 
-  const body: Cell[][] = [header];
-  items.forEach((it, i) => {
-    const row: Cell[] = [
-      { text: String(i + 1), fontSize: 8, alignment: 'center' },
-      { text: it.description + (it.dimensions ? `\nDim: ${it.dimensions}` : ''), fontSize: 8 },
-      { text: it.packages || '—', fontSize: 8, alignment: 'center' },
-      { text: it.hsn_code || '—', fontSize: 8, alignment: 'center' },
-      { text: it.qty != null ? `${fmtNum(it.qty, 0)} ${it.unit === 'unit' ? 'pcs' : it.unit}` : '—', fontSize: 8, alignment: 'right' },
-    ];
-    if (showThousand) row.push({ text: it.qty != null && ['unit', 'pcs'].includes((it.unit || '').toLowerCase()) ? fmtNum(it.qty / 1000, 2) : '—', fontSize: 8, alignment: 'right' });
-    row.push(
-      { text: fmtNum(it.net_weight), fontSize: 8, alignment: 'right' },
-      { text: fmtNum(it.gross_weight), fontSize: 8, alignment: 'right' },
-    );
-    body.push(row.map((cell) => ({ ...cell, fillColor: i % 2 ? '#f7f5f4' : undefined })));
+  const table = itemsTable(s, items, specs, cfg) as any;
+  // Append a totals row matching whichever columns survived.
+  const headerCells = table.table.body[0] as Cell[];
+  const totalsRow = headerCells.map((h: Cell) => {
+    const label = String(h.text);
+    const cell = (text: string, align: string = 'right') => ({ text, fontSize: 8, bold: true, alignment: align, fillColor: '#efe9e7' });
+    if (label === 'Description of Goods') return cell('TOTAL', 'left');
+    if (label === 'Quantity') return cell(totalQty ? fmtNum(totalQty, 0) : '');
+    if (label === 'Thousand Pcs') return cell(totalQty ? fmtNum(totalQty / 1000, 2) : '');
+    if (label === 'Net Wt (kg)') return cell(fmtNum(totalNet));
+    if (label === 'Gross Wt (kg)') return cell(fmtNum(totalGross));
+    return cell('');
   });
-
-  // Totals row
-  const totalRow: Cell[] = [
-    { text: '', fontSize: 8 },
-    { text: 'TOTAL', fontSize: 8, bold: true },
-    { text: '', fontSize: 8 },
-    { text: '', fontSize: 8 },
-    { text: totalQty ? fmtNum(totalQty, 0) : '—', fontSize: 8, bold: true, alignment: 'right' },
-  ];
-  if (showThousand) totalRow.push({ text: totalQty ? fmtNum(totalQty / 1000, 2) : '—', fontSize: 8, bold: true, alignment: 'right' });
-  totalRow.push(
-    { text: fmtNum(totalNet), fontSize: 8, bold: true, alignment: 'right' },
-    { text: fmtNum(totalGross), fontSize: 8, bold: true, alignment: 'right' },
-  );
-  body.push(totalRow.map((cell) => ({ ...cell, fillColor: '#efe9e7' })));
+  table.table.body.push(totalsRow);
 
   const certFooter: Content = {
     table: {
@@ -768,17 +786,21 @@ export function buildPackingListPdf(id: number): TDocumentDefinitions {
     ...companyHeader(s),
     docTitle(s, 'PACKING LIST'),
     grid,
-    { table: { headerRows: 1, widths, body }, layout: gridLayout },
+    table,
     ...(pl.shipping_marks ? [{ text: `MARKS & NO.: ${pl.shipping_marks}`, fontSize: 8, bold: true, margin: [0, 8, 0, 0] as any }] : []),
     certFooter,
   ];
   return baseDoc(content);
 }
 
-export function renderPdf(docDefinition: TDocumentDefinitions): Promise<Buffer> {
+/** Optional diagonal watermark for documents that have not been approved. */
+export function renderPdf(docDefinition: TDocumentDefinitions, watermark?: string): Promise<Buffer> {
+  const def: TDocumentDefinitions = watermark
+    ? { ...docDefinition, watermark: { text: watermark, color: '#b00020', opacity: 0.12, bold: true, angle: -35 } }
+    : docDefinition;
   return new Promise((resolve, reject) => {
     try {
-      const doc = printer.createPdfKitDocument(docDefinition);
+      const doc = printer.createPdfKitDocument(def);
       const chunks: Buffer[] = [];
       doc.on('data', (chunk: Buffer) => chunks.push(chunk));
       doc.on('end', () => resolve(Buffer.concat(chunks)));

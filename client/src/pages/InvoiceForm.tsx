@@ -2,11 +2,14 @@ import { useEffect, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
-import type { Invoice, Customer, LineItem, TaxType, Settings } from '../types';
+import type { Invoice, Customer, LineItem, TaxType, Settings, ColumnConfig } from '../types';
 import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, StatusBadge } from '../components/ui';
 import LineItemsEditor from '../components/LineItemsEditor';
 import FollowupButton from '../components/FollowupButton';
 import PaymentsCard from '../components/PaymentsCard';
+import ApprovalStrip from '../components/ApprovalStrip';
+import ColumnsControl from '../components/ColumnsControl';
+import NotePresetPicker from '../components/NotePresetPicker';
 import { today } from '../lib/format';
 
 interface Draft {
@@ -34,6 +37,7 @@ interface Draft {
   prepared_by: string;
   remarks: string;
   tax_type: TaxType;
+  column_config: ColumnConfig;
   items: LineItem[];
 }
 
@@ -42,7 +46,7 @@ const emptyDraft = (): Draft => ({
   freight: 0, insurance: 0, shipping_details: '', bank_account: '', inco_terms: '', payment_terms: '',
   is_export: 0, country_of_origin: '', port_of_loading: '', port_of_discharge: '', final_destination: '',
   notify_party_2: '', method_of_despatch: '', lot_no: '', prepared_by: '',
-  remarks: '', tax_type: 'igst', items: [],
+  remarks: '', tax_type: 'igst', column_config: {}, items: [],
 });
 
 export default function InvoiceFormPage() {
@@ -66,8 +70,13 @@ export default function InvoiceFormPage() {
 
   useEffect(() => {
     if (existing) {
-      const { id: _id, number: _n, status: _s, subtotal: _st, tax_total: _tt, grand_total: _gt, customer_name: _cn, pi_number: _pn, variance: _v, payments: _p, amount_received: _ar, balance_due: _bd, ...rest } = existing;
-      setDraft({ ...(rest as unknown as Draft), items: existing.items ?? [] });
+      const {
+        id: _id, number: _n, status: _s, subtotal: _st, tax_total: _tt, grand_total: _gt,
+        customer_name: _cn, pi_number: _pn, variance: _v, payments: _p, amount_received: _ar, balance_due: _bd,
+        approval_status: _as, approved_at: _aa, approval_note: _an, approved_by_name: _ab, created_by_name: _cb,
+        ...rest
+      } = existing;
+      setDraft({ ...(rest as unknown as Draft), column_config: existing.column_config ?? {}, items: existing.items ?? [] });
     }
   }, [existing]);
 
@@ -79,6 +88,30 @@ export default function InvoiceFormPage() {
       });
     }
   }, [isNew, fromProforma, prefilled]);
+
+  // Arriving from the export/domestic dialog.
+  useEffect(() => {
+    if (!isNew || fromProforma) return;
+    const type = search.get('type');
+    const customer = search.get('customer');
+    if (!type && !customer) return;
+    const isExport = type === 'export';
+    setDraft((d) => ({
+      ...d,
+      is_export: isExport ? 1 : 0,
+      tax_type: isExport ? 'none' : d.tax_type === 'none' ? 'igst' : d.tax_type,
+      country_of_origin: isExport ? 'India' : d.country_of_origin,
+      customer_id: customer ? Number(customer) : d.customer_id,
+    }));
+  }, [isNew, fromProforma, search]);
+
+  useEffect(() => {
+    if (!isNew || !draft.customer_id || customers.length === 0 || prefilled) return;
+    const c = customers.find((x) => x.id === draft.customer_id);
+    if (c && draft.currency !== c.currency) {
+      setDraft((d) => ({ ...d, currency: c.currency, consignee: c.consignee, notify_party: c.notify_party, notify_party_2: c.notify_party_2 }));
+    }
+  }, [isNew, draft.customer_id, customers, prefilled]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const save = useMutation({
     mutationFn: (d: Draft) => (isNew ? api.post<Invoice>('/api/invoices', d) : api.put<Invoice>(`/api/invoices/${id}`, d)),
@@ -129,6 +162,18 @@ export default function InvoiceFormPage() {
           </div>
         }
       />
+
+      {!isNew && (
+        <ApprovalStrip
+          docType="invoices"
+          docId={Number(id)}
+          status={existing!.approval_status}
+          approvedByName={existing!.approved_by_name}
+          approvedAt={existing!.approved_at}
+          note={existing!.approval_note}
+          queryKey="invoice"
+        />
+      )}
 
       {!isNew && (
         <div className="mb-4 flex flex-wrap items-center gap-2 text-sm">
@@ -232,7 +277,14 @@ export default function InvoiceFormPage() {
 
         <Card title="Export Details">
           <label className="mb-3 flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={!!draft.is_export} onChange={(e) => set({ is_export: e.target.checked ? 1 : 0 })} />
+            <input
+              type="checkbox"
+              checked={!!draft.is_export}
+              onChange={(e) => {
+                const isExport = e.target.checked;
+                set({ is_export: isExport ? 1 : 0, tax_type: isExport ? 'none' : draft.tax_type === 'none' ? 'igst' : draft.tax_type });
+              }}
+            />
             This is an export shipment
           </label>
           {!!draft.is_export && (
@@ -245,8 +297,11 @@ export default function InvoiceFormPage() {
           )}
         </Card>
 
-        <Card title="Line Items (final dispatch quantities)">
-          <LineItemsEditor items={draft.items} onChange={(items) => set({ items })} currency={draft.currency} taxType={draft.tax_type} />
+        <Card
+          title="Line Items (final dispatch quantities)"
+          actions={<ColumnsControl config={draft.column_config} onChange={(c) => set({ column_config: c })} />}
+        >
+          <LineItemsEditor items={draft.items} onChange={(items) => set({ items })} currency={draft.currency} taxType={draft.tax_type} config={draft.column_config} />
           <div className="mt-3 grid grid-cols-2 gap-3 border-t border-slate-100 pt-3 md:max-w-md">
             <Field label={`Freight (${draft.currency})`}>
               <Input type="number" min={0} step="any" value={draft.freight || ''} onChange={(e) => set({ freight: Number(e.target.value) })} />
@@ -257,7 +312,7 @@ export default function InvoiceFormPage() {
           </div>
         </Card>
 
-        <Card title="Remarks / Disclaimers">
+        <Card title="Remarks / Disclaimers" actions={<NotePresetPicker value={draft.remarks} onChange={(v) => set({ remarks: v })} />}>
           <Textarea rows={3} value={draft.remarks} onChange={(e) => set({ remarks: e.target.value })} />
         </Card>
 

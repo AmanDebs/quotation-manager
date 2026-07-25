@@ -10,6 +10,9 @@ export interface LineItemInput {
   packs?: number | null;
   pcs_per_pack?: number | null;
   total_pcs?: number | null;
+  custom1?: string;
+  custom2?: string;
+  custom3?: string;
 }
 
 export interface ComputedItem extends LineItemInput {
@@ -48,6 +51,9 @@ export function computeTotals(
     packs: it.packs ?? null,
     pcs_per_pack: it.pcs_per_pack ?? null,
     total_pcs: it.total_pcs ?? null,
+    custom1: it.custom1 ?? '',
+    custom2: it.custom2 ?? '',
+    custom3: it.custom3 ?? '',
     amount: it.qty != null ? round2(it.qty * it.unit_price) : 0,
   }));
 

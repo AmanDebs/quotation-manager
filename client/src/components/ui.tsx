@@ -104,6 +104,30 @@ export function StatusBadge({ status }: { status: string }) {
   );
 }
 
+/** All | Export | Domestic filter used on every document list. */
+export function ExportTabs({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const tabs = [
+    { key: '', label: 'All' },
+    { key: '1', label: '🌍 Export' },
+    { key: '0', label: '🇮🇳 Domestic' },
+  ];
+  return (
+    <div className="inline-flex rounded-md border border-slate-300 bg-white p-0.5">
+      {tabs.map((t) => (
+        <button
+          key={t.key}
+          onClick={() => onChange(t.key)}
+          className={`rounded px-3 py-1 text-sm transition-colors ${
+            value === t.key ? 'bg-brand-700 font-medium text-white' : 'text-slate-600 hover:bg-slate-50'
+          }`}
+        >
+          {t.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export function EmptyState({ message }: { message: string }) {
   return <div className="py-10 text-center text-sm text-slate-400">{message}</div>;
 }

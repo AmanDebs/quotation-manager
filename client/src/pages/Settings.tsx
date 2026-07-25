@@ -1,7 +1,7 @@
 import { useEffect, useState, type ChangeEvent } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
-import type { Settings, BankAccount } from '../types';
+import type { Settings, BankAccount, NotePreset } from '../types';
 import { Button, Input, Textarea, Field, Card, PageHeader, ErrorText } from '../components/ui';
 
 function ImageUpload({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
@@ -150,6 +150,42 @@ export default function SettingsPage() {
         </Card>
         <Card title="Default Terms & Conditions">
           <Textarea rows={4} value={form.default_terms} onChange={(e) => set({ default_terms: e.target.value })} placeholder="Printed at the bottom of every document…" />
+          <p className="mt-2 text-xs text-slate-400">One clause per line — each line prints as a bullet.</p>
+        </Card>
+
+        <Card
+          title="Note & Term Presets"
+          actions={
+            <Button variant="secondary" onClick={() => set({ note_presets: [...(form.note_presets ?? []), { label: '', body: '' }] })}>
+              + Add Preset
+            </Button>
+          }
+        >
+          <p className="mb-3 text-sm text-slate-500">
+            Reusable clauses your team can insert into any document's notes or remarks with one click, then edit freely on that document.
+          </p>
+          {(form.note_presets ?? []).length === 0 && <p className="text-sm text-slate-400">No presets yet.</p>}
+          <div className="space-y-3">
+            {(form.note_presets ?? []).map((p: NotePreset, i: number) => (
+              <div key={i} className="rounded-md border border-slate-200 p-3">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <Input
+                    placeholder="Preset name (e.g. Quantity tolerance)"
+                    value={p.label}
+                    onChange={(e) => set({ note_presets: form.note_presets.map((x, idx) => (idx === i ? { ...x, label: e.target.value } : x)) })}
+                    className="max-w-xs"
+                  />
+                  <Button variant="danger" onClick={() => set({ note_presets: form.note_presets.filter((_, idx) => idx !== i) })}>Remove</Button>
+                </div>
+                <Textarea
+                  rows={2}
+                  placeholder="The text that gets inserted…"
+                  value={p.body}
+                  onChange={(e) => set({ note_presets: form.note_presets.map((x, idx) => (idx === i ? { ...x, body: e.target.value } : x)) })}
+                />
+              </div>
+            ))}
+          </div>
         </Card>
       </div>
     </div>

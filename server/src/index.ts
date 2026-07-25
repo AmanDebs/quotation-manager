@@ -1,12 +1,13 @@
 import express from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
-import { requireAuth } from './middleware/auth.js';
+import { requireAuth, requireManager } from './middleware/auth.js';
 import { authRouter } from './routes/auth.js';
+import { usersRouter } from './routes/users.js';
+import { approvalsRouter } from './routes/approvals.js';
 import { settingsRouter } from './routes/settings.js';
 import { customersRouter } from './routes/customers.js';
 import { productsRouter } from './routes/products.js';
-import { enquiriesRouter } from './routes/enquiries.js';
 import { quotationsRouter } from './routes/quotations.js';
 import { proformasRouter } from './routes/proformas.js';
 import { invoicesRouter } from './routes/invoices.js';
@@ -24,10 +25,14 @@ app.use(express.json({ limit: '5mb' })); // logo/signature images arrive as data
 app.use(cookieParser());
 
 app.use('/api/auth', authRouter);
-app.use('/api/settings', requireAuth, settingsRouter);
+app.use('/api/users', requireAuth, requireManager, usersRouter);
+app.use('/api/approvals', requireAuth, requireManager, approvalsRouter);
+// Settings are readable by everyone (documents need the company profile) but
+// only a manager may change them.
+app.use('/api/settings', requireAuth, (req, res, next) =>
+  req.method === 'GET' ? next() : requireManager(req, res, next), settingsRouter);
 app.use('/api/customers', requireAuth, customersRouter);
 app.use('/api/products', requireAuth, productsRouter);
-app.use('/api/enquiries', requireAuth, enquiriesRouter);
 app.use('/api/quotations', requireAuth, quotationsRouter);
 app.use('/api/proformas', requireAuth, proformasRouter);
 app.use('/api/invoices', requireAuth, invoicesRouter);

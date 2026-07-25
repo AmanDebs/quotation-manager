@@ -2,10 +2,13 @@ import { useEffect, useState } from 'react';
 import { useNavigate, useParams, useSearchParams, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
-import type { Quotation, Customer, LineItem, TaxType } from '../types';
+import type { Quotation, Customer, LineItem, TaxType, ColumnConfig } from '../types';
 import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, StatusBadge } from '../components/ui';
 import LineItemsEditor from '../components/LineItemsEditor';
 import FollowupButton from '../components/FollowupButton';
+import ApprovalStrip from '../components/ApprovalStrip';
+import ColumnsControl from '../components/ColumnsControl';
+import NotePresetPicker from '../components/NotePresetPicker';
 import { fmtMoney, fmtDate, today } from '../lib/format';
 
 interface Draft {
@@ -24,13 +27,16 @@ interface Draft {
   container_count: string;
   prepared_by: string;
   tax_type: TaxType;
+  is_export: number;
+  column_config: ColumnConfig;
   items: LineItem[];
 }
 
 const emptyDraft = (): Draft => ({
   customer_id: '', enquiry_id: null, date: today(), currency: 'INR', validity_date: '',
   payment_terms: '', delivery_terms: '', notes: '', freight: 0, insurance: 0,
-  inco_terms: '', container_count: '', prepared_by: '', tax_type: 'igst', items: [],
+  inco_terms: '', container_count: '', prepared_by: '', tax_type: 'igst',
+  is_export: 0, column_config: {}, items: [],
 });
 
 export default function QuotationFormPage() {
@@ -67,25 +73,34 @@ export default function QuotationFormPage() {
         container_count: existing.container_count ?? '',
         prepared_by: existing.prepared_by ?? '',
         tax_type: existing.tax_type,
+        is_export: existing.is_export ?? 0,
+        column_config: existing.column_config ?? {},
         items: existing.items ?? [],
       });
     }
   }, [existing]);
 
-  // Pre-select customer/enquiry when arriving from an enquiry row.
+  // Arriving from the export/domestic dialog with a chosen customer.
   useEffect(() => {
-    if (isNew) {
-      const enquiry = search.get('enquiry');
-      const customer = search.get('customer');
-      if (enquiry || customer) {
-        setDraft((d) => ({
-          ...d,
-          enquiry_id: enquiry ? Number(enquiry) : null,
-          customer_id: customer ? Number(customer) : d.customer_id,
-        }));
-      }
-    }
+    if (!isNew) return;
+    const type = search.get('type');
+    const customer = search.get('customer');
+    if (!type && !customer) return;
+    const isExport = type === 'export';
+    setDraft((d) => ({
+      ...d,
+      is_export: isExport ? 1 : 0,
+      tax_type: isExport ? 'none' : d.tax_type === 'none' ? 'igst' : d.tax_type,
+      customer_id: customer ? Number(customer) : d.customer_id,
+    }));
   }, [isNew, search]);
+
+  // Once customers load, adopt the chosen customer's currency.
+  useEffect(() => {
+    if (!isNew || !draft.customer_id || customers.length === 0) return;
+    const c = customers.find((x) => x.id === draft.customer_id);
+    if (c && draft.currency !== c.currency) setDraft((d) => ({ ...d, currency: c.currency }));
+  }, [isNew, draft.customer_id, customers]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-pick currency and tax type from the selected customer.
   const onCustomerChange = (cid: number | '') => {
@@ -96,6 +111,7 @@ export default function QuotationFormPage() {
       ...(c
         ? {
             currency: c.currency,
+            is_export: c.is_export ?? (c.country.trim().toLowerCase() !== 'india' ? 1 : 0),
             tax_type: (c.country.trim().toLowerCase() !== 'india' ? 'none' : d.tax_type === 'none' ? 'igst' : d.tax_type) as TaxType,
           }
         : {}),
@@ -107,7 +123,6 @@ export default function QuotationFormPage() {
     onSuccess: (q) => {
       queryClient.invalidateQueries({ queryKey: ['quotations'] });
       queryClient.invalidateQueries({ queryKey: ['quotation', String(q.id)] });
-      queryClient.invalidateQueries({ queryKey: ['enquiries'] });
       if (isNew) navigate(`/quotations/${q.id}`, { replace: true });
     },
   });
@@ -177,6 +192,18 @@ export default function QuotationFormPage() {
         </div>
       )}
 
+      {!isNew && !isSuperseded && (
+        <ApprovalStrip
+          docType="quotations"
+          docId={Number(id)}
+          status={existing!.approval_status}
+          approvedByName={existing!.approved_by_name}
+          approvedAt={existing!.approved_at}
+          note={existing!.approval_note}
+          queryKey="quotation"
+        />
+      )}
+
       {!isNew && (
         <div className="mb-4 flex flex-wrap items-center gap-2 text-sm">
           <span className="text-slate-500">Set status:</span>
@@ -196,7 +223,26 @@ export default function QuotationFormPage() {
       )}
 
       <div className="space-y-4">
-        <Card title="Details">
+        <Card
+          title="Details"
+          actions={
+            <div className="flex items-center gap-2 text-sm">
+              <span className="text-slate-500">Type:</span>
+              <Select
+                value={draft.is_export ? 'export' : 'domestic'}
+                disabled={readOnly}
+                onChange={(e) => {
+                  const isExport = e.target.value === 'export';
+                  set({ is_export: isExport ? 1 : 0, tax_type: isExport ? 'none' : draft.tax_type === 'none' ? 'igst' : draft.tax_type });
+                }}
+                className="w-32"
+              >
+                <option value="export">🌍 Export</option>
+                <option value="domestic">🇮🇳 Domestic</option>
+              </Select>
+            </div>
+          }
+        >
           <div className="grid grid-cols-3 gap-3">
             {!isNew && (
               <Field label="Quotation Number (editable)">
@@ -232,18 +278,25 @@ export default function QuotationFormPage() {
             </Field>
             <Field label="Containers"><Input disabled={readOnly} value={draft.container_count} onChange={(e) => set({ container_count: e.target.value })} placeholder="e.g. 5 X 40ft HQ" /></Field>
             <div />
-            <Field label="Notes (printed on quotation)" className="col-span-3">
-              <Textarea rows={2} disabled={readOnly} value={draft.notes} onChange={(e) => set({ notes: e.target.value })} />
-            </Field>
+            <div className="col-span-3">
+              <div className="mb-1 flex items-center justify-between">
+                <span className="text-xs font-medium text-slate-600">Notes (printed on quotation)</span>
+                {!readOnly && <NotePresetPicker value={draft.notes} onChange={(v) => set({ notes: v })} />}
+              </div>
+              <Textarea rows={3} disabled={readOnly} value={draft.notes} onChange={(e) => set({ notes: e.target.value })} />
+            </div>
           </div>
         </Card>
 
-        <Card title="Line Items">
+        <Card
+          title="Line Items"
+          actions={!readOnly && <ColumnsControl config={draft.column_config} onChange={(c) => set({ column_config: c })} />}
+        >
           {readOnly ? (
             <ReadOnlyItems items={draft.items} currency={draft.currency} />
           ) : (
             <>
-              <LineItemsEditor items={draft.items} onChange={(items) => set({ items })} currency={draft.currency} taxType={draft.tax_type} />
+              <LineItemsEditor items={draft.items} onChange={(items) => set({ items })} currency={draft.currency} taxType={draft.tax_type} config={draft.column_config} />
               <div className="mt-3 grid grid-cols-2 gap-3 border-t border-slate-100 pt-3 md:max-w-md">
                 <Field label={`Indicative Freight (${draft.currency})`}>
                   <Input type="number" min={0} step="any" value={draft.freight || ''} onChange={(e) => set({ freight: Number(e.target.value) })} />

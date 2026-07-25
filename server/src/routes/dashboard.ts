@@ -1,86 +1,106 @@
 import { Router } from 'express';
 import { db } from '../db/connection.js';
+import type { AuthedRequest } from '../middleware/auth.js';
+import { scopeClause } from '../middleware/scope.js';
 
 export const dashboardRouter = Router();
 
 /**
- * All stats accept ?from=YYYY-MM-DD&to=YYYY-MM-DD.
- * Money aggregates are grouped by currency — mixing USD and INR totals would be meaningless.
+ * All stats accept ?from=YYYY-MM-DD&to=YYYY-MM-DD and are limited to the
+ * caller's customers (managers see everything).
+ * Money aggregates are grouped by currency — mixing USD and INR would be meaningless.
  */
-dashboardRouter.get('/', (req, res) => {
+dashboardRouter.get('/', (req: AuthedRequest, res) => {
   const from = String(req.query.from ?? '0000-01-01');
   const to = String(req.query.to ?? '9999-12-31');
   const today = new Date().toISOString().slice(0, 10);
 
+  const scope = scopeClause(req, 'customer_id');
+  const and = scope.sql ? ` AND ${scope.sql}` : '';
+  const p = scope.params;
+  // Helper: date-range params followed by the scope params.
+  const q = <T>(sql: string, ...extra: unknown[]) => db.prepare(sql).all(...(extra as never[])) as T[];
+  const one = (sql: string, ...extra: unknown[]) => (db.prepare(sql).get(...(extra as never[])) as { c: number }).c;
+
   const counts = {
-    enquiries: (db.prepare('SELECT COUNT(*) AS c FROM enquiries WHERE date BETWEEN ? AND ?').get(from, to) as { c: number }).c,
-    quotations: (db.prepare('SELECT COUNT(*) AS c FROM quotations WHERE superseded_by IS NULL AND date BETWEEN ? AND ?').get(from, to) as { c: number }).c,
-    orders: (db.prepare("SELECT COUNT(*) AS c FROM proforma_invoices WHERE status IN ('order_confirmed','advance_received','in_production') AND date BETWEEN ? AND ?").get(from, to) as { c: number }).c,
-    invoices: (db.prepare('SELECT COUNT(*) AS c FROM commercial_invoices WHERE date BETWEEN ? AND ?').get(from, to) as { c: number }).c,
+    quotations: one(`SELECT COUNT(*) AS c FROM quotations WHERE superseded_by IS NULL AND date BETWEEN ? AND ?${and}`, from, to, ...p),
+    orders: one(`SELECT COUNT(*) AS c FROM proforma_invoices WHERE status IN ('order_confirmed','advance_received','in_production') AND date BETWEEN ? AND ?${and}`, from, to, ...p),
+    invoices: one(`SELECT COUNT(*) AS c FROM commercial_invoices WHERE date BETWEEN ? AND ?${and}`, from, to, ...p),
+    pendingApprovals: one(
+      `SELECT (SELECT COUNT(*) FROM quotations WHERE approval_status = 'pending'${and})
+            + (SELECT COUNT(*) FROM proforma_invoices WHERE approval_status = 'pending'${and})
+            + (SELECT COUNT(*) FROM commercial_invoices WHERE approval_status = 'pending'${and}) AS c`,
+      ...p, ...p, ...p
+    ),
   };
 
-  const quotationsByStatus = db.prepare(
-    'SELECT status, COUNT(*) AS count FROM quotations WHERE superseded_by IS NULL AND date BETWEEN ? AND ? GROUP BY status'
-  ).all(from, to);
+  const quotationsByStatus = q(
+    `SELECT status, COUNT(*) AS count FROM quotations WHERE superseded_by IS NULL AND date BETWEEN ? AND ?${and} GROUP BY status`,
+    from, to, ...p
+  );
 
-  const quotedByMonth = db.prepare(
+  const quotedByMonth = q(
     `SELECT substr(date, 1, 7) AS month, currency, SUM(grand_total) AS total
-     FROM quotations WHERE superseded_by IS NULL AND date BETWEEN ? AND ? GROUP BY month, currency ORDER BY month`
-  ).all(from, to);
+     FROM quotations WHERE superseded_by IS NULL AND date BETWEEN ? AND ?${and} GROUP BY month, currency ORDER BY month`,
+    from, to, ...p
+  );
 
-  const invoicedByMonth = db.prepare(
+  const invoicedByMonth = q(
     `SELECT substr(date, 1, 7) AS month, currency, SUM(grand_total) AS total
-     FROM commercial_invoices WHERE date BETWEEN ? AND ? GROUP BY month, currency ORDER BY month`
-  ).all(from, to);
+     FROM commercial_invoices WHERE date BETWEEN ? AND ?${and} GROUP BY month, currency ORDER BY month`,
+    from, to, ...p
+  );
 
-  const topCustomers = db.prepare(
+  const topCustomers = q(
     `SELECT c.name, q.currency, SUM(q.grand_total) AS total, COUNT(*) AS quotes
      FROM quotations q JOIN customers c ON c.id = q.customer_id
-     WHERE q.superseded_by IS NULL AND q.date BETWEEN ? AND ?
-     GROUP BY c.id, q.currency ORDER BY total DESC LIMIT 8`
-  ).all(from, to);
+     WHERE q.superseded_by IS NULL AND q.date BETWEEN ? AND ?${scope.sql ? ` AND q.${scope.sql}` : ''}
+     GROUP BY c.id, q.currency ORDER BY total DESC LIMIT 8`,
+    from, to, ...p
+  );
 
-  const topProducts = db.prepare(
+  const topProducts = q(
     `SELECT COALESCE(p.name, qi.description) AS name, COUNT(*) AS times_quoted
      FROM quotation_items qi
      JOIN quotations q ON q.id = qi.quotation_id
      LEFT JOIN products p ON p.id = qi.product_id
-     WHERE q.superseded_by IS NULL AND q.date BETWEEN ? AND ?
-     GROUP BY COALESCE(p.name, qi.description) ORDER BY times_quoted DESC LIMIT 8`
-  ).all(from, to);
+     WHERE q.superseded_by IS NULL AND q.date BETWEEN ? AND ?${scope.sql ? ` AND q.${scope.sql}` : ''}
+     GROUP BY COALESCE(p.name, qi.description) ORDER BY times_quoted DESC LIMIT 8`,
+    from, to, ...p
+  );
 
-  const currencyTotals = db.prepare(
+  const currencyTotals = q(
     `SELECT currency,
        SUM(CASE WHEN status = 'accepted' THEN grand_total ELSE 0 END) AS accepted_value,
        SUM(grand_total) AS quoted_value
-     FROM quotations WHERE superseded_by IS NULL AND date BETWEEN ? AND ? GROUP BY currency`
-  ).all(from, to);
+     FROM quotations WHERE superseded_by IS NULL AND date BETWEEN ? AND ?${and} GROUP BY currency`,
+    from, to, ...p
+  );
 
+  const fu = (cond: string, ...extra: unknown[]) => q(
+    `SELECT f.*, c.name AS customer_name FROM followups f LEFT JOIN customers c ON c.id = f.customer_id
+     WHERE f.done = 0 AND ${cond}${scope.sql ? ` AND f.${scope.sql}` : ''} ORDER BY f.due_date LIMIT 20`,
+    ...extra, ...p
+  );
   const followups = {
-    overdue: db.prepare(
-      `SELECT f.*, c.name AS customer_name FROM followups f LEFT JOIN customers c ON c.id = f.customer_id
-       WHERE f.done = 0 AND f.due_date < ? ORDER BY f.due_date LIMIT 20`
-    ).all(today),
-    today: db.prepare(
-      `SELECT f.*, c.name AS customer_name FROM followups f LEFT JOIN customers c ON c.id = f.customer_id
-       WHERE f.done = 0 AND f.due_date = ? ORDER BY f.due_date LIMIT 20`
-    ).all(today),
-    upcoming: db.prepare(
-      `SELECT f.*, c.name AS customer_name FROM followups f LEFT JOIN customers c ON c.id = f.customer_id
-       WHERE f.done = 0 AND f.due_date > ? ORDER BY f.due_date LIMIT 20`
-    ).all(today),
+    overdue: fu('f.due_date < ?', today),
+    today: fu('f.due_date = ?', today),
+    upcoming: fu('f.due_date > ?', today),
   };
 
   // Receivables: per currency, invoiced value minus payments received (incl. PI advances).
-  const invoicesAll = db.prepare('SELECT id, pi_id, currency, grand_total FROM commercial_invoices').all() as
-    { id: number; pi_id: number | null; currency: string; grand_total: number }[];
-  const paymentsAll = db.prepare('SELECT pi_id, invoice_id, amount FROM payments').all() as
-    { pi_id: number | null; invoice_id: number | null; amount: number }[];
+  const invoicesAll = q<{ id: number; pi_id: number | null; currency: string; grand_total: number }>(
+    `SELECT id, pi_id, currency, grand_total FROM commercial_invoices${scope.sql ? ` WHERE ${scope.sql}` : ''}`,
+    ...p
+  );
+  const paymentsAll = q<{ pi_id: number | null; invoice_id: number | null; amount: number }>(
+    'SELECT pi_id, invoice_id, amount FROM payments'
+  );
   const receivablesMap = new Map<string, { currency: string; invoiced: number; received: number; outstanding: number }>();
   for (const inv of invoicesAll) {
     const received = paymentsAll
-      .filter((p) => p.invoice_id === inv.id || (inv.pi_id != null && p.pi_id === inv.pi_id))
-      .reduce((s, p) => s + p.amount, 0);
+      .filter((pay) => pay.invoice_id === inv.id || (inv.pi_id != null && pay.pi_id === inv.pi_id))
+      .reduce((s, pay) => s + pay.amount, 0);
     const row = receivablesMap.get(inv.currency) ?? { currency: inv.currency, invoiced: 0, received: 0, outstanding: 0 };
     row.invoiced += inv.grand_total;
     row.received += Math.min(received, inv.grand_total);
@@ -95,9 +115,9 @@ dashboardRouter.get('/', (req, res) => {
   }));
 
   const funnel = {
-    enquiries: counts.enquiries,
     quoted: counts.quotations,
-    accepted: (db.prepare("SELECT COUNT(*) AS c FROM quotations WHERE superseded_by IS NULL AND status = 'accepted' AND date BETWEEN ? AND ?").get(from, to) as { c: number }).c,
+    accepted: one(`SELECT COUNT(*) AS c FROM quotations WHERE superseded_by IS NULL AND status = 'accepted' AND date BETWEEN ? AND ?${and}`, from, to, ...p),
+    orders: counts.orders,
     invoiced: counts.invoices,
   };
 

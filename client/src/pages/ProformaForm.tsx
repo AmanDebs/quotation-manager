@@ -2,11 +2,14 @@ import { useEffect, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
-import type { Proforma, Customer, LineItem, TaxType, Settings } from '../types';
+import type { Proforma, Customer, LineItem, TaxType, Settings, ColumnConfig } from '../types';
 import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, StatusBadge } from '../components/ui';
 import LineItemsEditor from '../components/LineItemsEditor';
 import FollowupButton from '../components/FollowupButton';
 import PaymentsCard from '../components/PaymentsCard';
+import ApprovalStrip from '../components/ApprovalStrip';
+import ColumnsControl from '../components/ColumnsControl';
+import NotePresetPicker from '../components/NotePresetPicker';
 import { today } from '../lib/format';
 
 interface Draft {
@@ -41,6 +44,7 @@ interface Draft {
   prepared_by: string;
   remarks: string;
   tax_type: TaxType;
+  column_config: ColumnConfig;
   items: LineItem[];
 }
 
@@ -50,7 +54,7 @@ const emptyDraft = (): Draft => ({
   delivery_terms: '', validity_date: '', is_export: 0, country_of_origin: '', port_of_loading: '',
   port_of_discharge: '', final_destination: '', container_count: '', partial_shipment: 'Not Allowed',
   po_number: '', po_date: '', notify_party_2: '', method_of_despatch: '', quantity_tolerance: '',
-  hs_code: '', prepared_by: '', remarks: '', tax_type: 'igst', items: [],
+  hs_code: '', prepared_by: '', remarks: '', tax_type: 'igst', column_config: {}, items: [],
 });
 
 const INCO_TERMS = ['', 'EXW', 'FCA', 'FOB', 'CFR', 'CIF', 'CPT', 'CIP', 'DAP', 'DPU', 'DDP'];
@@ -76,8 +80,13 @@ export default function ProformaFormPage() {
 
   useEffect(() => {
     if (existing) {
-      const { id: _id, number: _n, status: _s, subtotal: _st, tax_total: _tt, grand_total: _gt, customer_name: _cn, quotation_number: _qn, payments: _p, amount_received: _ar, ...rest } = existing;
-      setDraft({ ...(rest as unknown as Draft), items: existing.items ?? [] });
+      const {
+        id: _id, number: _n, status: _s, subtotal: _st, tax_total: _tt, grand_total: _gt,
+        customer_name: _cn, quotation_number: _qn, payments: _p, amount_received: _ar,
+        approval_status: _as, approved_at: _aa, approval_note: _an, approved_by_name: _ab, created_by_name: _cb,
+        ...rest
+      } = existing;
+      setDraft({ ...(rest as unknown as Draft), column_config: existing.column_config ?? {}, items: existing.items ?? [] });
     }
   }, [existing]);
 
@@ -89,6 +98,32 @@ export default function ProformaFormPage() {
       });
     }
   }, [isNew, fromQuotation, prefilled]);
+
+  // Arriving from the export/domestic dialog.
+  useEffect(() => {
+    if (!isNew || fromQuotation) return;
+    const type = search.get('type');
+    const customer = search.get('customer');
+    if (!type && !customer) return;
+    const isExport = type === 'export';
+    setDraft((d) => ({
+      ...d,
+      is_export: isExport ? 1 : 0,
+      tax_type: isExport ? 'none' : d.tax_type === 'none' ? 'igst' : d.tax_type,
+      country_of_origin: isExport ? 'India' : d.country_of_origin,
+      quantity_tolerance: isExport && !d.quantity_tolerance ? '(±) 10% in value and quantity' : d.quantity_tolerance,
+      customer_id: customer ? Number(customer) : d.customer_id,
+    }));
+  }, [isNew, fromQuotation, search]);
+
+  // Adopt the chosen customer's details once customers load.
+  useEffect(() => {
+    if (!isNew || !draft.customer_id || customers.length === 0 || prefilled) return;
+    const c = customers.find((x) => x.id === draft.customer_id);
+    if (c && draft.currency !== c.currency) {
+      setDraft((d) => ({ ...d, currency: c.currency, consignee: c.consignee, notify_party: c.notify_party, notify_party_2: c.notify_party_2 }));
+    }
+  }, [isNew, draft.customer_id, customers, prefilled]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const save = useMutation({
     mutationFn: (d: Draft) => (isNew ? api.post<Proforma>('/api/proformas', d) : api.put<Proforma>(`/api/proformas/${id}`, d)),
@@ -156,6 +191,18 @@ export default function ProformaFormPage() {
           </div>
         }
       />
+
+      {!isNew && (
+        <ApprovalStrip
+          docType="proformas"
+          docId={Number(id)}
+          status={existing!.approval_status}
+          approvedByName={existing!.approved_by_name}
+          approvedAt={existing!.approved_at}
+          note={existing!.approval_note}
+          queryKey="proforma"
+        />
+      )}
 
       {!isNew && (
         <div className="mb-4 flex flex-wrap items-center gap-2 text-sm">
@@ -272,7 +319,14 @@ export default function ProformaFormPage() {
 
         <Card title="Export Details">
           <label className="mb-3 flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={!!draft.is_export} onChange={(e) => set({ is_export: e.target.checked ? 1 : 0 })} />
+            <input
+              type="checkbox"
+              checked={!!draft.is_export}
+              onChange={(e) => {
+                const isExport = e.target.checked;
+                set({ is_export: isExport ? 1 : 0, tax_type: isExport ? 'none' : draft.tax_type === 'none' ? 'igst' : draft.tax_type });
+              }}
+            />
             This is an export order
           </label>
           {!!draft.is_export && (
@@ -292,8 +346,11 @@ export default function ProformaFormPage() {
           )}
         </Card>
 
-        <Card title="Line Items">
-          <LineItemsEditor items={draft.items} onChange={(items) => set({ items })} currency={draft.currency} taxType={draft.tax_type} />
+        <Card
+          title="Line Items"
+          actions={<ColumnsControl config={draft.column_config} onChange={(c) => set({ column_config: c })} />}
+        >
+          <LineItemsEditor items={draft.items} onChange={(items) => set({ items })} currency={draft.currency} taxType={draft.tax_type} config={draft.column_config} />
           <div className="mt-3 grid grid-cols-2 gap-3 border-t border-slate-100 pt-3 md:max-w-md">
             <Field label={`Freight (${draft.currency})`}>
               <Input type="number" min={0} step="any" value={draft.freight || ''} onChange={(e) => set({ freight: Number(e.target.value) })} />
@@ -304,7 +361,7 @@ export default function ProformaFormPage() {
           </div>
         </Card>
 
-        <Card title="Remarks">
+        <Card title="Remarks" actions={<NotePresetPicker value={draft.remarks} onChange={(v) => set({ remarks: v })} />}>
           <Textarea rows={3} value={draft.remarks} onChange={(e) => set({ remarks: e.target.value })} placeholder="Any other conditions specific to this customer…" />
         </Card>
 

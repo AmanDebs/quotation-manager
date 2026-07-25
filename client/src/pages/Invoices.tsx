@@ -3,15 +3,23 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Invoice } from '../types';
-import { Button, Select, PageHeader, EmptyState, Card, StatusBadge } from '../components/ui';
+import { Button, Select, PageHeader, EmptyState, Card, StatusBadge, ExportTabs } from '../components/ui';
+import NewDocumentDialog from '../components/NewDocumentDialog';
 import { fmtDate, fmtMoney } from '../lib/format';
 
 export default function InvoicesPage() {
   const navigate = useNavigate();
   const [statusFilter, setStatusFilter] = useState('');
+  const [exportFilter, setExportFilter] = useState('');
+  const [creating, setCreating] = useState(false);
   const { data: invoices = [] } = useQuery({
-    queryKey: ['invoices', statusFilter],
-    queryFn: () => api.get<Invoice[]>(`/api/invoices${statusFilter ? `?status=${statusFilter}` : ''}`),
+    queryKey: ['invoices', statusFilter, exportFilter],
+    queryFn: () => {
+      const params = new URLSearchParams();
+      if (statusFilter) params.set('status', statusFilter);
+      if (exportFilter) params.set('export', exportFilter);
+      return api.get<Invoice[]>(`/api/invoices${params.toString() ? `?${params}` : ''}`);
+    },
   });
 
   return (
@@ -19,10 +27,12 @@ export default function InvoicesPage() {
       <PageHeader
         title="Commercial Invoices"
         subtitle="“This is the final bill.”"
-        actions={<Button onClick={() => navigate('/invoices/new')}>+ New Invoice</Button>}
+        actions={<Button onClick={() => setCreating(true)}>+ New Invoice</Button>}
       />
-      <div className="mb-3 max-w-45">
-        <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+      {creating && <NewDocumentDialog basePath="/invoices" title="New Commercial Invoice" onClose={() => setCreating(false)} />}
+      <div className="mb-3 flex flex-wrap items-center gap-3">
+        <ExportTabs value={exportFilter} onChange={setExportFilter} />
+        <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="max-w-45">
           <option value="">All statuses</option>
           {['draft', 'final', 'dispatched', 'paid'].map((s) => <option key={s} value={s}>{s[0].toUpperCase() + s.slice(1)}</option>)}
         </Select>
@@ -50,7 +60,10 @@ export default function InvoicesPage() {
                   <td className="py-2 pr-3">{inv.customer_name}</td>
                   <td className="py-2 pr-3">{inv.pi_number || '—'}</td>
                   <td className="py-2 pr-3 text-right tabular-nums">{fmtMoney(inv.grand_total, inv.currency)}</td>
-                  <td className="py-2 pr-3"><StatusBadge status={inv.status} /></td>
+                  <td className="py-2 pr-3">
+                    <StatusBadge status={inv.status} />
+                    {inv.approval_status === 'pending' && <span className="ml-1 text-xs text-amber-700">⏳</span>}
+                  </td>
                 </tr>
               ))}
             </tbody>

@@ -13,6 +13,11 @@ Each document is created from the previous one with all details carried forward,
 - **Commercial Invoices** created from a PI at dispatch — final quantities are checked against the 10% variance clause automatically
 - **Packing Lists** with cartons, dimensions, net/gross weights and shipping marks
 - **Branded PDFs** for all four documents (logo, signature/stamp, amount in words, GST or export layout)
+- **Team roles** — the manager sees everything, approves documents and controls Settings; employees see only the customers assigned to them
+- **Manager approval** before any quotation, proforma or invoice can be marked as sent; unapproved PDFs carry a "Pending Approval" watermark
+- **Export or domestic chosen up front**, driving tax treatment, numbering series, form fields and PDF layout
+- **Flexible columns** — hide any column you don't need per document, and add up to three custom columns (e.g. Mould No., Cavity)
+- **Reusable note & term presets**, editable per document
 - **Buyer PO capture** on the proforma invoice (PO number/date, printed on the PI PDF)
 - **Payment tracking** — record advances against the PI and balance payments against the invoice; balance due appears on screen, on the invoice PDF, and as receivables per currency on the dashboard
 - **Follow-up reminders** on any document — overdue/today/upcoming on the dashboard
@@ -31,11 +36,14 @@ cd server && npm run dev     # API on http://localhost:4000
 cd client && npm run dev     # Web app on http://localhost:5173
 ```
 
-On first launch the app asks you to create the first user account, then head to **Settings** to fill in your company profile, logo, bank accounts and GSTIN — these appear on every PDF.
+On first launch the app asks you to create the first account — this becomes the **manager**. Then head to **Settings** to fill in your company profile, logo, bank accounts and GSTIN (these appear on every PDF), and to **Team** to add employees. Employees cannot sign themselves up.
+
+To load realistic demo data on an empty database: `npm run seed` in `server/`.
 
 ## Tech notes
 
-- **Server:** Node.js + Express + TypeScript. Data is stored in a single SQLite file at `server/data/app.db` (uses Node's built-in `node:sqlite`, no database install needed). Back up that file to back up everything. Set the `DATA_DIR` environment variable to relocate the data folder.
+- **Server:** Node.js + Express + TypeScript. Data is stored in SQLite at `server/data/app.db` (uses Node's built-in `node:sqlite`, no database install needed). Set the `DATA_DIR` environment variable to relocate the data folder.
+- **Backing up:** copy **all** of `server/data/app.db*` — the database runs in WAL mode, so recent changes live in the `app.db-wal` sidecar file. Copying `app.db` on its own can give you an almost-empty backup.
 - **Client:** React + Vite + TypeScript + Tailwind CSS + TanStack Query, charts with Recharts.
 - **PDFs:** generated server-side with pdfmake.
 - **Auth:** email + password (bcrypt), JWT in an httpOnly cookie.

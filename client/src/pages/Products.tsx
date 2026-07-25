@@ -8,7 +8,34 @@ export const UNITS = ['unit', 'kg', 'tonne', 'per 1000', 'meter', 'litre', 'set'
 
 const empty: Omit<Product, 'id'> = {
   name: '', description: '', hsn_code: '', unit: 'unit', unit_price: 0, country_of_origin: 'India',
+  image: '', color: '',
 };
+
+function ProductImage({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  return (
+    <div className="flex items-center gap-3">
+      {value ? (
+        <img src={value} alt="" className="h-16 w-16 rounded border border-slate-200 object-cover" />
+      ) : (
+        <div className="flex h-16 w-16 items-center justify-center rounded border border-dashed border-slate-300 text-xs text-slate-400">None</div>
+      )}
+      <input
+        type="file"
+        accept="image/*"
+        className="text-xs"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (!file) return;
+          if (file.size > 300 * 1024) { alert('Please use an image under 300 KB'); return; }
+          const reader = new FileReader();
+          reader.onload = () => onChange(String(reader.result));
+          reader.readAsDataURL(file);
+        }}
+      />
+      {value && <Button type="button" variant="danger" onClick={() => onChange('')}>Remove</Button>}
+    </div>
+  );
+}
 
 export default function ProductsPage() {
   const queryClient = useQueryClient();
@@ -53,7 +80,9 @@ export default function ProductsPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-slate-200 text-left text-xs uppercase text-slate-500">
+                <th className="pb-2 pr-3 w-14" />
                 <th className="pb-2 pr-3">Name</th>
+                <th className="pb-2 pr-3">Colour</th>
                 <th className="pb-2 pr-3">HSN</th>
                 <th className="pb-2 pr-3">Unit</th>
                 <th className="pb-2 pr-3 text-right">Default Price</th>
@@ -64,7 +93,13 @@ export default function ProductsPage() {
             <tbody>
               {products.map((p) => (
                 <tr key={p.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50">
+                  <td className="py-2 pr-3">
+                    {p.image
+                      ? <img src={p.image} alt="" className="h-10 w-10 rounded border border-slate-200 object-cover" />
+                      : <div className="h-10 w-10 rounded border border-dashed border-slate-200" />}
+                  </td>
                   <td className="py-2 pr-3 font-medium">{p.name}</td>
+                  <td className="py-2 pr-3">{p.color || '—'}</td>
                   <td className="py-2 pr-3">{p.hsn_code || '—'}</td>
                   <td className="py-2 pr-3">{p.unit}</td>
                   <td className="py-2 pr-3 text-right">{p.unit_price ? p.unit_price.toLocaleString('en-IN') : '—'}</td>
@@ -105,6 +140,12 @@ export default function ProductsPage() {
               <Input type="number" min={0} step="any" value={editing.unit_price || ''} onChange={(e) => set({ unit_price: Number(e.target.value) })} />
             </Field>
             <Field label="Country of Origin"><Input value={editing.country_of_origin} onChange={(e) => set({ country_of_origin: e.target.value })} /></Field>
+            <Field label="Default Colour">
+              <Input value={editing.color} onChange={(e) => set({ color: e.target.value })} placeholder="e.g. Red-Yellow (Printing)" />
+            </Field>
+            <Field label="Product Photo" className="col-span-2">
+              <ProductImage value={editing.image} onChange={(v) => set({ image: v })} />
+            </Field>
           </div>
           <div className="mt-4 space-y-2">
             <ErrorText error={save.error} />

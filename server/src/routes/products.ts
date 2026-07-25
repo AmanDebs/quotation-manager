@@ -3,7 +3,7 @@ import { db } from '../db/connection.js';
 
 export const productsRouter = Router();
 
-const fields = ['name', 'description', 'hsn_code', 'unit', 'unit_price', 'country_of_origin'];
+const fields = ['name', 'description', 'hsn_code', 'unit', 'unit_price', 'country_of_origin', 'image', 'color'];
 
 productsRouter.get('/', (req, res) => {
   const q = String(req.query.q ?? '').trim();
@@ -17,14 +17,16 @@ productsRouter.post('/', (req, res) => {
   const body = req.body ?? {};
   if (!body.name) return res.status(400).json({ error: 'Product name is required' });
   const info = db
-    .prepare(`INSERT INTO products (name, description, hsn_code, unit, unit_price, country_of_origin) VALUES (?, ?, ?, ?, ?, ?)`)
+    .prepare(`INSERT INTO products (name, description, hsn_code, unit, unit_price, country_of_origin, image, color) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
     .run(
       String(body.name),
       String(body.description ?? ''),
       String(body.hsn_code ?? ''),
       String(body.unit ?? 'unit'),
       Number(body.unit_price ?? 0),
-      String(body.country_of_origin ?? 'India')
+      String(body.country_of_origin ?? 'India'),
+      String(body.image ?? ''),
+      String(body.color ?? '')
     );
   res.status(201).json(db.prepare('SELECT * FROM products WHERE id = ?').get(Number(info.lastInsertRowid)));
 });
@@ -34,13 +36,15 @@ productsRouter.put('/:id', (req, res) => {
   const body = req.body ?? {};
   if (!db.prepare('SELECT id FROM products WHERE id = ?').get(id)) return res.status(404).json({ error: 'Product not found' });
   if (!body.name) return res.status(400).json({ error: 'Product name is required' });
-  db.prepare('UPDATE products SET name = ?, description = ?, hsn_code = ?, unit = ?, unit_price = ?, country_of_origin = ? WHERE id = ?').run(
+  db.prepare('UPDATE products SET name = ?, description = ?, hsn_code = ?, unit = ?, unit_price = ?, country_of_origin = ?, image = ?, color = ? WHERE id = ?').run(
     String(body.name),
     String(body.description ?? ''),
     String(body.hsn_code ?? ''),
     String(body.unit ?? 'unit'),
     Number(body.unit_price ?? 0),
     String(body.country_of_origin ?? 'India'),
+    String(body.image ?? ''),
+    String(body.color ?? ''),
     id
   );
   res.json(db.prepare('SELECT * FROM products WHERE id = ?').get(id));

@@ -2,19 +2,26 @@ import { Router } from 'express';
 import { db, transaction } from '../db/connection.js';
 import { nextNumber } from '../services/numbering.js';
 import { computeTotals, round2, type LineItemInput } from '../services/totals.js';
+import type { AuthedRequest } from '../middleware/auth.js';
+import { scopeClause, canAccessCustomer } from '../middleware/scope.js';
+import { submit, decide, resetApprovalOnEdit, blockUnapprovedTransition } from '../services/approval.js';
 
 export const invoicesRouter = Router();
 
 const listSql = `
-  SELECT i.*, c.name AS customer_name, c.country AS customer_country, p.number AS pi_number
+  SELECT i.*, c.name AS customer_name, c.country AS customer_country, p.number AS pi_number,
+         u.name AS created_by_name, a.name AS approved_by_name
   FROM commercial_invoices i
   JOIN customers c ON c.id = i.customer_id
-  LEFT JOIN proforma_invoices p ON p.id = i.pi_id`;
+  LEFT JOIN proforma_invoices p ON p.id = i.pi_id
+  LEFT JOIN users u ON u.id = i.created_by
+  LEFT JOIN users a ON a.id = i.approved_by`;
 
 function getFull(id: number) {
   const inv = db.prepare(`${listSql} WHERE i.id = ?`).get(id) as Record<string, unknown> | undefined;
   if (!inv) return undefined;
   inv.items = db.prepare('SELECT * FROM invoice_items WHERE invoice_id = ? ORDER BY sort_order, id').all(id);
+  inv.column_config = JSON.parse(String(inv.column_config || '{}'));
   // Qty variance vs source PI (10% clause) computed for the client to display.
   if (inv.pi_id) {
     const piItems = db.prepare('SELECT description, qty FROM pi_items WHERE pi_id = ? ORDER BY sort_order, id').all(Number(inv.pi_id)) as {
@@ -44,12 +51,13 @@ function saveItems(invoiceId: number, items: LineItemInput[], taxType: 'none' | 
   const totals = computeTotals(items, taxType, freight, insurance, currency);
   db.prepare('DELETE FROM invoice_items WHERE invoice_id = ?').run(invoiceId);
   const ins = db.prepare(
-    `INSERT INTO invoice_items (invoice_id, product_id, description, hsn_code, qty, unit, unit_price, tax_pct, amount, color, packs, pcs_per_pack, total_pcs, sort_order)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO invoice_items (invoice_id, product_id, description, hsn_code, qty, unit, unit_price, tax_pct, amount, color, packs, pcs_per_pack, total_pcs, custom1, custom2, custom3, sort_order)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   );
   totals.items.forEach((it, i) =>
     ins.run(invoiceId, it.product_id ?? null, it.description, it.hsn_code ?? '', it.qty ?? null, it.unit ?? 'unit', it.unit_price, it.tax_pct ?? 0, it.amount,
-      it.color ?? '', it.packs ?? null, it.pcs_per_pack ?? null, it.total_pcs ?? null, i)
+      it.color ?? '', it.packs ?? null, it.pcs_per_pack ?? null, it.total_pcs ?? null,
+      it.custom1 ?? '', it.custom2 ?? '', it.custom3 ?? '', i)
   );
   db.prepare('UPDATE commercial_invoices SET subtotal = ?, tax_total = ?, grand_total = ? WHERE id = ?').run(
     totals.subtotal, totals.tax_total, totals.grand_total, invoiceId
@@ -93,25 +101,29 @@ function headerValues(body: Record<string, unknown>, existing?: Record<string, u
   };
 }
 
-invoicesRouter.get('/', (req, res) => {
-  const status = String(req.query.status ?? '');
-  const rows = status
-    ? db.prepare(`${listSql} WHERE i.status = ? ORDER BY i.date DESC, i.id DESC`).all(status)
-    : db.prepare(`${listSql} ORDER BY i.date DESC, i.id DESC`).all();
-  res.json(rows);
+invoicesRouter.get('/', (req: AuthedRequest, res) => {
+  const where: string[] = [];
+  const params: unknown[] = [];
+  const scope = scopeClause(req, 'i.customer_id');
+  if (scope.sql) { where.push(scope.sql); params.push(...scope.params); }
+  if (req.query.status) { where.push('i.status = ?'); params.push(String(req.query.status)); }
+  if (req.query.export === '1' || req.query.export === '0') { where.push('i.is_export = ?'); params.push(Number(req.query.export)); }
+  if (req.query.approval) { where.push('i.approval_status = ?'); params.push(String(req.query.approval)); }
+  const sql = `${listSql}${where.length ? ' WHERE ' + where.join(' AND ') : ''} ORDER BY i.date DESC, i.id DESC`;
+  res.json(db.prepare(sql).all(...(params as never[])));
 });
 
-invoicesRouter.get('/:id', (req, res) => {
+invoicesRouter.get('/:id', (req: AuthedRequest, res) => {
   const inv = getFull(Number(req.params.id));
-  if (!inv) return res.status(404).json({ error: 'Invoice not found' });
+  if (!inv || !canAccessCustomer(req, Number(inv.customer_id))) return res.status(404).json({ error: 'Invoice not found' });
   res.json(inv);
 });
 
 // Prefill payload for creating a commercial invoice from a PI.
-invoicesRouter.get('/prefill/from-proforma/:piId', (req, res) => {
+invoicesRouter.get('/prefill/from-proforma/:piId', (req: AuthedRequest, res) => {
   const piId = Number(req.params.piId);
   const pi = db.prepare('SELECT * FROM proforma_invoices WHERE id = ?').get(piId) as Record<string, unknown> | undefined;
-  if (!pi) return res.status(404).json({ error: 'Proforma invoice not found' });
+  if (!pi || !canAccessCustomer(req, Number(pi.customer_id))) return res.status(404).json({ error: 'Proforma invoice not found' });
   const items = db.prepare('SELECT * FROM pi_items WHERE pi_id = ? ORDER BY sort_order, id').all(piId);
   res.json({
     pi_id: piId,
@@ -132,20 +144,27 @@ invoicesRouter.get('/prefill/from-proforma/:piId', (req, res) => {
     port_of_discharge: pi.port_of_discharge,
     final_destination: pi.final_destination,
     tax_type: pi.tax_type,
+    column_config: JSON.parse(String(pi.column_config || '{}')),
     items,
   });
 });
 
-invoicesRouter.post('/', (req, res) => {
+invoicesRouter.post('/', (req: AuthedRequest, res) => {
   const body = req.body ?? {};
   if (!body.customer_id) return res.status(400).json({ error: 'Customer is required' });
+  if (!canAccessCustomer(req, Number(body.customer_id))) return res.status(403).json({ error: 'That customer is not assigned to you' });
   const h = headerValues(body);
   const id = transaction(() => {
     const number = nextNumber('invoice', { isExport: h.is_export === 1 });
     const info = db.prepare(
-      `INSERT INTO commercial_invoices (number, ${headerFields.join(', ')}, status)
-       VALUES (?, ${headerFields.map(() => '?').join(', ')}, 'draft')`
-    ).run(number, ...(headerFields.map((f) => (h as Record<string, unknown>)[f]) as never[]));
+      `INSERT INTO commercial_invoices (number, ${headerFields.join(', ')}, created_by, column_config, status)
+       VALUES (?, ${headerFields.map(() => '?').join(', ')}, ?, ?, 'draft')`
+    ).run(
+      number,
+      ...(headerFields.map((f) => (h as Record<string, unknown>)[f]) as never[]),
+      req.user!.id,
+      JSON.stringify(body.column_config ?? {})
+    );
     const id = Number(info.lastInsertRowid);
     saveItems(id, (body.items ?? []) as LineItemInput[], h.tax_type, h.freight, h.insurance, h.currency);
     return id;
@@ -153,33 +172,60 @@ invoicesRouter.post('/', (req, res) => {
   res.status(201).json(getFull(id));
 });
 
-invoicesRouter.put('/:id', (req, res) => {
+invoicesRouter.put('/:id', (req: AuthedRequest, res) => {
   const id = Number(req.params.id);
   const body = req.body ?? {};
   const existing = db.prepare('SELECT * FROM commercial_invoices WHERE id = ?').get(id) as Record<string, unknown> | undefined;
-  if (!existing) return res.status(404).json({ error: 'Invoice not found' });
+  if (!existing || !canAccessCustomer(req, Number(existing.customer_id))) return res.status(404).json({ error: 'Invoice not found' });
   const h = headerValues(body, existing);
   transaction(() => {
     db.prepare(
-      `UPDATE commercial_invoices SET number = ?, ${headerFields.map((f) => `${f} = ?`).join(', ')} WHERE id = ?`
-    ).run(String(body.number ?? existing.number), ...(headerFields.map((f) => (h as Record<string, unknown>)[f]) as never[]), id);
+      `UPDATE commercial_invoices SET number = ?, column_config = ?, ${headerFields.map((f) => `${f} = ?`).join(', ')} WHERE id = ?`
+    ).run(
+      String(body.number ?? existing.number),
+      JSON.stringify(body.column_config ?? JSON.parse(String(existing.column_config || '{}'))),
+      ...(headerFields.map((f) => (h as Record<string, unknown>)[f]) as never[]),
+      id
+    );
     if (Array.isArray(body.items)) saveItems(id, body.items as LineItemInput[], h.tax_type, h.freight, h.insurance, h.currency);
+    resetApprovalOnEdit('commercial_invoices', id);
   });
   res.json(getFull(id));
 });
 
-invoicesRouter.post('/:id/status', (req, res) => {
+invoicesRouter.post('/:id/submit', (req: AuthedRequest, res) => {
+  const id = Number(req.params.id);
+  const existing = db.prepare('SELECT customer_id FROM commercial_invoices WHERE id = ?').get(id) as { customer_id: number } | undefined;
+  if (!existing || !canAccessCustomer(req, existing.customer_id)) return res.status(404).json({ error: 'Invoice not found' });
+  submit('commercial_invoices', id, req.user!);
+  res.json(getFull(id));
+});
+
+invoicesRouter.post('/:id/approve', (req: AuthedRequest, res) => {
+  if (req.user!.role !== 'manager') return res.status(403).json({ error: 'Only a manager can approve documents' });
+  const id = Number(req.params.id);
+  if (!db.prepare('SELECT id FROM commercial_invoices WHERE id = ?').get(id)) return res.status(404).json({ error: 'Invoice not found' });
+  decide('commercial_invoices', id, req.user!, req.body?.approve !== false, String(req.body?.note ?? ''));
+  res.json(getFull(id));
+});
+
+invoicesRouter.post('/:id/status', (req: AuthedRequest, res) => {
   const id = Number(req.params.id);
   const { status } = req.body ?? {};
   const allowed = ['draft', 'final', 'dispatched', 'paid'];
   if (!allowed.includes(status)) return res.status(400).json({ error: 'Invalid status' });
-  if (!db.prepare('SELECT id FROM commercial_invoices WHERE id = ?').get(id)) return res.status(404).json({ error: 'Invoice not found' });
+  const existing = db.prepare('SELECT customer_id FROM commercial_invoices WHERE id = ?').get(id) as { customer_id: number } | undefined;
+  if (!existing || !canAccessCustomer(req, existing.customer_id)) return res.status(404).json({ error: 'Invoice not found' });
+  const blocked = blockUnapprovedTransition('commercial_invoices', id, String(status), req);
+  if (blocked) return res.status(409).json({ error: blocked });
   db.prepare('UPDATE commercial_invoices SET status = ? WHERE id = ?').run(String(status), id);
   res.json(getFull(id));
 });
 
-invoicesRouter.delete('/:id', (req, res) => {
+invoicesRouter.delete('/:id', (req: AuthedRequest, res) => {
   const id = Number(req.params.id);
+  const existing = db.prepare('SELECT customer_id FROM commercial_invoices WHERE id = ?').get(id) as { customer_id: number } | undefined;
+  if (!existing || !canAccessCustomer(req, existing.customer_id)) return res.status(404).json({ error: 'Invoice not found' });
   const used = db.prepare('SELECT COUNT(*) AS c FROM packing_lists WHERE invoice_id = ?').get(id) as { c: number };
   if (used.c > 0) return res.status(409).json({ error: 'Invoice has a packing list and cannot be deleted' });
   const paid = db.prepare('SELECT COUNT(*) AS c FROM payments WHERE invoice_id = ?').get(id) as { c: number };

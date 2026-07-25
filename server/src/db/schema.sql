@@ -6,6 +6,8 @@ CREATE TABLE IF NOT EXISTS users (
   name TEXT NOT NULL,
   email TEXT NOT NULL UNIQUE,
   password_hash TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT 'employee' CHECK (role IN ('manager','employee')),
+  active INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -38,7 +40,8 @@ CREATE TABLE IF NOT EXISTS settings (
   pi_export_pattern TEXT NOT NULL DEFAULT 'EX-PI/{FY}/{SEQ}',
   inv_pattern TEXT NOT NULL DEFAULT 'INV/{FY}/{SEQ}',
   inv_export_pattern TEXT NOT NULL DEFAULT 'EX/{FY}/{SEQ}',
-  pl_pattern TEXT NOT NULL DEFAULT 'PL/{FY}/{SEQ}'
+  pl_pattern TEXT NOT NULL DEFAULT 'PL/{FY}/{SEQ}',
+  note_presets TEXT NOT NULL DEFAULT '[]'
 );
 INSERT OR IGNORE INTO settings (id) VALUES (1);
 
@@ -57,6 +60,8 @@ CREATE TABLE IF NOT EXISTS customers (
   notify_party TEXT NOT NULL DEFAULT '',
   notify_party_2 TEXT NOT NULL DEFAULT '',
   notes TEXT NOT NULL DEFAULT '',
+  owner_id INTEGER REFERENCES users(id),
+  is_export INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -68,6 +73,8 @@ CREATE TABLE IF NOT EXISTS products (
   unit TEXT NOT NULL DEFAULT 'unit',
   unit_price REAL NOT NULL DEFAULT 0,
   country_of_origin TEXT NOT NULL DEFAULT 'India',
+  image TEXT NOT NULL DEFAULT '',
+  color TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -99,6 +106,13 @@ CREATE TABLE IF NOT EXISTS quotations (
   prepared_by TEXT NOT NULL DEFAULT '',
   tax_type TEXT NOT NULL DEFAULT 'none' CHECK (tax_type IN ('none','cgst_sgst','igst')),
   status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','sent','negotiating','accepted','rejected','expired')),
+  is_export INTEGER NOT NULL DEFAULT 0,
+  created_by INTEGER REFERENCES users(id),
+  approval_status TEXT NOT NULL DEFAULT 'not_submitted' CHECK (approval_status IN ('not_submitted','pending','approved','rejected')),
+  approved_by INTEGER REFERENCES users(id),
+  approved_at TEXT NOT NULL DEFAULT '',
+  approval_note TEXT NOT NULL DEFAULT '',
+  column_config TEXT NOT NULL DEFAULT '{}',
   subtotal REAL NOT NULL DEFAULT 0,
   tax_total REAL NOT NULL DEFAULT 0,
   grand_total REAL NOT NULL DEFAULT 0,
@@ -121,6 +135,9 @@ CREATE TABLE IF NOT EXISTS quotation_items (
   packs REAL,
   pcs_per_pack REAL,
   total_pcs REAL,
+  custom1 TEXT NOT NULL DEFAULT '',
+  custom2 TEXT NOT NULL DEFAULT '',
+  custom3 TEXT NOT NULL DEFAULT '',
   sort_order INTEGER NOT NULL DEFAULT 0
 );
 
@@ -158,6 +175,12 @@ CREATE TABLE IF NOT EXISTS proforma_invoices (
   remarks TEXT NOT NULL DEFAULT '',
   tax_type TEXT NOT NULL DEFAULT 'none' CHECK (tax_type IN ('none','cgst_sgst','igst')),
   status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','sent','order_confirmed','advance_received','in_production','cancelled')),
+  created_by INTEGER REFERENCES users(id),
+  approval_status TEXT NOT NULL DEFAULT 'not_submitted' CHECK (approval_status IN ('not_submitted','pending','approved','rejected')),
+  approved_by INTEGER REFERENCES users(id),
+  approved_at TEXT NOT NULL DEFAULT '',
+  approval_note TEXT NOT NULL DEFAULT '',
+  column_config TEXT NOT NULL DEFAULT '{}',
   subtotal REAL NOT NULL DEFAULT 0,
   tax_total REAL NOT NULL DEFAULT 0,
   grand_total REAL NOT NULL DEFAULT 0,
@@ -179,6 +202,9 @@ CREATE TABLE IF NOT EXISTS pi_items (
   packs REAL,
   pcs_per_pack REAL,
   total_pcs REAL,
+  custom1 TEXT NOT NULL DEFAULT '',
+  custom2 TEXT NOT NULL DEFAULT '',
+  custom3 TEXT NOT NULL DEFAULT '',
   sort_order INTEGER NOT NULL DEFAULT 0
 );
 
@@ -209,6 +235,12 @@ CREATE TABLE IF NOT EXISTS commercial_invoices (
   remarks TEXT NOT NULL DEFAULT '',
   tax_type TEXT NOT NULL DEFAULT 'none' CHECK (tax_type IN ('none','cgst_sgst','igst')),
   status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','final','dispatched','paid')),
+  created_by INTEGER REFERENCES users(id),
+  approval_status TEXT NOT NULL DEFAULT 'not_submitted' CHECK (approval_status IN ('not_submitted','pending','approved','rejected')),
+  approved_by INTEGER REFERENCES users(id),
+  approved_at TEXT NOT NULL DEFAULT '',
+  approval_note TEXT NOT NULL DEFAULT '',
+  column_config TEXT NOT NULL DEFAULT '{}',
   subtotal REAL NOT NULL DEFAULT 0,
   tax_total REAL NOT NULL DEFAULT 0,
   grand_total REAL NOT NULL DEFAULT 0,
@@ -230,6 +262,9 @@ CREATE TABLE IF NOT EXISTS invoice_items (
   packs REAL,
   pcs_per_pack REAL,
   total_pcs REAL,
+  custom1 TEXT NOT NULL DEFAULT '',
+  custom2 TEXT NOT NULL DEFAULT '',
+  custom3 TEXT NOT NULL DEFAULT '',
   sort_order INTEGER NOT NULL DEFAULT 0
 );
 
@@ -242,6 +277,8 @@ CREATE TABLE IF NOT EXISTS packing_lists (
   shipping_marks TEXT NOT NULL DEFAULT '',
   lot_no TEXT NOT NULL DEFAULT '',
   remarks TEXT NOT NULL DEFAULT '',
+  created_by INTEGER REFERENCES users(id),
+  column_config TEXT NOT NULL DEFAULT '{}',
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -256,6 +293,9 @@ CREATE TABLE IF NOT EXISTS packing_list_items (
   dimensions TEXT NOT NULL DEFAULT '',
   gross_weight REAL NOT NULL DEFAULT 0,
   net_weight REAL NOT NULL DEFAULT 0,
+  custom1 TEXT NOT NULL DEFAULT '',
+  custom2 TEXT NOT NULL DEFAULT '',
+  custom3 TEXT NOT NULL DEFAULT '',
   sort_order INTEGER NOT NULL DEFAULT 0
 );
 
