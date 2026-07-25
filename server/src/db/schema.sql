@@ -30,7 +30,15 @@ CREATE TABLE IF NOT EXISTS settings (
   pi_prefix TEXT NOT NULL DEFAULT 'PI',
   inv_prefix TEXT NOT NULL DEFAULT 'INV',
   pl_prefix TEXT NOT NULL DEFAULT 'PL',
-  bank_accounts TEXT NOT NULL DEFAULT '[]'
+  bank_accounts TEXT NOT NULL DEFAULT '[]',
+  arn_ref TEXT NOT NULL DEFAULT '',
+  theme_color TEXT NOT NULL DEFAULT '#8b1a1a',
+  quote_pattern TEXT NOT NULL DEFAULT 'QT/{FY}/{SEQ}',
+  pi_pattern TEXT NOT NULL DEFAULT 'PI/{FY}/{SEQ}',
+  pi_export_pattern TEXT NOT NULL DEFAULT 'EX-PI/{FY}/{SEQ}',
+  inv_pattern TEXT NOT NULL DEFAULT 'INV/{FY}/{SEQ}',
+  inv_export_pattern TEXT NOT NULL DEFAULT 'EX/{FY}/{SEQ}',
+  pl_pattern TEXT NOT NULL DEFAULT 'PL/{FY}/{SEQ}'
 );
 INSERT OR IGNORE INTO settings (id) VALUES (1);
 
@@ -47,6 +55,7 @@ CREATE TABLE IF NOT EXISTS customers (
   currency TEXT NOT NULL DEFAULT 'INR',
   consignee TEXT NOT NULL DEFAULT '',
   notify_party TEXT NOT NULL DEFAULT '',
+  notify_party_2 TEXT NOT NULL DEFAULT '',
   notes TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -83,6 +92,11 @@ CREATE TABLE IF NOT EXISTS quotations (
   payment_terms TEXT NOT NULL DEFAULT '',
   delivery_terms TEXT NOT NULL DEFAULT '',
   notes TEXT NOT NULL DEFAULT '',
+  freight REAL NOT NULL DEFAULT 0,
+  insurance REAL NOT NULL DEFAULT 0,
+  inco_terms TEXT NOT NULL DEFAULT '',
+  container_count TEXT NOT NULL DEFAULT '',
+  prepared_by TEXT NOT NULL DEFAULT '',
   tax_type TEXT NOT NULL DEFAULT 'none' CHECK (tax_type IN ('none','cgst_sgst','igst')),
   status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','sent','negotiating','accepted','rejected','expired')),
   subtotal REAL NOT NULL DEFAULT 0,
@@ -103,6 +117,10 @@ CREATE TABLE IF NOT EXISTS quotation_items (
   unit_price REAL NOT NULL DEFAULT 0,
   tax_pct REAL NOT NULL DEFAULT 0,
   amount REAL NOT NULL DEFAULT 0,
+  color TEXT NOT NULL DEFAULT '',
+  packs REAL,
+  pcs_per_pack REAL,
+  total_pcs REAL,
   sort_order INTEGER NOT NULL DEFAULT 0
 );
 
@@ -132,6 +150,11 @@ CREATE TABLE IF NOT EXISTS proforma_invoices (
   partial_shipment TEXT NOT NULL DEFAULT 'Not Allowed',
   po_number TEXT NOT NULL DEFAULT '',
   po_date TEXT NOT NULL DEFAULT '',
+  notify_party_2 TEXT NOT NULL DEFAULT '',
+  method_of_despatch TEXT NOT NULL DEFAULT '',
+  quantity_tolerance TEXT NOT NULL DEFAULT '',
+  hs_code TEXT NOT NULL DEFAULT '',
+  prepared_by TEXT NOT NULL DEFAULT '',
   remarks TEXT NOT NULL DEFAULT '',
   tax_type TEXT NOT NULL DEFAULT 'none' CHECK (tax_type IN ('none','cgst_sgst','igst')),
   status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','sent','order_confirmed','advance_received','in_production','cancelled')),
@@ -152,6 +175,10 @@ CREATE TABLE IF NOT EXISTS pi_items (
   unit_price REAL NOT NULL DEFAULT 0,
   tax_pct REAL NOT NULL DEFAULT 0,
   amount REAL NOT NULL DEFAULT 0,
+  color TEXT NOT NULL DEFAULT '',
+  packs REAL,
+  pcs_per_pack REAL,
+  total_pcs REAL,
   sort_order INTEGER NOT NULL DEFAULT 0
 );
 
@@ -175,6 +202,10 @@ CREATE TABLE IF NOT EXISTS commercial_invoices (
   port_of_loading TEXT NOT NULL DEFAULT '',
   port_of_discharge TEXT NOT NULL DEFAULT '',
   final_destination TEXT NOT NULL DEFAULT '',
+  notify_party_2 TEXT NOT NULL DEFAULT '',
+  method_of_despatch TEXT NOT NULL DEFAULT '',
+  lot_no TEXT NOT NULL DEFAULT '',
+  prepared_by TEXT NOT NULL DEFAULT '',
   remarks TEXT NOT NULL DEFAULT '',
   tax_type TEXT NOT NULL DEFAULT 'none' CHECK (tax_type IN ('none','cgst_sgst','igst')),
   status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','final','dispatched','paid')),
@@ -195,6 +226,10 @@ CREATE TABLE IF NOT EXISTS invoice_items (
   unit_price REAL NOT NULL DEFAULT 0,
   tax_pct REAL NOT NULL DEFAULT 0,
   amount REAL NOT NULL DEFAULT 0,
+  color TEXT NOT NULL DEFAULT '',
+  packs REAL,
+  pcs_per_pack REAL,
+  total_pcs REAL,
   sort_order INTEGER NOT NULL DEFAULT 0
 );
 
@@ -205,6 +240,7 @@ CREATE TABLE IF NOT EXISTS packing_lists (
   invoice_id INTEGER REFERENCES commercial_invoices(id),
   customer_id INTEGER NOT NULL REFERENCES customers(id),
   shipping_marks TEXT NOT NULL DEFAULT '',
+  lot_no TEXT NOT NULL DEFAULT '',
   remarks TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -212,6 +248,7 @@ CREATE TABLE IF NOT EXISTS packing_lists (
 CREATE TABLE IF NOT EXISTS packing_list_items (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   packing_list_id INTEGER NOT NULL REFERENCES packing_lists(id) ON DELETE CASCADE,
+  hsn_code TEXT NOT NULL DEFAULT '',
   description TEXT NOT NULL DEFAULT '',
   qty REAL,
   unit TEXT NOT NULL DEFAULT 'unit',

@@ -10,6 +10,7 @@ import PaymentsCard from '../components/PaymentsCard';
 import { today } from '../lib/format';
 
 interface Draft {
+  number?: string;
   customer_id: number | '';
   pi_id: number | null;
   date: string;
@@ -27,6 +28,10 @@ interface Draft {
   port_of_loading: string;
   port_of_discharge: string;
   final_destination: string;
+  notify_party_2: string;
+  method_of_despatch: string;
+  lot_no: string;
+  prepared_by: string;
   remarks: string;
   tax_type: TaxType;
   items: LineItem[];
@@ -36,6 +41,7 @@ const emptyDraft = (): Draft => ({
   customer_id: '', pi_id: null, date: today(), currency: 'INR', consignee: '', notify_party: '',
   freight: 0, insurance: 0, shipping_details: '', bank_account: '', inco_terms: '', payment_terms: '',
   is_export: 0, country_of_origin: '', port_of_loading: '', port_of_discharge: '', final_destination: '',
+  notify_party_2: '', method_of_despatch: '', lot_no: '', prepared_by: '',
   remarks: '', tax_type: 'igst', items: [],
 });
 
@@ -153,6 +159,11 @@ export default function InvoiceFormPage() {
       <div className="space-y-4">
         <Card title="Details">
           <div className="grid grid-cols-3 gap-3">
+            {!isNew && (
+              <Field label="Invoice Number (editable)">
+                <Input value={draft.number ?? ''} onChange={(e) => set({ number: e.target.value })} />
+              </Field>
+            )}
             <Field label="Buyer (Customer) *">
               <Select value={draft.customer_id} onChange={(e) => set({ customer_id: e.target.value ? Number(e.target.value) : '' })}>
                 <option value="">Select customer…</option>
@@ -178,6 +189,16 @@ export default function InvoiceFormPage() {
               </Select>
             </Field>
             <Field label="Payment Terms"><Input value={draft.payment_terms} onChange={(e) => set({ payment_terms: e.target.value })} /></Field>
+            <Field label="Method of Despatch">
+              <Select value={draft.method_of_despatch} onChange={(e) => set({ method_of_despatch: e.target.value })}>
+                <option value="">— select —</option>
+                <option>By Sea</option>
+                <option>By Air</option>
+                <option>By Road</option>
+              </Select>
+            </Field>
+            <Field label="Lot No."><Input value={draft.lot_no} onChange={(e) => set({ lot_no: e.target.value })} placeholder="e.g. 90/2025" /></Field>
+            <Field label="Prepared By"><Input value={draft.prepared_by} onChange={(e) => set({ prepared_by: e.target.value })} /></Field>
             <Field label="Shipping Details" className="col-span-2">
               <Input value={draft.shipping_details} onChange={(e) => set({ shipping_details: e.target.value })} placeholder="Vessel/flight, BL number, shipping line…" />
             </Field>
@@ -195,13 +216,16 @@ export default function InvoiceFormPage() {
           </div>
         </Card>
 
-        <Card title="Consignee & Notify Party">
-          <div className="grid grid-cols-2 gap-3">
+        <Card title="Consignee & Notify Parties">
+          <div className="grid grid-cols-3 gap-3">
             <Field label="Consignee">
               <Textarea rows={3} value={draft.consignee} onChange={(e) => set({ consignee: e.target.value })} />
             </Field>
-            <Field label="Notify Party">
+            <Field label="Notify Party 1">
               <Textarea rows={3} value={draft.notify_party} onChange={(e) => set({ notify_party: e.target.value })} />
+            </Field>
+            <Field label="Notify Party 2">
+              <Textarea rows={3} value={draft.notify_party_2} onChange={(e) => set({ notify_party_2: e.target.value })} />
             </Field>
           </div>
         </Card>

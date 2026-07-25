@@ -3,7 +3,7 @@ import { db } from '../db/connection.js';
 
 export const customersRouter = Router();
 
-const fields = ['name', 'contact_person', 'email', 'phone', 'address', 'city', 'country', 'gstin', 'currency', 'consignee', 'notify_party', 'notes'];
+const fields = ['name', 'contact_person', 'email', 'phone', 'address', 'city', 'country', 'gstin', 'currency', 'consignee', 'notify_party', 'notify_party_2', 'notes'];
 
 customersRouter.get('/', (req, res) => {
   const q = String(req.query.q ?? '').trim();

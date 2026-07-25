@@ -6,6 +6,10 @@ export interface LineItemInput {
   unit?: string;
   unit_price: number;
   tax_pct?: number;
+  color?: string;
+  packs?: number | null;
+  pcs_per_pack?: number | null;
+  total_pcs?: number | null;
 }
 
 export interface ComputedItem extends LineItemInput {
@@ -26,17 +30,24 @@ export const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 10
  * qty may be null (customer did not share quantity) — then line amount is 0
  * and the document acts as a price list.
  * tax_type 'none' (exports) zeroes all tax regardless of item tax_pct.
+ * INR grand totals are rounded to the whole rupee (Indian "round off" practice);
+ * PDFs derive the round-off line from the difference vs the components.
  */
 export function computeTotals(
   items: LineItemInput[],
   taxType: 'none' | 'cgst_sgst' | 'igst',
   freight = 0,
-  insurance = 0
+  insurance = 0,
+  currency = ''
 ): Totals {
   const computed: ComputedItem[] = items.map((it) => ({
     ...it,
     qty: it.qty ?? null,
     tax_pct: it.tax_pct ?? 0,
+    color: it.color ?? '',
+    packs: it.packs ?? null,
+    pcs_per_pack: it.pcs_per_pack ?? null,
+    total_pcs: it.total_pcs ?? null,
     amount: it.qty != null ? round2(it.qty * it.unit_price) : 0,
   }));
 
@@ -46,11 +57,11 @@ export function computeTotals(
   let tax_total = 0;
   if (taxType !== 'none') {
     tax_total = round2(
-      computed.reduce((s, it) => s + it.amount * ((it.tax_pct ?? 0) / 100), 0) +
-        0 // freight/insurance assumed tax-included per business practice; adjust in settings later
+      computed.reduce((s, it) => s + it.amount * ((it.tax_pct ?? 0) / 100), 0)
     );
   }
 
-  const grand_total = round2(taxable + tax_total);
+  let grand_total = round2(taxable + tax_total);
+  if (currency === 'INR') grand_total = Math.round(grand_total);
   return { items: computed, subtotal, tax_total, grand_total };
 }

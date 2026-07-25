@@ -95,12 +95,21 @@ export default function SettingsPage() {
             <Field label="GSTIN"><Input value={form.gstin} onChange={(e) => set({ gstin: e.target.value })} /></Field>
             <Field label="PAN"><Input value={form.pan} onChange={(e) => set({ pan: e.target.value })} /></Field>
             <Field label="IEC (Import-Export Code)"><Input value={form.iec} onChange={(e) => set({ iec: e.target.value })} /></Field>
+            <Field label="ARN / LUT Reference (printed on export invoices)" className="col-span-3">
+              <Input value={form.arn_ref} onChange={(e) => set({ arn_ref: e.target.value })} placeholder="e.g. AD1904250005855 DT. 01.04.25" />
+            </Field>
           </div>
         </Card>
         <Card title="Branding">
           <div className="grid grid-cols-2 gap-3">
             <ImageUpload label="Company Logo" value={form.logo} onChange={(v) => set({ logo: v })} />
             <ImageUpload label="Signature / Stamp" value={form.signature} onChange={(v) => set({ signature: v })} />
+            <Field label="Document Theme Colour (headers & bands on PDFs)">
+              <div className="flex items-center gap-2">
+                <input type="color" value={form.theme_color || '#8b1a1a'} onChange={(e) => set({ theme_color: e.target.value })} className="h-8 w-14 cursor-pointer rounded border border-slate-300" />
+                <Input value={form.theme_color || ''} onChange={(e) => set({ theme_color: e.target.value })} className="max-w-28" />
+              </div>
+            </Field>
           </div>
         </Card>
         <Card
@@ -125,14 +134,19 @@ export default function SettingsPage() {
             ))}
           </div>
         </Card>
-        <Card title="Document Numbering Prefixes">
-          <div className="grid grid-cols-4 gap-3">
-            <Field label="Quotation"><Input value={form.quote_prefix} onChange={(e) => set({ quote_prefix: e.target.value })} /></Field>
-            <Field label="Proforma Invoice"><Input value={form.pi_prefix} onChange={(e) => set({ pi_prefix: e.target.value })} /></Field>
-            <Field label="Commercial Invoice"><Input value={form.inv_prefix} onChange={(e) => set({ inv_prefix: e.target.value })} /></Field>
-            <Field label="Packing List"><Input value={form.pl_prefix} onChange={(e) => set({ pl_prefix: e.target.value })} /></Field>
+        <Card title="Document Numbering Patterns">
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Quotation"><Input value={form.quote_pattern} onChange={(e) => set({ quote_pattern: e.target.value })} /></Field>
+            <Field label="Packing List"><Input value={form.pl_pattern} onChange={(e) => set({ pl_pattern: e.target.value })} /></Field>
+            <Field label="Proforma Invoice (domestic)"><Input value={form.pi_pattern} onChange={(e) => set({ pi_pattern: e.target.value })} /></Field>
+            <Field label="Proforma Invoice (export)"><Input value={form.pi_export_pattern} onChange={(e) => set({ pi_export_pattern: e.target.value })} /></Field>
+            <Field label="Commercial Invoice (domestic)"><Input value={form.inv_pattern} onChange={(e) => set({ inv_pattern: e.target.value })} /></Field>
+            <Field label="Commercial Invoice (export)"><Input value={form.inv_export_pattern} onChange={(e) => set({ inv_export_pattern: e.target.value })} /></Field>
           </div>
-          <p className="mt-2 text-xs text-slate-400">Numbers look like QT-2026-0001 and reset each year.</p>
+          <p className="mt-2 text-xs text-slate-400">
+            Tokens: <code className="rounded bg-slate-100 px-1">{'{FY}'}</code> = fiscal year (Apr–Mar, e.g. 26-27), <code className="rounded bg-slate-100 px-1">{'{SEQ}'}</code> = sequence (001, 002…).
+            Example: <code className="rounded bg-slate-100 px-1">AGLO/EX/{'{FY}'}/{'{SEQ}'}</code> → AGLO/EX/26-27/001. Export and domestic series count separately; you can also edit any document's number manually on its page.
+          </p>
         </Card>
         <Card title="Default Terms & Conditions">
           <Textarea rows={4} value={form.default_terms} onChange={(e) => set({ default_terms: e.target.value })} placeholder="Printed at the bottom of every document…" />

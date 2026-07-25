@@ -10,6 +10,7 @@ import PaymentsCard from '../components/PaymentsCard';
 import { today } from '../lib/format';
 
 interface Draft {
+  number?: string;
   customer_id: number | '';
   quotation_id: number | null;
   date: string;
@@ -33,6 +34,11 @@ interface Draft {
   partial_shipment: string;
   po_number: string;
   po_date: string;
+  notify_party_2: string;
+  method_of_despatch: string;
+  quantity_tolerance: string;
+  hs_code: string;
+  prepared_by: string;
   remarks: string;
   tax_type: TaxType;
   items: LineItem[];
@@ -43,7 +49,8 @@ const emptyDraft = (): Draft => ({
   freight: 0, insurance: 0, lead_time: '', bank_account: '', inco_terms: '', payment_terms: '',
   delivery_terms: '', validity_date: '', is_export: 0, country_of_origin: '', port_of_loading: '',
   port_of_discharge: '', final_destination: '', container_count: '', partial_shipment: 'Not Allowed',
-  po_number: '', po_date: '', remarks: '', tax_type: 'igst', items: [],
+  po_number: '', po_date: '', notify_party_2: '', method_of_despatch: '', quantity_tolerance: '',
+  hs_code: '', prepared_by: '', remarks: '', tax_type: 'igst', items: [],
 });
 
 const INCO_TERMS = ['', 'EXW', 'FCA', 'FOB', 'CFR', 'CIF', 'CPT', 'CIP', 'DAP', 'DPU', 'DDP'];
@@ -119,8 +126,10 @@ export default function ProformaFormPage() {
       const isExport = c.country.trim().toLowerCase() !== 'india';
       set({
         customer_id: cid, currency: c.currency, consignee: c.consignee, notify_party: c.notify_party,
+        notify_party_2: c.notify_party_2,
         is_export: isExport ? 1 : 0, tax_type: isExport ? 'none' : draft.tax_type === 'none' ? 'igst' : draft.tax_type,
         country_of_origin: isExport ? 'India' : draft.country_of_origin,
+        quantity_tolerance: isExport && !draft.quantity_tolerance ? '(±) 10% in value and quantity' : draft.quantity_tolerance,
       });
     } else {
       set({ customer_id: cid });
@@ -169,6 +178,11 @@ export default function ProformaFormPage() {
       <div className="space-y-4">
         <Card title="Details">
           <div className="grid grid-cols-3 gap-3">
+            {!isNew && (
+              <Field label="PI Number (editable)">
+                <Input value={draft.number ?? ''} onChange={(e) => set({ number: e.target.value })} />
+              </Field>
+            )}
             <Field label="Buyer (Customer) *">
               <Select value={draft.customer_id} onChange={(e) => onCustomerChange(e.target.value ? Number(e.target.value) : '')}>
                 <option value="">Select customer…</option>
@@ -196,6 +210,23 @@ export default function ProformaFormPage() {
               <Select value={draft.inco_terms} onChange={(e) => set({ inco_terms: e.target.value })}>
                 {INCO_TERMS.map((t) => <option key={t} value={t}>{t || '— select —'}</option>)}
               </Select>
+            </Field>
+            <Field label="Method of Despatch">
+              <Select value={draft.method_of_despatch} onChange={(e) => set({ method_of_despatch: e.target.value })}>
+                <option value="">— select —</option>
+                <option>By Sea</option>
+                <option>By Air</option>
+                <option>By Road</option>
+              </Select>
+            </Field>
+            <Field label="Quantity Tolerance">
+              <Input value={draft.quantity_tolerance} onChange={(e) => set({ quantity_tolerance: e.target.value })} placeholder="e.g. (±) 10% in value and quantity" />
+            </Field>
+            <Field label="HS Code (header)">
+              <Input value={draft.hs_code} onChange={(e) => set({ hs_code: e.target.value })} placeholder="e.g. 3923" />
+            </Field>
+            <Field label="Prepared By">
+              <Input value={draft.prepared_by} onChange={(e) => set({ prepared_by: e.target.value })} />
             </Field>
             <Field label="Bank Account (printed on PI)" className="col-span-3">
               <Select
@@ -225,13 +256,16 @@ export default function ProformaFormPage() {
           <p className="mt-2 text-xs text-slate-400">Printed on the PI as “Buyer PO”. Set status to “order confirmed” once the PO is received.</p>
         </Card>
 
-        <Card title="Consignee & Notify Party">
-          <div className="grid grid-cols-2 gap-3">
+        <Card title="Consignee & Notify Parties">
+          <div className="grid grid-cols-3 gap-3">
             <Field label="Consignee (if different from buyer)">
               <Textarea rows={3} value={draft.consignee} onChange={(e) => set({ consignee: e.target.value })} />
             </Field>
-            <Field label="Notify Party">
+            <Field label="Notify Party 1">
               <Textarea rows={3} value={draft.notify_party} onChange={(e) => set({ notify_party: e.target.value })} />
+            </Field>
+            <Field label="Notify Party 2">
+              <Textarea rows={3} value={draft.notify_party_2} onChange={(e) => set({ notify_party_2: e.target.value })} />
             </Field>
           </div>
         </Card>

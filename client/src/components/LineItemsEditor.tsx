@@ -7,6 +7,8 @@ import { UNITS } from '../pages/Products';
 
 /**
  * Shared line-item grid for quotations, proforma invoices and commercial invoices.
+ * Each item has two rows: the billing row (qty × price) and a packaging row
+ * (color, boxes, pcs/box, total pcs) matching Aglo's real documents.
  * Amounts shown here are a client-side preview; the server recomputes on save.
  */
 export default function LineItemsEditor({
@@ -22,6 +24,15 @@ export default function LineItemsEditor({
 
   const set = (i: number, patch: Partial<LineItem>) =>
     onChange(items.map((it, idx) => (idx === i ? { ...it, ...patch } : it)));
+
+  // Boxes × pcs/box auto-fills Total Pcs (still editable afterwards).
+  const setPacking = (i: number, patch: Partial<LineItem>) => {
+    const it = { ...items[i], ...patch };
+    if ((patch.packs !== undefined || patch.pcs_per_pack !== undefined) && it.packs != null && it.pcs_per_pack != null) {
+      it.total_pcs = it.packs * it.pcs_per_pack;
+    }
+    onChange(items.map((x, idx) => (idx === i ? it : x)));
+  };
 
   const pickProduct = (i: number, productId: string) => {
     if (!productId) {
@@ -62,58 +73,83 @@ export default function LineItemsEditor({
         </thead>
         <tbody>
           {items.map((it, i) => (
-            <tr key={i} className="border-b border-slate-100 align-top">
-              <td className="py-1.5 pr-2">
-                <Select value={it.product_id ?? ''} onChange={(e) => pickProduct(i, e.target.value)}>
-                  <option value="">— custom —</option>
-                  {products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                </Select>
-              </td>
-              <td className="py-1.5 pr-2">
-                <Input value={it.description} onChange={(e) => set(i, { description: e.target.value })} placeholder="Item description" />
-              </td>
-              <td className="py-1.5 pr-2">
-                <Input value={it.hsn_code ?? ''} onChange={(e) => set(i, { hsn_code: e.target.value })} />
-              </td>
-              <td className="py-1.5 pr-2">
-                <Input
-                  type="number" min={0} step="any"
-                  value={it.qty ?? ''}
-                  placeholder="—"
-                  onChange={(e) => set(i, { qty: e.target.value === '' ? null : Number(e.target.value) })}
-                />
-              </td>
-              <td className="py-1.5 pr-2">
-                <Select value={it.unit} onChange={(e) => set(i, { unit: e.target.value })}>
-                  {UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
-                </Select>
-              </td>
-              <td className="py-1.5 pr-2">
-                <Input type="number" min={0} step="any" value={it.unit_price || ''} onChange={(e) => set(i, { unit_price: Number(e.target.value) })} />
-              </td>
-              {taxVisible && (
-                <td className="py-1.5 pr-2">
-                  <Input type="number" min={0} max={100} step="any" value={it.tax_pct ?? ''} onChange={(e) => set(i, { tax_pct: e.target.value === '' ? 0 : Number(e.target.value) })} />
+            <>
+              <tr key={`m${i}`} className="align-top">
+                <td className="pt-1.5 pr-2">
+                  <Select value={it.product_id ?? ''} onChange={(e) => pickProduct(i, e.target.value)}>
+                    <option value="">— custom —</option>
+                    {products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  </Select>
                 </td>
-              )}
-              <td className="py-1.5 pr-2 text-right tabular-nums">
-                {it.qty != null ? fmtMoney(it.qty * it.unit_price, currency) : <span className="text-slate-400">price only</span>}
-              </td>
-              <td className="py-1.5 text-right">
-                <button
-                  className="text-slate-300 hover:text-red-500"
-                  onClick={() => onChange(items.filter((_, idx) => idx !== i))}
-                  title="Remove line"
-                >✕</button>
-              </td>
-            </tr>
+                <td className="pt-1.5 pr-2">
+                  <Input value={it.description} onChange={(e) => set(i, { description: e.target.value })} placeholder="Item description incl. weight spec, e.g. (119 ±2) gms" />
+                </td>
+                <td className="pt-1.5 pr-2">
+                  <Input value={it.hsn_code ?? ''} onChange={(e) => set(i, { hsn_code: e.target.value })} />
+                </td>
+                <td className="pt-1.5 pr-2">
+                  <Input
+                    type="number" min={0} step="any"
+                    value={it.qty ?? ''}
+                    placeholder="—"
+                    onChange={(e) => set(i, { qty: e.target.value === '' ? null : Number(e.target.value) })}
+                  />
+                </td>
+                <td className="pt-1.5 pr-2">
+                  <Select value={it.unit} onChange={(e) => set(i, { unit: e.target.value })}>
+                    {UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
+                  </Select>
+                </td>
+                <td className="pt-1.5 pr-2">
+                  <Input type="number" min={0} step="any" value={it.unit_price || ''} onChange={(e) => set(i, { unit_price: Number(e.target.value) })} />
+                </td>
+                {taxVisible && (
+                  <td className="pt-1.5 pr-2">
+                    <Input type="number" min={0} max={100} step="any" value={it.tax_pct ?? ''} onChange={(e) => set(i, { tax_pct: e.target.value === '' ? 0 : Number(e.target.value) })} />
+                  </td>
+                )}
+                <td className="pt-1.5 pr-2 text-right tabular-nums">
+                  {it.qty != null ? fmtMoney(it.qty * it.unit_price, currency) : <span className="text-slate-400">price only</span>}
+                </td>
+                <td className="pt-1.5 text-right">
+                  <button
+                    className="text-slate-300 hover:text-red-500"
+                    onClick={() => onChange(items.filter((_, idx) => idx !== i))}
+                    title="Remove line"
+                  >✕</button>
+                </td>
+              </tr>
+              <tr key={`p${i}`} className="border-b border-slate-100">
+                <td />
+                <td colSpan={taxVisible ? 7 : 6} className="pb-2 pt-1">
+                  <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                    <span className="font-medium uppercase tracking-wide text-slate-400">Packaging:</span>
+                    <label className="flex items-center gap-1">Color
+                      <Input className="!w-24 !py-1" value={it.color ?? ''} onChange={(e) => set(i, { color: e.target.value })} placeholder="e.g. Red" />
+                    </label>
+                    <label className="flex items-center gap-1">Boxes/Ctns
+                      <Input className="!w-20 !py-1" type="number" min={0} step="any" value={it.packs ?? ''} onChange={(e) => setPacking(i, { packs: e.target.value === '' ? null : Number(e.target.value) })} />
+                    </label>
+                    <label className="flex items-center gap-1">Pcs per box
+                      <Input className="!w-20 !py-1" type="number" min={0} step="any" value={it.pcs_per_pack ?? ''} onChange={(e) => setPacking(i, { pcs_per_pack: e.target.value === '' ? null : Number(e.target.value) })} />
+                    </label>
+                    <label className="flex items-center gap-1">Total Pcs
+                      <Input className="!w-24 !py-1" type="number" min={0} step="any" value={it.total_pcs ?? ''} onChange={(e) => set(i, { total_pcs: e.target.value === '' ? null : Number(e.target.value) })} />
+                    </label>
+                    {it.total_pcs != null && it.qty != null && it.unit_price > 0 && (
+                      <span className="text-slate-400">≈ {fmtMoney((it.qty * it.unit_price / it.total_pcs) * 1000, currency)}/1000 pcs</span>
+                    )}
+                  </div>
+                </td>
+              </tr>
+            </>
           ))}
         </tbody>
       </table>
       <div className="mt-2 flex items-center justify-between">
         <Button
           variant="secondary"
-          onClick={() => onChange([...items, { description: '', hsn_code: '', qty: null, unit: 'unit', unit_price: 0, tax_pct: 0 }])}
+          onClick={() => onChange([...items, { description: '', hsn_code: '', qty: null, unit: 'unit', unit_price: 0, tax_pct: 0, color: '', packs: null, pcs_per_pack: null, total_pcs: null }])}
         >
           + Add Line
         </Button>
@@ -122,7 +158,7 @@ export default function LineItemsEditor({
           {taxVisible && <> · Tax: <span className="font-semibold tabular-nums">{fmtMoney(tax, currency)}</span></>}
         </div>
       </div>
-      <p className="mt-1 text-xs text-slate-400">Leave Qty empty when the customer hasn't shared quantities — the document then shows unit prices only.</p>
+      <p className="mt-1 text-xs text-slate-400">Qty × Unit Price is the billed amount (e.g. KGS × price/kg). The packaging row (boxes, total pcs) prints on the documents; per-1000-pcs rate is derived automatically. Leave Qty empty for a price-only quotation.</p>
     </div>
   );
 }

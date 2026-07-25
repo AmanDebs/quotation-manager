@@ -40,15 +40,16 @@ function getFull(id: number) {
   return inv;
 }
 
-function saveItems(invoiceId: number, items: LineItemInput[], taxType: 'none' | 'cgst_sgst' | 'igst', freight: number, insurance: number) {
-  const totals = computeTotals(items, taxType, freight, insurance);
+function saveItems(invoiceId: number, items: LineItemInput[], taxType: 'none' | 'cgst_sgst' | 'igst', freight: number, insurance: number, currency: string) {
+  const totals = computeTotals(items, taxType, freight, insurance, currency);
   db.prepare('DELETE FROM invoice_items WHERE invoice_id = ?').run(invoiceId);
   const ins = db.prepare(
-    `INSERT INTO invoice_items (invoice_id, product_id, description, hsn_code, qty, unit, unit_price, tax_pct, amount, sort_order)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO invoice_items (invoice_id, product_id, description, hsn_code, qty, unit, unit_price, tax_pct, amount, color, packs, pcs_per_pack, total_pcs, sort_order)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   );
   totals.items.forEach((it, i) =>
-    ins.run(invoiceId, it.product_id ?? null, it.description, it.hsn_code ?? '', it.qty ?? null, it.unit ?? 'unit', it.unit_price, it.tax_pct ?? 0, it.amount, i)
+    ins.run(invoiceId, it.product_id ?? null, it.description, it.hsn_code ?? '', it.qty ?? null, it.unit ?? 'unit', it.unit_price, it.tax_pct ?? 0, it.amount,
+      it.color ?? '', it.packs ?? null, it.pcs_per_pack ?? null, it.total_pcs ?? null, i)
   );
   db.prepare('UPDATE commercial_invoices SET subtotal = ?, tax_total = ?, grand_total = ? WHERE id = ?').run(
     totals.subtotal, totals.tax_total, totals.grand_total, invoiceId
@@ -59,6 +60,7 @@ const headerFields = [
   'date', 'customer_id', 'pi_id', 'consignee', 'notify_party', 'currency', 'freight', 'insurance',
   'shipping_details', 'bank_account', 'inco_terms', 'payment_terms',
   'is_export', 'country_of_origin', 'port_of_loading', 'port_of_discharge', 'final_destination',
+  'notify_party_2', 'method_of_despatch', 'lot_no', 'prepared_by',
   'remarks', 'tax_type',
 ] as const;
 
@@ -82,6 +84,10 @@ function headerValues(body: Record<string, unknown>, existing?: Record<string, u
     port_of_loading: String(v('port_of_loading')),
     port_of_discharge: String(v('port_of_discharge')),
     final_destination: String(v('final_destination')),
+    notify_party_2: String(v('notify_party_2')),
+    method_of_despatch: String(v('method_of_despatch')),
+    lot_no: String(v('lot_no')),
+    prepared_by: String(v('prepared_by')),
     remarks: String(v('remarks')),
     tax_type: String(v('tax_type', 'none')) as 'none' | 'cgst_sgst' | 'igst',
   };
@@ -112,6 +118,8 @@ invoicesRouter.get('/prefill/from-proforma/:piId', (req, res) => {
     customer_id: pi.customer_id,
     consignee: pi.consignee,
     notify_party: pi.notify_party,
+    notify_party_2: pi.notify_party_2,
+    method_of_despatch: pi.method_of_despatch,
     currency: pi.currency,
     freight: pi.freight,
     insurance: pi.insurance,
@@ -133,13 +141,13 @@ invoicesRouter.post('/', (req, res) => {
   if (!body.customer_id) return res.status(400).json({ error: 'Customer is required' });
   const h = headerValues(body);
   const id = transaction(() => {
-    const number = nextNumber('invoice');
+    const number = nextNumber('invoice', { isExport: h.is_export === 1 });
     const info = db.prepare(
       `INSERT INTO commercial_invoices (number, ${headerFields.join(', ')}, status)
        VALUES (?, ${headerFields.map(() => '?').join(', ')}, 'draft')`
     ).run(number, ...(headerFields.map((f) => (h as Record<string, unknown>)[f]) as never[]));
     const id = Number(info.lastInsertRowid);
-    saveItems(id, (body.items ?? []) as LineItemInput[], h.tax_type, h.freight, h.insurance);
+    saveItems(id, (body.items ?? []) as LineItemInput[], h.tax_type, h.freight, h.insurance, h.currency);
     return id;
   });
   res.status(201).json(getFull(id));
@@ -153,9 +161,9 @@ invoicesRouter.put('/:id', (req, res) => {
   const h = headerValues(body, existing);
   transaction(() => {
     db.prepare(
-      `UPDATE commercial_invoices SET ${headerFields.map((f) => `${f} = ?`).join(', ')} WHERE id = ?`
-    ).run(...(headerFields.map((f) => (h as Record<string, unknown>)[f]) as never[]), id);
-    if (Array.isArray(body.items)) saveItems(id, body.items as LineItemInput[], h.tax_type, h.freight, h.insurance);
+      `UPDATE commercial_invoices SET number = ?, ${headerFields.map((f) => `${f} = ?`).join(', ')} WHERE id = ?`
+    ).run(String(body.number ?? existing.number), ...(headerFields.map((f) => (h as Record<string, unknown>)[f]) as never[]), id);
+    if (Array.isArray(body.items)) saveItems(id, body.items as LineItemInput[], h.tax_type, h.freight, h.insurance, h.currency);
   });
   res.json(getFull(id));
 });

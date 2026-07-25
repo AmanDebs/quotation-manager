@@ -7,13 +7,16 @@ export interface Settings {
   phone: string; email: string; website: string; gstin: string; pan: string; iec: string;
   logo: string; signature: string; default_terms: string;
   quote_prefix: string; pi_prefix: string; inv_prefix: string; pl_prefix: string;
+  arn_ref: string; theme_color: string;
+  quote_pattern: string; pi_pattern: string; pi_export_pattern: string;
+  inv_pattern: string; inv_export_pattern: string; pl_pattern: string;
   bank_accounts: BankAccount[];
 }
 
 export interface Customer {
   id: number; name: string; contact_person: string; email: string; phone: string;
   address: string; city: string; country: string; gstin: string; currency: string;
-  consignee: string; notify_party: string; notes: string;
+  consignee: string; notify_party: string; notify_party_2: string; notes: string;
 }
 
 export interface Product {
@@ -30,6 +33,7 @@ export interface Enquiry {
 export interface LineItem {
   id?: number; product_id?: number | null; description: string; hsn_code?: string;
   qty: number | null; unit: string; unit_price: number; tax_pct?: number; amount?: number;
+  color?: string; packs?: number | null; pcs_per_pack?: number | null; total_pcs?: number | null;
 }
 
 export type TaxType = 'none' | 'cgst_sgst' | 'igst';
@@ -38,6 +42,7 @@ export interface Quotation {
   id: number; number: string; revision: number; date: string;
   enquiry_id: number | null; customer_id: number; currency: string;
   validity_date: string; payment_terms: string; delivery_terms: string; notes: string;
+  freight: number; insurance: number; inco_terms: string; container_count: string; prepared_by: string;
   tax_type: TaxType; status: string;
   subtotal: number; tax_total: number; grand_total: number;
   superseded_by: number | null;
@@ -59,6 +64,8 @@ export interface Proforma {
   country_of_origin: string; port_of_loading: string; port_of_discharge: string;
   final_destination: string; container_count: string; partial_shipment: string;
   po_number: string; po_date: string;
+  notify_party_2: string; method_of_despatch: string; quantity_tolerance: string;
+  hs_code: string; prepared_by: string;
   remarks: string; tax_type: TaxType; status: string;
   subtotal: number; tax_total: number; grand_total: number;
   customer_name?: string; quotation_number?: string;
@@ -72,7 +79,9 @@ export interface Invoice {
   consignee: string; notify_party: string; currency: string; freight: number; insurance: number;
   shipping_details: string; bank_account: string; inco_terms: string; payment_terms: string;
   is_export: number; country_of_origin: string; port_of_loading: string; port_of_discharge: string;
-  final_destination: string; remarks: string; tax_type: TaxType; status: string;
+  final_destination: string;
+  notify_party_2: string; method_of_despatch: string; lot_no: string; prepared_by: string;
+  remarks: string; tax_type: TaxType; status: string;
   subtotal: number; tax_total: number; grand_total: number;
   customer_name?: string; pi_number?: string;
   items?: LineItem[];
@@ -83,13 +92,14 @@ export interface Invoice {
 }
 
 export interface PackingListItem {
-  id?: number; description: string; qty: number | null; unit: string;
+  id?: number; description: string; hsn_code?: string; qty: number | null; unit: string;
   packages: string; dimensions: string; gross_weight: number; net_weight: number;
 }
 
 export interface PackingList {
   id: number; number: string; date: string; invoice_id: number | null; customer_id: number;
-  shipping_marks: string; remarks: string;
+  shipping_marks: string; lot_no: string; remarks: string;
+  invoice?: Record<string, unknown>;
   customer_name?: string; invoice_number?: string;
   total_gross?: number; total_net?: number;
   items?: PackingListItem[];

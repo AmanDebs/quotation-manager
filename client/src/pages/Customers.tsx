@@ -6,7 +6,7 @@ import { Button, Input, Textarea, Select, Field, PageHeader, EmptyState, ErrorTe
 
 const empty: Omit<Customer, 'id'> = {
   name: '', contact_person: '', email: '', phone: '', address: '', city: '', country: 'India',
-  gstin: '', currency: 'INR', consignee: '', notify_party: '', notes: '',
+  gstin: '', currency: 'INR', consignee: '', notify_party: '', notify_party_2: '', notes: '',
 };
 
 export default function CustomersPage() {
@@ -111,8 +111,11 @@ export default function CustomersPage() {
             <Field label="Default Consignee (if different from buyer)" className="col-span-2">
               <Textarea rows={2} value={editing.consignee} onChange={(e) => set({ consignee: e.target.value })} placeholder="Name and address of consignee" />
             </Field>
-            <Field label="Default Notify Party (for exports)" className="col-span-2">
+            <Field label="Default Notify Party 1 (for exports)" className="col-span-2">
               <Textarea rows={2} value={editing.notify_party} onChange={(e) => set({ notify_party: e.target.value })} />
+            </Field>
+            <Field label="Default Notify Party 2 (optional)" className="col-span-2">
+              <Textarea rows={2} value={editing.notify_party_2} onChange={(e) => set({ notify_party_2: e.target.value })} />
             </Field>
             <Field label="Notes" className="col-span-2">
               <Textarea rows={2} value={editing.notes} onChange={(e) => set({ notes: e.target.value })} />

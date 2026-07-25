@@ -21,15 +21,16 @@ function getFull(id: number) {
   return pi;
 }
 
-function saveItems(piId: number, items: LineItemInput[], taxType: 'none' | 'cgst_sgst' | 'igst', freight: number, insurance: number) {
-  const totals = computeTotals(items, taxType, freight, insurance);
+function saveItems(piId: number, items: LineItemInput[], taxType: 'none' | 'cgst_sgst' | 'igst', freight: number, insurance: number, currency: string) {
+  const totals = computeTotals(items, taxType, freight, insurance, currency);
   db.prepare('DELETE FROM pi_items WHERE pi_id = ?').run(piId);
   const ins = db.prepare(
-    `INSERT INTO pi_items (pi_id, product_id, description, hsn_code, qty, unit, unit_price, tax_pct, amount, sort_order)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO pi_items (pi_id, product_id, description, hsn_code, qty, unit, unit_price, tax_pct, amount, color, packs, pcs_per_pack, total_pcs, sort_order)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   );
   totals.items.forEach((it, i) =>
-    ins.run(piId, it.product_id ?? null, it.description, it.hsn_code ?? '', it.qty ?? null, it.unit ?? 'unit', it.unit_price, it.tax_pct ?? 0, it.amount, i)
+    ins.run(piId, it.product_id ?? null, it.description, it.hsn_code ?? '', it.qty ?? null, it.unit ?? 'unit', it.unit_price, it.tax_pct ?? 0, it.amount,
+      it.color ?? '', it.packs ?? null, it.pcs_per_pack ?? null, it.total_pcs ?? null, i)
   );
   db.prepare('UPDATE proforma_invoices SET subtotal = ?, tax_total = ?, grand_total = ? WHERE id = ?').run(
     totals.subtotal, totals.tax_total, totals.grand_total, piId
@@ -40,7 +41,9 @@ const headerFields = [
   'date', 'customer_id', 'quotation_id', 'consignee', 'notify_party', 'currency', 'freight', 'insurance',
   'lead_time', 'bank_account', 'inco_terms', 'payment_terms', 'delivery_terms', 'validity_date',
   'is_export', 'country_of_origin', 'port_of_loading', 'port_of_discharge', 'final_destination',
-  'container_count', 'partial_shipment', 'po_number', 'po_date', 'remarks', 'tax_type',
+  'container_count', 'partial_shipment', 'po_number', 'po_date',
+  'notify_party_2', 'method_of_despatch', 'quantity_tolerance', 'hs_code', 'prepared_by',
+  'remarks', 'tax_type',
 ] as const;
 
 function headerValues(body: Record<string, unknown>, existing?: Record<string, unknown>) {
@@ -69,6 +72,11 @@ function headerValues(body: Record<string, unknown>, existing?: Record<string, u
     partial_shipment: String(v('partial_shipment', 'Not Allowed')),
     po_number: String(v('po_number')),
     po_date: String(v('po_date')),
+    notify_party_2: String(v('notify_party_2')),
+    method_of_despatch: String(v('method_of_despatch')),
+    quantity_tolerance: String(v('quantity_tolerance')),
+    hs_code: String(v('hs_code')),
+    prepared_by: String(v('prepared_by')),
     remarks: String(v('remarks')),
     tax_type: String(v('tax_type', 'none')) as 'none' | 'cgst_sgst' | 'igst',
   };
@@ -106,7 +114,9 @@ proformasRouter.get('/prefill/from-quotation/:quotationId', (req, res) => {
     is_export: isExport ? 1 : 0,
     consignee: customer.consignee || '',
     notify_party: customer.notify_party || '',
+    notify_party_2: customer.notify_party_2 || '',
     country_of_origin: isExport ? 'India' : '',
+    quantity_tolerance: isExport ? '(±) 10% in value and quantity' : '',
     items,
   });
 });
@@ -116,13 +126,13 @@ proformasRouter.post('/', (req, res) => {
   if (!body.customer_id) return res.status(400).json({ error: 'Customer is required' });
   const h = headerValues(body);
   const id = transaction(() => {
-    const number = nextNumber('proforma');
+    const number = nextNumber('proforma', { isExport: h.is_export === 1 });
     const info = db.prepare(
       `INSERT INTO proforma_invoices (number, ${headerFields.join(', ')}, status)
        VALUES (?, ${headerFields.map(() => '?').join(', ')}, 'draft')`
     ).run(number, ...(headerFields.map((f) => (h as Record<string, unknown>)[f]) as never[]));
     const id = Number(info.lastInsertRowid);
-    saveItems(id, (body.items ?? []) as LineItemInput[], h.tax_type, h.freight, h.insurance);
+    saveItems(id, (body.items ?? []) as LineItemInput[], h.tax_type, h.freight, h.insurance, h.currency);
     return id;
   });
   res.status(201).json(getFull(id));
@@ -136,9 +146,9 @@ proformasRouter.put('/:id', (req, res) => {
   const h = headerValues(body, existing);
   transaction(() => {
     db.prepare(
-      `UPDATE proforma_invoices SET ${headerFields.map((f) => `${f} = ?`).join(', ')} WHERE id = ?`
-    ).run(...(headerFields.map((f) => (h as Record<string, unknown>)[f]) as never[]), id);
-    if (Array.isArray(body.items)) saveItems(id, body.items as LineItemInput[], h.tax_type, h.freight, h.insurance);
+      `UPDATE proforma_invoices SET number = ?, ${headerFields.map((f) => `${f} = ?`).join(', ')} WHERE id = ?`
+    ).run(String(body.number ?? existing.number), ...(headerFields.map((f) => (h as Record<string, unknown>)[f]) as never[]), id);
+    if (Array.isArray(body.items)) saveItems(id, body.items as LineItemInput[], h.tax_type, h.freight, h.insurance, h.currency);
   });
   res.json(getFull(id));
 });

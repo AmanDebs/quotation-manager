@@ -12,6 +12,8 @@ const fields = [
   'company_name', 'address', 'city', 'state', 'country', 'pincode', 'phone', 'email', 'website',
   'gstin', 'pan', 'iec', 'logo', 'signature', 'default_terms',
   'quote_prefix', 'pi_prefix', 'inv_prefix', 'pl_prefix',
+  'arn_ref', 'theme_color',
+  'quote_pattern', 'pi_pattern', 'pi_export_pattern', 'inv_pattern', 'inv_export_pattern', 'pl_pattern',
 ];
 
 settingsRouter.put('/', (req, res) => {

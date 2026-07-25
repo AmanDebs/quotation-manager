@@ -9,6 +9,7 @@ import FollowupButton from '../components/FollowupButton';
 import { fmtMoney, fmtDate, today } from '../lib/format';
 
 interface Draft {
+  number?: string;
   customer_id: number | '';
   enquiry_id: number | null;
   date: string;
@@ -17,13 +18,19 @@ interface Draft {
   payment_terms: string;
   delivery_terms: string;
   notes: string;
+  freight: number;
+  insurance: number;
+  inco_terms: string;
+  container_count: string;
+  prepared_by: string;
   tax_type: TaxType;
   items: LineItem[];
 }
 
 const emptyDraft = (): Draft => ({
   customer_id: '', enquiry_id: null, date: today(), currency: 'INR', validity_date: '',
-  payment_terms: '', delivery_terms: '', notes: '', tax_type: 'igst', items: [],
+  payment_terms: '', delivery_terms: '', notes: '', freight: 0, insurance: 0,
+  inco_terms: '', container_count: '', prepared_by: '', tax_type: 'igst', items: [],
 });
 
 export default function QuotationFormPage() {
@@ -45,6 +52,7 @@ export default function QuotationFormPage() {
   useEffect(() => {
     if (existing) {
       setDraft({
+        number: existing.number,
         customer_id: existing.customer_id,
         enquiry_id: existing.enquiry_id,
         date: existing.date,
@@ -53,6 +61,11 @@ export default function QuotationFormPage() {
         payment_terms: existing.payment_terms,
         delivery_terms: existing.delivery_terms,
         notes: existing.notes,
+        freight: existing.freight ?? 0,
+        insurance: existing.insurance ?? 0,
+        inco_terms: existing.inco_terms ?? '',
+        container_count: existing.container_count ?? '',
+        prepared_by: existing.prepared_by ?? '',
         tax_type: existing.tax_type,
         items: existing.items ?? [],
       });
@@ -185,6 +198,11 @@ export default function QuotationFormPage() {
       <div className="space-y-4">
         <Card title="Details">
           <div className="grid grid-cols-3 gap-3">
+            {!isNew && (
+              <Field label="Quotation Number (editable)">
+                <Input disabled={readOnly} value={draft.number ?? ''} onChange={(e) => set({ number: e.target.value })} />
+              </Field>
+            )}
             <Field label="Customer *">
               <Select value={draft.customer_id} disabled={readOnly} onChange={(e) => onCustomerChange(e.target.value ? Number(e.target.value) : '')}>
                 <option value="">Select customer…</option>
@@ -206,8 +224,13 @@ export default function QuotationFormPage() {
               </Select>
             </Field>
             <div />
-            <Field label="Payment Terms"><Input disabled={readOnly} value={draft.payment_terms} onChange={(e) => set({ payment_terms: e.target.value })} placeholder="e.g. 30% advance, balance against delivery" /></Field>
+            <Field label="Payment Terms"><Input disabled={readOnly} value={draft.payment_terms} onChange={(e) => set({ payment_terms: e.target.value })} placeholder="e.g. 40% advance, rest against shipping docs" /></Field>
             <Field label="Delivery Timeline"><Input disabled={readOnly} value={draft.delivery_terms} onChange={(e) => set({ delivery_terms: e.target.value })} placeholder="e.g. 4–6 weeks from order" /></Field>
+            <Field label="Prepared By"><Input disabled={readOnly} value={draft.prepared_by} onChange={(e) => set({ prepared_by: e.target.value })} placeholder="Who prepared this quote" /></Field>
+            <Field label="INCO Terms / Basis">
+              <Input disabled={readOnly} value={draft.inco_terms} onChange={(e) => set({ inco_terms: e.target.value })} placeholder="e.g. CIF Dakar Port" />
+            </Field>
+            <Field label="Containers"><Input disabled={readOnly} value={draft.container_count} onChange={(e) => set({ container_count: e.target.value })} placeholder="e.g. 5 X 40ft HQ" /></Field>
             <div />
             <Field label="Notes (printed on quotation)" className="col-span-3">
               <Textarea rows={2} disabled={readOnly} value={draft.notes} onChange={(e) => set({ notes: e.target.value })} />
@@ -219,7 +242,17 @@ export default function QuotationFormPage() {
           {readOnly ? (
             <ReadOnlyItems items={draft.items} currency={draft.currency} />
           ) : (
-            <LineItemsEditor items={draft.items} onChange={(items) => set({ items })} currency={draft.currency} taxType={draft.tax_type} />
+            <>
+              <LineItemsEditor items={draft.items} onChange={(items) => set({ items })} currency={draft.currency} taxType={draft.tax_type} />
+              <div className="mt-3 grid grid-cols-2 gap-3 border-t border-slate-100 pt-3 md:max-w-md">
+                <Field label={`Indicative Freight (${draft.currency})`}>
+                  <Input type="number" min={0} step="any" value={draft.freight || ''} onChange={(e) => set({ freight: Number(e.target.value) })} />
+                </Field>
+                <Field label={`Insurance (${draft.currency})`}>
+                  <Input type="number" min={0} step="any" value={draft.insurance || ''} onChange={(e) => set({ insurance: Number(e.target.value) })} />
+                </Field>
+              </div>
+            </>
           )}
         </Card>
 

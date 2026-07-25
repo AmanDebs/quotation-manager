@@ -8,15 +8,17 @@ import { fmtQty, today } from '../lib/format';
 import { UNITS } from './Products';
 
 interface Draft {
+  number?: string;
   customer_id: number | '';
   invoice_id: number | null;
   date: string;
   shipping_marks: string;
+  lot_no: string;
   remarks: string;
   items: PackingListItem[];
 }
 
-const emptyItem = (): PackingListItem => ({ description: '', qty: null, unit: 'unit', packages: '', dimensions: '', gross_weight: 0, net_weight: 0 });
+const emptyItem = (): PackingListItem => ({ description: '', hsn_code: '', qty: null, unit: 'unit', packages: '', dimensions: '', gross_weight: 0, net_weight: 0 });
 
 export default function PackingListFormPage() {
   const { id } = useParams();
@@ -33,16 +35,18 @@ export default function PackingListFormPage() {
     enabled: !isNew,
   });
 
-  const [draft, setDraft] = useState<Draft>({ customer_id: '', invoice_id: null, date: today(), shipping_marks: '', remarks: '', items: [] });
+  const [draft, setDraft] = useState<Draft>({ customer_id: '', invoice_id: null, date: today(), shipping_marks: '', lot_no: '', remarks: '', items: [] });
   const [prefilled, setPrefilled] = useState(false);
 
   useEffect(() => {
     if (existing) {
       setDraft({
+        number: existing.number,
         customer_id: existing.customer_id,
         invoice_id: existing.invoice_id,
         date: existing.date,
         shipping_marks: existing.shipping_marks,
+        lot_no: existing.lot_no ?? '',
         remarks: existing.remarks,
         items: existing.items ?? [],
       });
@@ -51,12 +55,13 @@ export default function PackingListFormPage() {
 
   useEffect(() => {
     if (isNew && fromInvoice && !prefilled) {
-      api.get<{ invoice_id: number; customer_id: number; items: PackingListItem[] }>(`/api/packing-lists/prefill/from-invoice/${fromInvoice}`).then((p) => {
+      api.get<{ invoice_id: number; customer_id: number; lot_no?: string; items: PackingListItem[] }>(`/api/packing-lists/prefill/from-invoice/${fromInvoice}`).then((p) => {
         setDraft((d) => ({
           ...d,
           invoice_id: p.invoice_id,
           customer_id: p.customer_id,
-          items: p.items.map((it) => ({ ...emptyItem(), description: it.description, qty: it.qty, unit: it.unit })),
+          lot_no: p.lot_no ?? d.lot_no,
+          items: p.items.map((it) => ({ ...emptyItem(), description: it.description, hsn_code: it.hsn_code ?? '', qty: it.qty, unit: it.unit })),
         }));
         setPrefilled(true);
       });
@@ -105,6 +110,11 @@ export default function PackingListFormPage() {
       <div className="space-y-4">
         <Card title="Details">
           <div className="grid grid-cols-3 gap-3">
+            {!isNew && (
+              <Field label="Packing List Number (editable)">
+                <Input value={draft.number ?? ''} onChange={(e) => set({ number: e.target.value })} />
+              </Field>
+            )}
             <Field label="Customer *">
               <Select value={draft.customer_id} onChange={(e) => set({ customer_id: e.target.value ? Number(e.target.value) : '' })}>
                 <option value="">Select customer…</option>
@@ -112,7 +122,7 @@ export default function PackingListFormPage() {
               </Select>
             </Field>
             <Field label="Date"><Input type="date" value={draft.date} onChange={(e) => set({ date: e.target.value })} /></Field>
-            <div />
+            <Field label="Lot No."><Input value={draft.lot_no} onChange={(e) => set({ lot_no: e.target.value })} placeholder="e.g. 90/2025" /></Field>
             <Field label="Shipping Marks" className="col-span-3">
               <Textarea rows={2} value={draft.shipping_marks} onChange={(e) => set({ shipping_marks: e.target.value })} placeholder="Marks and numbers printed on packages…" />
             </Field>
@@ -124,6 +134,7 @@ export default function PackingListFormPage() {
             <thead>
               <tr className="border-b border-slate-200 text-left text-xs uppercase text-slate-500">
                 <th className="pb-1 pr-2">Description</th>
+                <th className="pb-1 pr-2 w-20">HSN</th>
                 <th className="pb-1 pr-2 w-20">Qty</th>
                 <th className="pb-1 pr-2 w-24">Unit</th>
                 <th className="pb-1 pr-2 w-28">Packages</th>
@@ -137,6 +148,7 @@ export default function PackingListFormPage() {
               {draft.items.map((it, i) => (
                 <tr key={i} className="border-b border-slate-100 align-top">
                   <td className="py-1.5 pr-2"><Input value={it.description} onChange={(e) => setItem(i, { description: e.target.value })} /></td>
+                  <td className="py-1.5 pr-2"><Input value={it.hsn_code ?? ''} onChange={(e) => setItem(i, { hsn_code: e.target.value })} /></td>
                   <td className="py-1.5 pr-2">
                     <Input type="number" min={0} step="any" value={it.qty ?? ''} onChange={(e) => setItem(i, { qty: e.target.value === '' ? null : Number(e.target.value) })} />
                   </td>
