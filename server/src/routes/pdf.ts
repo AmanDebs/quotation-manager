@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { db } from '../db/connection.js';
-import { buildQuotationPdf, buildProformaPdf, buildInvoicePdf, buildPackingListPdf, renderPdf } from '../services/pdf.js';
+import { buildQuotationPdf, buildProformaPdf, buildInvoicePdf, buildPackingListPdf, buildInvoiceWithPackingPdf, renderPdf } from '../services/pdf.js';
 import type { AuthedRequest } from '../middleware/auth.js';
 import { canAccessCustomer } from '../middleware/scope.js';
 
@@ -11,6 +11,8 @@ const builders = {
   proforma: { build: buildProformaPdf, table: 'proforma_invoices', approvable: true },
   invoice: { build: buildInvoicePdf, table: 'commercial_invoices', approvable: true },
   'packing-list': { build: buildPackingListPdf, table: 'packing_lists', approvable: false },
+  // Invoice + its packing list in one file; approval follows the invoice.
+  'invoice-with-packing': { build: buildInvoiceWithPackingPdf, table: 'commercial_invoices', approvable: true },
 } as const;
 
 pdfRouter.get('/:type/:id', async (req: AuthedRequest, res) => {

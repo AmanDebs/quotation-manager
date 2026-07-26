@@ -793,6 +793,25 @@ export function buildPackingListPdf(id: number): TDocumentDefinitions {
   return baseDoc(content);
 }
 
+/**
+ * Commercial invoice followed by its packing list in one file — the pair that
+ * customs and the freight forwarder expect to receive together.
+ */
+export function buildInvoiceWithPackingPdf(invoiceId: number): TDocumentDefinitions {
+  const pl = db.prepare('SELECT id FROM packing_lists WHERE invoice_id = ?').get(invoiceId) as { id: number } | undefined;
+  const invoice = buildInvoicePdf(invoiceId);
+  if (!pl) return invoice;
+  const packing = buildPackingListPdf(pl.id);
+  return {
+    ...invoice,
+    content: [
+      ...(invoice.content as Content[]),
+      { text: '', pageBreak: 'after' },
+      ...(packing.content as Content[]),
+    ],
+  };
+}
+
 /** Optional diagonal watermark for documents that have not been approved. */
 export function renderPdf(docDefinition: TDocumentDefinitions, watermark?: string): Promise<Buffer> {
   const def: TDocumentDefinitions = watermark

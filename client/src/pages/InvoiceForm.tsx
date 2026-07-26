@@ -2,15 +2,15 @@ import { useEffect, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
-import type { Invoice, Customer, LineItem, TaxType, Settings, ColumnConfig } from '../types';
+import type { Invoice, Customer, LineItem, TaxType, Settings, ColumnConfig, PackingListItem } from '../types';
 import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, StatusBadge } from '../components/ui';
 import LineItemsEditor from '../components/LineItemsEditor';
 import FollowupButton from '../components/FollowupButton';
 import PaymentsCard from '../components/PaymentsCard';
 import ApprovalStrip from '../components/ApprovalStrip';
-import ColumnsControl from '../components/ColumnsControl';
+import ColumnsControl, { PACKING_COLUMNS } from '../components/ColumnsControl';
 import NotePresetPicker from '../components/NotePresetPicker';
-import { today } from '../lib/format';
+import { fmtQty, today } from '../lib/format';
 
 interface Draft {
   number?: string;
@@ -39,7 +39,22 @@ interface Draft {
   tax_type: TaxType;
   column_config: ColumnConfig;
   items: LineItem[];
+  packing: PackingDraft;
 }
+
+/** The packing list is edited here; the server derives its line items from the invoice's. */
+interface PackingDraft {
+  number?: string;
+  date: string;
+  shipping_marks: string;
+  remarks: string;
+  column_config: ColumnConfig;
+  items: PackingListItem[];
+}
+
+const emptyPackingItem = (): PackingListItem => ({
+  description: '', qty: null, unit: 'unit', packages: '', dimensions: '', gross_weight: 0, net_weight: 0,
+});
 
 const emptyDraft = (): Draft => ({
   customer_id: '', pi_id: null, date: today(), currency: 'INR', consignee: '', notify_party: '',
@@ -47,6 +62,7 @@ const emptyDraft = (): Draft => ({
   is_export: 0, country_of_origin: '', port_of_loading: '', port_of_discharge: '', final_destination: '',
   notify_party_2: '', method_of_despatch: '', lot_no: '', prepared_by: '',
   remarks: '', tax_type: 'igst', column_config: {}, items: [],
+  packing: { date: today(), shipping_marks: '', remarks: '', column_config: {}, items: [] },
 });
 
 export default function InvoiceFormPage() {
@@ -74,9 +90,22 @@ export default function InvoiceFormPage() {
         id: _id, number: _n, status: _s, subtotal: _st, tax_total: _tt, grand_total: _gt,
         customer_name: _cn, pi_number: _pn, variance: _v, payments: _p, amount_received: _ar, balance_due: _bd,
         approval_status: _as, approved_at: _aa, approval_note: _an, approved_by_name: _ab, created_by_name: _cb,
+        packing: _pk,
         ...rest
       } = existing;
-      setDraft({ ...(rest as unknown as Draft), column_config: existing.column_config ?? {}, items: existing.items ?? [] });
+      setDraft({
+        ...(rest as unknown as Draft),
+        column_config: existing.column_config ?? {},
+        items: existing.items ?? [],
+        packing: {
+          number: existing.packing?.number,
+          date: existing.packing?.date ?? existing.date,
+          shipping_marks: existing.packing?.shipping_marks ?? '',
+          remarks: existing.packing?.remarks ?? '',
+          column_config: existing.packing?.column_config ?? {},
+          items: existing.packing?.items ?? [],
+        },
+      });
     }
   }, [existing]);
 
@@ -142,6 +171,18 @@ export default function InvoiceFormPage() {
   if (!isNew && !existing) return <div className="text-slate-400">Loading…</div>;
 
   const set = (patch: Partial<Draft>) => setDraft((d) => ({ ...d, ...patch }));
+  const setPacking = (patch: Partial<PackingDraft>) =>
+    setDraft((d) => ({ ...d, packing: { ...d.packing, ...patch } }));
+  // Packing rows follow the invoice's items positionally, so a row may not exist yet.
+  const setPackingItem = (i: number, patch: Partial<PackingListItem>) =>
+    setDraft((d) => {
+      const items = [...d.packing.items];
+      while (items.length <= i) items.push(emptyPackingItem());
+      items[i] = { ...items[i], ...patch };
+      return { ...d, packing: { ...d.packing, items } };
+    });
+  const totalNet = draft.packing.items.reduce((s, it) => s + (it.net_weight || 0), 0);
+  const totalGross = draft.packing.items.reduce((s, it) => s + (it.gross_weight || 0), 0);
   const highVariance = existing?.variance?.filter((v) => Math.abs(v.variance_pct) > 10) ?? [];
 
   return (
@@ -154,9 +195,12 @@ export default function InvoiceFormPage() {
             {!isNew && <StatusBadge status={existing!.status} />}
             {!isNew && (
               <>
-                <a href={`/api/pdf/invoice/${id}`} target="_blank" rel="noreferrer"><Button variant="secondary">📄 PDF</Button></a>
+                <a href={`/api/pdf/invoice/${id}`} target="_blank" rel="noreferrer"><Button variant="secondary">📄 Invoice</Button></a>
+                <a href={`/api/pdf/packing-list/${existing!.packing?.id}`} target="_blank" rel="noreferrer">
+                  <Button variant="secondary" disabled={!existing!.packing}>📦 Packing List</Button>
+                </a>
+                <a href={`/api/pdf/invoice-with-packing/${id}`} target="_blank" rel="noreferrer"><Button>📄+📦 Both</Button></a>
                 <FollowupButton docType="invoice" docId={Number(id)} customerId={existing!.customer_id} />
-                <Button onClick={() => navigate(`/packing-lists/new?from_invoice=${id}`)}>→ Create Packing List</Button>
               </>
             )}
           </div>
@@ -310,6 +354,87 @@ export default function InvoiceFormPage() {
               <Input type="number" min={0} step="any" value={draft.insurance || ''} onChange={(e) => set({ insurance: Number(e.target.value) })} />
             </Field>
           </div>
+        </Card>
+
+        <Card
+          title={`Packing Details${existing?.packing ? ` — ${existing.packing.number}` : ''}`}
+          actions={
+            <ColumnsControl
+              config={draft.packing.column_config}
+              onChange={(c) => setPacking({ column_config: c })}
+              columns={PACKING_COLUMNS}
+            />
+          }
+        >
+          <p className="mb-3 text-sm text-slate-500">
+            The packing list is created and kept in sync with this invoice — same items, same shipment. Fill in how the goods are packed.
+          </p>
+          <div className="mb-3 grid grid-cols-3 gap-3">
+            {!isNew && (
+              <Field label="Packing List Number (editable)">
+                <Input value={draft.packing.number ?? ''} onChange={(e) => setPacking({ number: e.target.value })} />
+              </Field>
+            )}
+            <Field label="Packing List Date">
+              <Input type="date" value={draft.packing.date} onChange={(e) => setPacking({ date: e.target.value })} />
+            </Field>
+            <Field label="Shipping Marks" className={isNew ? 'col-span-2' : ''}>
+              <Input value={draft.packing.shipping_marks} onChange={(e) => setPacking({ shipping_marks: e.target.value })} placeholder="e.g. 1-590/AGLO POLY/NACALA" />
+            </Field>
+          </div>
+
+          {draft.items.length === 0 ? (
+            <p className="py-4 text-center text-sm text-slate-400">Add line items above and their packing rows will appear here.</p>
+          ) : (
+            <>
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-slate-200 text-left text-xs uppercase text-slate-500">
+                    <th className="pb-1 pr-2">Item (from invoice)</th>
+                    <th className="pb-1 pr-2 w-28">Packages</th>
+                    <th className="pb-1 pr-2 w-32">Dimensions</th>
+                    <th className="pb-1 pr-2 w-24">Net Wt (kg)</th>
+                    <th className="pb-1 pr-2 w-24">Gross Wt (kg)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {draft.items.map((it, i) => {
+                    const p = draft.packing.items[i] ?? emptyPackingItem();
+                    return (
+                      <tr key={i} className="border-b border-slate-100 align-top">
+                        <td className="py-1.5 pr-2">
+                          <div className="text-sm">{it.description || <span className="text-slate-400">(untitled item)</span>}</div>
+                          <div className="text-xs text-slate-400">
+                            {it.qty != null ? `${fmtQty(it.qty)} ${it.unit}` : 'no qty'}{it.hsn_code ? ` · HSN ${it.hsn_code}` : ''}
+                          </div>
+                        </td>
+                        <td className="py-1.5 pr-2">
+                          <Input value={p.packages} onChange={(e) => setPackingItem(i, { packages: e.target.value })} placeholder="e.g. 130 CTN" />
+                        </td>
+                        <td className="py-1.5 pr-2">
+                          <Input value={p.dimensions} onChange={(e) => setPackingItem(i, { dimensions: e.target.value })} placeholder="60x40x40 cm" />
+                        </td>
+                        <td className="py-1.5 pr-2">
+                          <Input type="number" min={0} step="any" value={p.net_weight || ''} onChange={(e) => setPackingItem(i, { net_weight: Number(e.target.value) })} />
+                        </td>
+                        <td className="py-1.5 pr-2">
+                          <Input type="number" min={0} step="any" value={p.gross_weight || ''} onChange={(e) => setPackingItem(i, { gross_weight: Number(e.target.value) })} />
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              <div className="mt-2 text-right text-sm text-slate-600">
+                Total Net: <span className="font-semibold tabular-nums">{fmtQty(totalNet)} kg</span>
+                {' · '}Total Gross: <span className="font-semibold tabular-nums">{fmtQty(totalGross)} kg</span>
+              </div>
+            </>
+          )}
+
+          <Field label="Packing List Remarks" className="mt-3">
+            <Textarea rows={2} value={draft.packing.remarks} onChange={(e) => setPacking({ remarks: e.target.value })} placeholder="e.g. Seaworthy wooden crates, VCI wrapped." />
+          </Field>
         </Card>
 
         <Card title="Remarks / Disclaimers" actions={<NotePresetPicker value={draft.remarks} onChange={(v) => set({ remarks: v })} />}>

@@ -136,6 +136,8 @@ export interface Invoice {
   approved_at?: string; approval_note?: string;
   approved_by_name?: string | null; created_by_name?: string | null;
   column_config?: ColumnConfig;
+  /** The paired packing list, created and kept in sync with this invoice. */
+  packing?: PackingList;
 }
 
 export interface PackingListItem {

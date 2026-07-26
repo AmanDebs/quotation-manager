@@ -91,6 +91,8 @@ export default function PackingListFormPage() {
   const set = (patch: Partial<Draft>) => setDraft((d) => ({ ...d, ...patch }));
   const setItem = (i: number, patch: Partial<PackingListItem>) =>
     set({ items: draft.items.map((it, idx) => (idx === i ? { ...it, ...patch } : it)) });
+  // Linked packing lists take their goods from the invoice; only packing values are editable here.
+  const linkedInvoiceId = draft.invoice_id;
 
   const totalGross = draft.items.reduce((s, it) => s + (it.gross_weight || 0), 0);
   const totalNet = draft.items.reduce((s, it) => s + (it.net_weight || 0), 0);
@@ -106,6 +108,16 @@ export default function PackingListFormPage() {
           )
         }
       />
+
+      {linkedInvoiceId && (
+        <div className="mb-4 rounded-md bg-blue-50 px-3 py-2 text-sm text-blue-800">
+          This packing list belongs to invoice{' '}
+          <button onClick={() => navigate(`/invoices/${linkedInvoiceId}`)} className="font-medium underline">
+            {existing?.invoice_number ?? `#${linkedInvoiceId}`}
+          </button>
+          . Descriptions and quantities come from the invoice — edit them there. Packages, dimensions and weights are editable here or on the invoice's Packing Details.
+        </div>
+      )}
 
       <div className="space-y-4">
         <Card title="Details">
@@ -147,13 +159,13 @@ export default function PackingListFormPage() {
             <tbody>
               {draft.items.map((it, i) => (
                 <tr key={i} className="border-b border-slate-100 align-top">
-                  <td className="py-1.5 pr-2"><Input value={it.description} onChange={(e) => setItem(i, { description: e.target.value })} /></td>
-                  <td className="py-1.5 pr-2"><Input value={it.hsn_code ?? ''} onChange={(e) => setItem(i, { hsn_code: e.target.value })} /></td>
+                  <td className="py-1.5 pr-2"><Input value={it.description} disabled={!!linkedInvoiceId} onChange={(e) => setItem(i, { description: e.target.value })} /></td>
+                  <td className="py-1.5 pr-2"><Input value={it.hsn_code ?? ''} disabled={!!linkedInvoiceId} onChange={(e) => setItem(i, { hsn_code: e.target.value })} /></td>
                   <td className="py-1.5 pr-2">
-                    <Input type="number" min={0} step="any" value={it.qty ?? ''} onChange={(e) => setItem(i, { qty: e.target.value === '' ? null : Number(e.target.value) })} />
+                    <Input type="number" min={0} step="any" disabled={!!linkedInvoiceId} value={it.qty ?? ''} onChange={(e) => setItem(i, { qty: e.target.value === '' ? null : Number(e.target.value) })} />
                   </td>
                   <td className="py-1.5 pr-2">
-                    <Select value={it.unit} onChange={(e) => setItem(i, { unit: e.target.value })}>
+                    <Select value={it.unit} disabled={!!linkedInvoiceId} onChange={(e) => setItem(i, { unit: e.target.value })}>
                       {UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
                     </Select>
                   </td>
@@ -162,14 +174,18 @@ export default function PackingListFormPage() {
                   <td className="py-1.5 pr-2"><Input type="number" min={0} step="any" value={it.net_weight || ''} onChange={(e) => setItem(i, { net_weight: Number(e.target.value) })} /></td>
                   <td className="py-1.5 pr-2"><Input type="number" min={0} step="any" value={it.gross_weight || ''} onChange={(e) => setItem(i, { gross_weight: Number(e.target.value) })} /></td>
                   <td className="py-1.5 text-right">
-                    <button className="text-slate-300 hover:text-red-500" onClick={() => set({ items: draft.items.filter((_, idx) => idx !== i) })}>✕</button>
+                    {!linkedInvoiceId && (
+                      <button className="text-slate-300 hover:text-red-500" onClick={() => set({ items: draft.items.filter((_, idx) => idx !== i) })}>✕</button>
+                    )}
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
           <div className="mt-2 flex items-center justify-between">
-            <Button variant="secondary" onClick={() => set({ items: [...draft.items, emptyItem()] })}>+ Add Package Line</Button>
+            {linkedInvoiceId
+              ? <span className="text-xs text-slate-400">Lines follow the invoice — add or remove items there.</span>
+              : <Button variant="secondary" onClick={() => set({ items: [...draft.items, emptyItem()] })}>+ Add Package Line</Button>}
             <div className="text-sm text-slate-600">
               Net: <span className="font-semibold">{fmtQty(totalNet)} kg</span> · Gross: <span className="font-semibold">{fmtQty(totalGross)} kg</span>
             </div>

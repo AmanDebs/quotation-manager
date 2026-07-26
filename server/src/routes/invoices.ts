@@ -44,7 +44,95 @@ function getFull(id: number) {
   inv.payments = payments;
   inv.amount_received = round2((payments as { amount: number }[]).reduce((s, p) => s + p.amount, 0));
   inv.balance_due = round2(Number(inv.grand_total) - Number(inv.amount_received));
+
+  // The paired packing list travels with the invoice everywhere.
+  const pl = db.prepare('SELECT * FROM packing_lists WHERE invoice_id = ?').get(id) as Record<string, unknown> | undefined;
+  if (pl) {
+    const plItems = db.prepare('SELECT * FROM packing_list_items WHERE packing_list_id = ? ORDER BY sort_order, id').all(Number(pl.id)) as
+      { gross_weight: number; net_weight: number }[];
+    inv.packing = {
+      ...pl,
+      column_config: JSON.parse(String(pl.column_config || '{}')),
+      items: plItems,
+      total_gross: round2(plItems.reduce((s, it) => s + (it.gross_weight || 0), 0)),
+      total_net: round2(plItems.reduce((s, it) => s + (it.net_weight || 0), 0)),
+    };
+  }
   return inv;
+}
+
+interface PackingInput {
+  number?: string;
+  date?: string;
+  shipping_marks?: string;
+  remarks?: string;
+  column_config?: unknown;
+  items?: {
+    packages?: string; dimensions?: string; gross_weight?: number; net_weight?: number;
+    custom1?: string; custom2?: string; custom3?: string;
+  }[];
+}
+
+/**
+ * A commercial invoice and its packing list are one act of work: they describe
+ * the same shipment and always travel together. The invoice owns the packing
+ * list — it is created on first save and its line items are always derived from
+ * the invoice's items, so the two documents can never disagree about what is
+ * being shipped. Only the packing-specific values (cartons, dimensions,
+ * weights) come from the client.
+ */
+function syncPackingList(invoiceId: number, userId: number, packing: PackingInput | undefined) {
+  const inv = db.prepare('SELECT * FROM commercial_invoices WHERE id = ?').get(invoiceId) as Record<string, unknown>;
+  let pl = db.prepare('SELECT * FROM packing_lists WHERE invoice_id = ?').get(invoiceId) as Record<string, unknown> | undefined;
+
+  if (!pl) {
+    const number = nextNumber('packing_list');
+    const info = db.prepare(
+      `INSERT INTO packing_lists (number, date, invoice_id, customer_id, shipping_marks, lot_no, remarks, created_by, column_config)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      packing?.number || number,
+      String(packing?.date ?? inv.date),
+      invoiceId,
+      Number(inv.customer_id),
+      String(packing?.shipping_marks ?? ''),
+      String(inv.lot_no ?? ''),
+      String(packing?.remarks ?? ''),
+      userId,
+      JSON.stringify(packing?.column_config ?? {})
+    );
+    pl = { id: Number(info.lastInsertRowid) };
+  } else {
+    db.prepare(
+      `UPDATE packing_lists SET number = ?, date = ?, customer_id = ?, shipping_marks = ?, lot_no = ?, remarks = ?, column_config = ? WHERE id = ?`
+    ).run(
+      String(packing?.number ?? pl.number),
+      String(packing?.date ?? pl.date),
+      Number(inv.customer_id),
+      String(packing?.shipping_marks ?? pl.shipping_marks ?? ''),
+      String(inv.lot_no ?? ''),
+      String(packing?.remarks ?? pl.remarks ?? ''),
+      JSON.stringify(packing?.column_config ?? JSON.parse(String(pl.column_config || '{}'))),
+      Number(pl.id)
+    );
+  }
+
+  const plId = Number(pl.id);
+  const invItems = db.prepare(
+    'SELECT description, hsn_code, qty, unit FROM invoice_items WHERE invoice_id = ? ORDER BY sort_order, id'
+  ).all(invoiceId) as { description: string; hsn_code: string; qty: number | null; unit: string }[];
+
+  db.prepare('DELETE FROM packing_list_items WHERE packing_list_id = ?').run(plId);
+  const ins = db.prepare(
+    `INSERT INTO packing_list_items (packing_list_id, description, hsn_code, qty, unit, packages, dimensions, gross_weight, net_weight, custom1, custom2, custom3, sort_order)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  );
+  invItems.forEach((it, i) => {
+    const p = packing?.items?.[i] ?? {};
+    ins.run(plId, it.description, it.hsn_code ?? '', it.qty ?? null, it.unit ?? 'unit',
+      String(p.packages ?? ''), String(p.dimensions ?? ''), Number(p.gross_weight ?? 0), Number(p.net_weight ?? 0),
+      String(p.custom1 ?? ''), String(p.custom2 ?? ''), String(p.custom3 ?? ''), i);
+  });
 }
 
 function saveItems(invoiceId: number, items: LineItemInput[], taxType: 'none' | 'cgst_sgst' | 'igst', freight: number, insurance: number, currency: string) {
@@ -167,6 +255,7 @@ invoicesRouter.post('/', (req: AuthedRequest, res) => {
     );
     const id = Number(info.lastInsertRowid);
     saveItems(id, (body.items ?? []) as LineItemInput[], h.tax_type, h.freight, h.insurance, h.currency);
+    syncPackingList(id, req.user!.id, body.packing as PackingInput | undefined);
     return id;
   });
   res.status(201).json(getFull(id));
@@ -188,6 +277,7 @@ invoicesRouter.put('/:id', (req: AuthedRequest, res) => {
       id
     );
     if (Array.isArray(body.items)) saveItems(id, body.items as LineItemInput[], h.tax_type, h.freight, h.insurance, h.currency);
+    syncPackingList(id, req.user!.id, body.packing as PackingInput | undefined);
     resetApprovalOnEdit('commercial_invoices', id);
   });
   res.json(getFull(id));
@@ -226,11 +316,15 @@ invoicesRouter.delete('/:id', (req: AuthedRequest, res) => {
   const id = Number(req.params.id);
   const existing = db.prepare('SELECT customer_id FROM commercial_invoices WHERE id = ?').get(id) as { customer_id: number } | undefined;
   if (!existing || !canAccessCustomer(req, existing.customer_id)) return res.status(404).json({ error: 'Invoice not found' });
-  const used = db.prepare('SELECT COUNT(*) AS c FROM packing_lists WHERE invoice_id = ?').get(id) as { c: number };
-  if (used.c > 0) return res.status(409).json({ error: 'Invoice has a packing list and cannot be deleted' });
   const paid = db.prepare('SELECT COUNT(*) AS c FROM payments WHERE invoice_id = ?').get(id) as { c: number };
   if (paid.c > 0) return res.status(409).json({ error: 'Invoice has recorded payments and cannot be deleted' });
   transaction(() => {
+    // The packing list belongs to the invoice, so it goes with it.
+    const pls = db.prepare('SELECT id FROM packing_lists WHERE invoice_id = ?').all(id) as { id: number }[];
+    for (const pl of pls) {
+      db.prepare('DELETE FROM packing_list_items WHERE packing_list_id = ?').run(pl.id);
+      db.prepare('DELETE FROM packing_lists WHERE id = ?').run(pl.id);
+    }
     db.prepare('DELETE FROM invoice_items WHERE invoice_id = ?').run(id);
     db.prepare('DELETE FROM commercial_invoices WHERE id = ?').run(id);
   });

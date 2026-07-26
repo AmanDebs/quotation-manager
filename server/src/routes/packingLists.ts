@@ -50,7 +50,33 @@ function getFull(id: number) {
   return pl;
 }
 
-function saveItems(plId: number, items: PlItemInput[]) {
+/**
+ * When a packing list belongs to an invoice, what is being shipped is the
+ * invoice's business — only the packing values are editable here. Standalone
+ * packing lists (no invoice) remain fully editable.
+ */
+function saveItems(plId: number, items: PlItemInput[], invoiceId?: number | null) {
+  if (invoiceId) {
+    const invItems = db.prepare(
+      'SELECT description, hsn_code, qty, unit FROM invoice_items WHERE invoice_id = ? ORDER BY sort_order, id'
+    ).all(invoiceId) as { description: string; hsn_code: string; qty: number | null; unit: string }[];
+    db.prepare('DELETE FROM packing_list_items WHERE packing_list_id = ?').run(plId);
+    const insLinked = db.prepare(
+      `INSERT INTO packing_list_items (packing_list_id, description, hsn_code, qty, unit, packages, dimensions, gross_weight, net_weight, custom1, custom2, custom3, sort_order)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    );
+    invItems.forEach((inv, i) => {
+      const p = items[i] ?? {};
+      insLinked.run(plId, inv.description, inv.hsn_code ?? '', inv.qty ?? null, inv.unit ?? 'unit',
+        String(p.packages ?? ''), String(p.dimensions ?? ''), Number(p.gross_weight ?? 0), Number(p.net_weight ?? 0),
+        String(p.custom1 ?? ''), String(p.custom2 ?? ''), String(p.custom3 ?? ''), i);
+    });
+    return;
+  }
+  saveStandaloneItems(plId, items);
+}
+
+function saveStandaloneItems(plId: number, items: PlItemInput[]) {
   db.prepare('DELETE FROM packing_list_items WHERE packing_list_id = ?').run(plId);
   const ins = db.prepare(
     `INSERT INTO packing_list_items (packing_list_id, description, hsn_code, qty, unit, packages, dimensions, gross_weight, net_weight, custom1, custom2, custom3, sort_order)
@@ -105,7 +131,7 @@ packingListsRouter.post('/', (req: AuthedRequest, res) => {
       JSON.stringify(body.column_config ?? {})
     );
     const id = Number(info.lastInsertRowid);
-    saveItems(id, (body.items ?? []) as PlItemInput[]);
+    saveItems(id, (body.items ?? []) as PlItemInput[], body.invoice_id ? Number(body.invoice_id) : null);
     return id;
   });
   res.status(201).json(getFull(id));
@@ -128,7 +154,8 @@ packingListsRouter.put('/:id', (req: AuthedRequest, res) => {
       JSON.stringify(body.column_config ?? JSON.parse(String(existing.column_config || '{}'))),
       id
     );
-    if (Array.isArray(body.items)) saveItems(id, body.items as PlItemInput[]);
+    const invoiceId = body.invoice_id ? Number(body.invoice_id) : (existing.invoice_id as number | null);
+    if (Array.isArray(body.items)) saveItems(id, body.items as PlItemInput[], invoiceId);
   });
   res.json(getFull(id));
 });
