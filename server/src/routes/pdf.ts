@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { db } from '../db/connection.js';
-import { buildQuotationPdf, buildProformaPdf, buildInvoicePdf, buildPackingListPdf, buildInvoiceWithPackingPdf, renderPdf } from '../services/pdf.js';
+import { buildQuotationPdf, buildOrderPdf, buildProformaPdf, buildInvoicePdf, buildPackingListPdf, buildInvoiceWithPackingPdf, renderPdf } from '../services/pdf.js';
 import type { AuthedRequest } from '../middleware/auth.js';
 import { canAccessCustomer } from '../middleware/scope.js';
 
@@ -8,6 +8,9 @@ export const pdfRouter = Router();
 
 const builders = {
   quotation: { build: buildQuotationPdf, table: 'quotations', approvable: true },
+  // Orders record the customer's commitment rather than an outgoing offer,
+  // so they carry no approval gate and no watermark.
+  order: { build: buildOrderPdf, table: 'orders', approvable: false },
   proforma: { build: buildProformaPdf, table: 'proforma_invoices', approvable: true },
   invoice: { build: buildInvoicePdf, table: 'commercial_invoices', approvable: true },
   'packing-list': { build: buildPackingListPdf, table: 'packing_lists', approvable: false },

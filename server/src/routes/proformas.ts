@@ -10,10 +10,11 @@ export const proformasRouter = Router();
 
 const listSql = `
   SELECT p.*, c.name AS customer_name, c.country AS customer_country, q.number AS quotation_number,
-         u.name AS created_by_name, a.name AS approved_by_name
+         o.number AS order_number, u.name AS created_by_name, a.name AS approved_by_name
   FROM proforma_invoices p
   JOIN customers c ON c.id = p.customer_id
   LEFT JOIN quotations q ON q.id = p.quotation_id
+  LEFT JOIN orders o ON o.id = p.order_id
   LEFT JOIN users u ON u.id = p.created_by
   LEFT JOIN users a ON a.id = p.approved_by`;
 
@@ -46,7 +47,7 @@ function saveItems(piId: number, items: LineItemInput[], taxType: 'none' | 'cgst
 }
 
 const headerFields = [
-  'date', 'customer_id', 'quotation_id', 'consignee', 'notify_party', 'currency', 'freight', 'insurance',
+  'date', 'customer_id', 'quotation_id', 'order_id', 'consignee', 'notify_party', 'currency', 'freight', 'insurance',
   'lead_time', 'bank_account', 'inco_terms', 'payment_terms', 'delivery_terms', 'validity_date',
   'is_export', 'country_of_origin', 'port_of_loading', 'port_of_discharge', 'final_destination',
   'container_count', 'partial_shipment', 'po_number', 'po_date',
@@ -60,6 +61,7 @@ function headerValues(body: Record<string, unknown>, existing?: Record<string, u
     date: String(v('date', new Date().toISOString().slice(0, 10))),
     customer_id: Number(v('customer_id', 0)),
     quotation_id: v('quotation_id', null) ? Number(v('quotation_id')) : null,
+    order_id: v('order_id', null) ? Number(v('order_id')) : null,
     consignee: String(v('consignee')),
     notify_party: String(v('notify_party')),
     currency: String(v('currency', 'INR')),
@@ -134,6 +136,42 @@ proformasRouter.get('/prefill/from-quotation/:quotationId', (req: AuthedRequest,
     freight: q.freight ?? 0,
     insurance: q.insurance ?? 0,
     column_config: JSON.parse(String(q.column_config || '{}')),
+    items,
+  });
+});
+
+// Prefill payload for raising a proforma against a booked order.
+proformasRouter.get('/prefill/from-order/:orderId', (req: AuthedRequest, res) => {
+  const oid = Number(req.params.orderId);
+  const o = db.prepare('SELECT * FROM orders WHERE id = ?').get(oid) as Record<string, unknown> | undefined;
+  if (!o || !canAccessCustomer(req, Number(o.customer_id))) return res.status(404).json({ error: 'Order not found' });
+  const customer = db.prepare('SELECT * FROM customers WHERE id = ?').get(Number(o.customer_id)) as Record<string, unknown>;
+  const items = db.prepare('SELECT * FROM order_items WHERE order_id = ? ORDER BY sort_order, id').all(oid);
+  const isExport = Number(o.is_export) === 1;
+  res.json({
+    order_id: oid,
+    quotation_id: o.quotation_id,
+    customer_id: o.customer_id,
+    currency: o.currency,
+    tax_type: o.tax_type,
+    is_export: isExport ? 1 : 0,
+    payment_terms: o.payment_terms,
+    inco_terms: o.inco_terms,
+    container_count: o.container_count,
+    freight: o.freight,
+    insurance: o.insurance,
+    po_number: o.po_number,
+    po_date: o.po_date,
+    port_of_discharge: o.destination,
+    final_destination: o.destination,
+    method_of_despatch: o.transport,
+    prepared_by: o.spoc,
+    consignee: customer.consignee || '',
+    notify_party: customer.notify_party || '',
+    notify_party_2: customer.notify_party_2 || '',
+    country_of_origin: isExport ? 'India' : '',
+    quantity_tolerance: isExport ? '(±) 10% in value and quantity' : '',
+    column_config: JSON.parse(String(o.column_config || '{}')),
     items,
   });
 });

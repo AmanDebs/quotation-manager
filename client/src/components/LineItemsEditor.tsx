@@ -62,7 +62,7 @@ export default function LineItemsEditor({
   const subtotal = items.reduce((s, it) => s + (it.qty != null ? it.qty * it.unit_price : 0), 0);
   const tax = taxVisible ? items.reduce((s, it) => s + (it.qty != null ? it.qty * it.unit_price * ((it.tax_pct ?? 0) / 100) : 0), 0) : 0;
 
-  const packagingVisible = show('color') || show('packs') || show('pcs_per_pack') || show('total_pcs') || customNames.length > 0;
+  const packagingVisible = show('code') || show('color') || show('supplier') || show('packs') || show('pcs_per_pack') || show('total_pcs') || customNames.length > 0;
   const mainCols = 3 + (show('hsn') ? 1 : 0) + (show('qty') ? 1 : 0) + (show('unit_price') ? 1 : 0) + (taxVisible ? 1 : 0);
 
   return (
@@ -146,9 +146,19 @@ export default function LineItemsEditor({
                     <td colSpan={mainCols} className="pb-2 pt-1">
                       <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
                         <span className="font-medium uppercase tracking-wide text-slate-400">Packaging:</span>
+                        {show('code') && (
+                          <label className="flex items-center gap-1">Code
+                            <Input className="!w-20 !py-1" value={(it as { code?: string }).code ?? ''} onChange={(e) => set(i, { code: e.target.value } as Partial<LineItem>)} placeholder="48mm" />
+                          </label>
+                        )}
                         {show('color') && (
                           <label className="flex items-center gap-1">Colour
                             <Input className="!w-24 !py-1" value={it.color ?? ''} onChange={(e) => set(i, { color: e.target.value })} placeholder="e.g. Red" />
+                          </label>
+                        )}
+                        {show('supplier') && (
+                          <label className="flex items-center gap-1">Supplier
+                            <Input className="!w-24 !py-1" value={(it as { supplier?: string }).supplier ?? ''} onChange={(e) => set(i, { supplier: e.target.value } as Partial<LineItem>)} placeholder="Internal" />
                           </label>
                         )}
                         {show('packs') && (

@@ -84,6 +84,12 @@ for (const table of ['quotation_items', 'pi_items', 'invoice_items', 'packing_li
   addColumnIfMissing(table, 'custom3', "TEXT NOT NULL DEFAULT ''");
 }
 
+// Order book (2026-07): orders sit between quotation and proforma invoice.
+addColumnIfMissing('settings', 'order_pattern', "TEXT NOT NULL DEFAULT 'SO/{FY}/{SEQ}'");
+addColumnIfMissing('settings', 'order_export_pattern', "TEXT NOT NULL DEFAULT 'SO-EX/{FY}/{SEQ}'");
+addColumnIfMissing('proforma_invoices', 'order_id', 'INTEGER');
+addColumnIfMissing('commercial_invoices', 'order_id', 'INTEGER');
+
 // One-off backfill: the founding account becomes the manager and inherits
 // ownership of everything that pre-dates the roles feature.
 const founder = db.prepare('SELECT id FROM users ORDER BY id LIMIT 1').get() as { id: number } | undefined;

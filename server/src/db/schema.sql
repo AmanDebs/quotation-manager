@@ -41,6 +41,8 @@ CREATE TABLE IF NOT EXISTS settings (
   inv_pattern TEXT NOT NULL DEFAULT 'INV/{FY}/{SEQ}',
   inv_export_pattern TEXT NOT NULL DEFAULT 'EX/{FY}/{SEQ}',
   pl_pattern TEXT NOT NULL DEFAULT 'PL/{FY}/{SEQ}',
+  order_pattern TEXT NOT NULL DEFAULT 'SO/{FY}/{SEQ}',
+  order_export_pattern TEXT NOT NULL DEFAULT 'SO-EX/{FY}/{SEQ}',
   note_presets TEXT NOT NULL DEFAULT '[]'
 );
 INSERT OR IGNORE INTO settings (id) VALUES (1);
@@ -141,11 +143,78 @@ CREATE TABLE IF NOT EXISTS quotation_items (
   sort_order INTEGER NOT NULL DEFAULT 0
 );
 
+-- The order book: what the customer has committed to buy, tracked from intake
+-- through production to dispatch. Sits between quotation and proforma invoice.
+CREATE TABLE IF NOT EXISTS orders (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  number TEXT NOT NULL,
+  date TEXT NOT NULL,
+  quotation_id INTEGER REFERENCES quotations(id),
+  customer_id INTEGER NOT NULL REFERENCES customers(id),
+  is_export INTEGER NOT NULL DEFAULT 0,
+  order_through TEXT NOT NULL DEFAULT '',
+  spoc TEXT NOT NULL DEFAULT '',
+  po_number TEXT NOT NULL DEFAULT '',
+  po_date TEXT NOT NULL DEFAULT '',
+  currency TEXT NOT NULL DEFAULT 'INR',
+  tax_type TEXT NOT NULL DEFAULT 'none' CHECK (tax_type IN ('none','cgst_sgst','igst')),
+  payment_terms TEXT NOT NULL DEFAULT '',
+  freight REAL NOT NULL DEFAULT 0,
+  insurance REAL NOT NULL DEFAULT 0,
+  inco_terms TEXT NOT NULL DEFAULT '',
+  container_count TEXT NOT NULL DEFAULT '',
+  advance_due REAL NOT NULL DEFAULT 0,
+  advance_amount REAL NOT NULL DEFAULT 0,
+  advance_received_date TEXT NOT NULL DEFAULT '',
+  destination TEXT NOT NULL DEFAULT '',
+  transport TEXT NOT NULL DEFAULT '',
+  freight_terms TEXT NOT NULL DEFAULT '',
+  promised_date TEXT NOT NULL DEFAULT '',
+  scheduled_date TEXT NOT NULL DEFAULT '',
+  revised_date TEXT NOT NULL DEFAULT '',
+  actual_production_date TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','confirmed','scheduled','in_production','ready','partially_dispatched','completed','cancelled')),
+  remarks TEXT NOT NULL DEFAULT '',
+  notes TEXT NOT NULL DEFAULT '',
+  column_config TEXT NOT NULL DEFAULT '{}',
+  created_by INTEGER REFERENCES users(id),
+  subtotal REAL NOT NULL DEFAULT 0,
+  tax_total REAL NOT NULL DEFAULT 0,
+  grand_total REAL NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS order_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  order_id INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+  product_id INTEGER REFERENCES products(id),
+  description TEXT NOT NULL DEFAULT '',
+  hsn_code TEXT NOT NULL DEFAULT '',
+  code TEXT NOT NULL DEFAULT '',
+  qty REAL,
+  unit TEXT NOT NULL DEFAULT 'unit',
+  unit_price REAL NOT NULL DEFAULT 0,
+  tax_pct REAL NOT NULL DEFAULT 0,
+  amount REAL NOT NULL DEFAULT 0,
+  color TEXT NOT NULL DEFAULT '',
+  packs REAL,
+  pcs_per_pack REAL,
+  total_pcs REAL,
+  supplier TEXT NOT NULL DEFAULT '',
+  scheduled_date TEXT NOT NULL DEFAULT '',
+  dispatched_date TEXT NOT NULL DEFAULT '',
+  custom1 TEXT NOT NULL DEFAULT '',
+  custom2 TEXT NOT NULL DEFAULT '',
+  custom3 TEXT NOT NULL DEFAULT '',
+  sort_order INTEGER NOT NULL DEFAULT 0
+);
+
 CREATE TABLE IF NOT EXISTS proforma_invoices (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   number TEXT NOT NULL,
   date TEXT NOT NULL,
   quotation_id INTEGER REFERENCES quotations(id),
+  order_id INTEGER REFERENCES orders(id),
   customer_id INTEGER NOT NULL REFERENCES customers(id),
   consignee TEXT NOT NULL DEFAULT '',
   notify_party TEXT NOT NULL DEFAULT '',
@@ -213,6 +282,7 @@ CREATE TABLE IF NOT EXISTS commercial_invoices (
   number TEXT NOT NULL,
   date TEXT NOT NULL,
   pi_id INTEGER REFERENCES proforma_invoices(id),
+  order_id INTEGER REFERENCES orders(id),
   customer_id INTEGER NOT NULL REFERENCES customers(id),
   consignee TEXT NOT NULL DEFAULT '',
   notify_party TEXT NOT NULL DEFAULT '',

@@ -153,7 +153,7 @@ function saveItems(invoiceId: number, items: LineItemInput[], taxType: 'none' | 
 }
 
 const headerFields = [
-  'date', 'customer_id', 'pi_id', 'consignee', 'notify_party', 'currency', 'freight', 'insurance',
+  'date', 'customer_id', 'pi_id', 'order_id', 'consignee', 'notify_party', 'currency', 'freight', 'insurance',
   'shipping_details', 'bank_account', 'inco_terms', 'payment_terms',
   'is_export', 'country_of_origin', 'port_of_loading', 'port_of_discharge', 'final_destination',
   'notify_party_2', 'method_of_despatch', 'lot_no', 'prepared_by',
@@ -166,6 +166,7 @@ function headerValues(body: Record<string, unknown>, existing?: Record<string, u
     date: String(v('date', new Date().toISOString().slice(0, 10))),
     customer_id: Number(v('customer_id', 0)),
     pi_id: v('pi_id', null) ? Number(v('pi_id')) : null,
+    order_id: v('order_id', null) ? Number(v('order_id')) : null,
     consignee: String(v('consignee')),
     notify_party: String(v('notify_party')),
     currency: String(v('currency', 'INR')),
@@ -215,6 +216,7 @@ invoicesRouter.get('/prefill/from-proforma/:piId', (req: AuthedRequest, res) => 
   const items = db.prepare('SELECT * FROM pi_items WHERE pi_id = ? ORDER BY sort_order, id').all(piId);
   res.json({
     pi_id: piId,
+    order_id: pi.order_id,
     customer_id: pi.customer_id,
     consignee: pi.consignee,
     notify_party: pi.notify_party,

@@ -41,6 +41,7 @@ export interface Settings {
   arn_ref: string; theme_color: string;
   quote_pattern: string; pi_pattern: string; pi_export_pattern: string;
   inv_pattern: string; inv_export_pattern: string; pl_pattern: string;
+  order_pattern: string; order_export_pattern: string;
   bank_accounts: BankAccount[];
   note_presets: NotePreset[];
 }
@@ -69,6 +70,8 @@ export interface LineItem {
   qty: number | null; unit: string; unit_price: number; tax_pct?: number; amount?: number;
   color?: string; packs?: number | null; pcs_per_pack?: number | null; total_pcs?: number | null;
   custom1?: string; custom2?: string; custom3?: string;
+  /** Order lines carry these too; harmless elsewhere. */
+  code?: string; supplier?: string;
 }
 
 export type TaxType = 'none' | 'cgst_sgst' | 'igst';
@@ -88,6 +91,40 @@ export interface Quotation {
   approved_at?: string; approval_note?: string;
   approved_by_name?: string | null; created_by_name?: string | null;
   column_config?: ColumnConfig;
+}
+
+export type OrderStatus =
+  | 'pending' | 'confirmed' | 'scheduled' | 'in_production'
+  | 'ready' | 'partially_dispatched' | 'completed' | 'cancelled';
+
+export interface OrderItem extends LineItem {
+  code?: string;
+  supplier?: string;
+  scheduled_date?: string;
+  dispatched_date?: string;
+  /** Derived on the server from downstream invoices. */
+  qty_dispatched?: number;
+  qty_pending?: number;
+}
+
+export interface Order {
+  id: number; number: string; date: string;
+  quotation_id: number | null; customer_id: number; is_export: number;
+  order_through: string; spoc: string; po_number: string; po_date: string;
+  currency: string; tax_type: TaxType; payment_terms: string;
+  freight: number; insurance: number; inco_terms: string; container_count: string;
+  advance_due: number; advance_amount: number; advance_received_date: string;
+  destination: string; transport: string; freight_terms: string;
+  promised_date: string; scheduled_date: string; revised_date: string; actual_production_date: string;
+  status: OrderStatus; remarks: string; notes: string;
+  subtotal: number; tax_total: number; grand_total: number;
+  customer_name?: string; quotation_number?: string; created_by_name?: string | null;
+  column_config?: ColumnConfig;
+  items?: OrderItem[];
+  dispatched_value?: number; pending_value?: number;
+  fully_dispatched?: boolean; any_dispatched?: boolean;
+  proformas?: { id: number; number: string; date: string; status: string; grand_total: number }[];
+  invoices?: { id: number; number: string; date: string; status: string; grand_total: number }[];
 }
 
 export interface Payment {

@@ -19,6 +19,7 @@ const fields = [
   'quote_prefix', 'pi_prefix', 'inv_prefix', 'pl_prefix',
   'arn_ref', 'theme_color',
   'quote_pattern', 'pi_pattern', 'pi_export_pattern', 'inv_pattern', 'inv_export_pattern', 'pl_pattern',
+  'order_pattern', 'order_export_pattern',
 ];
 
 settingsRouter.put('/', (req, res) => {

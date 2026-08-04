@@ -16,6 +16,7 @@ interface Draft {
   number?: string;
   customer_id: number | '';
   pi_id: number | null;
+  order_id?: number | null;
   date: string;
   currency: string;
   consignee: string;
@@ -72,6 +73,7 @@ export default function InvoiceFormPage() {
   const queryClient = useQueryClient();
   const isNew = !id;
   const fromProforma = search.get('from_proforma');
+  const fromOrder = search.get('from_order');
 
   const { data: customers = [] } = useQuery({ queryKey: ['customers', ''], queryFn: () => api.get<Customer[]>('/api/customers') });
   const { data: settings } = useQuery({ queryKey: ['settings'], queryFn: () => api.get<Settings>('/api/settings') });
@@ -118,9 +120,25 @@ export default function InvoiceFormPage() {
     }
   }, [isNew, fromProforma, prefilled]);
 
+  // Domestic sales sometimes invoice straight off the order, with no proforma.
+  useEffect(() => {
+    if (!isNew || fromProforma || !fromOrder || prefilled) return;
+    api.get<Partial<Draft> & { items?: LineItem[] }>(`/api/proformas/prefill/from-order/${fromOrder}`).then((p) => {
+      const { column_config, ...rest } = p as Record<string, unknown>;
+      setDraft((d) => ({
+        ...d,
+        ...(rest as Partial<Draft>),
+        order_id: Number(fromOrder),
+        column_config: (column_config as ColumnConfig) ?? {},
+        customer_id: (p.customer_id as number) ?? d.customer_id,
+      }));
+      setPrefilled(true);
+    });
+  }, [isNew, fromProforma, fromOrder, prefilled]);
+
   // Arriving from the export/domestic dialog.
   useEffect(() => {
-    if (!isNew || fromProforma) return;
+    if (!isNew || fromProforma || fromOrder) return;
     const type = search.get('type');
     const customer = search.get('customer');
     if (!type && !customer) return;
@@ -132,7 +150,7 @@ export default function InvoiceFormPage() {
       country_of_origin: isExport ? 'India' : d.country_of_origin,
       customer_id: customer ? Number(customer) : d.customer_id,
     }));
-  }, [isNew, fromProforma, search]);
+  }, [isNew, fromProforma, fromOrder, search]);
 
   useEffect(() => {
     if (!isNew || !draft.customer_id || customers.length === 0 || prefilled) return;

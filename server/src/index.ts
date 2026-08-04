@@ -9,6 +9,7 @@ import { settingsRouter } from './routes/settings.js';
 import { customersRouter } from './routes/customers.js';
 import { productsRouter } from './routes/products.js';
 import { quotationsRouter } from './routes/quotations.js';
+import { ordersRouter } from './routes/orders.js';
 import { proformasRouter } from './routes/proformas.js';
 import { invoicesRouter } from './routes/invoices.js';
 import { packingListsRouter } from './routes/packingLists.js';
@@ -34,6 +35,7 @@ app.use('/api/settings', requireAuth, (req, res, next) =>
 app.use('/api/customers', requireAuth, customersRouter);
 app.use('/api/products', requireAuth, productsRouter);
 app.use('/api/quotations', requireAuth, quotationsRouter);
+app.use('/api/orders', requireAuth, ordersRouter);
 app.use('/api/proformas', requireAuth, proformasRouter);
 app.use('/api/invoices', requireAuth, invoicesRouter);
 app.use('/api/packing-lists', requireAuth, packingListsRouter);

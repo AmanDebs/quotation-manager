@@ -2,7 +2,7 @@
 
 A complete order-to-dispatch document management system for a manufacturing/export business.
 
-**Enquiry → Quotation → Proforma Invoice → Commercial Invoice + Packing List**
+**Quotation → Order → Proforma Invoice → Commercial Invoice + Packing List**
 
 Each document is created from the previous one with all details carried forward, so nothing is retyped and totals are always computed by the system — no manual math, no missed follow-ups, and every data point stored for analysis.
 
@@ -13,6 +13,7 @@ Each document is created from the previous one with all details carried forward,
 - **Commercial Invoices** created from a PI at dispatch — final quantities are checked against the 10% variance clause automatically
 - **The packing list is made with the invoice**, on the same screen: fill in cartons, dimensions and weights beside each invoice line, and the packing list is created and kept in sync automatically. Download them separately or as one **Invoice + Packing List** file, the way customs and freight forwarders expect them
 - **Branded PDFs** for all four documents (logo, signature/stamp, amount in words, GST or export layout)
+- **Order book** — every confirmed order in one place: how it came in and who took it, the customer's own PO reference, advance due vs received, the production plan (promised → scheduled → revised → actual), and **how much of each line has actually shipped**, calculated automatically from the invoices raised against it. Overdue orders are flagged
 - **Team roles** — the manager sees everything, approves documents and controls Settings; employees see only the customers assigned to them
 - **Manager approval** before any quotation, proforma or invoice can be marked as sent; unapproved PDFs carry a "Pending Approval" watermark
 - **Export or domestic chosen up front**, driving tax treatment, numbering series, form fields and PDF layout

@@ -1,6 +1,6 @@
 import { db } from '../db/connection.js';
 
-type DocType = 'quotation' | 'proforma' | 'invoice' | 'packing_list';
+type DocType = 'quotation' | 'order' | 'proforma' | 'invoice' | 'packing_list';
 
 /** Indian fiscal year (April–March) as "25-26". */
 export function fiscalYear(date = new Date()): string {
@@ -14,6 +14,7 @@ function fiscalYearStart(date = new Date()): number {
 
 const patternColumn: Record<DocType, { std: string; export?: string }> = {
   quotation: { std: 'quote_pattern' },
+  order: { std: 'order_pattern', export: 'order_export_pattern' },
   proforma: { std: 'pi_pattern', export: 'pi_export_pattern' },
   invoice: { std: 'inv_pattern', export: 'inv_export_pattern' },
   packing_list: { std: 'pl_pattern' },

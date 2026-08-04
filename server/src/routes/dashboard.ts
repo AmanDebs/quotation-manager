@@ -24,7 +24,7 @@ dashboardRouter.get('/', (req: AuthedRequest, res) => {
 
   const counts = {
     quotations: one(`SELECT COUNT(*) AS c FROM quotations WHERE superseded_by IS NULL AND date BETWEEN ? AND ?${and}`, from, to, ...p),
-    orders: one(`SELECT COUNT(*) AS c FROM proforma_invoices WHERE status IN ('order_confirmed','advance_received','in_production') AND date BETWEEN ? AND ?${and}`, from, to, ...p),
+    orders: one(`SELECT COUNT(*) AS c FROM orders WHERE status NOT IN ('cancelled') AND date BETWEEN ? AND ?${and}`, from, to, ...p),
     invoices: one(`SELECT COUNT(*) AS c FROM commercial_invoices WHERE date BETWEEN ? AND ?${and}`, from, to, ...p),
     pendingApprovals: one(
       `SELECT (SELECT COUNT(*) FROM quotations WHERE approval_status = 'pending'${and})
@@ -114,6 +114,33 @@ dashboardRouter.get('/', (req: AuthedRequest, res) => {
     outstanding: Math.round(r.outstanding * 100) / 100,
   }));
 
+  // Order book: value still to ship, per currency, plus anything past its
+  // promised date. Pending value is order value minus what's been invoiced.
+  const openOrders = q<{ id: number; currency: string; grand_total: number; promised_date: string; status: string }>(
+    `SELECT id, currency, grand_total, promised_date, status FROM orders
+     WHERE status NOT IN ('completed','cancelled')${and}`,
+    ...p
+  );
+  const orderBookMap = new Map<string, { currency: string; open_value: number; pending_value: number; count: number }>();
+  let overdueOrders = 0;
+  for (const o of openOrders) {
+    const invoiced = (db.prepare(
+      `SELECT COALESCE(SUM(grand_total), 0) AS v FROM commercial_invoices
+       WHERE order_id = ? OR pi_id IN (SELECT id FROM proforma_invoices WHERE order_id = ?)`
+    ).get(o.id, o.id) as { v: number }).v;
+    const row = orderBookMap.get(o.currency) ?? { currency: o.currency, open_value: 0, pending_value: 0, count: 0 };
+    row.open_value += o.grand_total;
+    row.pending_value += Math.max(0, o.grand_total - invoiced);
+    row.count += 1;
+    orderBookMap.set(o.currency, row);
+    if (o.promised_date && o.promised_date < today) overdueOrders += 1;
+  }
+  const orderBook = [...orderBookMap.values()].map((r) => ({
+    ...r,
+    open_value: Math.round(r.open_value * 100) / 100,
+    pending_value: Math.round(r.pending_value * 100) / 100,
+  }));
+
   const funnel = {
     quoted: counts.quotations,
     accepted: one(`SELECT COUNT(*) AS c FROM quotations WHERE superseded_by IS NULL AND status = 'accepted' AND date BETWEEN ? AND ?${and}`, from, to, ...p),
@@ -121,5 +148,5 @@ dashboardRouter.get('/', (req: AuthedRequest, res) => {
     invoiced: counts.invoices,
   };
 
-  res.json({ counts, quotationsByStatus, quotedByMonth, invoicedByMonth, topCustomers, topProducts, currencyTotals, followups, funnel, receivables });
+  res.json({ counts, quotationsByStatus, quotedByMonth, invoicedByMonth, topCustomers, topProducts, currencyTotals, followups, funnel, receivables, orderBook, overdueOrders });
 });

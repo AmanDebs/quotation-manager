@@ -380,6 +380,101 @@ export function buildQuotationPdf(id: number): TDocumentDefinitions {
 }
 
 /* ------------------------------------------------------------------ */
+/* ORDER CONFIRMATION                                                  */
+/* ------------------------------------------------------------------ */
+export function buildOrderPdf(id: number): TDocumentDefinitions {
+  const s = getSettings();
+  const o = db.prepare('SELECT * FROM orders WHERE id = ?').get(id) as Row;
+  if (!o) throw new Error('Order not found');
+  const c = db.prepare('SELECT * FROM customers WHERE id = ?').get(o.customer_id) as Row;
+  const items = db.prepare('SELECT * FROM order_items WHERE order_id = ? ORDER BY sort_order, id').all(id) as Row[];
+  const quotation = o.quotation_id
+    ? (db.prepare('SELECT number FROM quotations WHERE id = ?').get(o.quotation_id) as Row | undefined)
+    : undefined;
+
+  const cur = o.currency;
+  const showTax = o.tax_type !== 'none';
+  const cfg: ColumnConfig = JSON.parse(String(o.column_config || '{}'));
+
+  const specs: ColumnSpec[] = [
+    { key: 'sl', label: 'SL', width: 18, align: 'center', always: true, value: (_it, i) => String(i + 1) },
+    { key: 'description', label: 'Description of Goods', width: '*', always: true, value: (it) => it.description },
+    { key: 'code', label: 'Code', width: 45, align: 'center', value: (it) => it.code || '' },
+    { key: 'hsn', label: 'HSN', width: 45, align: 'center', value: (it) => it.hsn_code || '' },
+    { key: 'color', label: 'Colour', width: 50, align: 'center', value: (it) => it.color || '' },
+    { key: 'qty', label: 'Quantity', width: 58, align: 'right', value: (it) => (it.qty != null ? `${fmtNum(it.qty)} ${it.unit}` : '') },
+    { key: 'unit_price', label: `Rate ${cur}`, width: 52, align: 'right', value: (it) => fmtNum(it.unit_price, 3) },
+    { key: 'supplier', label: 'Supplier', width: 48, align: 'center', value: (it) => it.supplier || '' },
+    { key: 'tax', label: 'Tax %', width: 30, align: 'right', value: (it) => (showTax ? `${it.tax_pct ?? 0}%` : '') },
+    { key: 'amount', label: `Amount (${cur})`, width: 62, align: 'right', always: true, value: (it) => fmtMoney(it.amount, cur) },
+  ];
+
+  const detail = (rows: [string, string][]): Cell => ({
+    table: {
+      widths: [110, '*'],
+      body: rows.map(([l, v]) => [
+        { text: l, fontSize: 7.5, bold: true, color: '#333333' },
+        { text: v || '—', fontSize: 7.5 },
+      ]),
+    },
+    layout: { ...gridLayout, hLineColor: '#dddddd', vLineColor: '#dddddd' },
+  });
+
+  const sectionHead = (t: string): Cell => ({ text: t, bold: true, fontSize: 8, color: '#ffffff', fillColor: s.theme });
+
+  const orderInfo: [string, string][] = [
+    ['Order Number', o.number],
+    ['Order Date', fmtDate(o.date)],
+    ...(quotation ? [['Ref. Quotation', quotation.number] as [string, string]] : []),
+    ...(o.po_number ? [['Your PO No. & Date', `${o.po_number}${o.po_date ? ` dt. ${fmtDate(o.po_date)}` : ''}`] as [string, string]] : []),
+    ...(o.order_through ? [['Order Received Via', o.order_through] as [string, string]] : []),
+    ...(o.spoc ? [['Handled By', o.spoc] as [string, string]] : []),
+    ['Currency', currencyNames[cur] ?? cur],
+    ...(o.payment_terms ? [['Payment Terms', o.payment_terms] as [string, string]] : []),
+  ];
+
+  const deliveryInfo: [string, string][] = [
+    ...(o.promised_date ? [['Promised Despatch', fmtDate(o.promised_date)] as [string, string]] : []),
+    ...(o.scheduled_date ? [['Production Scheduled', fmtDate(o.scheduled_date)] as [string, string]] : []),
+    ...(o.destination ? [['Destination', o.destination] as [string, string]] : []),
+    ...(o.transport ? [['Transport', o.transport] as [string, string]] : []),
+    ...(o.freight_terms ? [['Freight Terms', o.freight_terms] as [string, string]] : []),
+    ...(o.inco_terms ? [['INCO Terms', o.inco_terms] as [string, string]] : []),
+    ...(o.container_count ? [['Containers', o.container_count] as [string, string]] : []),
+    ...(Number(o.advance_due) ? [['Advance Due', fmtMoney(o.advance_due, cur)] as [string, string]] : []),
+    ...(Number(o.advance_amount)
+      ? [['Advance Received', `${fmtMoney(o.advance_amount, cur)}${o.advance_received_date ? ` on ${fmtDate(o.advance_received_date)}` : ''}`] as [string, string]]
+      : []),
+  ];
+
+  const content: Content[] = [
+    ...companyHeader(s),
+    docTitle(s, 'ORDER CONFIRMATION'),
+    {
+      table: {
+        widths: ['*', '*'],
+        body: [
+          [sectionHead('CUSTOMER'), sectionHead('ORDER DETAILS')],
+          [{ stack: [{ text: customerAddress(c), fontSize: 8 }] }, detail(orderInfo)],
+          ...(deliveryInfo.length
+            ? [[sectionHead('DELIVERY & PRODUCTION'), sectionHead('')], [{ ...detail(deliveryInfo), colSpan: 2 }, {}]]
+            : []),
+        ] as any,
+      },
+      layout: boxedLayout,
+      margin: [0, 0, 0, 8] as any,
+    },
+    itemsTable(s, items, specs, cfg),
+    totalsBand(s, o, cur, 'ORDER VALUE'),
+    amountWords(o, cur),
+    ...(o.remarks ? [{ text: 'REMARKS:', fontSize: 9, bold: true, color: s.theme, margin: [0, 8, 0, 2] as any }, { text: o.remarks, fontSize: 8 }] : []),
+    ...notesAndTerms(s, o.notes),
+    signatureBlock(s, { preparedBy: o.spoc }),
+  ];
+  return baseDoc(content);
+}
+
+/* ------------------------------------------------------------------ */
 /* PROFORMA INVOICE — modeled on the Emeraude sample                   */
 /* ------------------------------------------------------------------ */
 export function buildProformaPdf(id: number): TDocumentDefinitions {

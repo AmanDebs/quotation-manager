@@ -7,6 +7,7 @@ import type { User } from '../types';
 const nav = [
   { to: '/', label: 'Dashboard', icon: '📊' },
   { to: '/quotations', label: 'Quotations', icon: '📄' },
+  { to: '/orders', label: 'Orders', icon: '📋' },
   { to: '/proformas', label: 'Proforma Invoices', icon: '🧾' },
   { to: '/invoices', label: 'Commercial Invoices', icon: '💰' },
   { to: '/packing-lists', label: 'Packing Lists', icon: '📦' },

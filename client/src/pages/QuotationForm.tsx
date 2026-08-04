@@ -178,7 +178,10 @@ export default function QuotationFormPage() {
                   </Button>
                 )}
                 {existing!.status === 'accepted' && (
-                  <Button onClick={() => navigate(`/proformas/new?from_quotation=${id}`)}>→ Create Proforma Invoice</Button>
+                  <>
+                    <Button onClick={() => navigate(`/orders/new?from_quotation=${id}`)}>→ Book Order</Button>
+                    <Button variant="secondary" onClick={() => navigate(`/proformas/new?from_quotation=${id}`)}>→ Proforma directly</Button>
+                  </>
                 )}
               </>
             )}

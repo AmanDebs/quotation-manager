@@ -66,6 +66,7 @@ export default function ProformaFormPage() {
   const queryClient = useQueryClient();
   const isNew = !id;
   const fromQuotation = search.get('from_quotation');
+  const fromOrder = search.get('from_order');
 
   const { data: customers = [] } = useQuery({ queryKey: ['customers', ''], queryFn: () => api.get<Customer[]>('/api/customers') });
   const { data: settings } = useQuery({ queryKey: ['settings'], queryFn: () => api.get<Settings>('/api/settings') });
@@ -91,17 +92,22 @@ export default function ProformaFormPage() {
   }, [existing]);
 
   useEffect(() => {
-    if (isNew && fromQuotation && !prefilled) {
-      api.get<Partial<Draft>>(`/api/proformas/prefill/from-quotation/${fromQuotation}`).then((p) => {
-        setDraft((d) => ({ ...d, ...p, customer_id: (p.customer_id as number) ?? d.customer_id }));
-        setPrefilled(true);
-      });
-    }
-  }, [isNew, fromQuotation, prefilled]);
+    if (!isNew || prefilled) return;
+    const source = fromOrder
+      ? `/api/proformas/prefill/from-order/${fromOrder}`
+      : fromQuotation
+        ? `/api/proformas/prefill/from-quotation/${fromQuotation}`
+        : null;
+    if (!source) return;
+    api.get<Partial<Draft>>(source).then((p) => {
+      setDraft((d) => ({ ...d, ...p, customer_id: (p.customer_id as number) ?? d.customer_id }));
+      setPrefilled(true);
+    });
+  }, [isNew, fromQuotation, fromOrder, prefilled]);
 
   // Arriving from the export/domestic dialog.
   useEffect(() => {
-    if (!isNew || fromQuotation) return;
+    if (!isNew || fromQuotation || fromOrder) return;
     const type = search.get('type');
     const customer = search.get('customer');
     if (!type && !customer) return;
@@ -114,7 +120,7 @@ export default function ProformaFormPage() {
       quantity_tolerance: isExport && !d.quantity_tolerance ? '(±) 10% in value and quantity' : d.quantity_tolerance,
       customer_id: customer ? Number(customer) : d.customer_id,
     }));
-  }, [isNew, fromQuotation, search]);
+  }, [isNew, fromQuotation, fromOrder, search]);
 
   // Adopt the chosen customer's details once customers load.
   useEffect(() => {

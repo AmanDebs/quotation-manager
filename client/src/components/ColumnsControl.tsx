@@ -7,6 +7,8 @@ export interface ToggleableColumn { key: string; label: string }
 /** Optional columns per document type, in display order. */
 export const ITEM_COLUMNS: ToggleableColumn[] = [
   { key: 'hsn', label: 'HSN Code' },
+  { key: 'code', label: 'Code (size/spec)' },
+  { key: 'supplier', label: 'Supplier' },
   { key: 'qty', label: 'Quantity' },
   { key: 'unit_price', label: 'Unit Price' },
   { key: 'uom', label: 'UOM / Rate basis' },

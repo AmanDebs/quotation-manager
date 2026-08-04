@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Quotation } from '../types';
-import { Button, Select, PageHeader, EmptyState, Card, StatusBadge, ExportTabs } from '../components/ui';
+import { Button, Select, PageHeader, EmptyState, Card, ExportTabs, ErrorText } from '../components/ui';
 import NewDocumentDialog from '../components/NewDocumentDialog';
 import { fmtDate, fmtMoney } from '../lib/format';
 
@@ -13,8 +13,21 @@ const approvalBadge: Record<string, { cls: string; label: string }> = {
   not_submitted: { cls: 'bg-slate-100 text-slate-500', label: 'Not submitted' },
 };
 
+const STATUSES = ['draft', 'sent', 'negotiating', 'accepted', 'rejected', 'expired'];
+
+// Tint the inline picker so the list still reads at a glance, like the badge did.
+const statusTint: Record<string, string> = {
+  draft: 'bg-slate-100 text-slate-700 border-slate-300',
+  sent: 'bg-blue-50 text-blue-700 border-blue-300',
+  negotiating: 'bg-amber-50 text-amber-800 border-amber-300',
+  accepted: 'bg-green-50 text-green-700 border-green-300',
+  rejected: 'bg-red-50 text-red-700 border-red-300',
+  expired: 'bg-slate-100 text-slate-500 border-slate-300',
+};
+
 export default function QuotationsPage() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [statusFilter, setStatusFilter] = useState('');
   const [exportFilter, setExportFilter] = useState('');
   const [creating, setCreating] = useState(false);
@@ -25,6 +38,19 @@ export default function QuotationsPage() {
       if (statusFilter) params.set('status', statusFilter);
       if (exportFilter) params.set('export', exportFilter);
       return api.get<Quotation[]>(`/api/quotations${params.toString() ? `?${params}` : ''}`);
+    },
+  });
+
+  // Change status without leaving the list. The server still enforces the
+  // approval rule, so a blocked change surfaces as an error here.
+  const setStatus = useMutation({
+    mutationFn: ({ id, status }: { id: number; status: string }) =>
+      api.post<Quotation>(`/api/quotations/${id}/status`, { status }),
+    onSuccess: (q) => {
+      queryClient.invalidateQueries({ queryKey: ['quotations'] });
+      queryClient.invalidateQueries({ queryKey: ['quotation', String(q.id)] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+      queryClient.invalidateQueries({ queryKey: ['approval-count'] });
     },
   });
 
@@ -45,6 +71,7 @@ export default function QuotationsPage() {
           ))}
         </Select>
       </div>
+      <ErrorText error={setStatus.error} />
       <Card className="overflow-x-auto">
         {quotations.length === 0 ? (
           <EmptyState message="No quotations yet. Create one from an enquiry or directly." />
@@ -71,7 +98,25 @@ export default function QuotationsPage() {
                   <td className="py-2 pr-3">{q.customer_name}</td>
                   <td className="py-2 pr-3 text-xs">{q.is_export ? '🌍 Export' : '🇮🇳 Domestic'}</td>
                   <td className="py-2 pr-3 text-right tabular-nums">{q.grand_total ? fmtMoney(q.grand_total, q.currency) : '—'}</td>
-                  <td className="py-2 pr-3"><StatusBadge status={q.status} /></td>
+                  {/* Editable in place — the click must not open the quotation. */}
+                  <td className="py-2 pr-3" onClick={(e) => e.stopPropagation()}>
+                    <select
+                      value={q.status}
+                      disabled={setStatus.isPending}
+                      onChange={(e) => {
+                        setStatus.reset();
+                        setStatus.mutate({ id: q.id, status: e.target.value });
+                      }}
+                      className={`cursor-pointer rounded-full border px-2 py-0.5 text-xs font-medium capitalize focus:outline-none focus:ring-1 focus:ring-brand-600 disabled:opacity-50 ${statusTint[q.status] ?? 'bg-slate-100 text-slate-600 border-slate-300'}`}
+                      title="Change status"
+                    >
+                      {STATUSES.map((s) => (
+                        <option key={s} value={s} className="bg-white text-slate-800">
+                          {s[0].toUpperCase() + s.slice(1)}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
                   <td className="py-2 pr-3">
                     {q.approval_status === 'approved' ? (
                       <span className="text-xs text-green-700">✓ Approved</span>

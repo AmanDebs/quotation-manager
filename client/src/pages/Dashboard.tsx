@@ -28,6 +28,8 @@ interface DashboardData {
   followups: { overdue: Followup[]; today: Followup[]; upcoming: Followup[] };
   funnel: { quoted: number; accepted: number; orders: number; invoiced: number };
   receivables: { currency: string; invoiced: number; received: number; outstanding: number }[];
+  orderBook: { currency: string; open_value: number; pending_value: number; count: number }[];
+  overdueOrders: number;
 }
 
 const RANGES = [
@@ -220,6 +222,42 @@ export default function DashboardPage() {
                 <Bar dataKey="invoiced" name="Invoiced" fill={SERIES_2} radius={[4, 4, 0, 0]} maxBarSize={28} />
               </BarChart>
             </ResponsiveContainer>
+          )}
+        </Card>
+
+        {/* Order book */}
+        <Card
+          title={`Order Book${data.overdueOrders ? ` — ${data.overdueOrders} overdue` : ''}`}
+          actions={<Link to="/orders" className="text-xs text-brand-600 hover:underline">View orders</Link>}
+        >
+          {data.orderBook.length === 0 ? (
+            <p className="py-6 text-center text-sm text-slate-400">No open orders. Book one from an accepted quotation.</p>
+          ) : (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-slate-200 text-left text-xs uppercase text-slate-500">
+                  <th className="pb-1 pr-3">Currency</th>
+                  <th className="pb-1 pr-3 text-right">Open Orders</th>
+                  <th className="pb-1 pr-3 text-right">Order Value</th>
+                  <th className="pb-1 text-right">Still to Ship</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.orderBook.map((r) => (
+                  <tr key={r.currency} className="border-b border-slate-100 last:border-0">
+                    <td className="py-1.5 pr-3 font-medium">{r.currency}</td>
+                    <td className="py-1.5 pr-3 text-right">{r.count}</td>
+                    <td className="py-1.5 pr-3 text-right tabular-nums">{fmtMoney(r.open_value, r.currency)}</td>
+                    <td className="py-1.5 text-right tabular-nums font-semibold text-amber-700">{fmtMoney(r.pending_value, r.currency)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          {!!data.overdueOrders && (
+            <p className="mt-2 text-xs text-red-600">
+              ⚠ {data.overdueOrders} order{data.overdueOrders === 1 ? '' : 's'} past the promised despatch date.
+            </p>
           )}
         </Card>
 
