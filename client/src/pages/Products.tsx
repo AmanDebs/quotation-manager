@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
+import { useIsManager } from '../App';
 import type { Product } from '../types';
 import { Button, Input, Textarea, Select, Field, PageHeader, EmptyState, ErrorText, Modal, Card } from '../components/ui';
 import ProductImportModal from '../components/ProductImportModal';
@@ -46,6 +47,9 @@ export default function ProductsPage() {
   const [q, setQ] = useState('');
   const [editing, setEditing] = useState<Product | Omit<Product, 'id'> | null>(null);
   const [importing, setImporting] = useState(false);
+  // Anyone may add a product mid-quotation, but changing or bulk-replacing the
+  // shared catalogue moves everyone's prices — that stays with the manager.
+  const isManager = useIsManager();
   const { data: products = [] } = useQuery({
     queryKey: ['products', q],
     queryFn: () => api.get<Product[]>(`/api/products?q=${encodeURIComponent(q)}`),
@@ -74,7 +78,7 @@ export default function ProductsPage() {
         subtitle={`${products.length} product${products.length === 1 ? '' : 's'} in catalog`}
         actions={
           <>
-            <Button variant="secondary" onClick={() => setImporting(true)}>⬆ Import from Excel</Button>
+            {isManager && <Button variant="secondary" onClick={() => setImporting(true)}>⬆ Import from Excel</Button>}
             <Button onClick={() => { save.reset(); setEditing({ ...empty }); }}>+ New Product</Button>
           </>
         }
@@ -119,14 +123,20 @@ export default function ProductsPage() {
                   <td className="py-2 pr-3 text-right tabular-nums">{p.qty_20ft?.toLocaleString('en-IN') ?? '—'}</td>
                   <td className="py-2 pr-3 text-right tabular-nums">{p.qty_40ft?.toLocaleString('en-IN') ?? '—'}</td>
                   <td className="py-2 text-right whitespace-nowrap">
-                    <Button variant="ghost" onClick={() => { save.reset(); setEditing(p); }}>Edit</Button>
-                    <Button
-                      variant="danger"
-                      className="ml-1 border-0"
-                      onClick={() => { if (confirm(`Delete product "${p.name}"?`)) remove.mutate(p.id); }}
-                    >
-                      Delete
-                    </Button>
+                    {isManager ? (
+                      <>
+                        <Button variant="ghost" onClick={() => { save.reset(); setEditing(p); }}>Edit</Button>
+                        <Button
+                          variant="danger"
+                          className="ml-1 border-0"
+                          onClick={() => { if (confirm(`Delete product "${p.name}"?`)) remove.mutate(p.id); }}
+                        >
+                          Delete
+                        </Button>
+                      </>
+                    ) : (
+                      <span className="text-xs text-slate-300" title="Ask your manager to change a catalogue entry">—</span>
+                    )}
                   </td>
                 </tr>
               ))}

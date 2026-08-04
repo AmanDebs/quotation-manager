@@ -406,3 +406,7 @@ CREATE TABLE IF NOT EXISTS sequences (
   next_num INTEGER NOT NULL DEFAULT 1,
   PRIMARY KEY (doc_type, year)
 );
+
+-- The unique indexes on document numbers are created in db/connection.ts, not
+-- here: this file runs first on every boot, so an existing database holding
+-- duplicates would fail to start before anything could clean them up.

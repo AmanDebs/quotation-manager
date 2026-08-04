@@ -26,9 +26,14 @@ followupsRouter.get('/', (req: AuthedRequest, res) => {
   res.json(db.prepare(sql).all(...(params as never[])));
 });
 
-followupsRouter.post('/', (req, res) => {
+followupsRouter.post('/', (req: AuthedRequest, res) => {
   const body = req.body ?? {};
   if (!body.due_date) return res.status(400).json({ error: 'Due date is required' });
+  // A follow-up attached to a customer is only creatable by someone who may
+  // see that customer — otherwise it would surface on their dashboard.
+  if (body.customer_id != null && !canAccessCustomer(req, Number(body.customer_id))) {
+    return res.status(404).json({ error: 'Customer not found' });
+  }
   const info = db.prepare(
     'INSERT INTO followups (doc_type, doc_id, customer_id, due_date, note) VALUES (?, ?, ?, ?, ?)'
   ).run(
@@ -58,7 +63,14 @@ followupsRouter.put('/:id', (req: AuthedRequest, res) => {
   res.json(db.prepare(`${listSql} WHERE f.id = ?`).get(id));
 });
 
-followupsRouter.delete('/:id', (req, res) => {
-  db.prepare('DELETE FROM followups WHERE id = ?').run(Number(req.params.id));
+followupsRouter.delete('/:id', (req: AuthedRequest, res) => {
+  const id = Number(req.params.id);
+  const existing = db.prepare('SELECT customer_id FROM followups WHERE id = ?').get(id) as
+    | { customer_id: number | null } | undefined;
+  if (!existing) return res.status(404).json({ error: 'Follow-up not found' });
+  if (existing.customer_id != null && !canAccessCustomer(req, Number(existing.customer_id))) {
+    return res.status(404).json({ error: 'Follow-up not found' });
+  }
+  db.prepare('DELETE FROM followups WHERE id = ?').run(id);
   res.json({ ok: true });
 });

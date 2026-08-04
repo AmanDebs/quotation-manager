@@ -24,6 +24,8 @@ Each document is created from the previous one with all details carried forward,
 - **Follow-up reminders** on any document — overdue/today/upcoming on the dashboard
 - **Dashboard** — conversion funnel, quotations by status, monthly quoted vs invoiced value per currency, top customers and products
 - **Multi-currency** (INR/USD/EUR at the customer's option) and **GST support** (CGST+SGST / IGST / no tax for exports)
+- **Import your product catalogue from Excel** — drop in an .xlsx or .csv, check the columns it detected, and see exactly which products will be added and which updated before anything is saved. Re-importing the same sheet updates in place instead of duplicating
+- **Container planner** — work out the mix of products that fills a 20ft or 40ft container, or how many containers an order needs. Uses each product's pieces-per-box and boxes-per-container, so it knows that a box of handles and a box of caps take different amounts of space
 - Customer & product catalogs, simple team login
 
 ## Running the app
@@ -51,6 +53,29 @@ To load realistic demo data on an empty database: `npm run seed` in `server/`.
 - All money math happens server-side in `server/src/services/totals.ts` (single source of truth).
 - Document numbers (QT-2026-0001, PI-…, INV-…, PL-…) are per-type yearly sequences; prefixes configurable in Settings.
 
-### Moving to the cloud later
+## Deploying it for your team
 
-The app is a standard Express API + static React build: deploy the server to any Node host, run `npm run build` in `client/` and serve `client/dist`, and swap SQLite for PostgreSQL when multi-user concurrency demands it.
+The app is one service: Express serves both the API and the built React app on a single origin. It needs a host with a **persistent disk**, because the database is a file. That rules out serverless platforms (Vercel, Netlify, Lambda) — their filesystems are wiped between requests, so the database would disappear.
+
+**On Render**, which is what `render.yaml` is written for:
+
+1. Push this repository to GitHub.
+2. Render dashboard → **New → Blueprint** → pick the repository. It reads `render.yaml` and creates the service, the 1 GB disk mounted at `/data`, and a generated `JWT_SECRET`.
+3. Wait for the first deploy, then open the URL. The first visit asks you to create an account — **that account becomes the manager**.
+4. Go to **Settings** and fill in the company profile, logo, signature and bank details (these appear on every PDF), then **Team** to add your colleagues. Employees cannot sign themselves up.
+
+Roughly $7/month for the instance plus a little for the disk.
+
+**Keep it on one instance.** SQLite is a file on that disk; a second instance would quietly get its own copy.
+
+Any other Node host with a disk works the same way — set `DATA_DIR` to the mount path, `NODE_ENV=production`, and a stable `JWT_SECRET` (at least 32 characters; `openssl rand -hex 32` generates one). Without a stable secret everyone is signed out on each deploy.
+
+### Backups
+
+The server writes a snapshot to `$DATA_DIR/backups/` when it starts and once a day after, keeping the last 14. A manager can also download the whole database at any time from **Settings → Backup**. Do that occasionally and keep the file somewhere off the server — a single disk is a single point of failure.
+
+Snapshots use SQLite's `VACUUM INTO`, so each one is a complete, consistent file you can open directly or drop back into `$DATA_DIR/app.db` to restore.
+
+### If you outgrow SQLite
+
+For one office and a few thousand documents a year it will not be the bottleneck. If a second location appears, the migration path is PostgreSQL: the schema translates directly, and the honest cost is that every database call in `server/src/routes/` becomes asynchronous.

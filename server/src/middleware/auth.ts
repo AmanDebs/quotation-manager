@@ -7,8 +7,22 @@ import { db, dataDir } from '../db/connection.js';
 
 const secretFile = path.join(dataDir, 'jwt-secret');
 
-// Persist a random secret so logins survive server restarts.
+/**
+ * The signing secret must be stable across restarts, or every deploy signs
+ * everyone out. A hosted deployment sets JWT_SECRET; locally we fall back to a
+ * random secret persisted next to the database.
+ */
 function loadSecret(): string {
+  const fromEnv = process.env.JWT_SECRET?.trim();
+  if (fromEnv) {
+    if (fromEnv.length < 32) {
+      throw new Error('JWT_SECRET must be at least 32 characters — generate one with: openssl rand -hex 32');
+    }
+    return fromEnv;
+  }
+  if (process.env.NODE_ENV === 'production') {
+    console.warn('JWT_SECRET is not set — falling back to a file-based secret. Sessions will not survive a redeploy on a host with an ephemeral disk.');
+  }
   mkdirSync(path.dirname(secretFile), { recursive: true });
   if (existsSync(secretFile)) return readFileSync(secretFile, 'utf-8');
   const secret = crypto.randomBytes(32).toString('hex');

@@ -96,6 +96,40 @@ addColumnIfMissing('products', 'pcs_per_pack', 'REAL');
 addColumnIfMissing('products', 'qty_20ft', 'REAL');
 addColumnIfMissing('products', 'qty_40ft', 'REAL');
 
+/**
+ * A document number is an identity, not a label — it goes on paperwork the
+ * customer and the tax authority both keep. Enforce that in the database, so a
+ * manual override cannot quietly reuse one. Quotations key on (number,
+ * revision) because revisions deliberately share a number; everything else is
+ * unique on the number alone.
+ *
+ * Done here rather than in schema.sql because that file runs first on every
+ * boot: a database that already contains duplicates has to be cleaned before
+ * the index can exist, or the server would refuse to start.
+ */
+function enforceUniqueNumbers(table: string, indexName: string, columns: string[]) {
+  const cols = columns.join(', ');
+  try {
+    db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS ${indexName} ON ${table}(${cols})`);
+    return;
+  } catch {
+    // Duplicates exist. Suffix the later rows so the earliest keeps the number.
+    const dupes = db.prepare(
+      `SELECT id FROM ${table} WHERE id NOT IN (SELECT MIN(id) FROM ${table} GROUP BY ${cols})`
+    ).all() as { id: number }[];
+    for (const d of dupes) {
+      db.prepare(`UPDATE ${table} SET number = number || '-DUP' || id WHERE id = ?`).run(d.id);
+    }
+    console.warn(`${table}: renamed ${dupes.length} duplicate document number(s) so they could be made unique.`);
+    db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS ${indexName} ON ${table}(${cols})`);
+  }
+}
+enforceUniqueNumbers('quotations', 'idx_quotations_number', ['number', 'revision']);
+enforceUniqueNumbers('orders', 'idx_orders_number', ['number']);
+enforceUniqueNumbers('proforma_invoices', 'idx_proformas_number', ['number']);
+enforceUniqueNumbers('commercial_invoices', 'idx_invoices_number', ['number']);
+enforceUniqueNumbers('packing_lists', 'idx_packing_lists_number', ['number']);
+
 // One-off backfill: the founding account becomes the manager and inherits
 // ownership of everything that pre-dates the roles feature.
 const founder = db.prepare('SELECT id FROM users ORDER BY id LIMIT 1').get() as { id: number } | undefined;
@@ -148,4 +182,13 @@ export function transaction<T>(fn: () => T): T {
     db.exec('ROLLBACK');
     throw err;
   }
+}
+
+/**
+ * True when an error is the unique-number index rejecting a manual override.
+ * Routes turn this into a 409 the user can act on, rather than a 500.
+ */
+export function isDuplicateNumberError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return /UNIQUE constraint failed/i.test(message) && /\.number\b/i.test(message);
 }

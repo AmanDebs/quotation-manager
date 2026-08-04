@@ -3,10 +3,18 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { db } from '../db/connection.js';
 import { JWT_SECRET, COOKIE_NAME, requireAuth, type AuthedRequest } from '../middleware/auth.js';
+import { loginRateLimit } from '../middleware/rateLimit.js';
 
 export const authRouter = Router();
 
-const cookieOpts = { httpOnly: true, sameSite: 'lax' as const, maxAge: 30 * 24 * 3600 * 1000 };
+// `secure` only in production: over plain http://localhost a secure cookie is
+// silently dropped, which would make local development impossible to log into.
+const cookieOpts = {
+  httpOnly: true,
+  sameSite: 'lax' as const,
+  secure: process.env.NODE_ENV === 'production',
+  maxAge: 30 * 24 * 3600 * 1000,
+};
 
 // True until the first user registers; the client shows a setup screen then.
 authRouter.get('/status', (_req, res) => {
@@ -19,7 +27,7 @@ authRouter.get('/status', (_req, res) => {
  * further accounts are created by a manager via /api/users, so nobody can
  * sign themselves up.
  */
-authRouter.post('/register', (req, res) => {
+authRouter.post('/register', loginRateLimit, (req, res) => {
   const existingUsers = db.prepare('SELECT COUNT(*) AS c FROM users').get() as { c: number };
   if (existingUsers.c > 0) {
     return res.status(403).json({ error: 'Accounts are created by your manager. Please ask them for a login.' });
@@ -37,7 +45,7 @@ authRouter.post('/register', (req, res) => {
   res.json({ id, name, email, role: 'manager' });
 });
 
-authRouter.post('/login', (req, res) => {
+authRouter.post('/login', loginRateLimit, (req, res) => {
   const { email, password } = req.body ?? {};
   const user = db.prepare('SELECT * FROM users WHERE email = ?').get(String(email ?? '').toLowerCase()) as
     | { id: number; name: string; email: string; password_hash: string; role: string; active: number }
@@ -52,7 +60,9 @@ authRouter.post('/login', (req, res) => {
 });
 
 authRouter.post('/logout', (_req, res) => {
-  res.clearCookie(COOKIE_NAME);
+  // Must repeat the attributes the cookie was set with, or the browser keeps it.
+  const { maxAge: _maxAge, ...clearOpts } = cookieOpts;
+  res.clearCookie(COOKIE_NAME, clearOpts);
   res.json({ ok: true });
 });
 

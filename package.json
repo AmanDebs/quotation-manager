@@ -1,0 +1,14 @@
+{
+  "name": "quotation-manager",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Order-to-dispatch document management — deploy entry point. Local development still runs the two halves separately (see start-app.bat).",
+  "engines": {
+    "node": ">=22.5"
+  },
+  "scripts": {
+    "build": "npm --prefix client ci --include=dev && npm --prefix client run build && npm --prefix server ci --omit=dev",
+    "start": "npm --prefix server run start",
+    "typecheck": "npm --prefix server exec tsc -- --noEmit && npm --prefix client exec tsc -- --noEmit"
+  }
+}

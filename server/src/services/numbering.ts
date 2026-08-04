@@ -31,13 +31,14 @@ export function nextNumber(docType: DocType, opts: { isExport?: boolean } = {}):
   const seqKey = useExport ? `${docType}_export` : docType;
   const fyStart = fiscalYearStart();
 
-  db.prepare(
-    'INSERT INTO sequences (doc_type, year, next_num) VALUES (?, ?, 1) ON CONFLICT(doc_type, year) DO NOTHING'
-  ).run(seqKey, fyStart);
-  const row = db
-    .prepare('SELECT next_num FROM sequences WHERE doc_type = ? AND year = ?')
-    .get(seqKey, fyStart) as { next_num: number };
-  db.prepare('UPDATE sequences SET next_num = next_num + 1 WHERE doc_type = ? AND year = ?').run(seqKey, fyStart);
+  // Claim the next number in a single statement. Read-then-update would hand
+  // the same number to two people creating documents at the same moment; that
+  // was only ever safe because SQLite serialises writes on one connection.
+  const row = db.prepare(
+    `INSERT INTO sequences (doc_type, year, next_num) VALUES (?, ?, 1)
+     ON CONFLICT(doc_type, year) DO UPDATE SET next_num = next_num + 1
+     RETURNING next_num`
+  ).get(seqKey, fyStart) as { next_num: number };
 
   const settings = db.prepare('SELECT * FROM settings WHERE id = 1').get() as Record<string, string>;
   const pattern = settings[useExport ? cols.export! : cols.std] || `${docType.toUpperCase()}/{FY}/{SEQ}`;

@@ -31,6 +31,48 @@ function ImageUpload({ label, value, onChange }: { label: string; value: string;
   );
 }
 
+/**
+ * The server snapshots the database daily, but a backup nobody can reach is not
+ * a backup — this puts a copy in the manager's hands on demand.
+ */
+function BackupCard() {
+  const { data } = useQuery({
+    queryKey: ['backups'],
+    queryFn: () => api.get<{ snapshots: { name: string; size: number; modified: string }[] }>('/api/backup'),
+  });
+  const latest = data?.snapshots?.[0];
+  const mb = (n: number) => `${(n / 1024 / 1024).toFixed(1)} MB`;
+
+  return (
+    <Card
+      title="Backup"
+      actions={
+        // A plain link, not fetch(): the browser handles the file download.
+        <a
+          href="/api/backup/download"
+          className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+        >
+          ⬇ Download backup now
+        </a>
+      }
+    >
+      <p className="text-sm text-slate-500">
+        A snapshot of the whole database — every customer, document and payment — as a single file you can keep
+        somewhere safe. The server also takes one automatically each day and keeps the last 14.
+      </p>
+      {latest ? (
+        <p className="mt-2 text-xs text-slate-400">
+          Most recent automatic snapshot: <span className="font-medium text-slate-600">{latest.name}</span> ·{' '}
+          {mb(latest.size)} · {new Date(latest.modified).toLocaleString()}
+          {data && data.snapshots.length > 1 && ` · ${data.snapshots.length} kept`}
+        </p>
+      ) : (
+        <p className="mt-2 text-xs text-slate-400">No automatic snapshot yet — one is taken when the server starts.</p>
+      )}
+    </Card>
+  );
+}
+
 export default function SettingsPage() {
   const queryClient = useQueryClient();
   const { data } = useQuery({ queryKey: ['settings'], queryFn: () => api.get<Settings>('/api/settings') });
@@ -154,6 +196,8 @@ export default function SettingsPage() {
           <Textarea rows={4} value={form.default_terms} onChange={(e) => set({ default_terms: e.target.value })} placeholder="Printed at the bottom of every document…" />
           <p className="mt-2 text-xs text-slate-400">One clause per line — each line prints as a bullet.</p>
         </Card>
+
+        <BackupCard />
 
         <Card
           title="Note & Term Presets"

@@ -1,0 +1,30 @@
+# Render blueprint — create the service from this file rather than by hand:
+# Render dashboard → New → Blueprint → pick this repository.
+#
+# One web service serving both the API and the built React app on a single
+# origin, with the SQLite database on a persistent disk. Do not scale this
+# service past one instance: SQLite is a file on that disk, and a second
+# instance would have its own copy.
+services:
+  - type: web
+    name: quotation-manager
+    runtime: node
+    plan: starter # the free plan has no persistent disk
+    region: singapore # closest to Kolkata
+    buildCommand: npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    autoDeployTrigger: commit
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATA_DIR
+        value: /data # must match the disk mountPath below
+      - key: JWT_SECRET
+        generateValue: true # generated once and kept; sessions survive redeploys
+      - key: NODE_VERSION
+        value: "24"
+    disk:
+      name: quotation-data
+      mountPath: /data
+      sizeGB: 1

@@ -1,8 +1,16 @@
 import { Router } from 'express';
 import { db, transaction } from '../db/connection.js';
+import { requireManager } from '../middleware/auth.js';
 import { IMPORT_FIELDS, buildImport, decodeUpload, identityKey, type BuildOptions } from '../services/productImport.js';
 
 export const productsRouter = Router();
+
+/**
+ * The catalogue is shared, so changing an existing product changes everyone's
+ * prices — that is a manager's call. Creating one is not: an employee who meets
+ * a new product mid-quotation must not have to wait for someone. Reading is
+ * open because every document form needs the picker.
+ */
 
 const fields = ['name', 'description', 'hsn_code', 'unit', 'unit_price', 'country_of_origin', 'image', 'color'];
 /** Numeric packing fields — kept separate because blank must persist as NULL, not 0. */
@@ -35,7 +43,7 @@ productsRouter.get('/import/fields', (_req, res) => {
  * every row. Writes nothing — the client shows this for confirmation and then
  * posts the same file and options to /import.
  */
-productsRouter.post('/import/preview', (req, res) => {
+productsRouter.post('/import/preview', requireManager, (req, res) => {
   const body = req.body ?? {};
   if (!body.file) return res.status(400).json({ error: 'No file was uploaded' });
   try {
@@ -48,7 +56,7 @@ productsRouter.post('/import/preview', (req, res) => {
 });
 
 /** Apply the import. Re-parses the file so the result matches the preview exactly. */
-productsRouter.post('/import', (req, res) => {
+productsRouter.post('/import', requireManager, (req, res) => {
   const body = req.body ?? {};
   if (!body.file) return res.status(400).json({ error: 'No file was uploaded' });
 
@@ -125,7 +133,7 @@ productsRouter.post('/', (req, res) => {
   res.status(201).json(db.prepare('SELECT * FROM products WHERE id = ?').get(Number(info.lastInsertRowid)));
 });
 
-productsRouter.put('/:id', (req, res) => {
+productsRouter.put('/:id', requireManager, (req, res) => {
   const id = Number(req.params.id);
   const body = req.body ?? {};
   if (!db.prepare('SELECT id FROM products WHERE id = ?').get(id)) return res.status(404).json({ error: 'Product not found' });
@@ -147,7 +155,21 @@ productsRouter.put('/:id', (req, res) => {
   res.json(db.prepare('SELECT * FROM products WHERE id = ?').get(id));
 });
 
-productsRouter.delete('/:id', (req, res) => {
-  db.prepare('DELETE FROM products WHERE id = ?').run(Number(req.params.id));
+productsRouter.delete('/:id', requireManager, (req, res) => {
+  const id = Number(req.params.id);
+  if (!db.prepare('SELECT id FROM products WHERE id = ?').get(id)) {
+    return res.status(404).json({ error: 'Product not found' });
+  }
+  // Line items reference products, so a used product cannot simply vanish.
+  const used = db.prepare(
+    `SELECT (SELECT COUNT(*) FROM quotation_items WHERE product_id = ?) +
+            (SELECT COUNT(*) FROM order_items WHERE product_id = ?) +
+            (SELECT COUNT(*) FROM pi_items WHERE product_id = ?) +
+            (SELECT COUNT(*) FROM invoice_items WHERE product_id = ?) AS c`
+  ).get(id, id, id, id) as { c: number };
+  if (used.c > 0) {
+    return res.status(409).json({ error: 'This product is used on existing documents and cannot be deleted' });
+  }
+  db.prepare('DELETE FROM products WHERE id = ?').run(id);
   res.json({ ok: true });
 });

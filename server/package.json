@@ -14,7 +14,8 @@
     "cors": "^2.8.5",
     "express": "^4.21.2",
     "jsonwebtoken": "^9.0.2",
-    "pdfmake": "^0.2.18"
+    "pdfmake": "^0.2.18",
+    "tsx": "^4.19.2"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
@@ -24,7 +25,6 @@
     "@types/jsonwebtoken": "^9.0.7",
     "@types/node": "^22.10.0",
     "@types/pdfmake": "^0.2.11",
-    "tsx": "^4.19.2",
     "typescript": "^5.7.2"
   }
 }

@@ -83,14 +83,27 @@ Stop-Process -Id (Get-NetTCPConnection -LocalPort 4100 -State Listen).OwningProc
 
 **Conventions**: dates are `YYYY-MM-DD` strings; money is REAL rounded via `round2`; `qty` may be NULL (price-only quotations — PDFs then hide amounts); INR formats with lakh grouping and Indian-system amount-in-words (`services/amountInWords.ts`).
 
+## Deployment
+
+Production is **one service on one origin**: Express serves `/api` and, when `client/dist` exists, the built React app plus an SPA fallback. The root `package.json` is the deploy entry point (`build` → client build + production install; `start` → the server); `render.yaml` is a working blueprint for Render with a disk at `/data`.
+
+- **`tsx` is a runtime dependency, not a dev one** — the server runs TypeScript directly in production. Compiling would need an emitting tsconfig *and* an asset copy for `schema.sql`, which `db/connection.ts` loads relative to `__dirname`. Don't "fix" this by moving tsx back.
+- **Env vars that matter**: `DATA_DIR` (the disk mount), `NODE_ENV=production` (switches on `trust proxy`, `secure` cookies, and switches *off* CORS since it's same-origin), and `JWT_SECRET` (≥32 chars, enforced at boot — without it every redeploy signs everyone out).
+- **Never scale past one instance.** SQLite is a file on that disk.
+- **Backups** (`services/backup.ts`): `VACUUM INTO` on boot and daily into `$DATA_DIR/backups/`, 14-day retention, plus manager-only `GET /api/backup/download`. That route is mounted at `/api/backup`, **not** under `/api/settings`, whose guard lets any GET through — putting it there would make the whole database downloadable by every employee.
+
 ## Known gaps
 
-Found in a review and **not yet fixed** — don't rediscover them as new, and don't assume the invariant holds:
+Recorded from a review; **not yet fixed** — don't rediscover them as new, and don't assume the invariant holds:
 
-- **Document numbers are not unique.** There is no `UNIQUE` index on any `number` column, and manual override accepts a number already in use. This is worse than cosmetic for quotations, where revisions are keyed *by number*: a duplicate merges two unrelated quotations into one revision family, and `POST /:id/revise` takes `MAX(revision)` across both.
-- **`routes/followups.ts` scopes GET and PUT but not POST or DELETE**, so any employee can delete another owner's follow-up by id.
-- **`routes/products.ts` has no manager guard**, so any employee can rewrite or delete the shared catalogue — including via the import endpoints. Deleting a product that a line item references throws a foreign-key error (now surfaced as a 409 by the `index.ts` backstop).
 - Nothing auto-expires a quotation past its `validity_date`; `expired` is only ever set by hand. The dashboard counts these under `attention.expiringQuotations` but does not change the status.
 - Order status is manual even though dispatch is derived — `partially_dispatched`/`completed` never set themselves, though `getFull` already computes `any_dispatched`/`fully_dispatched`.
 - The invoice's 10% qty-variance check matches PI lines **by description**, while packing lists and dispatch progress match **by index**. Editing a description on the invoice silently empties the variance report.
-- There is no audit trail, no pagination on any list, and no rate limiting on login.
+- There is no audit trail (who changed what, when) and no pagination on any list.
+
+Fixed while making the app deployable, and worth knowing the shape of:
+
+- **Document numbers are unique**, enforced by indexes created in `db/connection.ts` — deliberately *not* in `schema.sql`, which runs first on every boot and would refuse to start on a database that already held duplicates. The migration de-duplicates (suffixing `-DUPn`) and then creates the index. Quotations key on `(number, revision)` since revisions share a number. `services/numbering.ts` claims the next number in one `INSERT … ON CONFLICT DO UPDATE … RETURNING` statement; the old read-then-update was only safe because SQLite serialises writes. A rejected number surfaces as a 409 from the central handler in `index.ts`, so every document type behaves the same.
+- **Products**: read and create are open (an employee meeting a new product mid-quotation must not be blocked); `PUT`, `DELETE` and both import endpoints are manager-only, and delete now 409s when line items reference the product.
+- **Follow-ups**: `POST` and `DELETE` are scoped like `PUT` already was.
+- **Login is rate-limited** (`middleware/rateLimit.ts`) — in-memory by IP + email, which is correct for a single-instance deployment and is the piece to replace if that ever changes.
