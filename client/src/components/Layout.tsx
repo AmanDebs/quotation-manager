@@ -14,6 +14,7 @@ const nav = [
   { to: '/followups', label: 'Follow-ups', icon: '🔔' },
   { to: '/customers', label: 'Customers', icon: '🏢' },
   { to: '/products', label: 'Products', icon: '🏷️' },
+  { to: '/container-planner', label: 'Container Planner', icon: '🚢' },
   { to: '/approvals', label: 'Approvals', icon: '✅', managerOnly: true },
   { to: '/team', label: 'Team', icon: '👥', managerOnly: true },
   { to: '/settings', label: 'Settings', icon: '⚙️', managerOnly: true },
