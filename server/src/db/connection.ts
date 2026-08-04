@@ -90,6 +90,12 @@ addColumnIfMissing('settings', 'order_export_pattern', "TEXT NOT NULL DEFAULT 'S
 addColumnIfMissing('proforma_invoices', 'order_id', 'INTEGER');
 addColumnIfMissing('commercial_invoices', 'order_id', 'INTEGER');
 
+// Product packing defaults (2026-08), matching the columns the user keeps in
+// their own catalogue sheet: pieces per box, and boxes per container.
+addColumnIfMissing('products', 'pcs_per_pack', 'REAL');
+addColumnIfMissing('products', 'qty_20ft', 'REAL');
+addColumnIfMissing('products', 'qty_40ft', 'REAL');
+
 // One-off backfill: the founding account becomes the manager and inherits
 // ownership of everything that pre-dates the roles feature.
 const founder = db.prepare('SELECT id FROM users ORDER BY id LIMIT 1').get() as { id: number } | undefined;

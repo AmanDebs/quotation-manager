@@ -57,6 +57,28 @@ export interface Product {
   id: number; name: string; description: string; hsn_code: string;
   unit: string; unit_price: number; country_of_origin: string;
   image: string; color: string;
+  /** Packing defaults, used by the line-item editor and the container planner. */
+  pcs_per_pack: number | null; qty_20ft: number | null; qty_40ft: number | null;
+}
+
+export interface ImportField { key: string; label: string; required: boolean }
+
+export interface ImportPreviewRow {
+  row: number;
+  product: Omit<Product, 'id' | 'image'>;
+  action: 'create' | 'update' | 'skip';
+  note?: string;
+  existingId?: number;
+}
+
+export interface ImportPreview {
+  sheetNames: string[];
+  sheet: string;
+  headerRow: number;
+  headers: string[];
+  mapping: Record<string, number>;
+  rows: ImportPreviewRow[];
+  summary: { create: number; update: number; skip: number; total: number };
 }
 
 export interface Enquiry {

@@ -3,13 +3,17 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Product } from '../types';
 import { Button, Input, Textarea, Select, Field, PageHeader, EmptyState, ErrorText, Modal, Card } from '../components/ui';
+import ProductImportModal from '../components/ProductImportModal';
 
 export const UNITS = ['unit', 'kg', 'tonne', 'per 1000', 'meter', 'litre', 'set', 'box'];
 
 const empty: Omit<Product, 'id'> = {
   name: '', description: '', hsn_code: '', unit: 'unit', unit_price: 0, country_of_origin: 'India',
-  image: '', color: '',
+  image: '', color: '', pcs_per_pack: null, qty_20ft: null, qty_40ft: null,
 };
+
+/** Blank must stay blank — 0 boxes per container is a real, different claim. */
+const numOrNull = (v: string) => (v === '' ? null : Number(v));
 
 function ProductImage({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   return (
@@ -41,6 +45,7 @@ export default function ProductsPage() {
   const queryClient = useQueryClient();
   const [q, setQ] = useState('');
   const [editing, setEditing] = useState<Product | Omit<Product, 'id'> | null>(null);
+  const [importing, setImporting] = useState(false);
   const { data: products = [] } = useQuery({
     queryKey: ['products', q],
     queryFn: () => api.get<Product[]>(`/api/products?q=${encodeURIComponent(q)}`),
@@ -67,7 +72,12 @@ export default function ProductsPage() {
       <PageHeader
         title="Products"
         subtitle={`${products.length} product${products.length === 1 ? '' : 's'} in catalog`}
-        actions={<Button onClick={() => { save.reset(); setEditing({ ...empty }); }}>+ New Product</Button>}
+        actions={
+          <>
+            <Button variant="secondary" onClick={() => setImporting(true)}>⬆ Import from Excel</Button>
+            <Button onClick={() => { save.reset(); setEditing({ ...empty }); }}>+ New Product</Button>
+          </>
+        }
       />
       <div className="mb-3 max-w-xs">
         <Input placeholder="Search by name or HSN…" value={q} onChange={(e) => setQ(e.target.value)} />
@@ -86,7 +96,9 @@ export default function ProductsPage() {
                 <th className="pb-2 pr-3">HSN</th>
                 <th className="pb-2 pr-3">Unit</th>
                 <th className="pb-2 pr-3 text-right">Default Price</th>
-                <th className="pb-2 pr-3">Origin</th>
+                <th className="pb-2 pr-3 text-right">Pcs / Box</th>
+                <th className="pb-2 pr-3 text-right">20ft</th>
+                <th className="pb-2 pr-3 text-right">40ft</th>
                 <th className="pb-2" />
               </tr>
             </thead>
@@ -103,7 +115,9 @@ export default function ProductsPage() {
                   <td className="py-2 pr-3">{p.hsn_code || '—'}</td>
                   <td className="py-2 pr-3">{p.unit}</td>
                   <td className="py-2 pr-3 text-right">{p.unit_price ? p.unit_price.toLocaleString('en-IN') : '—'}</td>
-                  <td className="py-2 pr-3">{p.country_of_origin}</td>
+                  <td className="py-2 pr-3 text-right tabular-nums">{p.pcs_per_pack?.toLocaleString('en-IN') ?? '—'}</td>
+                  <td className="py-2 pr-3 text-right tabular-nums">{p.qty_20ft?.toLocaleString('en-IN') ?? '—'}</td>
+                  <td className="py-2 pr-3 text-right tabular-nums">{p.qty_40ft?.toLocaleString('en-IN') ?? '—'}</td>
                   <td className="py-2 text-right whitespace-nowrap">
                     <Button variant="ghost" onClick={() => { save.reset(); setEditing(p); }}>Edit</Button>
                     <Button
@@ -143,6 +157,22 @@ export default function ProductsPage() {
             <Field label="Default Colour">
               <Input value={editing.color} onChange={(e) => set({ color: e.target.value })} placeholder="e.g. Red-Yellow (Printing)" />
             </Field>
+            <div className="col-span-2 rounded-md border border-slate-200 p-3">
+              <div className="mb-2 text-xs font-medium text-slate-600">
+                Packing & loadability — used by the container planner
+              </div>
+              <div className="grid grid-cols-3 gap-3">
+                <Field label="Pcs / Box">
+                  <Input type="number" min={0} step="any" value={editing.pcs_per_pack ?? ''} onChange={(e) => set({ pcs_per_pack: numOrNull(e.target.value) })} />
+                </Field>
+                <Field label="Boxes per 20ft">
+                  <Input type="number" min={0} step="any" value={editing.qty_20ft ?? ''} onChange={(e) => set({ qty_20ft: numOrNull(e.target.value) })} />
+                </Field>
+                <Field label="Boxes per 40ft">
+                  <Input type="number" min={0} step="any" value={editing.qty_40ft ?? ''} onChange={(e) => set({ qty_40ft: numOrNull(e.target.value) })} />
+                </Field>
+              </div>
+            </div>
             <Field label="Product Photo" className="col-span-2">
               <ProductImage value={editing.image} onChange={(v) => set({ image: v })} />
             </Field>
@@ -158,6 +188,8 @@ export default function ProductsPage() {
           </div>
         </Modal>
       )}
+
+      {importing && <ProductImportModal onClose={() => setImporting(false)} />}
     </div>
   );
 }

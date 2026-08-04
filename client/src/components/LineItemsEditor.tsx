@@ -54,6 +54,8 @@ export default function LineItemsEditor({
         unit: p.unit,
         unit_price: p.unit_price,
         color: p.color || items[i].color,
+        // The catalogue knows how this product packs; total pcs follows from it.
+        pcs_per_pack: p.pcs_per_pack ?? items[i].pcs_per_pack,
       });
     }
   };

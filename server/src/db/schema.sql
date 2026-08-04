@@ -77,6 +77,12 @@ CREATE TABLE IF NOT EXISTS products (
   country_of_origin TEXT NOT NULL DEFAULT 'India',
   image TEXT NOT NULL DEFAULT '',
   color TEXT NOT NULL DEFAULT '',
+  -- Packing defaults: how the product ships and how much fills a container.
+  -- The same product can exist at more than one box count, so name alone does
+  -- not identify a catalogue entry — see productImport.ts.
+  pcs_per_pack REAL,
+  qty_20ft REAL,
+  qty_40ft REAL,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 

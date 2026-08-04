@@ -22,7 +22,9 @@ const app = express();
 const PORT = Number(process.env.PORT ?? 4000);
 
 app.use(cors({ origin: true, credentials: true }));
-app.use(express.json({ limit: '5mb' })); // logo/signature images arrive as data URLs
+// Logo/signature images and spreadsheet uploads both arrive base64-encoded in
+// the JSON body, and base64 inflates a file by a third.
+app.use(express.json({ limit: '12mb' }));
 app.use(cookieParser());
 
 app.use('/api/auth', authRouter);
