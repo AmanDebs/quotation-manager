@@ -79,12 +79,23 @@ customersRouter.put('/:id', (req: AuthedRequest, res) => {
 customersRouter.delete('/:id', (req: AuthedRequest, res) => {
   const id = Number(req.params.id);
   if (!canAccessCustomer(req, id)) return res.status(404).json({ error: 'Customer not found' });
+  // Anything referencing the customer blocks the delete — including follow-ups,
+  // payments and orders, which are foreign keys too and would otherwise fail
+  // inside SQLite and reach the user as "Internal server error".
   const used = db.prepare(
     `SELECT (SELECT COUNT(*) FROM quotations WHERE customer_id = ?) +
+            (SELECT COUNT(*) FROM orders WHERE customer_id = ?) +
             (SELECT COUNT(*) FROM proforma_invoices WHERE customer_id = ?) +
-            (SELECT COUNT(*) FROM commercial_invoices WHERE customer_id = ?) AS c`
-  ).get(id, id, id) as { c: number };
+            (SELECT COUNT(*) FROM commercial_invoices WHERE customer_id = ?) +
+            (SELECT COUNT(*) FROM packing_lists WHERE customer_id = ?) AS c`
+  ).get(id, id, id, id, id) as { c: number };
   if (used.c > 0) return res.status(409).json({ error: 'Customer has documents and cannot be deleted' });
+  const linked = db.prepare(
+    `SELECT (SELECT COUNT(*) FROM followups WHERE customer_id = ?) +
+            (SELECT COUNT(*) FROM payments WHERE customer_id = ?) +
+            (SELECT COUNT(*) FROM enquiries WHERE customer_id = ?) AS c`
+  ).get(id, id, id) as { c: number };
+  if (linked.c > 0) return res.status(409).json({ error: 'Customer has follow-ups or payments recorded and cannot be deleted' });
   db.prepare('DELETE FROM customers WHERE id = ?').run(id);
   res.json({ ok: true });
 });

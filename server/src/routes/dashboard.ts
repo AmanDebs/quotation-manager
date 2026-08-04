@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { db } from '../db/connection.js';
 import type { AuthedRequest } from '../middleware/auth.js';
 import { scopeClause } from '../middleware/scope.js';
+import { receivedByInvoice } from '../services/receivables.js';
 
 export const dashboardRouter = Router();
 
@@ -88,19 +89,17 @@ dashboardRouter.get('/', (req: AuthedRequest, res) => {
     upcoming: fu('f.due_date > ?', today),
   };
 
-  // Receivables: per currency, invoiced value minus payments received (incl. PI advances).
+  // Receivables: per currency, invoiced value minus payments received. A PI
+  // advance is shared across the invoices raised from that PI, so the split
+  // comes from services/receivables.ts rather than being recomputed here.
   const invoicesAll = q<{ id: number; pi_id: number | null; currency: string; grand_total: number }>(
     `SELECT id, pi_id, currency, grand_total FROM commercial_invoices${scope.sql ? ` WHERE ${scope.sql}` : ''}`,
     ...p
   );
-  const paymentsAll = q<{ pi_id: number | null; invoice_id: number | null; amount: number }>(
-    'SELECT pi_id, invoice_id, amount FROM payments'
-  );
+  const receivedPerInvoice = receivedByInvoice();
   const receivablesMap = new Map<string, { currency: string; invoiced: number; received: number; outstanding: number }>();
   for (const inv of invoicesAll) {
-    const received = paymentsAll
-      .filter((pay) => pay.invoice_id === inv.id || (inv.pi_id != null && pay.pi_id === inv.pi_id))
-      .reduce((s, pay) => s + pay.amount, 0);
+    const received = receivedPerInvoice.get(inv.id) ?? 0;
     const row = receivablesMap.get(inv.currency) ?? { currency: inv.currency, invoiced: 0, received: 0, outstanding: 0 };
     row.invoiced += inv.grand_total;
     row.received += Math.min(received, inv.grand_total);

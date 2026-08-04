@@ -1,27 +1,31 @@
 import { Router } from 'express';
 import { db } from '../db/connection.js';
+import type { AuthedRequest } from '../middleware/auth.js';
+import { canAccessCustomer } from '../middleware/scope.js';
 
 export const paymentsRouter = Router();
 
-paymentsRouter.post('/', (req, res) => {
+paymentsRouter.post('/', (req: AuthedRequest, res) => {
   const body = req.body ?? {};
   const amount = Number(body.amount);
   if (!amount || amount <= 0) return res.status(400).json({ error: 'Amount must be greater than zero' });
   if (!body.pi_id && !body.invoice_id) return res.status(400).json({ error: 'Payment must be linked to a proforma or an invoice' });
 
-  // Inherit customer/currency from the linked document.
+  // Inherit customer/currency from the linked document. A payment is only
+  // recordable by someone who may see that document, so out-of-scope ids read
+  // as "not found" exactly like the document routes.
   let customerId: number | null = null;
   let currency = 'INR';
   if (body.invoice_id) {
     const inv = db.prepare('SELECT customer_id, currency FROM commercial_invoices WHERE id = ?').get(Number(body.invoice_id)) as
       | { customer_id: number; currency: string } | undefined;
-    if (!inv) return res.status(404).json({ error: 'Invoice not found' });
+    if (!inv || !canAccessCustomer(req, inv.customer_id)) return res.status(404).json({ error: 'Invoice not found' });
     customerId = inv.customer_id;
     currency = inv.currency;
   } else if (body.pi_id) {
     const pi = db.prepare('SELECT customer_id, currency FROM proforma_invoices WHERE id = ?').get(Number(body.pi_id)) as
       | { customer_id: number; currency: string } | undefined;
-    if (!pi) return res.status(404).json({ error: 'Proforma invoice not found' });
+    if (!pi || !canAccessCustomer(req, pi.customer_id)) return res.status(404).json({ error: 'Proforma invoice not found' });
     customerId = pi.customer_id;
     currency = pi.currency;
   }
@@ -43,7 +47,11 @@ paymentsRouter.post('/', (req, res) => {
   res.status(201).json(db.prepare('SELECT * FROM payments WHERE id = ?').get(Number(info.lastInsertRowid)));
 });
 
-paymentsRouter.delete('/:id', (req, res) => {
-  db.prepare('DELETE FROM payments WHERE id = ?').run(Number(req.params.id));
+paymentsRouter.delete('/:id', (req: AuthedRequest, res) => {
+  const id = Number(req.params.id);
+  const payment = db.prepare('SELECT customer_id FROM payments WHERE id = ?').get(id) as
+    | { customer_id: number | null } | undefined;
+  if (!payment || !canAccessCustomer(req, payment.customer_id)) return res.status(404).json({ error: 'Payment not found' });
+  db.prepare('DELETE FROM payments WHERE id = ?').run(id);
   res.json({ ok: true });
 });

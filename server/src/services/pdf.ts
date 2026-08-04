@@ -4,6 +4,7 @@ import type { TDocumentDefinitions, Content } from 'pdfmake/interfaces';
 import { db } from '../db/connection.js';
 import { amountInWords } from './amountInWords.js';
 import { round2 } from './totals.js';
+import { invoiceReceivable } from './receivables.js';
 
 // The npm package ships fonts only as base64 vfs; decode them for the server printer.
 const vfs: Record<string, string> =
@@ -671,10 +672,8 @@ export function buildInvoicePdf(id: number): TDocumentDefinitions {
   const showTax = inv.tax_type !== 'none';
   const cfg: ColumnConfig = JSON.parse(String(inv.column_config || '{}'));
 
-  const paymentRows = (inv.pi_id
-    ? db.prepare('SELECT amount FROM payments WHERE invoice_id = ? OR pi_id = ?').all(id, Number(inv.pi_id))
-    : db.prepare('SELECT amount FROM payments WHERE invoice_id = ?').all(id)) as { amount: number }[];
-  const received = round2(paymentRows.reduce((sum, p) => sum + p.amount, 0));
+  // Own payments plus this invoice's share of any advance on the source PI.
+  const received = invoiceReceivable(id).amount_received;
 
   const refCells: Cell[] = [
     lv('Invoice No.  /  Date', `${inv.number}   ${fmtDate(inv.date)}`),

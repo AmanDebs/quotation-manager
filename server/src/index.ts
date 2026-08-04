@@ -46,6 +46,14 @@ app.use('/api/pdf', requireAuth, pdfRouter);
 
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error(err);
+  // Safety net: a delete blocked by a foreign key is a conflict the user can
+  // act on, not a server fault. Routes still guard explicitly with a specific
+  // message — this only stops a missed guard from reading as a crash.
+  if (/FOREIGN KEY constraint failed/i.test(err.message)) {
+    return res.status(409).json({
+      error: 'This record is still referenced by another document and cannot be deleted.',
+    });
+  }
   res.status(500).json({ error: 'Internal server error' });
 });
 

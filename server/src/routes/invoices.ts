@@ -5,6 +5,7 @@ import { computeTotals, round2, type LineItemInput } from '../services/totals.js
 import type { AuthedRequest } from '../middleware/auth.js';
 import { scopeClause, canAccessCustomer } from '../middleware/scope.js';
 import { submit, decide, resetApprovalOnEdit, blockUnapprovedTransition } from '../services/approval.js';
+import { invoiceReceivable } from '../services/receivables.js';
 
 export const invoicesRouter = Router();
 
@@ -37,13 +38,13 @@ function getFull(id: number) {
       })
       .filter((v) => v.variance_pct !== 0);
   }
-  // Payments: recorded directly on this invoice plus advances taken on the source PI.
-  const payments = inv.pi_id
-    ? db.prepare('SELECT * FROM payments WHERE invoice_id = ? OR pi_id = ? ORDER BY date, id').all(id, Number(inv.pi_id))
-    : db.prepare('SELECT * FROM payments WHERE invoice_id = ? ORDER BY date, id').all(id);
-  inv.payments = payments;
-  inv.amount_received = round2((payments as { amount: number }[]).reduce((s, p) => s + p.amount, 0));
-  inv.balance_due = round2(Number(inv.grand_total) - Number(inv.amount_received));
+  // Payments: recorded directly on this invoice, plus this invoice's share of any
+  // advance taken on the source PI (see services/receivables.ts).
+  const money = invoiceReceivable(id);
+  inv.payments = money.payments;
+  inv.amount_received = money.amount_received;
+  inv.balance_due = money.balance_due;
+  inv.advance_applied = money.advance_applied;
 
   // The paired packing list travels with the invoice everywhere.
   const pl = db.prepare('SELECT * FROM packing_lists WHERE invoice_id = ?').get(id) as Record<string, unknown> | undefined;

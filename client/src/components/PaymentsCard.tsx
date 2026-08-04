@@ -80,22 +80,41 @@ export default function PaymentsCard({
             </tr>
           </thead>
           <tbody>
-            {payments.map((p) => (
-              <tr key={p.id} className="border-b border-slate-100 last:border-0">
-                <td className="py-1.5 pr-3 whitespace-nowrap">{fmtDate(p.date)}</td>
-                <td className="py-1.5 pr-3">{p.method || '—'}</td>
-                <td className="py-1.5 pr-3">{p.reference || '—'}</td>
-                <td className="py-1.5 pr-3 text-xs text-slate-500">{p.pi_id ? 'Advance (PI)' : 'Invoice'}</td>
-                <td className="py-1.5 pr-3 text-right tabular-nums">{fmtMoney(p.amount, p.currency)}</td>
-                <td className="py-1.5 text-right">
-                  <button
-                    className="text-slate-300 hover:text-red-500"
-                    title="Delete payment"
-                    onClick={() => { if (confirm('Delete this payment record?')) remove.mutate(p.id); }}
-                  >✕</button>
-                </td>
-              </tr>
-            ))}
+            {payments.map((p) => {
+              // On an invoice, an advance recorded on the proforma may be split
+              // across several shipments — show the slice credited here, and
+              // send the user to the proforma to change the payment itself.
+              const isSharedAdvance = docType === 'invoice' && !p.invoice_id && !!p.pi_id;
+              const applied = p.applied_amount ?? p.amount;
+              const partly = isSharedAdvance && applied !== p.amount;
+              return (
+                <tr key={p.id} className="border-b border-slate-100 last:border-0">
+                  <td className="py-1.5 pr-3 whitespace-nowrap">{fmtDate(p.date)}</td>
+                  <td className="py-1.5 pr-3">{p.method || '—'}</td>
+                  <td className="py-1.5 pr-3">{p.reference || '—'}</td>
+                  <td className="py-1.5 pr-3 text-xs text-slate-500">{p.pi_id ? 'Advance (PI)' : 'Invoice'}</td>
+                  <td className="py-1.5 pr-3 text-right tabular-nums">
+                    {fmtMoney(applied, p.currency)}
+                    {partly && (
+                      <div className="text-xs font-normal text-slate-400">
+                        of {fmtMoney(p.amount, p.currency)} advance
+                      </div>
+                    )}
+                  </td>
+                  <td className="py-1.5 text-right">
+                    {isSharedAdvance ? (
+                      <span className="text-slate-300" title="Recorded on the proforma invoice — edit it there">–</span>
+                    ) : (
+                      <button
+                        className="text-slate-300 hover:text-red-500"
+                        title="Delete payment"
+                        onClick={() => { if (confirm('Delete this payment record?')) remove.mutate(p.id); }}
+                      >✕</button>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       )}

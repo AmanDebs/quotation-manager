@@ -206,6 +206,10 @@ quotationsRouter.delete('/:id', (req: AuthedRequest, res) => {
   const id = Number(req.params.id);
   const existing = db.prepare('SELECT customer_id FROM quotations WHERE id = ?').get(id) as { customer_id: number } | undefined;
   if (!existing || !canAccessCustomer(req, existing.customer_id)) return res.status(404).json({ error: 'Quotation not found' });
+  // Every table that points at this quotation has to be checked here — a
+  // foreign key left dangling surfaces to the user as "Internal server error".
+  const orders = db.prepare('SELECT COUNT(*) AS c FROM orders WHERE quotation_id = ?').get(id) as { c: number };
+  if (orders.c > 0) return res.status(409).json({ error: 'Quotation has an order booked against it and cannot be deleted' });
   const used = db.prepare('SELECT COUNT(*) AS c FROM proforma_invoices WHERE quotation_id = ?').get(id) as { c: number };
   if (used.c > 0) return res.status(409).json({ error: 'Quotation has a proforma invoice and cannot be deleted' });
   transaction(() => {

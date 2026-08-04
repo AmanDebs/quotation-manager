@@ -130,6 +130,8 @@ export interface Order {
 export interface Payment {
   id: number; pi_id: number | null; invoice_id: number | null; customer_id: number | null;
   date: string; amount: number; currency: string; method: string; reference: string; notes: string;
+  /** On an invoice, the slice of this payment credited here — a PI advance is shared across shipments. */
+  applied_amount?: number;
 }
 
 export interface Proforma {
