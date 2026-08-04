@@ -40,6 +40,20 @@ dashboardRouter.get('/', (req: AuthedRequest, res) => {
     from, to, ...p
   );
 
+  // Where every order currently sits on the production line.
+  const ordersByStatus = q(
+    `SELECT status, COUNT(*) AS count, SUM(grand_total) AS total, currency
+     FROM orders WHERE date BETWEEN ? AND ?${and} GROUP BY status, currency`,
+    from, to, ...p
+  );
+
+  // Export vs domestic — the split the whole business is organised around.
+  const businessSplit = q(
+    `SELECT is_export, currency, COUNT(*) AS count, SUM(grand_total) AS total
+     FROM commercial_invoices WHERE date BETWEEN ? AND ?${and} GROUP BY is_export, currency`,
+    from, to, ...p
+  );
+
   const quotedByMonth = q(
     `SELECT substr(date, 1, 7) AS month, currency, SUM(grand_total) AS total
      FROM quotations WHERE superseded_by IS NULL AND date BETWEEN ? AND ?${and} GROUP BY month, currency ORDER BY month`,
@@ -57,6 +71,16 @@ dashboardRouter.get('/', (req: AuthedRequest, res) => {
      FROM quotations q JOIN customers c ON c.id = q.customer_id
      WHERE q.superseded_by IS NULL AND q.date BETWEEN ? AND ?${scope.sql ? ` AND q.${scope.sql}` : ''}
      GROUP BY c.id, q.currency ORDER BY total DESC LIMIT 8`,
+    from, to, ...p
+  );
+
+  // Quoted value flatters whoever quotes the most; invoiced value is the real
+  // business. Both are offered so the two can be compared.
+  const topCustomersInvoiced = q(
+    `SELECT c.name, i.currency, SUM(i.grand_total) AS total, COUNT(*) AS invoices
+     FROM commercial_invoices i JOIN customers c ON c.id = i.customer_id
+     WHERE i.date BETWEEN ? AND ?${scope.sql ? ` AND i.${scope.sql}` : ''}
+     GROUP BY c.id, i.currency ORDER BY total DESC LIMIT 8`,
     from, to, ...p
   );
 
@@ -92,26 +116,51 @@ dashboardRouter.get('/', (req: AuthedRequest, res) => {
   // Receivables: per currency, invoiced value minus payments received. A PI
   // advance is shared across the invoices raised from that PI, so the split
   // comes from services/receivables.ts rather than being recomputed here.
-  const invoicesAll = q<{ id: number; pi_id: number | null; currency: string; grand_total: number }>(
-    `SELECT id, pi_id, currency, grand_total FROM commercial_invoices${scope.sql ? ` WHERE ${scope.sql}` : ''}`,
+  const invoicesAll = q<{ id: number; pi_id: number | null; currency: string; grand_total: number; date: string }>(
+    `SELECT id, pi_id, currency, grand_total, date FROM commercial_invoices${scope.sql ? ` WHERE ${scope.sql}` : ''}`,
     ...p
   );
   const receivedPerInvoice = receivedByInvoice();
   const receivablesMap = new Map<string, { currency: string; invoiced: number; received: number; outstanding: number }>();
+
+  // Ageing: how long the unpaid money has been outstanding, bucketed by the
+  // age of the invoice. This is what tells you which customer to chase first.
+  const AGE_BUCKETS = ['0-30', '31-60', '61-90', '90+'] as const;
+  const bucketFor = (days: number) => (days <= 30 ? '0-30' : days <= 60 ? '31-60' : days <= 90 ? '61-90' : '90+');
+  const ageingMap = new Map<string, { currency: string; bucket: string; outstanding: number; count: number }>();
+  const todayMs = Date.parse(today);
+  let overdueInvoices = 0;
+
   for (const inv of invoicesAll) {
     const received = receivedPerInvoice.get(inv.id) ?? 0;
     const row = receivablesMap.get(inv.currency) ?? { currency: inv.currency, invoiced: 0, received: 0, outstanding: 0 };
     row.invoiced += inv.grand_total;
     row.received += Math.min(received, inv.grand_total);
-    row.outstanding += Math.max(0, inv.grand_total - received);
+    const outstanding = Math.max(0, inv.grand_total - received);
+    row.outstanding += outstanding;
     receivablesMap.set(inv.currency, row);
+
+    if (outstanding > 0.005) {
+      const days = Math.max(0, Math.floor((todayMs - Date.parse(inv.date)) / 86_400_000));
+      const bucket = bucketFor(days);
+      if (days > 60) overdueInvoices += 1;
+      const key = `${inv.currency}|${bucket}`;
+      const ageRow = ageingMap.get(key) ?? { currency: inv.currency, bucket, outstanding: 0, count: 0 };
+      ageRow.outstanding += outstanding;
+      ageRow.count += 1;
+      ageingMap.set(key, ageRow);
+    }
   }
+
   const receivables = [...receivablesMap.values()].map((r) => ({
     ...r,
     invoiced: Math.round(r.invoiced * 100) / 100,
     received: Math.round(r.received * 100) / 100,
     outstanding: Math.round(r.outstanding * 100) / 100,
   }));
+  const receivablesAgeing = [...ageingMap.values()]
+    .map((r) => ({ ...r, outstanding: Math.round(r.outstanding * 100) / 100 }))
+    .sort((a, b) => a.currency.localeCompare(b.currency) || AGE_BUCKETS.indexOf(a.bucket as never) - AGE_BUCKETS.indexOf(b.bucket as never));
 
   // Order book: value still to ship, per currency, plus anything past its
   // promised date. Pending value is order value minus what's been invoiced.
@@ -147,5 +196,26 @@ dashboardRouter.get('/', (req: AuthedRequest, res) => {
     invoiced: counts.invoices,
   };
 
-  res.json({ counts, quotationsByStatus, quotedByMonth, invoicedByMonth, topCustomers, topProducts, currencyTotals, followups, funnel, receivables, orderBook, overdueOrders });
+  // Everything that wants a human today, gathered in one place so the dashboard
+  // can lead with it instead of burying it among the charts. These ignore the
+  // date range on purpose — an overdue follow-up from March still needs doing.
+  const attention = {
+    overdueFollowups: followups.overdue.length,
+    followupsToday: followups.today.length,
+    overdueOrders,
+    overdueInvoices,
+    pendingApprovals: counts.pendingApprovals,
+    expiringQuotations: one(
+      `SELECT COUNT(*) AS c FROM quotations
+       WHERE superseded_by IS NULL AND status IN ('sent','negotiating')
+         AND validity_date <> '' AND validity_date < ?${and}`,
+      today, ...p
+    ),
+  };
+
+  res.json({
+    counts, quotationsByStatus, ordersByStatus, businessSplit, quotedByMonth, invoicedByMonth,
+    topCustomers, topCustomersInvoiced, topProducts, currencyTotals, followups, funnel,
+    receivables, receivablesAgeing, orderBook, overdueOrders, attention,
+  });
 });
