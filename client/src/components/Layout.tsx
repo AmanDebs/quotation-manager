@@ -9,8 +9,10 @@ const nav = [
   { to: '/quotations', label: 'Quotations', icon: '📄' },
   { to: '/orders', label: 'Orders', icon: '📋' },
   { to: '/proformas', label: 'Proforma Invoices', icon: '🧾' },
+  // No Packing Lists entry: the commercial invoice owns its packing list, so it
+  // is created and edited on the invoice. The pages remain routed for any
+  // bookmarked link, but they are no longer a place you navigate to.
   { to: '/invoices', label: 'Commercial Invoices', icon: '💰' },
-  { to: '/packing-lists', label: 'Packing Lists', icon: '📦' },
   { to: '/followups', label: 'Follow-ups', icon: '🔔' },
   { to: '/customers', label: 'Customers', icon: '🏢' },
   { to: '/products', label: 'Products', icon: '🏷️' },
