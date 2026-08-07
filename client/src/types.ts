@@ -92,6 +92,9 @@ export interface LineItem {
   qty: number | null; unit: string; unit_price: number; tax_pct?: number; amount?: number;
   color?: string; packs?: number | null; pcs_per_pack?: number | null; total_pcs?: number | null;
   custom1?: string; custom2?: string; custom3?: string;
+  /** Optional photo as a base64 data URL. Stored on every document type so it
+   *  survives the carry-forward chain, but only printed on the quotation. */
+  image?: string;
   /** Order lines carry these too; harmless elsewhere. */
   code?: string; supplier?: string;
 }

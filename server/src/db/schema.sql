@@ -146,6 +146,8 @@ CREATE TABLE IF NOT EXISTS quotation_items (
   custom1 TEXT NOT NULL DEFAULT '',
   custom2 TEXT NOT NULL DEFAULT '',
   custom3 TEXT NOT NULL DEFAULT '',
+  -- Optional photo for this line (base64 data URL); printed on quotations.
+  image TEXT NOT NULL DEFAULT '',
   sort_order INTEGER NOT NULL DEFAULT 0
 );
 
@@ -212,6 +214,8 @@ CREATE TABLE IF NOT EXISTS order_items (
   custom1 TEXT NOT NULL DEFAULT '',
   custom2 TEXT NOT NULL DEFAULT '',
   custom3 TEXT NOT NULL DEFAULT '',
+  -- Optional photo for this line (base64 data URL); printed on quotations.
+  image TEXT NOT NULL DEFAULT '',
   sort_order INTEGER NOT NULL DEFAULT 0
 );
 
@@ -280,6 +284,8 @@ CREATE TABLE IF NOT EXISTS pi_items (
   custom1 TEXT NOT NULL DEFAULT '',
   custom2 TEXT NOT NULL DEFAULT '',
   custom3 TEXT NOT NULL DEFAULT '',
+  -- Optional photo for this line (base64 data URL); printed on quotations.
+  image TEXT NOT NULL DEFAULT '',
   sort_order INTEGER NOT NULL DEFAULT 0
 );
 
@@ -341,6 +347,8 @@ CREATE TABLE IF NOT EXISTS invoice_items (
   custom1 TEXT NOT NULL DEFAULT '',
   custom2 TEXT NOT NULL DEFAULT '',
   custom3 TEXT NOT NULL DEFAULT '',
+  -- Optional photo for this line (base64 data URL); printed on quotations.
+  image TEXT NOT NULL DEFAULT '',
   sort_order INTEGER NOT NULL DEFAULT 0
 );
 

@@ -96,6 +96,14 @@ addColumnIfMissing('products', 'pcs_per_pack', 'REAL');
 addColumnIfMissing('products', 'qty_20ft', 'REAL');
 addColumnIfMissing('products', 'qty_40ft', 'REAL');
 
+// Per-line photo (2026-08). Added to every item table, not just quotations:
+// the line-items editor is shared, so a column missing from one table would
+// mean the upload silently vanished on save there. Only the quotation PDF
+// prints it; downstream documents simply carry it.
+for (const table of ['quotation_items', 'order_items', 'pi_items', 'invoice_items']) {
+  addColumnIfMissing(table, 'image', "TEXT NOT NULL DEFAULT ''");
+}
+
 /**
  * A document number is an identity, not a label — it goes on paperwork the
  * customer and the tax authority both keep. Enforce that in the database, so a

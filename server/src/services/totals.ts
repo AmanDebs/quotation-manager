@@ -13,6 +13,8 @@ export interface LineItemInput {
   custom1?: string;
   custom2?: string;
   custom3?: string;
+  /** Optional per-line photo as a base64 data URL; printed on quotations. */
+  image?: string;
 }
 
 export interface ComputedItem extends LineItemInput {
@@ -54,6 +56,7 @@ export function computeTotals(
     custom1: it.custom1 ?? '',
     custom2: it.custom2 ?? '',
     custom3: it.custom3 ?? '',
+    image: it.image ?? '',
     amount: it.qty != null ? round2(it.qty * it.unit_price) : 0,
   }));
 

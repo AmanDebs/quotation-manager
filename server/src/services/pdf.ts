@@ -240,6 +240,11 @@ export interface ColumnSpec {
   align?: 'left' | 'right' | 'center';
   /** Cell text for an item; return '' to count as empty for auto-hide. */
   value: (it: Row, index: number) => string;
+  /**
+   * Render something other than text — an image, say. `value` is still used to
+   * decide whether the column is empty and can be dropped.
+   */
+  cell?: (it: Row, index: number) => Cell;
   /** Always keep this column, even when every value is empty. */
   always?: boolean;
 }
@@ -285,7 +290,7 @@ function itemsTable(s: Row, items: Row[], specs: ColumnSpec[], cfg: ColumnConfig
     columns.map((c) => ({ ...th(s, c.label), alignment: c.key === 'description' ? 'left' : 'center' })),
     ...items.map((it, i) =>
       columns.map((c) => ({
-        text: c.value(it, i),
+        ...(c.cell ? c.cell(it, i) : { text: c.value(it, i) }),
         fontSize: 8,
         alignment: c.align ?? 'left',
         fillColor: i % 2 ? '#f7f5f4' : undefined,
@@ -349,6 +354,13 @@ export function buildQuotationPdf(id: number): TDocumentDefinitions {
 
   const specs: ColumnSpec[] = [
     { key: 'sl', label: 'SL', width: 18, align: 'center', always: true, value: (_it, i) => String(i + 1) },
+    // Photos are a selling aid, so they appear on the quotation and nowhere
+    // else. The column drops out entirely when no line carries one.
+    {
+      key: 'image', label: 'Photo', width: 46, align: 'center',
+      value: (it) => String(it.image || ''),
+      cell: (it) => (it.image ? { image: String(it.image), fit: [40, 40] as [number, number] } : { text: '' }),
+    },
     { key: 'description', label: 'Product Description', width: '*', always: true, value: (it) => String(it.description) },
     { key: 'hsn', label: 'HSN', width: 45, align: 'center', value: (it) => String(it.hsn_code || '') },
     { key: 'unit_price', label: 'Unit Price', width: 48, align: 'right', always: true, value: (it) => fmtNum(it.unit_price, 3) },

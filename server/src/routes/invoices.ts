@@ -140,13 +140,13 @@ function saveItems(invoiceId: number, items: LineItemInput[], taxType: 'none' | 
   const totals = computeTotals(items, taxType, freight, insurance, currency);
   db.prepare('DELETE FROM invoice_items WHERE invoice_id = ?').run(invoiceId);
   const ins = db.prepare(
-    `INSERT INTO invoice_items (invoice_id, product_id, description, hsn_code, qty, unit, unit_price, tax_pct, amount, color, packs, pcs_per_pack, total_pcs, custom1, custom2, custom3, sort_order)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO invoice_items (invoice_id, product_id, description, hsn_code, qty, unit, unit_price, tax_pct, amount, color, packs, pcs_per_pack, total_pcs, custom1, custom2, custom3, image, sort_order)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   );
   totals.items.forEach((it, i) =>
     ins.run(invoiceId, it.product_id ?? null, it.description, it.hsn_code ?? '', it.qty ?? null, it.unit ?? 'unit', it.unit_price, it.tax_pct ?? 0, it.amount,
       it.color ?? '', it.packs ?? null, it.pcs_per_pack ?? null, it.total_pcs ?? null,
-      it.custom1 ?? '', it.custom2 ?? '', it.custom3 ?? '', i)
+      it.custom1 ?? '', it.custom2 ?? '', it.custom3 ?? '', it.image ?? '', i)
   );
   db.prepare('UPDATE commercial_invoices SET subtotal = ?, tax_total = ?, grand_total = ? WHERE id = ?').run(
     totals.subtotal, totals.tax_total, totals.grand_total, invoiceId

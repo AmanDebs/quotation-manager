@@ -1,10 +1,75 @@
-import { useState, type ReactNode } from 'react';
+import { useRef, useState, type ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { LineItem, Product, TaxType, ColumnConfig } from '../types';
 import { Button, Input, Select } from './ui';
 import { fmtMoney, fmtQty } from '../lib/format';
+import { shrinkImage } from '../lib/image';
 import { UNITS } from '../pages/Products';
+
+/**
+ * The photo for one line. Clicking the thumbnail replaces it, ✕ clears it.
+ * Photos are downscaled before they are stored — see lib/image.ts for why.
+ */
+function PhotoCell({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const input = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+
+  const pick = async (file: File | undefined) => {
+    if (!file) return;
+    setBusy(true);
+    try {
+      onChange(await shrinkImage(file));
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Could not use that image');
+    } finally {
+      setBusy(false);
+      if (input.current) input.current.value = '';
+    }
+  };
+
+  return (
+    <div className="relative">
+      <input
+        ref={input}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={(e) => pick(e.target.files?.[0])}
+      />
+      {value ? (
+        <>
+          <button
+            type="button"
+            onClick={() => input.current?.click()}
+            className="block h-10 w-10 overflow-hidden rounded border border-slate-200 focus:outline-none focus:ring-1 focus:ring-brand-600"
+            title="Replace photo"
+          >
+            <img src={value} alt="" className="h-full w-full object-cover" />
+          </button>
+          <button
+            type="button"
+            onClick={() => onChange('')}
+            className="absolute -right-1.5 -top-1.5 rounded-full bg-white text-slate-400 opacity-0 shadow-sm hover:text-red-500 focus:opacity-100 group-hover:opacity-100"
+            aria-label="Remove photo"
+            title="Remove photo"
+          >✕</button>
+        </>
+      ) : (
+        <button
+          type="button"
+          onClick={() => input.current?.click()}
+          disabled={busy}
+          className="flex h-10 w-10 items-center justify-center rounded border border-dashed border-slate-300 text-slate-400 hover:border-brand-600 hover:text-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600"
+          title="Add a photo for this line"
+          aria-label="Add a photo for this line"
+        >
+          {busy ? '…' : '+'}
+        </button>
+      )}
+    </div>
+  );
+}
 
 /**
  * Shared line-item grid for quotations, orders, proforma invoices and
@@ -85,6 +150,9 @@ export default function LineItemsEditor({
         color: p.color || items[i].color,
         // The catalogue knows how this product packs; total pcs follows from it.
         pcs_per_pack: p.pcs_per_pack ?? items[i].pcs_per_pack,
+        // Reuse the catalogue photo when the line has none of its own, so a
+        // photo set once on the product does not have to be uploaded again.
+        image: items[i].image || p.image || '',
       });
     }
   };
@@ -95,7 +163,8 @@ export default function LineItemsEditor({
 
   const packagingVisible = show('code') || show('color') || show('supplier') || show('packs') || show('pcs_per_pack') || show('total_pcs') || customNames.length > 0;
   // Columns between the line number and the amount, for the packaging row's colSpan.
-  const spanCols = 2 + (show('hsn') ? 1 : 0) + (show('qty') ? 1 : 0) + 1 + (show('unit_price') ? 1 : 0) + (taxVisible ? 1 : 0);
+  const spanCols = 2 + (show('image') ? 1 : 0) + (show('hsn') ? 1 : 0) + (show('qty') ? 1 : 0)
+    + 1 + (show('unit_price') ? 1 : 0) + (taxVisible ? 1 : 0);
 
   /** The packaging values worth reading at a glance, as one line. */
   const summarise = (it: LineItem): string => {
@@ -133,6 +202,7 @@ export default function LineItemsEditor({
           <thead>
             <tr className="border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-500">
               <th className="w-8 pb-2 pr-2 font-medium">#</th>
+              {show('image') && <th className="w-14 pb-2 pr-2 font-medium">Photo</th>}
               {/* w-52 fits ~75% of the catalogue's names; longer ones clip, but
                   the full name sits in Description and in the select's title. */}
               <th className="w-52 pb-2 pr-2 font-medium">Product</th>
@@ -159,9 +229,13 @@ export default function LineItemsEditor({
               <tbody key={i} className="group border-b border-slate-100 align-top hover:bg-slate-50/60">
                 <tr>
                   <td className="py-2 pr-2 text-xs tabular-nums text-slate-400">{i + 1}</td>
+                  {show('image') && (
+                    <td className="py-2 pr-2">
+                      <PhotoCell value={it.image ?? ''} onChange={(v) => set(i, { image: v })} />
+                    </td>
+                  )}
                   <td className="py-2 pr-2">
                     <div className="flex items-center gap-1.5">
-                      {product?.image && <img src={product.image} alt="" className="h-8 w-8 shrink-0 rounded border border-slate-200 object-cover" />}
                       <Select
                         value={it.product_id ?? ''}
                         title={product?.name ?? 'Custom line'}

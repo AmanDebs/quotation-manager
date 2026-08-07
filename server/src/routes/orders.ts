@@ -136,8 +136,8 @@ function saveItems(orderId: number, items: OrderItemInput[], taxType: 'none' | '
   db.prepare('DELETE FROM order_items WHERE order_id = ?').run(orderId);
   const ins = db.prepare(
     `INSERT INTO order_items (order_id, product_id, description, hsn_code, code, qty, unit, unit_price, tax_pct, amount,
-       color, packs, pcs_per_pack, total_pcs, supplier, scheduled_date, dispatched_date, custom1, custom2, custom3, sort_order)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       color, packs, pcs_per_pack, total_pcs, supplier, scheduled_date, dispatched_date, custom1, custom2, custom3, image, sort_order)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   );
   totals.items.forEach((it, i) => {
     const src = items[i] ?? {};
@@ -145,7 +145,7 @@ function saveItems(orderId: number, items: OrderItemInput[], taxType: 'none' | '
       it.qty ?? null, it.unit ?? 'unit', it.unit_price, it.tax_pct ?? 0, it.amount,
       it.color ?? '', it.packs ?? null, it.pcs_per_pack ?? null, it.total_pcs ?? null,
       String(src.supplier ?? ''), String(src.scheduled_date ?? ''), String(src.dispatched_date ?? ''),
-      it.custom1 ?? '', it.custom2 ?? '', it.custom3 ?? '', i);
+      it.custom1 ?? '', it.custom2 ?? '', it.custom3 ?? '', it.image ?? '', i);
   });
   db.prepare('UPDATE orders SET subtotal = ?, tax_total = ?, grand_total = ? WHERE id = ?').run(
     totals.subtotal, totals.tax_total, totals.grand_total, orderId
