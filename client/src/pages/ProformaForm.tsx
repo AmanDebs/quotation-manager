@@ -178,7 +178,7 @@ export default function ProformaFormPage() {
   };
 
   return (
-    <div className="mx-auto max-w-5xl">
+    <div className="mx-auto max-w-7xl">
       <PageHeader
         title={isNew ? 'New Proforma Invoice' : existing!.number}
         subtitle={isNew ? (fromQuotation ? 'Pre-filled from quotation — review and save' : undefined) : existing!.customer_name}

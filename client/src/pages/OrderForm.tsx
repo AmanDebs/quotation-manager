@@ -147,7 +147,7 @@ export default function OrderFormPage() {
   };
 
   return (
-    <div className="mx-auto max-w-5xl">
+    <div className="mx-auto max-w-7xl">
       <PageHeader
         title={isNew ? 'New Order' : existing!.number}
         subtitle={isNew ? (fromQuotation ? 'Booked from quotation — confirm the details' : undefined) : existing!.customer_name}

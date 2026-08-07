@@ -15,11 +15,23 @@ export function Button({ variant = 'primary', className = '', ...props }: Button
   );
 }
 
+/**
+ * Number fields get the spinner arrows removed and their figures right-aligned.
+ * The arrows are never used for quantities like 17,850 and cost ~16px of width,
+ * which is enough to clip the value in a narrow column. Applied here so every
+ * numeric field in the app behaves the same; a caller can still override.
+ */
+const numberInputClass =
+  'text-right tabular-nums [appearance:textfield] ' +
+  '[&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-inner-spin-button]:m-0';
+
 export function Input({ className = '', ...props }: InputHTMLAttributes<HTMLInputElement>) {
   return (
     <input
       {...props}
-      className={`w-full rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-sm focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600 ${className}`}
+      className={`w-full rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-sm focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600 ${
+        props.type === 'number' ? numberInputClass : ''
+      } ${className}`}
     />
   );
 }

@@ -159,7 +159,7 @@ export default function QuotationFormPage() {
   const readOnly = isSuperseded;
 
   return (
-    <div className="mx-auto max-w-5xl">
+    <div className="mx-auto max-w-7xl">
       <PageHeader
         title={isNew ? 'New Quotation' : `${existing!.number}${existing!.revision ? ` · Rev. ${existing!.revision}` : ''}`}
         subtitle={isNew ? undefined : existing!.customer_name}

@@ -204,7 +204,7 @@ export default function InvoiceFormPage() {
   const highVariance = existing?.variance?.filter((v) => Math.abs(v.variance_pct) > 10) ?? [];
 
   return (
-    <div className="mx-auto max-w-5xl">
+    <div className="mx-auto max-w-7xl">
       <PageHeader
         title={isNew ? 'New Commercial Invoice' : existing!.number}
         subtitle={isNew ? (fromProforma ? 'Pre-filled from proforma invoice — adjust final quantities and save' : undefined) : existing!.customer_name}

@@ -98,7 +98,7 @@ export default function PackingListFormPage() {
   const totalNet = draft.items.reduce((s, it) => s + (it.net_weight || 0), 0);
 
   return (
-    <div className="mx-auto max-w-5xl">
+    <div className="mx-auto max-w-7xl">
       <PageHeader
         title={isNew ? 'New Packing List' : existing!.number}
         subtitle={isNew ? (fromInvoice ? 'Pre-filled from invoice — add packages, dimensions and weights' : undefined) : existing!.customer_name}
