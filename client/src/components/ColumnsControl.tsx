@@ -4,22 +4,35 @@ import { Button, Input } from './ui';
 
 export interface ToggleableColumn { key: string; label: string }
 
-/** Optional columns per document type, in display order. */
+/**
+ * Optional columns per document type, listed in the order the line-items
+ * editor and the quotation PDF lay them out, so the tick-list reads the same
+ * way as the table it controls.
+ */
 export const ITEM_COLUMNS: ToggleableColumn[] = [
   { key: 'image', label: 'Product photo' },
   { key: 'hsn', label: 'HSN Code' },
-  { key: 'code', label: 'Code (size/spec)' },
-  { key: 'supplier', label: 'Supplier' },
-  { key: 'qty', label: 'Quantity' },
   { key: 'unit_price', label: 'Unit Price' },
   { key: 'uom', label: 'UOM / Rate basis' },
-  { key: 'color', label: 'Colour' },
-  { key: 'packs', label: 'Boxes / Cartons' },
   { key: 'pcs_per_pack', label: 'Pcs per box' },
+  { key: 'packs', label: 'Boxes / Cartons' },
   { key: 'total_pcs', label: 'Total pieces' },
+  { key: 'qty', label: 'Quantity' },
+  { key: 'color', label: 'Colour' },
   { key: 'per_1000', label: 'Rate per 1000 pcs' },
   { key: 'tax', label: 'Tax %' },
+  { key: 'code', label: 'Code (size/spec)' },
+  { key: 'supplier', label: 'Supplier' },
 ];
+
+/**
+ * A quotation is not a tax document, so it carries no HSN column — in the
+ * editor, in the tick-list, or on the PDF. `hsn_code` is still stored and
+ * still carries forward to the proforma and invoice, where GST needs it.
+ */
+export const QUOTATION_OMIT = ['hsn'];
+export const QUOTATION_ITEM_COLUMNS: ToggleableColumn[] =
+  ITEM_COLUMNS.filter((c) => !QUOTATION_OMIT.includes(c.key));
 
 export const PACKING_COLUMNS: ToggleableColumn[] = [
   { key: 'hsn', label: 'HSN Code' },

@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { LineItem, Product, TaxType, ColumnConfig } from '../types';
 import { Button, Input, Select } from './ui';
-import { fmtMoney, fmtQty } from '../lib/format';
+import { fmtMoney } from '../lib/format';
 import { shrinkImage } from '../lib/image';
 import { UNITS } from '../pages/Products';
 
@@ -75,17 +75,19 @@ function PhotoCell({ value, onChange }: { value: string; onChange: (v: string) =
  * Shared line-item grid for quotations, orders, proforma invoices and
  * commercial invoices.
  *
- * A line has two kinds of information and they are not equally important. The
- * billing figures (qty × price = amount) are read on every glance and get the
- * table proper. The packaging detail (code, colour, boxes, pcs/box) is entered
- * once — often filled from the catalogue — and then only referred to, so it
- * collapses to a single summary line that opens on demand.
+ * The column order mirrors the quotation PDF (`buildQuotationPdf` in
+ * server/src/services/pdf.ts), so what you type is laid out the way it prints.
+ * Packing is part of that: Aglo prices per 1000 pieces, so pcs/box × boxes =
+ * total qty *is* the quotation and those figures belong in the table proper.
+ * Only the leftovers — code, supplier and any custom columns — collapse into
+ * the quiet second line that opens on demand.
  *
- * Columns hidden via the document's column_config disappear here and on the PDF.
+ * Columns hidden via the document's column_config disappear here and on the
+ * PDF; `omit` drops one for a document type that never has it at all.
  * Amounts shown are a client-side preview; the server recomputes on save.
  */
 export default function LineItemsEditor({
-  items, onChange, currency, taxType, showTax, config = {},
+  items, onChange, currency, taxType, showTax, config = {}, omit,
 }: {
   items: LineItem[];
   onChange: (items: LineItem[]) => void;
@@ -93,11 +95,13 @@ export default function LineItemsEditor({
   taxType: TaxType;
   showTax?: boolean;
   config?: ColumnConfig;
+  /** Column keys this document type never carries, e.g. `['hsn']` on a quotation. */
+  omit?: string[];
 }) {
   const { data: products = [] } = useQuery({ queryKey: ['products', ''], queryFn: () => api.get<Product[]>('/api/products') });
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
 
-  const hidden = new Set(config.hidden ?? []);
+  const hidden = new Set([...(config.hidden ?? []), ...(omit ?? [])]);
   const show = (key: string) => !hidden.has(key);
   const customNames = (config.custom ?? []).filter(Boolean);
 
@@ -161,26 +165,23 @@ export default function LineItemsEditor({
   const subtotal = items.reduce((s, it) => s + (it.qty != null ? it.qty * it.unit_price : 0), 0);
   const tax = taxVisible ? items.reduce((s, it) => s + (it.qty != null ? it.qty * it.unit_price * ((it.tax_pct ?? 0) / 100) : 0), 0) : 0;
 
-  const packagingVisible = show('code') || show('color') || show('supplier') || show('packs') || show('pcs_per_pack') || show('total_pcs') || customNames.length > 0;
-  // Columns between the line number and the amount, for the packaging row's colSpan.
-  const spanCols = 2 + (show('image') ? 1 : 0) + (show('hsn') ? 1 : 0) + (show('qty') ? 1 : 0)
-    + 1 + (show('unit_price') ? 1 : 0) + (taxVisible ? 1 : 0);
+  // What is left once packing has its own columns: the fields a line rarely
+  // carries. When none of them apply the second row holds only the /1000 rate.
+  const extrasVisible = show('code') || show('supplier') || customNames.length > 0;
+  // Columns between the line number and the amount, for the second row's colSpan.
+  // Derived from the same show() calls as the header, so the two cannot drift.
+  const spanCols = 3 // Product, Description, Unit — always present
+    + (show('image') ? 1 : 0) + (show('hsn') ? 1 : 0) + (show('unit_price') ? 1 : 0)
+    + (show('pcs_per_pack') ? 1 : 0) + (show('packs') ? 1 : 0) + (show('total_pcs') ? 1 : 0)
+    + (show('qty') ? 1 : 0) + (show('color') ? 1 : 0) + (taxVisible ? 1 : 0);
 
-  /** The packaging values worth reading at a glance, as one line. */
+  /** The leftover fields worth reading at a glance, as one line. */
   const summarise = (it: LineItem): string => {
     const parts: string[] = [];
     const code = (it as { code?: string }).code;
     const supplier = (it as { supplier?: string }).supplier;
     if (show('code') && code) parts.push(code);
-    if (show('color') && it.color) parts.push(it.color);
     if (show('supplier') && supplier) parts.push(supplier);
-    if (show('packs') && it.packs != null && show('pcs_per_pack') && it.pcs_per_pack != null) {
-      parts.push(`${fmtQty(it.packs)} boxes × ${fmtQty(it.pcs_per_pack)}${it.total_pcs != null ? ` = ${fmtQty(it.total_pcs)} pcs` : ''}`);
-    } else if (show('packs') && it.packs != null) {
-      parts.push(`${fmtQty(it.packs)} boxes`);
-    } else if (show('total_pcs') && it.total_pcs != null) {
-      parts.push(`${fmtQty(it.total_pcs)} pcs`);
-    }
     customNames.forEach((name, ci) => {
       const v = it[`custom${ci + 1}` as 'custom1'] as string;
       if (v) parts.push(`${name}: ${v}`);
@@ -208,9 +209,13 @@ export default function LineItemsEditor({
               <th className="w-52 pb-2 pr-2 font-medium">Product</th>
               <th className="pb-2 pr-2 font-medium">Description</th>
               {show('hsn') && <th className="w-28 pb-2 pr-2 font-medium">HSN</th>}
-              {show('qty') && <th className="w-24 pb-2 pr-2 text-right font-medium">Qty</th>}
-              <th className="w-32 pb-2 pr-2 font-medium">Unit</th>
               {show('unit_price') && <th className="w-28 pb-2 pr-2 text-right font-medium">Unit Price</th>}
+              <th className="w-32 pb-2 pr-2 font-medium">Unit</th>
+              {show('pcs_per_pack') && <th className="w-24 pb-2 pr-2 text-right font-medium">Pcs/Box</th>}
+              {show('packs') && <th className="w-20 pb-2 pr-2 text-right font-medium">Boxes</th>}
+              {show('total_pcs') && <th className="w-28 pb-2 pr-2 text-right font-medium">Total Qty</th>}
+              {show('qty') && <th className="w-24 pb-2 pr-2 text-right font-medium">Qty</th>}
+              {show('color') && <th className="w-24 pb-2 pr-2 font-medium">Colour</th>}
               {taxVisible && <th className="w-20 pb-2 pr-2 text-right font-medium">Tax %</th>}
               <th className="w-36 pb-2 pr-2 text-right font-medium">Amount</th>
               <th className="w-8 pb-2" />
@@ -254,6 +259,48 @@ export default function LineItemsEditor({
                       <Input value={it.hsn_code ?? ''} onChange={(e) => set(i, { hsn_code: e.target.value })} />
                     </td>
                   )}
+                  {show('unit_price') && (
+                    <td className="py-2 pr-2">
+                      <Input type="number" min={0} step="any" value={it.unit_price || ''} onChange={(e) => set(i, { unit_price: Number(e.target.value) })} />
+                    </td>
+                  )}
+                  <td className="py-2 pr-2">
+                    <Select value={it.unit} onChange={(e) => set(i, { unit: e.target.value })}>
+                      {UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
+                    </Select>
+                  </td>
+                  {show('pcs_per_pack') && (
+                    <td className="py-2 pr-2">
+                      <Input
+                        type="number" min={0} step="any"
+                        value={it.pcs_per_pack ?? ''}
+                        placeholder="—"
+                        onChange={(e) => setPacking(i, { pcs_per_pack: e.target.value === '' ? null : Number(e.target.value) })}
+                      />
+                    </td>
+                  )}
+                  {show('packs') && (
+                    <td className="py-2 pr-2">
+                      <Input
+                        type="number" min={0} step="any"
+                        value={it.packs ?? ''}
+                        placeholder="—"
+                        onChange={(e) => setPacking(i, { packs: e.target.value === '' ? null : Number(e.target.value) })}
+                      />
+                    </td>
+                  )}
+                  {show('total_pcs') && (
+                    <td className="py-2 pr-2">
+                      {/* Boxes × pcs/box fills this in, but it stays editable —
+                          a part-filled last box is normal. */}
+                      <Input
+                        type="number" min={0} step="any"
+                        value={it.total_pcs ?? ''}
+                        placeholder="—"
+                        onChange={(e) => set(i, { total_pcs: e.target.value === '' ? null : Number(e.target.value) })}
+                      />
+                    </td>
+                  )}
                   {show('qty') && (
                     <td className="py-2 pr-2">
                       <Input
@@ -264,14 +311,9 @@ export default function LineItemsEditor({
                       />
                     </td>
                   )}
-                  <td className="py-2 pr-2">
-                    <Select value={it.unit} onChange={(e) => set(i, { unit: e.target.value })}>
-                      {UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
-                    </Select>
-                  </td>
-                  {show('unit_price') && (
+                  {show('color') && (
                     <td className="py-2 pr-2">
-                      <Input type="number" min={0} step="any" value={it.unit_price || ''} onChange={(e) => set(i, { unit_price: Number(e.target.value) })} />
+                      <Input value={it.color ?? ''} onChange={(e) => set(i, { color: e.target.value })} placeholder="Natural" />
                     </td>
                   )}
                   {taxVisible && (
@@ -292,53 +334,45 @@ export default function LineItemsEditor({
                   </td>
                 </tr>
 
-                {packagingVisible && (
+                {(extrasVisible || per1000 != null) && (
                   <tr>
                     <td />
                     <td colSpan={spanCols} className="pb-2">
-                      <button
-                        type="button"
-                        onClick={() => toggle(i)}
-                        aria-expanded={isOpen}
-                        aria-controls={`packing-${i}`}
-                        className="flex items-center gap-1.5 rounded text-xs text-slate-500 hover:text-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600"
-                      >
-                        <span className={`inline-block transition-transform ${isOpen ? 'rotate-90' : ''}`}>▸</span>
-                        {summary ? (
-                          <span>{summary}</span>
-                        ) : (
-                          <span className="text-slate-400">Add packaging details</span>
-                        )}
-                      </button>
+                      {extrasVisible && (
+                        <button
+                          type="button"
+                          onClick={() => toggle(i)}
+                          aria-expanded={isOpen}
+                          aria-controls={`extras-${i}`}
+                          className="flex items-center gap-1.5 rounded text-xs text-slate-500 hover:text-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600"
+                        >
+                          <span className={`inline-block transition-transform ${isOpen ? 'rotate-90' : ''}`}>▸</span>
+                          {summary ? (
+                            <span>{summary}</span>
+                          ) : (
+                            <span className="text-slate-400">Add more details</span>
+                          )}
+                        </button>
+                      )}
                     </td>
+                    {/* The /1000 rate is the pricing basis, so it shows whether
+                        or not the extras are expanded. */}
                     <td className="pb-2 pr-2 text-right text-xs tabular-nums text-slate-400" colSpan={2}>
                       {per1000 != null && <>≈ {fmtMoney(per1000, currency)} /1000 pcs</>}
                     </td>
                   </tr>
                 )}
 
-                {packagingVisible && isOpen && (
-                  <tr id={`packing-${i}`}>
+                {extrasVisible && isOpen && (
+                  <tr id={`extras-${i}`}>
                     <td />
                     <td colSpan={spanCols + 2} className="pb-3">
                       <div className="grid grid-cols-2 gap-3 rounded-md border border-slate-200 bg-slate-50/70 p-3 sm:grid-cols-3 lg:grid-cols-6">
                         {show('code') && packField('Code', (
                           <Input value={(it as { code?: string }).code ?? ''} onChange={(e) => set(i, { code: e.target.value } as Partial<LineItem>)} placeholder="48mm" />
                         ))}
-                        {show('color') && packField('Colour', (
-                          <Input value={it.color ?? ''} onChange={(e) => set(i, { color: e.target.value })} placeholder="Red" />
-                        ))}
                         {show('supplier') && packField('Supplier', (
                           <Input value={(it as { supplier?: string }).supplier ?? ''} onChange={(e) => set(i, { supplier: e.target.value } as Partial<LineItem>)} placeholder="Internal" />
-                        ))}
-                        {show('packs') && packField('Boxes', (
-                          <Input type="number" min={0} step="any" value={it.packs ?? ''} onChange={(e) => setPacking(i, { packs: e.target.value === '' ? null : Number(e.target.value) })} />
-                        ))}
-                        {show('pcs_per_pack') && packField('Pcs per box', (
-                          <Input type="number" min={0} step="any" value={it.pcs_per_pack ?? ''} onChange={(e) => setPacking(i, { pcs_per_pack: e.target.value === '' ? null : Number(e.target.value) })} />
-                        ))}
-                        {show('total_pcs') && packField('Total pcs', (
-                          <Input type="number" min={0} step="any" value={it.total_pcs ?? ''} onChange={(e) => set(i, { total_pcs: e.target.value === '' ? null : Number(e.target.value) })} />
                         ))}
                         {customNames.map((name, ci) => (
                           <div key={ci}>

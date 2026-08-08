@@ -7,9 +7,9 @@ import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, St
 import LineItemsEditor from '../components/LineItemsEditor';
 import FollowupButton from '../components/FollowupButton';
 import ApprovalStrip from '../components/ApprovalStrip';
-import ColumnsControl from '../components/ColumnsControl';
+import ColumnsControl, { QUOTATION_ITEM_COLUMNS, QUOTATION_OMIT } from '../components/ColumnsControl';
 import NotePresetPicker from '../components/NotePresetPicker';
-import { fmtMoney, fmtDate, today } from '../lib/format';
+import { fmtMoney, fmtQty, fmtDate, today } from '../lib/format';
 
 interface Draft {
   number?: string;
@@ -293,13 +293,13 @@ export default function QuotationFormPage() {
 
         <Card
           title="Line Items"
-          actions={!readOnly && <ColumnsControl config={draft.column_config} onChange={(c) => set({ column_config: c })} />}
+          actions={!readOnly && <ColumnsControl config={draft.column_config} onChange={(c) => set({ column_config: c })} columns={QUOTATION_ITEM_COLUMNS} />}
         >
           {readOnly ? (
             <ReadOnlyItems items={draft.items} currency={draft.currency} />
           ) : (
             <>
-              <LineItemsEditor items={draft.items} onChange={(items) => set({ items })} currency={draft.currency} taxType={draft.tax_type} config={draft.column_config} />
+              <LineItemsEditor items={draft.items} onChange={(items) => set({ items })} currency={draft.currency} taxType={draft.tax_type} config={draft.column_config} omit={QUOTATION_OMIT} />
               <div className="mt-3 grid grid-cols-2 gap-3 border-t border-slate-100 pt-3 md:max-w-md">
                 <Field label={`Indicative Freight (${draft.currency})`}>
                   <Input type="number" min={0} step="any" value={draft.freight || ''} onChange={(e) => set({ freight: Number(e.target.value) })} />
@@ -351,15 +351,20 @@ export default function QuotationFormPage() {
   );
 }
 
+/** A superseded revision, laid out in the same sequence as the PDF. */
 function ReadOnlyItems({ items, currency }: { items: LineItem[]; currency: string }) {
+  const hasPacking = items.some((it) => it.pcs_per_pack != null || it.packs != null || it.total_pcs != null);
   return (
     <table className="w-full text-sm">
       <thead>
         <tr className="border-b border-slate-200 text-left text-xs uppercase text-slate-500">
           <th className="pb-1 pr-3">Description</th>
-          <th className="pb-1 pr-3 text-right">Qty</th>
-          <th className="pb-1 pr-3">Unit</th>
           <th className="pb-1 pr-3 text-right">Unit Price</th>
+          <th className="pb-1 pr-3">Unit</th>
+          {hasPacking && <th className="pb-1 pr-3 text-right">Pcs/Box</th>}
+          {hasPacking && <th className="pb-1 pr-3 text-right">Boxes</th>}
+          {hasPacking && <th className="pb-1 pr-3 text-right">Total Qty</th>}
+          <th className="pb-1 pr-3 text-right">Qty</th>
           <th className="pb-1 text-right">Amount</th>
         </tr>
       </thead>
@@ -367,9 +372,12 @@ function ReadOnlyItems({ items, currency }: { items: LineItem[]; currency: strin
         {items.map((it, i) => (
           <tr key={i} className="border-b border-slate-100 last:border-0">
             <td className="py-1.5 pr-3">{it.description}</td>
-            <td className="py-1.5 pr-3 text-right">{it.qty ?? '—'}</td>
-            <td className="py-1.5 pr-3">{it.unit}</td>
             <td className="py-1.5 pr-3 text-right tabular-nums">{fmtMoney(it.unit_price, currency)}</td>
+            <td className="py-1.5 pr-3">{it.unit}</td>
+            {hasPacking && <td className="py-1.5 pr-3 text-right tabular-nums">{it.pcs_per_pack != null ? fmtQty(it.pcs_per_pack) : '—'}</td>}
+            {hasPacking && <td className="py-1.5 pr-3 text-right tabular-nums">{it.packs != null ? fmtQty(it.packs) : '—'}</td>}
+            {hasPacking && <td className="py-1.5 pr-3 text-right tabular-nums">{it.total_pcs != null ? fmtQty(it.total_pcs) : '—'}</td>}
+            <td className="py-1.5 pr-3 text-right tabular-nums">{it.qty != null ? fmtQty(it.qty) : '—'}</td>
             <td className="py-1.5 text-right tabular-nums">{it.qty != null ? fmtMoney((it.amount ?? it.qty * it.unit_price), currency) : '—'}</td>
           </tr>
         ))}
