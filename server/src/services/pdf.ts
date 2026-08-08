@@ -484,7 +484,10 @@ export function buildQuotationPdf(id: number): TDocumentDefinitions {
     { key: 'pcs_per_pack', label: 'Pcs/Box', width: 42, align: 'right', value: (it) => (it.pcs_per_pack != null ? fmtNum(it.pcs_per_pack, 0) : '') },
     { key: 'packs', label: 'Boxes', width: 40, align: 'right', value: (it) => (it.packs != null ? fmtNum(it.packs, 0) : '') },
     { key: 'total_pcs', label: 'Total Qty', width: 55, align: 'right', value: (it) => (it.total_pcs != null ? fmtNum(it.total_pcs, 0) : '') },
-    { key: 'qty', label: 'Qty', width: 50, align: 'right', value: (it) => (it.qty != null ? `${fmtNum(it.qty)} ${it.unit}` : '') },
+    // No Qty column: Total Qty already says how much is being quoted, and the
+    // billing quantity restates it in whatever the rate basis is ("12 per
+    // 1000"). It is still entered in the editor — qty x unit_price is the
+    // amount — it just does not print.
     { key: 'color', label: 'Color', width: 48, align: 'center', value: (it) => String(it.color || '') },
     { key: 'unit_price', label: 'Unit Price', width: 48, align: 'right', always: true, value: (it) => fmtNum(it.unit_price, 3) },
     { key: 'uom', label: 'UOM', width: 52, align: 'center', always: true, value: (it) => uomLabel(cur, it.unit) },
