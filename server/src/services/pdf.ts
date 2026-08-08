@@ -97,8 +97,11 @@ function companyHeader(s: Row): Content[] {
     ],
     width: '*',
   };
+  // The logo column eats into the right block, which gets the rest of the
+  // 515pt content width. At 150 the company lines still fit on one line each
+  // with ~40pt to spare — the longest, the contact row, measures ~316pt.
   const cols: Content = s.logo
-    ? { columns: [{ image: s.logo, fit: [95, 52] as [number, number], width: 110 }, right], columnGap: 10 }
+    ? { columns: [{ image: s.logo, fit: [140, 72] as [number, number], width: 150 }, right], columnGap: 10 }
     : right;
   return [
     cols,
@@ -340,7 +343,8 @@ export function buildQuotationPdf(id: number): TDocumentDefinitions {
         table: {
           widths: [92, '*'],
           body: [
-            [{ text: 'Quotation No:', bold: true, color: s.theme, fontSize: 8.5, border: [false, false, false, false] }, { text: `${q.number}${q.revision ? ` (Rev. ${q.revision})` : ''}`, fontSize: 8.5, bold: true, border: [false, false, false, false] }],
+            // No quotation number on the page, by request. It still names the
+            // downloaded file and still identifies the record in the app.
             [{ text: 'Quotation Date:', bold: true, color: s.theme, fontSize: 8.5, border: [false, false, false, false] }, { text: fmtDate(q.date), fontSize: 8.5, border: [false, false, false, false] }],
             [{ text: 'Customer / Buyer:', bold: true, color: s.theme, fontSize: 8.5, border: [false, false, false, false] }, { text: c.name, fontSize: 8.5, bold: true, border: [false, false, false, false] }],
             [{ text: 'Address:', bold: true, color: s.theme, fontSize: 8.5, border: [false, false, false, false] }, { text: [c.address, c.city].filter(Boolean).join(', ') || '—', fontSize: 8.5, border: [false, false, false, false] }],
