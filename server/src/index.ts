@@ -13,6 +13,7 @@ import { authRouter } from './routes/auth.js';
 import { usersRouter } from './routes/users.js';
 import { approvalsRouter } from './routes/approvals.js';
 import { settingsRouter } from './routes/settings.js';
+import { companiesRouter } from './routes/companies.js';
 import { customersRouter } from './routes/customers.js';
 import { productsRouter } from './routes/products.js';
 import { quotationsRouter } from './routes/quotations.js';
@@ -52,6 +53,9 @@ app.use('/api/approvals', requireAuth, requireManager, approvalsRouter);
 // only a manager may change them.
 app.use('/api/settings', requireAuth, (req, res, next) =>
   req.method === 'GET' ? next() : requireManager(req, res, next), settingsRouter);
+// Guards its own writes with requireManager, since reads must stay open —
+// every document form needs the list of who can be selling.
+app.use('/api/companies', requireAuth, companiesRouter);
 app.use('/api/customers', requireAuth, customersRouter);
 app.use('/api/products', requireAuth, productsRouter);
 app.use('/api/quotations', requireAuth, quotationsRouter);

@@ -4,6 +4,7 @@ import { nextNumber } from '../services/numbering.js';
 import { computeTotals, round2, type LineItemInput } from '../services/totals.js';
 import type { AuthedRequest } from '../middleware/auth.js';
 import { scopeClause, canAccessCustomer } from '../middleware/scope.js';
+import { resolveCompanyId } from '../services/companies.js';
 import { submit, decide, resetApprovalOnEdit, blockUnapprovedTransition } from '../services/approval.js';
 
 export const proformasRouter = Router();
@@ -122,6 +123,7 @@ proformasRouter.get('/prefill/from-quotation/:quotationId', (req: AuthedRequest,
   res.json({
     quotation_id: qid,
     customer_id: q.customer_id,
+    company_id: q.company_id,
     currency: q.currency,
     payment_terms: q.payment_terms,
     delivery_terms: q.delivery_terms,
@@ -153,6 +155,7 @@ proformasRouter.get('/prefill/from-order/:orderId', (req: AuthedRequest, res) =>
     order_id: oid,
     quotation_id: o.quotation_id,
     customer_id: o.customer_id,
+    company_id: o.company_id,
     currency: o.currency,
     tax_type: o.tax_type,
     is_export: isExport ? 1 : 0,
@@ -182,13 +185,16 @@ proformasRouter.post('/', (req: AuthedRequest, res) => {
   if (!body.customer_id) return res.status(400).json({ error: 'Customer is required' });
   if (!canAccessCustomer(req, Number(body.customer_id))) return res.status(403).json({ error: 'That customer is not assigned to you' });
   const h = headerValues(body);
+  // Fixed at creation: the number below comes from this company's series.
+  const companyId = resolveCompanyId(body.company_id, Number(body.customer_id));
   const id = transaction(() => {
-    const number = nextNumber('proforma', { isExport: h.is_export === 1 });
+    const number = nextNumber('proforma', { isExport: h.is_export === 1, companyId });
     const info = db.prepare(
-      `INSERT INTO proforma_invoices (number, ${headerFields.join(', ')}, created_by, column_config, status)
-       VALUES (?, ${headerFields.map(() => '?').join(', ')}, ?, ?, 'draft')`
+      `INSERT INTO proforma_invoices (number, company_id, ${headerFields.join(', ')}, created_by, column_config, status)
+       VALUES (?, ?, ${headerFields.map(() => '?').join(', ')}, ?, ?, 'draft')`
     ).run(
       number,
+      companyId,
       ...(headerFields.map((f) => (h as Record<string, unknown>)[f]) as never[]),
       req.user!.id,
       JSON.stringify(body.column_config ?? {})

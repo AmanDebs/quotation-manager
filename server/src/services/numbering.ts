@@ -21,11 +21,19 @@ const patternColumn: Record<DocType, { std: string; export?: string }> = {
 };
 
 /**
- * Next document number from the configurable pattern, e.g. AGLO/EX/{FY}/{SEQ}
- * → AGLO/EX/25-26/119. Sequences advance per doc type (export series separate),
- * per fiscal year. Tokens: {FY} fiscal year "25-26", {SEQ} 3-digit sequence.
+ * Next document number from the issuing company's pattern, e.g.
+ * AGLO/EX/{FY}/{SEQ} → AGLO/EX/25-26/119.
+ *
+ * Sequences advance per company, per doc type (export series separate), per
+ * fiscal year. Per company because a GST-registered entity keeps one
+ * consecutive series per GSTIN — sharing a series across the group would leave
+ * gaps in each company's books. Tokens: {FY} fiscal year "25-26", {SEQ}
+ * 3-digit sequence.
  */
-export function nextNumber(docType: DocType, opts: { isExport?: boolean } = {}): string {
+export function nextNumber(
+  docType: DocType,
+  opts: { isExport?: boolean; companyId: number }
+): string {
   const cols = patternColumn[docType];
   const useExport = !!opts.isExport && !!cols.export;
   const seqKey = useExport ? `${docType}_export` : docType;
@@ -35,13 +43,13 @@ export function nextNumber(docType: DocType, opts: { isExport?: boolean } = {}):
   // the same number to two people creating documents at the same moment; that
   // was only ever safe because SQLite serialises writes on one connection.
   const row = db.prepare(
-    `INSERT INTO sequences (doc_type, year, next_num) VALUES (?, ?, 1)
-     ON CONFLICT(doc_type, year) DO UPDATE SET next_num = next_num + 1
+    `INSERT INTO sequences (company_id, doc_type, year, next_num) VALUES (?, ?, ?, 1)
+     ON CONFLICT(company_id, doc_type, year) DO UPDATE SET next_num = next_num + 1
      RETURNING next_num`
-  ).get(seqKey, fyStart) as { next_num: number };
+  ).get(opts.companyId, seqKey, fyStart) as { next_num: number };
 
-  const settings = db.prepare('SELECT * FROM settings WHERE id = 1').get() as Record<string, string>;
-  const pattern = settings[useExport ? cols.export! : cols.std] || `${docType.toUpperCase()}/{FY}/{SEQ}`;
+  const company = db.prepare('SELECT * FROM companies WHERE id = ?').get(opts.companyId) as Record<string, string> | undefined;
+  const pattern = company?.[useExport ? cols.export! : cols.std] || `${docType.toUpperCase()}/{FY}/{SEQ}`;
   return pattern
     .replaceAll('{FY}', fiscalYear())
     .replaceAll('{SEQ}', String(row.next_num).padStart(3, '0'));

@@ -4,6 +4,7 @@ import { nextNumber } from '../services/numbering.js';
 import { computeTotals, round2, type LineItemInput } from '../services/totals.js';
 import type { AuthedRequest } from '../middleware/auth.js';
 import { scopeClause, canAccessCustomer } from '../middleware/scope.js';
+import { resolveCompanyId } from '../services/companies.js';
 
 export const ordersRouter = Router();
 
@@ -188,6 +189,7 @@ ordersRouter.get('/prefill/from-quotation/:quotationId', (req: AuthedRequest, re
   res.json({
     quotation_id: qid,
     customer_id: q.customer_id,
+    company_id: q.company_id,
     currency: q.currency,
     tax_type: q.tax_type,
     is_export: q.is_export,
@@ -207,13 +209,16 @@ ordersRouter.post('/', (req: AuthedRequest, res) => {
   if (!body.customer_id) return res.status(400).json({ error: 'Customer is required' });
   if (!canAccessCustomer(req, Number(body.customer_id))) return res.status(403).json({ error: 'That customer is not assigned to you' });
   const h = headerValues(body);
+  // Fixed at creation: the number below comes from this company's series.
+  const companyId = resolveCompanyId(body.company_id, Number(body.customer_id));
   const id = transaction(() => {
-    const number = nextNumber('order', { isExport: h.is_export === 1 });
+    const number = nextNumber('order', { isExport: h.is_export === 1, companyId });
     const info = db.prepare(
-      `INSERT INTO orders (number, ${headerFields.join(', ')}, created_by, column_config, status)
-       VALUES (?, ${headerFields.map(() => '?').join(', ')}, ?, ?, ?)`
+      `INSERT INTO orders (number, company_id, ${headerFields.join(', ')}, created_by, column_config, status)
+       VALUES (?, ?, ${headerFields.map(() => '?').join(', ')}, ?, ?, ?)`
     ).run(
       number,
+      companyId,
       ...(headerFields.map((f) => (h as Record<string, unknown>)[f]) as never[]),
       req.user!.id,
       JSON.stringify(body.column_config ?? {}),

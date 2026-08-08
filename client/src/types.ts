@@ -46,11 +46,24 @@ export interface Settings {
   note_presets: NotePreset[];
 }
 
+/**
+ * One selling entity in the group. Same shape as Settings — Settings is now
+ * just the view of whichever company is the default, kept so the parts of the
+ * app that only mean "us" did not all have to change at once.
+ */
+export interface Company extends Settings {
+  id: number;
+  is_default?: number;
+  active?: number;
+}
+
 export interface Customer {
   id: number; name: string; contact_person: string; email: string; phone: string;
   address: string; city: string; country: string; gstin: string; currency: string;
   consignee: string; notify_party: string; notify_party_2: string; notes: string;
   owner_id?: number | null; owner_name?: string | null; is_export?: number;
+  /** Which group entity usually invoices them; null = the group default. */
+  company_id?: number | null;
 }
 
 export interface Product {
@@ -106,7 +119,7 @@ export type TaxType = 'none' | 'cgst_sgst' | 'igst';
 
 export interface Quotation {
   id: number; number: string; revision: number; date: string;
-  enquiry_id: number | null; customer_id: number; currency: string;
+  enquiry_id: number | null; customer_id: number; company_id?: number; currency: string;
   validity_date: string; payment_terms: string; delivery_terms: string;
   /** Printed on the quotation as the NOTES & TERMS bullets. */
   notes: string;
@@ -141,7 +154,7 @@ export interface OrderItem extends LineItem {
 
 export interface Order {
   id: number; number: string; date: string;
-  quotation_id: number | null; customer_id: number; is_export: number;
+  quotation_id: number | null; customer_id: number; company_id?: number; is_export: number;
   order_through: string; spoc: string; po_number: string; po_date: string;
   currency: string; tax_type: TaxType; payment_terms: string;
   freight: number; insurance: number; inco_terms: string; container_count: string;
@@ -167,7 +180,7 @@ export interface Payment {
 }
 
 export interface Proforma {
-  id: number; number: string; date: string; quotation_id: number | null; customer_id: number;
+  id: number; number: string; date: string; quotation_id: number | null; customer_id: number; company_id?: number;
   consignee: string; notify_party: string; currency: string; freight: number; insurance: number;
   lead_time: string; bank_account: string; inco_terms: string; payment_terms: string;
   delivery_terms: string; validity_date: string; is_export: number;
@@ -189,7 +202,7 @@ export interface Proforma {
 }
 
 export interface Invoice {
-  id: number; number: string; date: string; pi_id: number | null; customer_id: number;
+  id: number; number: string; date: string; pi_id: number | null; customer_id: number; company_id?: number;
   consignee: string; notify_party: string; currency: string; freight: number; insurance: number;
   shipping_details: string; bank_account: string; inco_terms: string; payment_terms: string;
   is_export: number; country_of_origin: string; port_of_loading: string; port_of_discharge: string;
@@ -218,7 +231,7 @@ export interface PackingListItem {
 }
 
 export interface PackingList {
-  id: number; number: string; date: string; invoice_id: number | null; customer_id: number;
+  id: number; number: string; date: string; invoice_id: number | null; customer_id: number; company_id?: number;
   shipping_marks: string; lot_no: string; remarks: string;
   invoice?: Record<string, unknown>;
   customer_name?: string; invoice_number?: string;

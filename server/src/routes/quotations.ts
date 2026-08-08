@@ -5,6 +5,7 @@ import { computeTotals, type LineItemInput } from '../services/totals.js';
 import type { AuthedRequest } from '../middleware/auth.js';
 import { scopeClause, canAccessCustomer } from '../middleware/scope.js';
 import { submit, decide, resetApprovalOnEdit, blockUnapprovedTransition } from '../services/approval.js';
+import { resolveCompanyId } from '../services/companies.js';
 
 export const quotationsRouter = Router();
 
@@ -82,11 +83,14 @@ quotationsRouter.post('/', (req: AuthedRequest, res) => {
   if (!canAccessCustomer(req, Number(body.customer_id))) return res.status(403).json({ error: 'That customer is not assigned to you' });
   const taxType = (body.tax_type ?? 'none') as 'none' | 'cgst_sgst' | 'igst';
   const isExport = body.is_export ? 1 : 0;
+  // Which entity is selling. Fixed here and never changed afterwards: the
+  // number below is drawn from this company's series.
+  const companyId = resolveCompanyId(body.company_id, Number(body.customer_id));
   const result = transaction(() => {
-    const number = nextNumber('quotation');
+    const number = nextNumber('quotation', { companyId });
     const info = db.prepare(
-      `INSERT INTO quotations (number, revision, date, customer_id, currency, validity_date, payment_terms, delivery_terms, notes, freight, insurance, inco_terms, container_count, prepared_by, tax_type, is_export, created_by, column_config, status)
-       VALUES (?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft')`
+      `INSERT INTO quotations (number, revision, date, customer_id, currency, validity_date, payment_terms, delivery_terms, notes, freight, insurance, inco_terms, container_count, prepared_by, tax_type, is_export, created_by, column_config, company_id, status)
+       VALUES (?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft')`
     ).run(
       number,
       String(body.date ?? new Date().toISOString().slice(0, 10)),
@@ -104,7 +108,8 @@ quotationsRouter.post('/', (req: AuthedRequest, res) => {
       taxType,
       isExport,
       req.user!.id,
-      JSON.stringify(body.column_config ?? {})
+      JSON.stringify(body.column_config ?? {}),
+      companyId
     );
     const id = Number(info.lastInsertRowid);
     saveItems(id, (body.items ?? []) as LineItemInput[], taxType, Number(body.freight ?? 0), Number(body.insurance ?? 0), String(body.currency ?? 'INR'));
@@ -209,8 +214,8 @@ quotationsRouter.post('/:id/revise', (req: AuthedRequest, res) => {
     const info = db.prepare(
       // internal_notes rides along: a revision is the next round of the same
       // negotiation, so the running commentary should follow it.
-      `INSERT INTO quotations (number, revision, date, customer_id, currency, validity_date, payment_terms, delivery_terms, notes, internal_notes, freight, insurance, inco_terms, container_count, prepared_by, tax_type, is_export, column_config, created_by, status, subtotal, tax_total, grand_total)
-       SELECT number, ?, ?, customer_id, currency, validity_date, payment_terms, delivery_terms, notes, internal_notes, freight, insurance, inco_terms, container_count, prepared_by, tax_type, is_export, column_config, ?, 'negotiating', subtotal, tax_total, grand_total
+      `INSERT INTO quotations (number, revision, date, customer_id, company_id, currency, validity_date, payment_terms, delivery_terms, notes, internal_notes, freight, insurance, inco_terms, container_count, prepared_by, tax_type, is_export, column_config, created_by, status, subtotal, tax_total, grand_total)
+       SELECT number, ?, ?, customer_id, company_id, currency, validity_date, payment_terms, delivery_terms, notes, internal_notes, freight, insurance, inco_terms, container_count, prepared_by, tax_type, is_export, column_config, ?, 'negotiating', subtotal, tax_total, grand_total
        FROM quotations WHERE id = ?`
     ).run(maxRev.r + 1, new Date().toISOString().slice(0, 10), req.user!.id, id);
     const newId = Number(info.lastInsertRowid);

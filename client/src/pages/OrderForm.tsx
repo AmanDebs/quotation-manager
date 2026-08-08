@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Order, OrderItem, Customer, TaxType, ColumnConfig } from '../types';
 import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card } from '../components/ui';
+import CompanySelect from '../components/CompanySelect';
 import LineItemsEditor from '../components/LineItemsEditor';
 import ColumnsControl from '../components/ColumnsControl';
 import NotePresetPicker from '../components/NotePresetPicker';
@@ -14,6 +15,8 @@ import { fmtMoney, fmtQty, today } from '../lib/format';
 interface Draft {
   number?: string;
   customer_id: number | '';
+  /** Which group entity is selling. Fixed once the document is numbered. */
+  company_id?: number;
   quotation_id: number | null;
   date: string;
   is_export: number;
@@ -211,6 +214,13 @@ export default function OrderFormPage() {
                 <option value="">Select customer…</option>
                 {customers.map((c) => <option key={c.id} value={c.id}>{c.name} ({c.country})</option>)}
               </Select>
+            </Field>
+            <Field label="Issued By">
+              <CompanySelect
+                value={draft.company_id ?? null}
+                locked={!isNew}
+                onChange={(id) => set({ company_id: id ?? undefined })}
+              />
             </Field>
             <Field label="Order Date"><Input type="date" value={draft.date} onChange={(e) => set({ date: e.target.value })} /></Field>
             <Field label="Order Received Via">

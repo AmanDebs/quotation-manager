@@ -39,20 +39,25 @@ customersRouter.get('/:id', (req: AuthedRequest, res) => {
   res.json(row);
 });
 
+/** Blank means "the group default" — stored as NULL, resolved when a document is raised. */
+const companyId = (v: unknown): number | null => (Number(v) > 0 ? Number(v) : null);
+
 customersRouter.post('/', (req: AuthedRequest, res) => {
   const body = req.body ?? {};
   if (!body.name) return res.status(400).json({ error: 'Customer name is required' });
   // Managers may assign an owner; employees always own what they create.
   const ownerId = req.user!.role === 'manager' && body.owner_id ? Number(body.owner_id) : req.user!.id;
+  const companyId = ((v: unknown) => (Number(v) > 0 ? Number(v) : null))(body.company_id);
   const isExport = body.is_export !== undefined
     ? (body.is_export ? 1 : 0)
     : (String(body.country ?? '').trim().toLowerCase() !== 'india' && body.country ? 1 : 0);
   const info = db
-    .prepare(`INSERT INTO customers (${fields.join(', ')}, owner_id, is_export) VALUES (${fields.map(() => '?').join(', ')}, ?, ?)`)
+    .prepare(`INSERT INTO customers (${fields.join(', ')}, owner_id, is_export, company_id) VALUES (${fields.map(() => '?').join(', ')}, ?, ?, ?)`)
     .run(
       ...(fields.map((f) => String(body[f] ?? (f === 'country' ? 'India' : f === 'currency' ? 'INR' : ''))) as never[]),
       ownerId,
-      isExport
+      isExport,
+      companyId
     );
   res.status(201).json(db.prepare(`${listSql} WHERE c.id = ?`).get(Number(info.lastInsertRowid)));
 });
@@ -66,11 +71,12 @@ customersRouter.put('/:id', (req: AuthedRequest, res) => {
   if (!body.name) return res.status(400).json({ error: 'Customer name is required' });
   const ownerId = req.user!.role === 'manager' && body.owner_id ? Number(body.owner_id) : (existing.owner_id as number | null);
   db.prepare(
-    `UPDATE customers SET ${fields.map((f) => `${f} = ?`).join(', ')}, owner_id = ?, is_export = ? WHERE id = ?`
+    `UPDATE customers SET ${fields.map((f) => `${f} = ?`).join(', ')}, owner_id = ?, is_export = ?, company_id = ? WHERE id = ?`
   ).run(
     ...(fields.map((f) => String(body[f] ?? '')) as never[]),
     ownerId,
     body.is_export !== undefined ? (body.is_export ? 1 : 0) : Number(existing.is_export ?? 0),
+    'company_id' in body ? companyId(body.company_id) : (existing.company_id as number | null),
     id
   );
   res.json(db.prepare(`${listSql} WHERE c.id = ?`).get(id));

@@ -4,6 +4,7 @@ import { nextNumber } from '../services/numbering.js';
 import { round2 } from '../services/totals.js';
 import type { AuthedRequest } from '../middleware/auth.js';
 import { scopeClause, canAccessCustomer } from '../middleware/scope.js';
+import { resolveCompanyId } from '../services/companies.js';
 
 export const packingListsRouter = Router();
 
@@ -107,23 +108,29 @@ packingListsRouter.get('/prefill/from-invoice/:invoiceId', (req: AuthedRequest, 
   const inv = db.prepare('SELECT * FROM commercial_invoices WHERE id = ?').get(invId) as Record<string, unknown> | undefined;
   if (!inv || !canAccessCustomer(req, Number(inv.customer_id))) return res.status(404).json({ error: 'Invoice not found' });
   const items = db.prepare('SELECT description, hsn_code, qty, unit FROM invoice_items WHERE invoice_id = ? ORDER BY sort_order, id').all(invId);
-  res.json({ invoice_id: invId, customer_id: inv.customer_id, lot_no: inv.lot_no, items });
+  res.json({ invoice_id: invId, customer_id: inv.customer_id, company_id: inv.company_id, lot_no: inv.lot_no, items });
 });
 
 packingListsRouter.post('/', (req: AuthedRequest, res) => {
   const body = req.body ?? {};
   if (!body.customer_id) return res.status(400).json({ error: 'Customer is required' });
   if (!canAccessCustomer(req, Number(body.customer_id))) return res.status(403).json({ error: 'That customer is not assigned to you' });
+  // A standalone packing list follows its invoice's company when it has one.
+  const linked = body.invoice_id
+    ? (db.prepare('SELECT company_id FROM commercial_invoices WHERE id = ?').get(Number(body.invoice_id)) as { company_id: number } | undefined)
+    : undefined;
+  const companyId = resolveCompanyId(linked?.company_id ?? body.company_id, Number(body.customer_id));
   const id = transaction(() => {
-    const number = nextNumber('packing_list');
+    const number = nextNumber('packing_list', { companyId });
     const info = db.prepare(
-      `INSERT INTO packing_lists (number, date, invoice_id, customer_id, shipping_marks, lot_no, remarks, created_by, column_config)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO packing_lists (number, date, invoice_id, customer_id, company_id, shipping_marks, lot_no, remarks, created_by, column_config)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       number,
       String(body.date ?? new Date().toISOString().slice(0, 10)),
       body.invoice_id ? Number(body.invoice_id) : null,
       Number(body.customer_id),
+      companyId,
       String(body.shipping_marks ?? ''),
       String(body.lot_no ?? ''),
       String(body.remarks ?? ''),

@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Proforma, Customer, LineItem, TaxType, Settings, ColumnConfig } from '../types';
 import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, StatusBadge } from '../components/ui';
+import CompanySelect from '../components/CompanySelect';
 import LineItemsEditor from '../components/LineItemsEditor';
 import FollowupButton from '../components/FollowupButton';
 import PaymentsCard from '../components/PaymentsCard';
@@ -15,6 +16,8 @@ import { today } from '../lib/format';
 interface Draft {
   number?: string;
   customer_id: number | '';
+  /** Which group entity is selling. Fixed once the document is numbered. */
+  company_id?: number;
   quotation_id: number | null;
   date: string;
   currency: string;
@@ -241,6 +244,13 @@ export default function ProformaFormPage() {
                 <option value="">Select customer…</option>
                 {customers.map((c) => <option key={c.id} value={c.id}>{c.name} ({c.country})</option>)}
               </Select>
+            </Field>
+            <Field label="Issued By">
+              <CompanySelect
+                value={draft.company_id ?? null}
+                locked={!isNew}
+                onChange={(id) => set({ company_id: id ?? undefined })}
+              />
             </Field>
             <Field label="Date"><Input type="date" value={draft.date} onChange={(e) => set({ date: e.target.value })} /></Field>
             <Field label="Valid Until"><Input type="date" value={draft.validity_date} onChange={(e) => set({ validity_date: e.target.value })} /></Field>

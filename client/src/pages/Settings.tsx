@@ -1,7 +1,7 @@
 import { useEffect, useState, type ChangeEvent } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
-import type { Settings, BankAccount, NotePreset } from '../types';
+import type { Company, BankAccount, NotePreset } from '../types';
 import { Button, Input, Textarea, Field, Card, PageHeader, ErrorText } from '../components/ui';
 import { shrinkImage } from '../lib/image';
 
@@ -94,27 +94,55 @@ function BackupCard() {
 
 export default function SettingsPage() {
   const queryClient = useQueryClient();
-  const { data } = useQuery({ queryKey: ['settings'], queryFn: () => api.get<Settings>('/api/settings') });
-  const [form, setForm] = useState<Settings | null>(null);
+  const { data: companies = [] } = useQuery({
+    queryKey: ['companies'],
+    queryFn: () => api.get<Company[]>('/api/companies?all=1'),
+  });
+  // Which entity's profile is on screen. Defaults to the group's main one.
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [form, setForm] = useState<Company | null>(null);
   const [saved, setSaved] = useState(false);
 
+  const current = companies.find((c) => c.id === selectedId)
+    ?? companies.find((c) => c.is_default)
+    ?? companies[0];
+
   useEffect(() => {
-    if (data && !form) setForm(data);
-  }, [data]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (current && current.id !== form?.id) {
+      setSelectedId(current.id);
+      setForm(current);
+    }
+  }, [current?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const refresh = (c: Company) => {
+    queryClient.invalidateQueries({ queryKey: ['companies'] });
+    queryClient.invalidateQueries({ queryKey: ['settings'] });
+    setSelectedId(c.id);
+    setForm(c);
+  };
 
   const save = useMutation({
-    mutationFn: (s: Settings) => api.put<Settings>('/api/settings', s),
+    mutationFn: (s: Company) => api.put<Company>(`/api/companies/${s.id}`, s),
     onSuccess: (s) => {
-      queryClient.setQueryData(['settings'], s);
-      setForm(s);
+      refresh(s);
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
     },
   });
 
+  const addCompany = useMutation({
+    mutationFn: (name: string) => api.post<Company>('/api/companies', { company_name: name }),
+    onSuccess: refresh,
+  });
+
+  const makeDefault = useMutation({
+    mutationFn: (id: number) => api.put<Company>(`/api/companies/${id}`, { is_default: true }),
+    onSuccess: refresh,
+  });
+
   if (!form) return <div className="text-slate-400">Loading…</div>;
 
-  const set = (patch: Partial<Settings>) => setForm({ ...form, ...patch });
+  const set = (patch: Partial<Company>) => setForm({ ...form, ...patch });
   const setBank = (i: number, patch: Partial<BankAccount>) => {
     const accounts = form.bank_accounts.map((b, idx) => (idx === i ? { ...b, ...patch } : b));
     set({ bank_accounts: accounts });
@@ -124,7 +152,9 @@ export default function SettingsPage() {
     <div className="mx-auto max-w-4xl">
       <PageHeader
         title="Settings"
-        subtitle="Company profile shown on all documents"
+        subtitle={companies.length > 1
+          ? 'Each company in the group has its own profile, numbering and bank details'
+          : 'Company profile shown on all documents'}
         actions={
           <div className="flex items-center gap-2">
             {saved && <span className="text-sm text-green-600">Saved ✓</span>}
@@ -132,7 +162,38 @@ export default function SettingsPage() {
           </div>
         }
       />
-      <ErrorText error={save.error} />
+      <ErrorText error={save.error ?? addCompany.error ?? makeDefault.error} />
+
+      {/* Which entity is being edited. A document keeps the company it was
+          issued under, so switching here never rewrites existing paperwork. */}
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        {companies.map((c) => (
+          <button
+            key={c.id}
+            onClick={() => { setSelectedId(c.id); setForm(c); }}
+            className={`rounded-md border px-3 py-1.5 text-sm ${
+              c.id === form.id ? 'border-brand-600 bg-brand-50 font-medium text-brand-700' : 'border-slate-300 bg-white hover:border-brand-600'
+            }`}
+          >
+            {c.company_name || 'Untitled company'}
+            {c.is_default ? <span className="ml-1.5 text-xs text-slate-400">· default</span> : null}
+          </button>
+        ))}
+        <Button
+          variant="secondary"
+          disabled={addCompany.isPending}
+          onClick={() => {
+            const name = prompt('Name of the company to add');
+            if (name?.trim()) addCompany.mutate(name.trim());
+          }}
+        >+ Add company</Button>
+        {!form.is_default && (
+          <Button variant="secondary" disabled={makeDefault.isPending} onClick={() => makeDefault.mutate(form.id)}>
+            Make default
+          </Button>
+        )}
+      </div>
+
       <div className="space-y-4">
         <Card title="Company Details">
           <div className="grid grid-cols-2 gap-3">

@@ -116,6 +116,87 @@ for (const table of ['quotation_items', 'order_items', 'pi_items', 'invoice_item
   addColumnIfMissing(table, 'image', "TEXT NOT NULL DEFAULT ''");
 }
 
+/* ------------------------------------------------------------------ */
+/* Multiple companies in the group (2026-08)                           */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The old single `settings` row becomes company 1, once.
+ *
+ * Copied column by column from whatever `settings` actually has, rather than a
+ * fixed list: the two tables were written years apart and `settings` on an old
+ * database may be missing columns that later migrations added.
+ */
+const companyCount = db.prepare('SELECT COUNT(*) AS c FROM companies').get() as { c: number };
+if (companyCount.c === 0) {
+  const old = db.prepare('SELECT * FROM settings WHERE id = 1').get() as Record<string, unknown> | undefined;
+  const carried = (db.prepare('PRAGMA table_info(companies)').all() as { name: string }[])
+    .map((c) => c.name)
+    .filter((n) => !['id', 'created_at', 'is_default', 'active'].includes(n))
+    .filter((n) => old && n in old);
+  if (carried.length) {
+    db.prepare(
+      `INSERT INTO companies (id, is_default, active, ${carried.join(', ')})
+       VALUES (1, 1, 1, ${carried.map(() => '?').join(', ')})`
+    ).run(...carried.map((n) => old![n] as never));
+    console.warn(`companies: seeded company 1 from the old settings row (${carried.length} fields).`);
+  } else {
+    db.prepare('INSERT INTO companies (id, is_default, active) VALUES (1, 1, 1)').run();
+  }
+}
+// Exactly one company has to be the fallback, or documents have nowhere to land.
+const defaults = db.prepare('SELECT COUNT(*) AS c FROM companies WHERE is_default = 1').get() as { c: number };
+if (defaults.c === 0) {
+  db.prepare('UPDATE companies SET is_default = 1 WHERE id = (SELECT MIN(id) FROM companies)').run();
+}
+
+/**
+ * Every document records the company that issued it. DEFAULT 1 is the backfill:
+ * there has only ever been one company, so every existing row belongs to it.
+ *
+ * No REFERENCES clause here, unlike schema.sql — SQLite refuses to add a column
+ * with a foreign key unless its default is NULL, and a nullable company on a
+ * document would be worse than a missing constraint. Fresh installs get the
+ * real foreign key; migrated ones rely on the routes.
+ */
+for (const table of ['quotations', 'orders', 'proforma_invoices', 'commercial_invoices', 'packing_lists']) {
+  addColumnIfMissing(table, 'company_id', 'INTEGER NOT NULL DEFAULT 1');
+}
+addColumnIfMissing('customers', 'company_id', 'INTEGER');
+
+/**
+ * `sequences` was keyed (doc_type, year); it has to become
+ * (company_id, doc_type, year), and SQLite cannot alter a primary key in place.
+ *
+ * This is the one migration that could corrupt live numbering: lose these rows
+ * and every series restarts at 001, colliding with documents already issued. So
+ * the rebuild happens in one transaction and refuses to drop the old table
+ * unless every row arrived in the new one.
+ */
+const seqCols = db.prepare('PRAGMA table_info(sequences)').all() as { name: string }[];
+if (!seqCols.some((c) => c.name === 'company_id')) {
+  transaction(() => {
+    const before = (db.prepare('SELECT COUNT(*) AS c FROM sequences').get() as { c: number }).c;
+    db.exec(`CREATE TABLE sequences_new (
+      company_id INTEGER NOT NULL DEFAULT 1,
+      doc_type TEXT NOT NULL,
+      year INTEGER NOT NULL,
+      next_num INTEGER NOT NULL DEFAULT 1,
+      PRIMARY KEY (company_id, doc_type, year)
+    )`);
+    db.exec(
+      'INSERT INTO sequences_new (company_id, doc_type, year, next_num) SELECT 1, doc_type, year, next_num FROM sequences'
+    );
+    const after = (db.prepare('SELECT COUNT(*) AS c FROM sequences_new').get() as { c: number }).c;
+    if (after !== before) {
+      throw new Error(`sequences rebuild copied ${after} of ${before} rows — refusing to drop the original`);
+    }
+    db.exec('DROP TABLE sequences');
+    db.exec('ALTER TABLE sequences_new RENAME TO sequences');
+    console.warn(`sequences: rebuilt per company; ${after} existing counter(s) assigned to company 1.`);
+  });
+}
+
 /**
  * A document number is an identity, not a label — it goes on paperwork the
  * customer and the tax authority both keep. Enforce that in the database, so a
@@ -144,11 +225,21 @@ function enforceUniqueNumbers(table: string, indexName: string, columns: string[
     db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS ${indexName} ON ${table}(${cols})`);
   }
 }
-enforceUniqueNumbers('quotations', 'idx_quotations_number', ['number', 'revision']);
-enforceUniqueNumbers('orders', 'idx_orders_number', ['number']);
-enforceUniqueNumbers('proforma_invoices', 'idx_proformas_number', ['number']);
-enforceUniqueNumbers('commercial_invoices', 'idx_invoices_number', ['number']);
-enforceUniqueNumbers('packing_lists', 'idx_packing_lists_number', ['number']);
+// Uniqueness is per company now. Each entity counts its own series from 001,
+// so two companies reaching the same number is legitimate — a global unique
+// index would reject the second one. Within one company it is still an error.
+// The old global indexes are dropped by name so the new ones can be built.
+for (const old of [
+  'idx_quotations_number', 'idx_orders_number', 'idx_proformas_number',
+  'idx_invoices_number', 'idx_packing_lists_number',
+]) {
+  db.exec(`DROP INDEX IF EXISTS ${old}`);
+}
+enforceUniqueNumbers('quotations', 'idx_quotations_company_number', ['company_id', 'number', 'revision']);
+enforceUniqueNumbers('orders', 'idx_orders_company_number', ['company_id', 'number']);
+enforceUniqueNumbers('proforma_invoices', 'idx_proformas_company_number', ['company_id', 'number']);
+enforceUniqueNumbers('commercial_invoices', 'idx_invoices_company_number', ['company_id', 'number']);
+enforceUniqueNumbers('packing_lists', 'idx_packing_lists_company_number', ['company_id', 'number']);
 
 // One-off backfill: the founding account becomes the manager and inherits
 // ownership of everything that pre-dates the roles feature.
@@ -179,16 +270,17 @@ db.prepare("UPDATE customers SET is_export = 1 WHERE is_export = 0 AND lower(tri
 db.prepare('UPDATE quotations SET is_export = 1 WHERE is_export = 0 AND customer_id IN (SELECT id FROM customers WHERE is_export = 1)').run();
 
 // Starter note presets so the feature is useful immediately.
-const presetRow = db.prepare('SELECT note_presets FROM settings WHERE id = 1').get() as { note_presets: string } | undefined;
+const presetRow = db.prepare('SELECT id, note_presets FROM companies WHERE is_default = 1 ORDER BY id LIMIT 1').get() as
+  { id: number; note_presets: string } | undefined;
 if (presetRow && (!presetRow.note_presets || presetRow.note_presets === '[]')) {
-  db.prepare('UPDATE settings SET note_presets = ? WHERE id = 1').run(JSON.stringify([
+  db.prepare('UPDATE companies SET note_presets = ? WHERE id = ?').run(JSON.stringify([
     { label: 'Freight & insurance clause', body: 'Price is subject to change in freight & insurance billed at actual at the time of booking and dispatch.' },
     { label: 'Quantity tolerance', body: 'Quantity Tolerance: (±) 10% in value and quantity. Packing details are subject to change.' },
     { label: 'Production plan', body: 'Production and transit plan to be finalized at the time of order placement.' },
     { label: 'Force majeure', body: "Quotation is subject to force majeure clause and subject to changes in case of any unforeseen situation which is beyond supplier's control." },
     { label: 'Jurisdiction', body: 'All disputes subject to Kolkata jurisdiction.' },
     { label: 'Billing basis', body: 'Product will be billed in tonnage as per standard weight of each product; tolerance weight is acceptable to buyer as mentioned in each product description.' },
-  ]));
+  ]), presetRow.id);
 }
 
 /** Run fn inside a transaction; rolls back on any thrown error. */

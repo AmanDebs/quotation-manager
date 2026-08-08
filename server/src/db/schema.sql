@@ -11,6 +11,54 @@ CREATE TABLE IF NOT EXISTS users (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- The group's selling entities. Every document records the one that issued it,
+-- so a reprint years later still carries the right name, GSTIN and letterhead.
+-- Each company numbers its own documents: a GST-registered entity keeps one
+-- consecutive series per GSTIN.
+--
+-- On an existing database this is seeded once from the old single `settings`
+-- row (see db/connection.ts), which is why the columns mirror it.
+CREATE TABLE IF NOT EXISTS companies (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  company_name TEXT NOT NULL DEFAULT '',
+  address TEXT NOT NULL DEFAULT '',
+  city TEXT NOT NULL DEFAULT '',
+  state TEXT NOT NULL DEFAULT '',
+  country TEXT NOT NULL DEFAULT 'India',
+  pincode TEXT NOT NULL DEFAULT '',
+  phone TEXT NOT NULL DEFAULT '',
+  email TEXT NOT NULL DEFAULT '',
+  website TEXT NOT NULL DEFAULT '',
+  gstin TEXT NOT NULL DEFAULT '',
+  pan TEXT NOT NULL DEFAULT '',
+  iec TEXT NOT NULL DEFAULT '',
+  logo TEXT NOT NULL DEFAULT '',
+  signature TEXT NOT NULL DEFAULT '',
+  default_terms TEXT NOT NULL DEFAULT '',
+  bank_accounts TEXT NOT NULL DEFAULT '[]',
+  note_presets TEXT NOT NULL DEFAULT '[]',
+  arn_ref TEXT NOT NULL DEFAULT '',
+  theme_color TEXT NOT NULL DEFAULT '#8b1a1a',
+  quote_prefix TEXT NOT NULL DEFAULT 'QT',
+  pi_prefix TEXT NOT NULL DEFAULT 'PI',
+  inv_prefix TEXT NOT NULL DEFAULT 'INV',
+  pl_prefix TEXT NOT NULL DEFAULT 'PL',
+  quote_pattern TEXT NOT NULL DEFAULT 'QT/{FY}/{SEQ}',
+  pi_pattern TEXT NOT NULL DEFAULT 'PI/{FY}/{SEQ}',
+  pi_export_pattern TEXT NOT NULL DEFAULT 'EX-PI/{FY}/{SEQ}',
+  inv_pattern TEXT NOT NULL DEFAULT 'INV/{FY}/{SEQ}',
+  inv_export_pattern TEXT NOT NULL DEFAULT 'EX/{FY}/{SEQ}',
+  pl_pattern TEXT NOT NULL DEFAULT 'PL/{FY}/{SEQ}',
+  order_pattern TEXT NOT NULL DEFAULT 'SO/{FY}/{SEQ}',
+  order_export_pattern TEXT NOT NULL DEFAULT 'SO-EX/{FY}/{SEQ}',
+  -- The one a document falls back to when neither it nor its customer names one.
+  is_default INTEGER NOT NULL DEFAULT 0,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Superseded by `companies` above, and no longer read by anything. Kept so a
+-- database migrated to multi-company can still be rolled back.
 CREATE TABLE IF NOT EXISTS settings (
   id INTEGER PRIMARY KEY CHECK (id = 1),
   company_name TEXT NOT NULL DEFAULT '',
@@ -63,6 +111,8 @@ CREATE TABLE IF NOT EXISTS customers (
   notify_party_2 TEXT NOT NULL DEFAULT '',
   notes TEXT NOT NULL DEFAULT '',
   owner_id INTEGER REFERENCES users(id),
+  -- Which group entity normally invoices this customer; NULL = the default.
+  company_id INTEGER REFERENCES companies(id),
   is_export INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -102,6 +152,8 @@ CREATE TABLE IF NOT EXISTS quotations (
   date TEXT NOT NULL,
   enquiry_id INTEGER REFERENCES enquiries(id),
   customer_id INTEGER NOT NULL REFERENCES customers(id),
+  -- The group entity issuing this document. Fixed at creation.
+  company_id INTEGER NOT NULL DEFAULT 1 REFERENCES companies(id),
   currency TEXT NOT NULL DEFAULT 'INR',
   validity_date TEXT NOT NULL DEFAULT '',
   payment_terms TEXT NOT NULL DEFAULT '',
@@ -166,6 +218,8 @@ CREATE TABLE IF NOT EXISTS orders (
   date TEXT NOT NULL,
   quotation_id INTEGER REFERENCES quotations(id),
   customer_id INTEGER NOT NULL REFERENCES customers(id),
+  -- The group entity issuing this document. Fixed at creation.
+  company_id INTEGER NOT NULL DEFAULT 1 REFERENCES companies(id),
   is_export INTEGER NOT NULL DEFAULT 0,
   order_through TEXT NOT NULL DEFAULT '',
   spoc TEXT NOT NULL DEFAULT '',
@@ -237,6 +291,8 @@ CREATE TABLE IF NOT EXISTS proforma_invoices (
   quotation_id INTEGER REFERENCES quotations(id),
   order_id INTEGER REFERENCES orders(id),
   customer_id INTEGER NOT NULL REFERENCES customers(id),
+  -- The group entity issuing this document. Fixed at creation.
+  company_id INTEGER NOT NULL DEFAULT 1 REFERENCES companies(id),
   consignee TEXT NOT NULL DEFAULT '',
   notify_party TEXT NOT NULL DEFAULT '',
   currency TEXT NOT NULL DEFAULT 'INR',
@@ -311,6 +367,8 @@ CREATE TABLE IF NOT EXISTS commercial_invoices (
   pi_id INTEGER REFERENCES proforma_invoices(id),
   order_id INTEGER REFERENCES orders(id),
   customer_id INTEGER NOT NULL REFERENCES customers(id),
+  -- The group entity issuing this document. Fixed at creation.
+  company_id INTEGER NOT NULL DEFAULT 1 REFERENCES companies(id),
   consignee TEXT NOT NULL DEFAULT '',
   notify_party TEXT NOT NULL DEFAULT '',
   currency TEXT NOT NULL DEFAULT 'INR',
@@ -377,6 +435,8 @@ CREATE TABLE IF NOT EXISTS packing_lists (
   date TEXT NOT NULL,
   invoice_id INTEGER REFERENCES commercial_invoices(id),
   customer_id INTEGER NOT NULL REFERENCES customers(id),
+  -- The group entity issuing this document. Fixed at creation.
+  company_id INTEGER NOT NULL DEFAULT 1 REFERENCES companies(id),
   shipping_marks TEXT NOT NULL DEFAULT '',
   lot_no TEXT NOT NULL DEFAULT '',
   remarks TEXT NOT NULL DEFAULT '',
@@ -427,11 +487,15 @@ CREATE TABLE IF NOT EXISTS payments (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- One running series per company, doc type and fiscal year. An existing
+-- database keyed only on (doc_type, year) is rebuilt into this shape by
+-- db/connection.ts — SQLite cannot alter a primary key in place.
 CREATE TABLE IF NOT EXISTS sequences (
+  company_id INTEGER NOT NULL DEFAULT 1,
   doc_type TEXT NOT NULL,
   year INTEGER NOT NULL,
   next_num INTEGER NOT NULL DEFAULT 1,
-  PRIMARY KEY (doc_type, year)
+  PRIMARY KEY (company_id, doc_type, year)
 );
 
 -- The unique indexes on document numbers are created in db/connection.ts, not

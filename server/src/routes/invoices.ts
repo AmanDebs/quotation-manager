@@ -4,6 +4,7 @@ import { nextNumber } from '../services/numbering.js';
 import { computeTotals, round2, type LineItemInput } from '../services/totals.js';
 import type { AuthedRequest } from '../middleware/auth.js';
 import { scopeClause, canAccessCustomer } from '../middleware/scope.js';
+import { resolveCompanyId } from '../services/companies.js';
 import { submit, decide, resetApprovalOnEdit, blockUnapprovedTransition } from '../services/approval.js';
 import { invoiceReceivable } from '../services/receivables.js';
 
@@ -87,15 +88,19 @@ function syncPackingList(invoiceId: number, userId: number, packing: PackingInpu
   let pl = db.prepare('SELECT * FROM packing_lists WHERE invoice_id = ?').get(invoiceId) as Record<string, unknown> | undefined;
 
   if (!pl) {
-    const number = nextNumber('packing_list');
+    // The packing list is the invoice's other half, so it is issued by the
+    // same company and numbered from that company's series.
+    const plCompanyId = Number(inv.company_id) || resolveCompanyId(null, Number(inv.customer_id));
+    const number = nextNumber('packing_list', { companyId: plCompanyId });
     const info = db.prepare(
-      `INSERT INTO packing_lists (number, date, invoice_id, customer_id, shipping_marks, lot_no, remarks, created_by, column_config)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO packing_lists (number, date, invoice_id, customer_id, company_id, shipping_marks, lot_no, remarks, created_by, column_config)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       packing?.number || number,
       String(packing?.date ?? inv.date),
       invoiceId,
       Number(inv.customer_id),
+      plCompanyId,
       String(packing?.shipping_marks ?? ''),
       String(inv.lot_no ?? ''),
       String(packing?.remarks ?? ''),
@@ -220,6 +225,7 @@ invoicesRouter.get('/prefill/from-proforma/:piId', (req: AuthedRequest, res) => 
     pi_id: piId,
     order_id: pi.order_id,
     customer_id: pi.customer_id,
+    company_id: pi.company_id,
     consignee: pi.consignee,
     notify_party: pi.notify_party,
     notify_party_2: pi.notify_party_2,
@@ -246,13 +252,16 @@ invoicesRouter.post('/', (req: AuthedRequest, res) => {
   if (!body.customer_id) return res.status(400).json({ error: 'Customer is required' });
   if (!canAccessCustomer(req, Number(body.customer_id))) return res.status(403).json({ error: 'That customer is not assigned to you' });
   const h = headerValues(body);
+  // Fixed at creation: the number below comes from this company's series.
+  const companyId = resolveCompanyId(body.company_id, Number(body.customer_id));
   const id = transaction(() => {
-    const number = nextNumber('invoice', { isExport: h.is_export === 1 });
+    const number = nextNumber('invoice', { isExport: h.is_export === 1, companyId });
     const info = db.prepare(
-      `INSERT INTO commercial_invoices (number, ${headerFields.join(', ')}, created_by, column_config, status)
-       VALUES (?, ${headerFields.map(() => '?').join(', ')}, ?, ?, 'draft')`
+      `INSERT INTO commercial_invoices (number, company_id, ${headerFields.join(', ')}, created_by, column_config, status)
+       VALUES (?, ?, ${headerFields.map(() => '?').join(', ')}, ?, ?, 'draft')`
     ).run(
       number,
+      companyId,
       ...(headerFields.map((f) => (h as Record<string, unknown>)[f]) as never[]),
       req.user!.id,
       JSON.stringify(body.column_config ?? {})

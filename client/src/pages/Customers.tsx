@@ -4,6 +4,7 @@ import { api } from '../api/client';
 import type { Customer, User } from '../types';
 import { useIsManager } from '../App';
 import { Button, Input, Textarea, Select, Field, PageHeader, EmptyState, ErrorText, Modal, Card, ExportTabs } from '../components/ui';
+import CompanySelect, { useCompanies } from '../components/CompanySelect';
 
 const empty: Omit<Customer, 'id'> = {
   name: '', contact_person: '', email: '', phone: '', address: '', city: '', country: 'India',
@@ -14,6 +15,7 @@ const empty: Omit<Customer, 'id'> = {
 export default function CustomersPage() {
   const queryClient = useQueryClient();
   const isManager = useIsManager();
+  const companies = useCompanies();
   const [q, setQ] = useState('');
   const [exportFilter, setExportFilter] = useState('');
   const [editing, setEditing] = useState<Customer | Omit<Customer, 'id'> | null>(null);
@@ -131,6 +133,16 @@ export default function CustomersPage() {
                   <option value="">— me —</option>
                   {users.map((u) => <option key={u.id} value={u.id}>{u.name} ({u.role})</option>)}
                 </Select>
+              </Field>
+            )}
+            {/* Renders nothing when the group has only one entity. */}
+            {companies.length > 1 && (
+              <Field label="Invoiced By">
+                <CompanySelect
+                  allowDefault
+                  value={editing.company_id ?? null}
+                  onChange={(id) => set({ company_id: id })}
+                />
               </Field>
             )}
             <Field label="Preferred Currency">

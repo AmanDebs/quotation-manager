@@ -15,6 +15,10 @@ import bcrypt from 'bcryptjs';
 import { db, transaction } from './connection.js';
 import { nextNumber } from '../services/numbering.js';
 import { computeTotals, type LineItemInput } from '../services/totals.js';
+import { defaultCompanyId } from '../services/companies.js';
+
+/** Demo data belongs to the group's default company. */
+const seedCompanyId = defaultCompanyId();
 
 const force = process.argv.includes('--force');
 
@@ -42,11 +46,11 @@ if (users.c === 0) {
   employeeId = Number((db.prepare("SELECT id FROM users WHERE role = 'employee' ORDER BY id LIMIT 1").get() as { id: number } | undefined)?.id ?? managerId);
 }
 
-const settings = db.prepare('SELECT company_name FROM settings WHERE id = 1').get() as { company_name: string };
-if (!settings.company_name) {
+const seedCompany = db.prepare('SELECT company_name FROM companies WHERE id = ?').get(seedCompanyId) as { company_name: string };
+if (!seedCompany.company_name) {
   db.prepare(
-    `UPDATE settings SET company_name = ?, address = ?, city = ?, state = ?, country = ?, pincode = ?,
-     phone = ?, email = ?, website = ?, gstin = ?, pan = ?, iec = ?, default_terms = ?, bank_accounts = ? WHERE id = 1`
+    `UPDATE companies SET company_name = ?, address = ?, city = ?, state = ?, country = ?, pincode = ?,
+     phone = ?, email = ?, website = ?, gstin = ?, pan = ?, iec = ?, default_terms = ?, bank_accounts = ? WHERE id = ?`
   ).run(
     'Demo Metals & Alloys Pvt. Ltd.',
     'Plot 42, Industrial Area Phase II',
@@ -57,7 +61,8 @@ if (!settings.company_name) {
     JSON.stringify([
       { label: 'HDFC Bank — INR', details: 'HDFC Bank, Park Street Branch\nA/C 5020 0012 3456 78\nIFSC: HDFC0000123' },
       { label: 'HDFC Bank — Export (USD/EUR)', details: 'HDFC Bank, Park Street Branch\nA/C 5020 0098 7654 32\nSWIFT: HDFCINBBXXX' },
-    ])
+    ]),
+    seedCompanyId
   );
   console.log('Filled in demo company profile (Settings)');
 }
@@ -96,7 +101,7 @@ function createQuotation(opts: {
   number?: string; revision?: number; isExport?: boolean; createdBy?: number; approval?: string;
 }): { id: number; number: string } {
   return transaction(() => {
-    const number = opts.number ?? nextNumber('quotation');
+    const number = opts.number ?? nextNumber('quotation', { companyId: seedCompanyId });
     const totals = computeTotals(opts.items, opts.taxType, 0, 0, opts.currency);
     const approval = opts.approval ?? (opts.status === 'draft' ? 'not_submitted' : 'approved');
     const info = db.prepare(
@@ -146,7 +151,7 @@ createQuotation({ customer: customers.titan, date: daysFromNow(-58), currency: '
 // Proforma from the accepted Acme revision — export order with PO and advance
 const piTotals = computeTotals([{ ...forgingEUR, unit_price: 2.45 }, flangeEUR], 'none', 1800, 420);
 const piId = transaction(() => {
-  const number = nextNumber('proforma');
+  const number = nextNumber('proforma', { companyId: seedCompanyId });
   const info = db.prepare(
     `INSERT INTO proforma_invoices (number, date, quotation_id, customer_id, consignee, notify_party, currency, freight, insurance,
        lead_time, bank_account, inco_terms, payment_terms, delivery_terms, validity_date, is_export,
@@ -183,7 +188,7 @@ db.prepare('INSERT INTO payments (pi_id, customer_id, date, amount, currency, me
 const invItems: Item[] = [{ ...forgingEUR, qty: 8670, unit_price: 2.45 }, flangeEUR];
 const invTotals = computeTotals(invItems, 'none', 1800, 420);
 const invId = transaction(() => {
-  const number = nextNumber('invoice');
+  const number = nextNumber('invoice', { companyId: seedCompanyId });
   const info = db.prepare(
     `INSERT INTO commercial_invoices (number, date, pi_id, customer_id, consignee, notify_party, currency, freight, insurance,
        shipping_details, bank_account, inco_terms, payment_terms, is_export, country_of_origin, port_of_loading,
@@ -215,7 +220,7 @@ db.prepare('INSERT INTO payments (invoice_id, customer_id, date, amount, currenc
 
 // Packing list for the dispatch
 transaction(() => {
-  const number = nextNumber('packing_list');
+  const number = nextNumber('packing_list', { companyId: seedCompanyId });
   const info = db.prepare(
     `INSERT INTO packing_lists (number, date, invoice_id, customer_id, shipping_marks, lot_no, remarks, created_by)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`

@@ -6,6 +6,7 @@ import { db } from '../db/connection.js';
 import { amountInWords } from './amountInWords.js';
 import { round2 } from './totals.js';
 import { invoiceReceivable } from './receivables.js';
+import { getCompany, defaultCompany } from './companies.js';
 
 // The npm package ships fonts only as base64 vfs; decode them for the server printer.
 const vfs: Record<string, string> =
@@ -131,12 +132,19 @@ function sanitiseItemImages(items: Row[]): void {
   }
 }
 
-function getSettings(): Row {
-  const s = db.prepare('SELECT * FROM settings WHERE id = 1').get() as Row;
-  s.bank_accounts = JSON.parse(s.bank_accounts || '[]');
+/**
+ * The letterhead for one document, taken from the company that issued it.
+ *
+ * Every builder passes its own row's `company_id`, so the paperwork is
+ * reproducible: a 2026 invoice reprinted in 2028 still carries the entity,
+ * GSTIN and logo it actually went out under, whatever the group looks like by
+ * then. Falls back to the group default when a document predates the column.
+ */
+function companyProfile(companyId: unknown): Row {
+  const id = Number(companyId);
+  const s = (Number.isInteger(id) && id > 0 ? getCompany(id) : defaultCompany()) as Row;
   s.theme = s.theme_color || '#8b1a1a';
-  // Every builder reads the logo and signature from here, so one check covers
-  // all of them.
+  // Both images reach pdfmake from here, so one check covers every builder.
   s.logo = safeImage(s.logo);
   s.signature = safeImage(s.signature);
   return s;
@@ -418,9 +426,11 @@ function itemsTable(s: Row, items: Row[], specs: ColumnSpec[], cfg: ColumnConfig
 /* QUOTATION — modeled on the Sanya Industries sample                  */
 /* ------------------------------------------------------------------ */
 export function buildQuotationPdf(id: number): TDocumentDefinitions {
-  const s = getSettings();
   const q = db.prepare('SELECT * FROM quotations WHERE id = ?').get(id) as Row;
   if (!q) throw new Error('Quotation not found');
+  // The company that issued it, not whichever is current — a reprint years
+  // later must still carry the right entity, GSTIN and letterhead.
+  const s = companyProfile(q.company_id);
   const c = db.prepare('SELECT * FROM customers WHERE id = ?').get(q.customer_id) as Row;
   const items = db.prepare('SELECT * FROM quotation_items WHERE quotation_id = ? ORDER BY sort_order, id').all(id) as Row[];
   // The quotation is the only document that prints line photos.
@@ -531,9 +541,9 @@ export function buildQuotationPdf(id: number): TDocumentDefinitions {
 /* ORDER CONFIRMATION                                                  */
 /* ------------------------------------------------------------------ */
 export function buildOrderPdf(id: number): TDocumentDefinitions {
-  const s = getSettings();
   const o = db.prepare('SELECT * FROM orders WHERE id = ?').get(id) as Row;
   if (!o) throw new Error('Order not found');
+  const s = companyProfile(o.company_id);
   const c = db.prepare('SELECT * FROM customers WHERE id = ?').get(o.customer_id) as Row;
   const items = db.prepare('SELECT * FROM order_items WHERE order_id = ? ORDER BY sort_order, id').all(id) as Row[];
   const quotation = o.quotation_id
@@ -626,9 +636,9 @@ export function buildOrderPdf(id: number): TDocumentDefinitions {
 /* PROFORMA INVOICE — modeled on the Emeraude sample                   */
 /* ------------------------------------------------------------------ */
 export function buildProformaPdf(id: number): TDocumentDefinitions {
-  const s = getSettings();
   const pi = db.prepare('SELECT * FROM proforma_invoices WHERE id = ?').get(id) as Row;
   if (!pi) throw new Error('Proforma invoice not found');
+  const s = companyProfile(pi.company_id);
   const c = db.prepare('SELECT * FROM customers WHERE id = ?').get(pi.customer_id) as Row;
   const items = db.prepare('SELECT * FROM pi_items WHERE pi_id = ? ORDER BY sort_order, id').all(id) as Row[];
   const quotation = pi.quotation_id
@@ -808,9 +818,9 @@ function exportDocGrid(s: Row, opts: {
 /* COMMERCIAL INVOICE                                                  */
 /* ------------------------------------------------------------------ */
 export function buildInvoicePdf(id: number): TDocumentDefinitions {
-  const s = getSettings();
   const inv = db.prepare('SELECT * FROM commercial_invoices WHERE id = ?').get(id) as Row;
   if (!inv) throw new Error('Invoice not found');
+  const s = companyProfile(inv.company_id);
   const c = db.prepare('SELECT * FROM customers WHERE id = ?').get(inv.customer_id) as Row;
   const items = db.prepare('SELECT * FROM invoice_items WHERE invoice_id = ? ORDER BY sort_order, id').all(id) as Row[];
   const pi = inv.pi_id ? (db.prepare('SELECT number, date, po_number, po_date FROM proforma_invoices WHERE id = ?').get(inv.pi_id) as Row | undefined) : undefined;
@@ -929,9 +939,9 @@ export function buildInvoicePdf(id: number): TDocumentDefinitions {
 /* PACKING LIST                                                        */
 /* ------------------------------------------------------------------ */
 export function buildPackingListPdf(id: number): TDocumentDefinitions {
-  const s = getSettings();
   const pl = db.prepare('SELECT * FROM packing_lists WHERE id = ?').get(id) as Row;
   if (!pl) throw new Error('Packing list not found');
+  const s = companyProfile(pl.company_id);
   const c = db.prepare('SELECT * FROM customers WHERE id = ?').get(pl.customer_id) as Row;
   const items = db.prepare('SELECT * FROM packing_list_items WHERE packing_list_id = ? ORDER BY sort_order, id').all(id) as Row[];
   const inv = pl.invoice_id

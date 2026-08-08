@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Quotation, Customer, LineItem, TaxType, ColumnConfig } from '../types';
 import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, StatusBadge } from '../components/ui';
+import CompanySelect from '../components/CompanySelect';
 import LineItemsEditor from '../components/LineItemsEditor';
 import FollowupButton from '../components/FollowupButton';
 import ApprovalStrip from '../components/ApprovalStrip';
@@ -15,6 +16,8 @@ import { fmtMoney, fmtQty, fmtDate, today } from '../lib/format';
 interface Draft {
   number?: string;
   customer_id: number | '';
+  /** Which group entity is selling. Fixed once the document is numbered. */
+  company_id?: number;
   enquiry_id: number | null;
   date: string;
   currency: string;
@@ -61,6 +64,7 @@ export default function QuotationFormPage() {
       setDraft({
         number: existing.number,
         customer_id: existing.customer_id,
+        company_id: existing.company_id,
         enquiry_id: existing.enquiry_id,
         date: existing.date,
         currency: existing.currency,
@@ -111,6 +115,8 @@ export default function QuotationFormPage() {
       customer_id: cid,
       ...(c
         ? {
+            // The entity that usually serves them; still changeable below.
+            company_id: c.company_id ?? undefined,
             currency: c.currency,
             is_export: c.is_export ?? (c.country.trim().toLowerCase() !== 'india' ? 1 : 0),
             tax_type: (c.country.trim().toLowerCase() !== 'india' ? 'none' : d.tax_type === 'none' ? 'igst' : d.tax_type) as TaxType,
@@ -258,6 +264,13 @@ export default function QuotationFormPage() {
                 <option value="">Select customer…</option>
                 {customers.map((c) => <option key={c.id} value={c.id}>{c.name} ({c.country})</option>)}
               </Select>
+            </Field>
+            <Field label="Issued By">
+              <CompanySelect
+                value={draft.company_id ?? null}
+                locked={!isNew}
+                onChange={(id) => set({ company_id: id ?? undefined })}
+              />
             </Field>
             <Field label="Date"><Input type="date" disabled={readOnly} value={draft.date} onChange={(e) => set({ date: e.target.value })} /></Field>
             <Field label="Valid Until"><Input type="date" disabled={readOnly} value={draft.validity_date} onChange={(e) => set({ validity_date: e.target.value })} /></Field>
