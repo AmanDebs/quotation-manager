@@ -1,6 +1,7 @@
 import PdfPrinter from 'pdfmake';
 import pdfFonts from 'pdfmake/build/vfs_fonts.js';
 import type { TDocumentDefinitions, Content } from 'pdfmake/interfaces';
+import { inflateSync } from 'node:zlib';
 import { db } from '../db/connection.js';
 import { amountInWords } from './amountInWords.js';
 import { round2 } from './totals.js';
@@ -46,10 +47,98 @@ function fmtDate(iso: string): string {
   return `${d}-${m}-${y}`;
 }
 
+/* ------------------------------------------------------------------ */
+/* Image safety                                                        */
+/* ------------------------------------------------------------------ */
+
+/**
+ * A stored image is only handed to pdfmake once we know it decodes.
+ *
+ * This is a crash guard, not a nicety. pdfkit's PNG path inflates the IDAT
+ * data through zlib's *callback* API and rethrows any failure from inside that
+ * callback — so a corrupt PNG surfaces as an uncaughtException on a later
+ * tick, escaping both the promise in renderPdf and the try/catch in
+ * routes/pdf.ts, and taking the whole server process down with it. One bad
+ * logo would then break every document for everyone, not just its own.
+ *
+ * Validating up front costs one synchronous inflate of an image we were about
+ * to decode anyway, and turns the failure into "the PDF prints without the
+ * picture".
+ */
+const IMAGE_DATA_URL = /^data:image\/(png|jpe?g);base64,([A-Za-z0-9+/=\s]+)$/;
+const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
+function pngDecodes(buf: Buffer): boolean {
+  if (buf.length < 8 || !buf.subarray(0, 8).equals(PNG_SIGNATURE)) return false;
+  const idat: Buffer[] = [];
+  let off = 8;
+  while (off + 8 <= buf.length) {
+    const len = buf.readUInt32BE(off);
+    const type = buf.toString('ascii', off + 4, off + 8);
+    const start = off + 8;
+    // A length that runs past the buffer means the file is truncated or lying.
+    if (len > buf.length || start + len + 4 > buf.length) return false;
+    if (type === 'IDAT') idat.push(buf.subarray(start, start + len));
+    if (type === 'IEND') break;
+    off = start + len + 4;
+  }
+  if (!idat.length) return false;
+  try {
+    inflateSync(Buffer.concat(idat));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * JPEG failures throw synchronously from pdfkit, so they are already caught
+ * and turned into a 500 — this only needs to be good enough to spot a file
+ * that is not a JPEG at all. A false positive costs a 500, never a crash.
+ */
+function jpegLooksSane(buf: Buffer): boolean {
+  if (buf.length < 4 || buf[0] !== 0xff || buf[1] !== 0xd8) return false;
+  for (let i = 2; i + 1 < buf.length; i++) {
+    if (buf[i] !== 0xff) continue;
+    const marker = buf[i + 1];
+    // Any start-of-frame marker: C0–CF except DHT (C4), JPG (C8) and DAC (CC).
+    if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) return true;
+  }
+  return false;
+}
+
+/** The data URL if pdfmake can be trusted with it, otherwise ''. */
+export function safeImage(value: unknown): string {
+  const dataUrl = typeof value === 'string' ? value.trim() : '';
+  if (!dataUrl) return '';
+  const m = IMAGE_DATA_URL.exec(dataUrl);
+  if (!m) return '';
+  let buf: Buffer;
+  try {
+    buf = Buffer.from(m[2], 'base64');
+  } catch {
+    return '';
+  }
+  const ok = m[1] === 'png' ? pngDecodes(buf) : jpegLooksSane(buf);
+  if (!ok) console.warn(`Skipping an undecodable ${m[1]} image (${buf.length} bytes) in a PDF`);
+  return ok ? dataUrl : '';
+}
+
+/** Drops any line-item photo that would not decode, in place. */
+function sanitiseItemImages(items: Row[]): void {
+  for (const it of items) {
+    if (it.image) it.image = safeImage(it.image);
+  }
+}
+
 function getSettings(): Row {
   const s = db.prepare('SELECT * FROM settings WHERE id = 1').get() as Row;
   s.bank_accounts = JSON.parse(s.bank_accounts || '[]');
   s.theme = s.theme_color || '#8b1a1a';
+  // Every builder reads the logo and signature from here, so one check covers
+  // all of them.
+  s.logo = safeImage(s.logo);
+  s.signature = safeImage(s.signature);
   return s;
 }
 
@@ -331,6 +420,8 @@ export function buildQuotationPdf(id: number): TDocumentDefinitions {
   if (!q) throw new Error('Quotation not found');
   const c = db.prepare('SELECT * FROM customers WHERE id = ?').get(q.customer_id) as Row;
   const items = db.prepare('SELECT * FROM quotation_items WHERE quotation_id = ? ORDER BY sort_order, id').all(id) as Row[];
+  // The quotation is the only document that prints line photos.
+  sanitiseItemImages(items);
 
   const cur = q.currency;
   const showTax = q.tax_type !== 'none';

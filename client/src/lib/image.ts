@@ -8,8 +8,22 @@
  * thumbnail on screen and a small image on the PDF.
  *
  * Uses canvas, so there is no dependency.
+ *
+ * Re-encoding is also what makes the stored image *safe*: the browser has to
+ * decode the file before it can be drawn, so anything corrupt or mislabelled
+ * fails here with a message rather than reaching the server. The PDF printer
+ * decodes a bad PNG on a zlib callback and rethrows from there, which no
+ * amount of try/catch around the render will contain.
+ *
+ * Pass `mime: 'image/png'` for artwork with sharp edges or transparency — a
+ * logo or a signature — where JPEG's white fill and ringing artefacts show.
  */
-export function shrinkImage(file: File, maxEdge = 480, quality = 0.75): Promise<string> {
+export function shrinkImage(
+  file: File,
+  maxEdge = 480,
+  quality = 0.75,
+  mime: 'image/jpeg' | 'image/png' = 'image/jpeg',
+): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onerror = () => reject(new Error('Could not read that file'));
@@ -25,11 +39,13 @@ export function shrinkImage(file: File, maxEdge = 480, quality = 0.75): Promise<
         canvas.height = h;
         const ctx = canvas.getContext('2d');
         if (!ctx) return reject(new Error('Could not process that image'));
-        // JPEG has no alpha, so fill white rather than letting transparency go black.
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, 0, w, h);
+        if (mime === 'image/jpeg') {
+          // JPEG has no alpha, so fill white rather than letting transparency go black.
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, w, h);
+        }
         ctx.drawImage(img, 0, 0, w, h);
-        resolve(canvas.toDataURL('image/jpeg', quality));
+        resolve(canvas.toDataURL(mime, quality));
       };
       img.src = String(reader.result);
     };

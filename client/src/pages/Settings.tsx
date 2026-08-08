@@ -3,28 +3,47 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Settings, BankAccount, NotePreset } from '../types';
 import { Button, Input, Textarea, Field, Card, PageHeader, ErrorText } from '../components/ui';
+import { shrinkImage } from '../lib/image';
 
+/**
+ * The logo and signature print on every document, so they go through the same
+ * canvas re-encode as line-item photos: the browser must decode the file to
+ * draw it, which means a corrupt or mislabelled image is caught here instead
+ * of reaching the PDF printer. PNG at 600px keeps edges and transparency
+ * crisp — these are artwork, not photographs.
+ */
 function ImageUpload({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
-  const handleFile = (e: ChangeEvent<HTMLInputElement>) => {
+  const [busy, setBusy] = useState(false);
+
+  const handleFile = async (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (file.size > 500 * 1024) {
-      alert('Please use an image under 500 KB');
+    if (file.size > 5 * 1024 * 1024) {
+      alert('Please use an image under 5 MB');
       return;
     }
-    const reader = new FileReader();
-    reader.onload = () => onChange(String(reader.result));
-    reader.readAsDataURL(file);
+    setBusy(true);
+    try {
+      onChange(await shrinkImage(file, 600, 0.92, 'image/png'));
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Could not use that image');
+    } finally {
+      setBusy(false);
+      e.target.value = '';
+    }
   };
+
   return (
     <Field label={label}>
       <div className="flex items-center gap-3">
         {value ? (
           <img src={value} alt={label} className="h-14 max-w-32 rounded border border-slate-200 object-contain p-1" />
         ) : (
-          <div className="flex h-14 w-24 items-center justify-center rounded border border-dashed border-slate-300 text-xs text-slate-400">None</div>
+          <div className="flex h-14 w-24 items-center justify-center rounded border border-dashed border-slate-300 text-xs text-slate-400">
+            {busy ? '…' : 'None'}
+          </div>
         )}
-        <input type="file" accept="image/*" onChange={handleFile} className="text-xs" />
+        <input type="file" accept="image/*" onChange={handleFile} disabled={busy} className="text-xs" />
         {value && <Button type="button" variant="danger" onClick={() => onChange('')}>Remove</Button>}
       </div>
     </Field>
