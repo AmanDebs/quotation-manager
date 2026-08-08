@@ -143,6 +143,10 @@ CREATE TABLE IF NOT EXISTS quotation_items (
   packs REAL,
   pcs_per_pack REAL,
   total_pcs REAL,
+  -- Loadability, copied from the catalogue when the product is picked so an
+  -- old document keeps the figures it was quoted on.
+  qty_20ft REAL,
+  qty_40ft REAL,
   custom1 TEXT NOT NULL DEFAULT '',
   custom2 TEXT NOT NULL DEFAULT '',
   custom3 TEXT NOT NULL DEFAULT '',
@@ -208,6 +212,10 @@ CREATE TABLE IF NOT EXISTS order_items (
   packs REAL,
   pcs_per_pack REAL,
   total_pcs REAL,
+  -- Loadability, copied from the catalogue when the product is picked so an
+  -- old document keeps the figures it was quoted on.
+  qty_20ft REAL,
+  qty_40ft REAL,
   supplier TEXT NOT NULL DEFAULT '',
   scheduled_date TEXT NOT NULL DEFAULT '',
   dispatched_date TEXT NOT NULL DEFAULT '',
@@ -281,6 +289,10 @@ CREATE TABLE IF NOT EXISTS pi_items (
   packs REAL,
   pcs_per_pack REAL,
   total_pcs REAL,
+  -- Loadability, copied from the catalogue when the product is picked so an
+  -- old document keeps the figures it was quoted on.
+  qty_20ft REAL,
+  qty_40ft REAL,
   custom1 TEXT NOT NULL DEFAULT '',
   custom2 TEXT NOT NULL DEFAULT '',
   custom3 TEXT NOT NULL DEFAULT '',
@@ -344,6 +356,10 @@ CREATE TABLE IF NOT EXISTS invoice_items (
   packs REAL,
   pcs_per_pack REAL,
   total_pcs REAL,
+  -- Loadability, copied from the catalogue when the product is picked so an
+  -- old document keeps the figures it was quoted on.
+  qty_20ft REAL,
+  qty_40ft REAL,
   custom1 TEXT NOT NULL DEFAULT '',
   custom2 TEXT NOT NULL DEFAULT '',
   custom3 TEXT NOT NULL DEFAULT '',

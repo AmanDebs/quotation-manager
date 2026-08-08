@@ -483,6 +483,15 @@ export function buildQuotationPdf(id: number): TDocumentDefinitions {
     // still carries forward to the proforma and invoice, which do print it.
     { key: 'pcs_per_pack', label: 'Pcs/Box', width: 42, align: 'right', value: (it) => (it.pcs_per_pack != null ? fmtNum(it.pcs_per_pack, 0) : '') },
     { key: 'packs', label: 'Boxes', width: 40, align: 'right', value: (it) => (it.packs != null ? fmtNum(it.packs, 0) : '') },
+    // Loadability, the way the real Aglo quotations state it. Export only: a
+    // domestic GST buyer is not shipping in containers. Both still auto-hide
+    // when no line has the figures.
+    ...(q.is_export
+      ? [
+        { key: 'qty_20ft', label: 'Boxes/20ft', width: 44, align: 'right' as const, value: (it: Row) => (it.qty_20ft != null ? fmtNum(it.qty_20ft, 0) : '') },
+        { key: 'qty_40ft', label: 'Boxes/40ft HC', width: 50, align: 'right' as const, value: (it: Row) => (it.qty_40ft != null ? fmtNum(it.qty_40ft, 0) : '') },
+      ]
+      : []),
     { key: 'total_pcs', label: 'Total Qty', width: 55, align: 'right', value: (it) => (it.total_pcs != null ? fmtNum(it.total_pcs, 0) : '') },
     // No Qty column: Total Qty already says how much is being quoted, and the
     // billing quantity restates it in whatever the rate basis is ("12 per

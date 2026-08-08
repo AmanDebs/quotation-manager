@@ -33,6 +33,14 @@ for (const table of ['quotation_items', 'pi_items', 'invoice_items']) {
   addColumnIfMissing(table, 'pcs_per_pack', 'REAL');
   addColumnIfMissing(table, 'total_pcs', 'REAL');
 }
+// Per-line loadability (2026-08). Copied from the catalogue when a product is
+// picked, then owned by the document — editing products must not rewrite the
+// figures an old quotation was sent out with. Carried on all four item tables
+// so a conversion down the chain does not silently drop them.
+for (const table of ['quotation_items', 'order_items', 'pi_items', 'invoice_items']) {
+  addColumnIfMissing(table, 'qty_20ft', 'REAL');
+  addColumnIfMissing(table, 'qty_40ft', 'REAL');
+}
 addColumnIfMissing('packing_list_items', 'hsn_code', "TEXT NOT NULL DEFAULT ''");
 addColumnIfMissing('quotations', 'freight', 'REAL NOT NULL DEFAULT 0');
 addColumnIfMissing('quotations', 'insurance', 'REAL NOT NULL DEFAULT 0');

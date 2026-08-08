@@ -10,6 +10,9 @@ export interface LineItemInput {
   packs?: number | null;
   pcs_per_pack?: number | null;
   total_pcs?: number | null;
+  /** Boxes that fill a container of each size; printed on export quotations. */
+  qty_20ft?: number | null;
+  qty_40ft?: number | null;
   custom1?: string;
   custom2?: string;
   custom3?: string;
@@ -81,6 +84,8 @@ export function computeTotals(
       packs: it.packs ?? null,
       pcs_per_pack: it.pcs_per_pack ?? null,
       total_pcs: it.total_pcs ?? null,
+      qty_20ft: it.qty_20ft ?? null,
+      qty_40ft: it.qty_40ft ?? null,
       custom1: it.custom1 ?? '',
       custom2: it.custom2 ?? '',
       custom3: it.custom3 ?? '',

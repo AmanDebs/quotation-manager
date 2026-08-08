@@ -35,12 +35,13 @@ function saveItems(
   const totals = computeTotals(items, taxType, freight, insurance, currency);
   db.prepare('DELETE FROM quotation_items WHERE quotation_id = ?').run(quotationId);
   const ins = db.prepare(
-    `INSERT INTO quotation_items (quotation_id, product_id, description, hsn_code, qty, unit, unit_price, tax_pct, amount, color, packs, pcs_per_pack, total_pcs, custom1, custom2, custom3, image, sort_order)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO quotation_items (quotation_id, product_id, description, hsn_code, qty, unit, unit_price, tax_pct, amount, color, packs, pcs_per_pack, total_pcs, qty_20ft, qty_40ft, custom1, custom2, custom3, image, sort_order)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   );
   totals.items.forEach((it, i) =>
     ins.run(quotationId, it.product_id ?? null, it.description, it.hsn_code ?? '', it.qty ?? null, it.unit ?? 'unit', it.unit_price, it.tax_pct ?? 0, it.amount,
       it.color ?? '', it.packs ?? null, it.pcs_per_pack ?? null, it.total_pcs ?? null,
+      it.qty_20ft ?? null, it.qty_40ft ?? null,
       it.custom1 ?? '', it.custom2 ?? '', it.custom3 ?? '', it.image ?? '', i)
   );
   db.prepare('UPDATE quotations SET subtotal = ?, tax_total = ?, grand_total = ? WHERE id = ?').run(
@@ -193,8 +194,8 @@ quotationsRouter.post('/:id/revise', (req: AuthedRequest, res) => {
     ).run(maxRev.r + 1, new Date().toISOString().slice(0, 10), req.user!.id, id);
     const newId = Number(info.lastInsertRowid);
     db.prepare(
-      `INSERT INTO quotation_items (quotation_id, product_id, description, hsn_code, qty, unit, unit_price, tax_pct, amount, color, packs, pcs_per_pack, total_pcs, custom1, custom2, custom3, image, sort_order)
-       SELECT ?, product_id, description, hsn_code, qty, unit, unit_price, tax_pct, amount, color, packs, pcs_per_pack, total_pcs, custom1, custom2, custom3, image, sort_order FROM quotation_items WHERE quotation_id = ?`
+      `INSERT INTO quotation_items (quotation_id, product_id, description, hsn_code, qty, unit, unit_price, tax_pct, amount, color, packs, pcs_per_pack, total_pcs, qty_20ft, qty_40ft, custom1, custom2, custom3, image, sort_order)
+       SELECT ?, product_id, description, hsn_code, qty, unit, unit_price, tax_pct, amount, color, packs, pcs_per_pack, total_pcs, qty_20ft, qty_40ft, custom1, custom2, custom3, image, sort_order FROM quotation_items WHERE quotation_id = ?`
     ).run(newId, id);
     db.prepare('UPDATE quotations SET superseded_by = ? WHERE id = ?').run(newId, id);
     return newId;

@@ -14,6 +14,8 @@ export const ITEM_COLUMNS: ToggleableColumn[] = [
   { key: 'hsn', label: 'HSN Code' },
   { key: 'pcs_per_pack', label: 'Pcs per box' },
   { key: 'packs', label: 'Boxes / Cartons' },
+  { key: 'qty_20ft', label: 'Boxes per 20ft' },
+  { key: 'qty_40ft', label: 'Boxes per 40ft HC' },
   { key: 'total_pcs', label: 'Total pieces' },
   { key: 'qty', label: 'Quantity' },
   { key: 'color', label: 'Colour' },
@@ -38,8 +40,19 @@ export const ITEM_COLUMNS: ToggleableColumn[] = [
  * server/src/services/totals.ts.
  */
 export const QUOTATION_OMIT = ['hsn', 'qty'];
-export const QUOTATION_ITEM_COLUMNS: ToggleableColumn[] =
-  ITEM_COLUMNS.filter((c) => !QUOTATION_OMIT.includes(c.key));
+
+/** Container loadability is meaningless to a domestic GST buyer. */
+export const LOADABILITY_COLUMNS = ['qty_20ft', 'qty_40ft'];
+
+/** What a quotation offers, given whether it is an export document. */
+export function quotationOmit(isExport: boolean): string[] {
+  return isExport ? QUOTATION_OMIT : [...QUOTATION_OMIT, ...LOADABILITY_COLUMNS];
+}
+
+export function quotationColumns(isExport: boolean): ToggleableColumn[] {
+  const omit = quotationOmit(isExport);
+  return ITEM_COLUMNS.filter((c) => !omit.includes(c.key));
+}
 
 export const PACKING_COLUMNS: ToggleableColumn[] = [
   { key: 'hsn', label: 'HSN Code' },

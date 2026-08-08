@@ -91,6 +91,9 @@ export interface LineItem {
   id?: number; product_id?: number | null; description: string; hsn_code?: string;
   qty: number | null; unit: string; unit_price: number; tax_pct?: number; amount?: number;
   color?: string; packs?: number | null; pcs_per_pack?: number | null; total_pcs?: number | null;
+  /** Boxes that fill each container size. Copied from the catalogue when a
+   *  product is picked, then owned by the document; printed on export quotations. */
+  qty_20ft?: number | null; qty_40ft?: number | null;
   custom1?: string; custom2?: string; custom3?: string;
   /** Optional photo as a base64 data URL. Stored on every document type so it
    *  survives the carry-forward chain, but only printed on the quotation. */

@@ -7,7 +7,7 @@ import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, St
 import LineItemsEditor from '../components/LineItemsEditor';
 import FollowupButton from '../components/FollowupButton';
 import ApprovalStrip from '../components/ApprovalStrip';
-import ColumnsControl, { QUOTATION_ITEM_COLUMNS, QUOTATION_OMIT } from '../components/ColumnsControl';
+import ColumnsControl, { quotationColumns, quotationOmit } from '../components/ColumnsControl';
 import NotePresetPicker from '../components/NotePresetPicker';
 import { fmtMoney, fmtQty, fmtDate, today } from '../lib/format';
 
@@ -293,13 +293,13 @@ export default function QuotationFormPage() {
 
         <Card
           title="Line Items"
-          actions={!readOnly && <ColumnsControl config={draft.column_config} onChange={(c) => set({ column_config: c })} columns={QUOTATION_ITEM_COLUMNS} />}
+          actions={!readOnly && <ColumnsControl config={draft.column_config} onChange={(c) => set({ column_config: c })} columns={quotationColumns(!!draft.is_export)} />}
         >
           {readOnly ? (
             <ReadOnlyItems items={draft.items} currency={draft.currency} />
           ) : (
             <>
-              <LineItemsEditor items={draft.items} onChange={(items) => set({ items })} currency={draft.currency} taxType={draft.tax_type} config={draft.column_config} omit={QUOTATION_OMIT} />
+              <LineItemsEditor items={draft.items} onChange={(items) => set({ items })} currency={draft.currency} taxType={draft.tax_type} config={draft.column_config} omit={quotationOmit(!!draft.is_export)} />
               <div className="mt-3 grid grid-cols-2 gap-3 border-t border-slate-100 pt-3 md:max-w-md">
                 <Field label={`Indicative Freight (${draft.currency})`}>
                   <Input type="number" min={0} step="any" value={draft.freight || ''} onChange={(e) => set({ freight: Number(e.target.value) })} />

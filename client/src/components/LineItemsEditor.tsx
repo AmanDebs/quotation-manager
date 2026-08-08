@@ -167,8 +167,12 @@ export default function LineItemsEditor({
         unit: p.unit,
         unit_price: p.unit_price,
         color: p.color || items[i].color,
-        // The catalogue knows how this product packs; total pcs follows from it.
+        // The catalogue knows how this product packs and loads; total pcs
+        // follows from it. Copied rather than looked up at print time, so
+        // editing the catalogue never rewrites a quotation already sent.
         pcs_per_pack: p.pcs_per_pack ?? items[i].pcs_per_pack,
+        qty_20ft: p.qty_20ft ?? items[i].qty_20ft,
+        qty_40ft: p.qty_40ft ?? items[i].qty_40ft,
         // Reuse the catalogue photo when the line has none of its own, so a
         // photo set once on the product does not have to be uploaded again.
         image: items[i].image || p.image || '',
@@ -192,6 +196,7 @@ export default function LineItemsEditor({
   const spanCols = 3 // Product, Description, Unit — always present
     + (show('image') ? 1 : 0) + (show('hsn') ? 1 : 0) + (show('unit_price') ? 1 : 0)
     + (show('pcs_per_pack') ? 1 : 0) + (show('packs') ? 1 : 0) + (show('total_pcs') ? 1 : 0)
+    + (show('qty_20ft') ? 1 : 0) + (show('qty_40ft') ? 1 : 0)
     + (show('qty') ? 1 : 0) + (show('color') ? 1 : 0) + (taxVisible ? 1 : 0);
 
   /** The leftover fields worth reading at a glance, as one line. */
@@ -230,6 +235,8 @@ export default function LineItemsEditor({
               {show('hsn') && <th className="w-28 pb-2 pr-2 font-medium">HSN</th>}
               {show('pcs_per_pack') && <th className="w-24 pb-2 pr-2 text-right font-medium">Pcs/Box</th>}
               {show('packs') && <th className="w-20 pb-2 pr-2 text-right font-medium">Boxes</th>}
+              {show('qty_20ft') && <th className="w-24 pb-2 pr-2 text-right font-medium">Boxes/20ft</th>}
+              {show('qty_40ft') && <th className="w-24 pb-2 pr-2 text-right font-medium">Boxes/40ft</th>}
               {show('total_pcs') && <th className="w-28 pb-2 pr-2 text-right font-medium">Total Qty</th>}
               {show('qty') && <th className="w-24 pb-2 pr-2 text-right font-medium">Qty</th>}
               {show('color') && <th className="w-24 pb-2 pr-2 font-medium">Colour</th>}
@@ -296,6 +303,26 @@ export default function LineItemsEditor({
                         value={it.packs ?? ''}
                         placeholder="—"
                         onChange={(e) => setPacking(i, { packs: e.target.value === '' ? null : Number(e.target.value) })}
+                      />
+                    </td>
+                  )}
+                  {show('qty_20ft') && (
+                    <td className="py-2 pr-2">
+                      <Input
+                        type="number" min={0} step="any"
+                        value={it.qty_20ft ?? ''}
+                        placeholder="—"
+                        onChange={(e) => set(i, { qty_20ft: e.target.value === '' ? null : Number(e.target.value) })}
+                      />
+                    </td>
+                  )}
+                  {show('qty_40ft') && (
+                    <td className="py-2 pr-2">
+                      <Input
+                        type="number" min={0} step="any"
+                        value={it.qty_40ft ?? ''}
+                        placeholder="—"
+                        onChange={(e) => set(i, { qty_40ft: e.target.value === '' ? null : Number(e.target.value) })}
                       />
                     </td>
                   )}
