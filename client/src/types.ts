@@ -129,7 +129,7 @@ export interface Quotation {
   tax_type: TaxType; status: string; is_export: number;
   subtotal: number; tax_total: number; grand_total: number;
   superseded_by: number | null;
-  customer_name?: string; customer_country?: string;
+  customer_name?: string; customer_country?: string; company_name?: string;
   items?: LineItem[];
   revisions?: { id: number; revision: number; status: string; grand_total: number; date: string }[];
   approval_status: ApprovalStatus;

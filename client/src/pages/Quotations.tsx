@@ -6,6 +6,7 @@ import type { Quotation } from '../types';
 import { Button, Select, PageHeader, EmptyState, Card, ExportTabs, ErrorText } from '../components/ui';
 import NewDocumentDialog from '../components/NewDocumentDialog';
 import InternalNotes from '../components/InternalNotes';
+import { useCompanies } from '../components/CompanySelect';
 import { fmtDate, fmtMoney } from '../lib/format';
 
 const approvalBadge: Record<string, { cls: string; label: string }> = {
@@ -32,6 +33,9 @@ export default function QuotationsPage() {
   const [statusFilter, setStatusFilter] = useState('');
   const [exportFilter, setExportFilter] = useState('');
   const [creating, setCreating] = useState(false);
+  // Only worth a column once the group actually has more than one entity.
+  const companies = useCompanies();
+  const showCompany = companies.length > 1;
   // Which rows have their note panel open. Keyed by quotation id rather than
   // index, so filtering the list cannot open the wrong one.
   const [openNotes, setOpenNotes] = useState<Set<number>>(new Set());
@@ -93,6 +97,7 @@ export default function QuotationsPage() {
                 <th className="pb-2 pr-3">Number</th>
                 <th className="pb-2 pr-3">Date</th>
                 <th className="pb-2 pr-3">Customer</th>
+                {showCompany && <th className="pb-2 pr-3">Issued By</th>}
                 <th className="pb-2 pr-3">Type</th>
                 <th className="pb-2 pr-3 text-right">Total</th>
                 <th className="pb-2 pr-3">Status</th>
@@ -111,6 +116,9 @@ export default function QuotationsPage() {
                   </td>
                   <td className="py-2 pr-3 whitespace-nowrap">{fmtDate(q.date)}</td>
                   <td className="py-2 pr-3">{q.customer_name}</td>
+                  {showCompany && (
+                    <td className="py-2 pr-3 text-xs text-slate-500">{q.company_name ?? "—"}</td>
+                  )}
                   <td className="py-2 pr-3 text-xs">{q.is_export ? '🌍 Export' : '🇮🇳 Domestic'}</td>
                   <td className="py-2 pr-3 text-right tabular-nums">{q.grand_total ? fmtMoney(q.grand_total, q.currency) : '—'}</td>
                   {/* Editable in place — the click must not open the quotation. */}
@@ -157,7 +165,7 @@ export default function QuotationsPage() {
 
                 {noteOpen && (
                   <tr onClick={(e) => e.stopPropagation()}>
-                    <td colSpan={8} className="cursor-default px-1 pb-3">
+                    <td colSpan={showCompany ? 9 : 8} className="cursor-default px-1 pb-3">
                       <div className="rounded-md border border-slate-200 bg-slate-50/70 p-3">
                         <InternalNotes quotationId={q.id} value={q.internal_notes ?? ''} autoFocus />
                       </div>
