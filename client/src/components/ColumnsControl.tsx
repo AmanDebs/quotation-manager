@@ -41,17 +41,44 @@ export const ITEM_COLUMNS: ToggleableColumn[] = [
  */
 export const QUOTATION_OMIT = ['hsn', 'qty'];
 
+/**
+ * Columns a proforma does not carry.
+ *
+ * `hsn`: Aglo's own proformas state the HS code once, in the customs block
+ * (`hs_code` on the header), never per line — see the Emeraude sample in
+ * `D:\Quotation Doc\`. The per-line value is still stored and still carries
+ * forward to the commercial invoice, which does print it.
+ *
+ * `qty` stays, unlike on a quotation. A proforma is routinely billed by weight
+ * — the Emeraude sample prices 32,100 KGS at 1.625 USD/KGS — and for any rate
+ * basis other than pieces, Qty is the only quantity there is. Dropping it would
+ * make that document impossible to raise.
+ */
+export const PROFORMA_OMIT = ['hsn'];
+
 /** Container loadability is meaningless to a domestic GST buyer. */
 export const LOADABILITY_COLUMNS = ['qty_20ft', 'qty_40ft'];
 
+const withLoadability = (omit: string[], isExport: boolean) =>
+  (isExport ? omit : [...omit, ...LOADABILITY_COLUMNS]);
+
+const columnsFor = (omit: string[]) => ITEM_COLUMNS.filter((c) => !omit.includes(c.key));
+
 /** What a quotation offers, given whether it is an export document. */
 export function quotationOmit(isExport: boolean): string[] {
-  return isExport ? QUOTATION_OMIT : [...QUOTATION_OMIT, ...LOADABILITY_COLUMNS];
+  return withLoadability(QUOTATION_OMIT, isExport);
 }
 
 export function quotationColumns(isExport: boolean): ToggleableColumn[] {
-  const omit = quotationOmit(isExport);
-  return ITEM_COLUMNS.filter((c) => !omit.includes(c.key));
+  return columnsFor(quotationOmit(isExport));
+}
+
+export function proformaOmit(isExport: boolean): string[] {
+  return withLoadability(PROFORMA_OMIT, isExport);
+}
+
+export function proformaColumns(isExport: boolean): ToggleableColumn[] {
+  return columnsFor(proformaOmit(isExport));
 }
 
 export const PACKING_COLUMNS: ToggleableColumn[] = [

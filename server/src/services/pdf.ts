@@ -714,7 +714,12 @@ export function buildProformaPdf(id: number): TDocumentDefinitions {
 
   const specs: ColumnSpec[] = [
     { key: 'sl', label: 'SL', width: 16, align: 'center', always: true, value: (_it, i) => String(i + 1) },
-    { key: 'description', label: 'Description of Goods', width: '*', always: true, value: (it) => it.description + (it.hsn_code ? `\nHSN: ${it.hsn_code}` : '') },
+    // No per-line HSN: Aglo's proformas carry the HS code once, in the customs
+    // block above (`hs_code`), the way the Emeraude sample does. The value is
+    // still stored and still reaches the commercial invoice, which prints it.
+    { key: 'description', label: 'Description of Goods', width: '*', always: true, value: (it) => String(it.description) },
+    // Qty stays, unlike on the quotation: a proforma is often billed by weight
+    // (KGS x price/kg), and then this is the only quantity on the document.
     { key: 'qty', label: 'Qty', width: 52, align: 'right', always: true, value: (it) => (it.qty != null ? `${fmtNum(it.qty)} ${it.unit}` : '—') },
     { key: 'unit_price', label: `Price ${cur}`, width: 46, align: 'right', always: true, value: (it) => `${fmtNum(it.unit_price, 3)} /${it.unit === 'per 1000' ? '1000' : it.unit}` },
     { key: 'color', label: 'Color', width: 48, align: 'center', value: (it) => String(it.color || '') },

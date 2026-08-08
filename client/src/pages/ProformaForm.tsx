@@ -9,7 +9,7 @@ import LineItemsEditor from '../components/LineItemsEditor';
 import FollowupButton from '../components/FollowupButton';
 import PaymentsCard from '../components/PaymentsCard';
 import ApprovalStrip from '../components/ApprovalStrip';
-import ColumnsControl from '../components/ColumnsControl';
+import ColumnsControl, { proformaColumns, proformaOmit } from '../components/ColumnsControl';
 import NotePresetPicker from '../components/NotePresetPicker';
 import { today } from '../lib/format';
 
@@ -364,9 +364,9 @@ export default function ProformaFormPage() {
 
         <Card
           title="Line Items"
-          actions={<ColumnsControl config={draft.column_config} onChange={(c) => set({ column_config: c })} />}
+          actions={<ColumnsControl config={draft.column_config} onChange={(c) => set({ column_config: c })} columns={proformaColumns(!!draft.is_export)} />}
         >
-          <LineItemsEditor items={draft.items} onChange={(items) => set({ items })} currency={draft.currency} taxType={draft.tax_type} config={draft.column_config} />
+          <LineItemsEditor items={draft.items} onChange={(items) => set({ items })} currency={draft.currency} taxType={draft.tax_type} config={draft.column_config} omit={proformaOmit(!!draft.is_export)} />
           <div className="mt-3 grid grid-cols-2 gap-3 border-t border-slate-100 pt-3 md:max-w-md">
             <Field label={`Freight (${draft.currency})`}>
               <Input type="number" min={0} step="any" value={draft.freight || ''} onChange={(e) => set({ freight: Number(e.target.value) })} />
