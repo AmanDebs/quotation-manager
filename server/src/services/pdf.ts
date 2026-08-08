@@ -313,7 +313,10 @@ function totalsBand(s: Row, doc: Row, currency: string, grandLabel: string): Con
 }
 
 function amountWords(doc: Row, currency: string): Content {
-  return { text: `Amount in Words: ${amountInWords(doc.grand_total, currency)}`, fontSize: 8, italics: true, margin: [0, 5, 0, 0] as any };
+  return {
+    text: `Amount in Words: ${amountInWords(doc.grand_total, currency)}`,
+    fontSize: 10, bold: true, italics: true, margin: [0, 6, 0, 0] as any,
+  };
 }
 
 function customerAddress(c: Row, withContact = true): string {
