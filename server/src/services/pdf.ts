@@ -106,19 +106,34 @@ function companyHeader(s: Row): Content[] {
   ];
 }
 
+/**
+ * The letter-spaced document title. Tracking comes from pdfmake's
+ * characterSpacing rather than joining the letters with spaces — a real space
+ * is a full word-space wide (~0.25em), which reads as gappy rather than as
+ * tracking and cannot be tuned.
+ */
 function docTitle(s: Row, title: string): Content {
   return {
-    text: title.split('').join(' '),
-    fontSize: 13, bold: true, alignment: 'center', color: s.theme,
+    text: title,
+    fontSize: 14, bold: true, characterSpacing: 1.6, alignment: 'center', color: s.theme,
     decoration: 'underline', margin: [0, 8, 0, 10] as any,
   };
 }
 
-/** "NOTES & TERMS" bullet list from notes + default terms. */
+/**
+ * "NOTES & TERMS" bullet list from notes + default terms.
+ *
+ * Terms are typed by hand in Settings, and people number them inline as often
+ * as they put one per line — "1. Prices are ex-works. 2. Levies extra." would
+ * otherwise print as a single bullet carrying a stray "2.". So split on both:
+ * newlines first, then on an inline "<n>." or "<n>)" that starts a new clause.
+ * The lookahead requires a following space, so a decimal or "(119 ±2)" is safe.
+ */
 function notesAndTerms(s: Row, docNotes: string, title = 'NOTES & TERMS:'): Content[] {
   const bullets = [docNotes, s.default_terms]
     .filter(Boolean)
     .flatMap((t: string) => t.split('\n'))
+    .flatMap((line) => line.split(/\s+(?=\d{1,2}[.)]\s)/))
     .map((line) => line.replace(/^\s*\d+[.)]\s*/, '').trim())
     .filter(Boolean);
   if (!bullets.length) return [];
@@ -362,7 +377,8 @@ export function buildQuotationPdf(id: number): TDocumentDefinitions {
       cell: (it) => (it.image ? { image: String(it.image), fit: [40, 40] as [number, number] } : { text: '' }),
     },
     { key: 'description', label: 'Product Description', width: '*', always: true, value: (it) => String(it.description) },
-    { key: 'hsn', label: 'HSN', width: 45, align: 'center', value: (it) => String(it.hsn_code || '') },
+    // No HSN: a quotation is not a tax document. The value is still stored and
+    // still carries forward to the proforma and invoice, which do print it.
     { key: 'unit_price', label: 'Unit Price', width: 48, align: 'right', always: true, value: (it) => fmtNum(it.unit_price, 3) },
     { key: 'uom', label: 'UOM', width: 52, align: 'center', always: true, value: (it) => uomLabel(cur, it.unit) },
     { key: 'pcs_per_pack', label: 'Pcs/Box', width: 42, align: 'right', value: (it) => (it.pcs_per_pack != null ? fmtNum(it.pcs_per_pack, 0) : '') },
@@ -387,7 +403,12 @@ export function buildQuotationPdf(id: number): TDocumentDefinitions {
       ? [totalsBand(s, q, cur, grandLabel), amountWords(q, cur)]
       : [{ text: 'Note: Quantities to be confirmed by the customer. Prices are as stated above.', fontSize: 8, italics: true, margin: [0, 6, 0, 0] as any }]),
     ...notesAndTerms(s, q.notes),
-    signatureBlock(s, { preparedBy: q.prepared_by }),
+    // No signature block: a quotation is an offer, not a document anyone
+    // countersigns. The order confirmation and proforma still carry one. The
+    // preparer's name is not a signature, so it stays on its own.
+    ...(q.prepared_by
+      ? [{ text: `Prepared By: ${q.prepared_by}`, fontSize: 7.5, color: '#666666', margin: [0, 18, 0, 0] as any }]
+      : []),
   ];
   return baseDoc(content);
 }
