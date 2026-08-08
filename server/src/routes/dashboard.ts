@@ -3,6 +3,7 @@ import { db } from '../db/connection.js';
 import type { AuthedRequest } from '../middleware/auth.js';
 import { scopeClause } from '../middleware/scope.js';
 import { receivedByInvoice } from '../services/receivables.js';
+import { defaultCompanyId } from '../services/companies.js';
 
 export const dashboardRouter = Router();
 
@@ -10,6 +11,9 @@ export const dashboardRouter = Router();
  * All stats accept ?from=YYYY-MM-DD&to=YYYY-MM-DD and are limited to the
  * caller's customers (managers see everything).
  * Money aggregates are grouped by currency — mixing USD and INR would be meaningless.
+ *
+ * `?company=N` narrows every figure to one selling entity. Ignored when absent,
+ * so the default view is still the group as a whole.
  */
 dashboardRouter.get('/', (req: AuthedRequest, res) => {
   const from = String(req.query.from ?? '0000-01-01');
@@ -17,8 +21,22 @@ dashboardRouter.get('/', (req: AuthedRequest, res) => {
   const today = new Date().toISOString().slice(0, 10);
 
   const scope = scopeClause(req, 'customer_id');
-  const and = scope.sql ? ` AND ${scope.sql}` : '';
-  const p = scope.params;
+  const companyId = Number(req.query.company) > 0 ? Number(req.query.company) : 0;
+
+  /**
+   * The two row-level filters every document table shares: who may see it, and
+   * which entity issued it. Both are columns on the row, so the same alias
+   * serves both. SQL and params are returned together — they got out of step
+   * once when they were kept apart.
+   */
+  const docFilter = (alias = '') => {
+    const at = alias ? `${alias}.` : '';
+    return {
+      sql: (scope.sql ? ` AND ${at}${scope.sql}` : '') + (companyId ? ` AND ${at}company_id = ?` : ''),
+      params: [...scope.params, ...(companyId ? [companyId] : [])] as unknown[],
+    };
+  };
+  const { sql: and, params: p } = docFilter();
   // Helper: date-range params followed by the scope params.
   const q = <T>(sql: string, ...extra: unknown[]) => db.prepare(sql).all(...(extra as never[])) as T[];
   const one = (sql: string, ...extra: unknown[]) => (db.prepare(sql).get(...(extra as never[])) as { c: number }).c;
@@ -66,12 +84,16 @@ dashboardRouter.get('/', (req: AuthedRequest, res) => {
     from, to, ...p
   );
 
+  // These join in the customer, so the filters need the document's own alias.
+  const dq = docFilter('q');
+  const di = docFilter('i');
+
   const topCustomers = q(
     `SELECT c.name, q.currency, SUM(q.grand_total) AS total, COUNT(*) AS quotes
      FROM quotations q JOIN customers c ON c.id = q.customer_id
-     WHERE q.superseded_by IS NULL AND q.date BETWEEN ? AND ?${scope.sql ? ` AND q.${scope.sql}` : ''}
+     WHERE q.superseded_by IS NULL AND q.date BETWEEN ? AND ?${dq.sql}
      GROUP BY c.id, q.currency ORDER BY total DESC LIMIT 8`,
-    from, to, ...p
+    from, to, ...dq.params
   );
 
   // Quoted value flatters whoever quotes the most; invoiced value is the real
@@ -79,9 +101,9 @@ dashboardRouter.get('/', (req: AuthedRequest, res) => {
   const topCustomersInvoiced = q(
     `SELECT c.name, i.currency, SUM(i.grand_total) AS total, COUNT(*) AS invoices
      FROM commercial_invoices i JOIN customers c ON c.id = i.customer_id
-     WHERE i.date BETWEEN ? AND ?${scope.sql ? ` AND i.${scope.sql}` : ''}
+     WHERE i.date BETWEEN ? AND ?${di.sql}
      GROUP BY c.id, i.currency ORDER BY total DESC LIMIT 8`,
-    from, to, ...p
+    from, to, ...di.params
   );
 
   const topProducts = q(
@@ -89,9 +111,9 @@ dashboardRouter.get('/', (req: AuthedRequest, res) => {
      FROM quotation_items qi
      JOIN quotations q ON q.id = qi.quotation_id
      LEFT JOIN products p ON p.id = qi.product_id
-     WHERE q.superseded_by IS NULL AND q.date BETWEEN ? AND ?${scope.sql ? ` AND q.${scope.sql}` : ''}
+     WHERE q.superseded_by IS NULL AND q.date BETWEEN ? AND ?${dq.sql}
      GROUP BY COALESCE(p.name, qi.description) ORDER BY times_quoted DESC LIMIT 8`,
-    from, to, ...p
+    from, to, ...dq.params
   );
 
   const currencyTotals = q(
@@ -102,10 +124,37 @@ dashboardRouter.get('/', (req: AuthedRequest, res) => {
     from, to, ...p
   );
 
+  /**
+   * A follow-up carries no company of its own. It inherits one from the
+   * document it is against, else from the customer's usual entity, else the
+   * group default — the same order `resolveCompanyId` uses when stamping a new
+   * document, so a reminder files under the entity that will act on it.
+   *
+   * `general` doubles as the order case: the schema's CHECK on `doc_type` has
+   * no 'order' value, so the order form files its reminders as general with the
+   * order's id (OrderForm.tsx). A genuinely general reminder carries no doc_id,
+   * the subquery yields NULL, and the COALESCE falls through to the customer.
+   */
+  const fuCompany = companyId
+    ? {
+        sql: ` AND COALESCE(
+            CASE f.doc_type
+              WHEN 'quotation' THEN (SELECT company_id FROM quotations WHERE id = f.doc_id)
+              WHEN 'general' THEN (SELECT company_id FROM orders WHERE id = f.doc_id)
+              WHEN 'proforma' THEN (SELECT company_id FROM proforma_invoices WHERE id = f.doc_id)
+              WHEN 'invoice' THEN (SELECT company_id FROM commercial_invoices WHERE id = f.doc_id)
+            END,
+            (SELECT company_id FROM customers WHERE id = f.customer_id),
+            ?) = ?`,
+        params: [defaultCompanyId(), companyId] as unknown[],
+      }
+    : { sql: '', params: [] as unknown[] };
+
   const fu = (cond: string, ...extra: unknown[]) => q(
     `SELECT f.*, c.name AS customer_name FROM followups f LEFT JOIN customers c ON c.id = f.customer_id
-     WHERE f.done = 0 AND ${cond}${scope.sql ? ` AND f.${scope.sql}` : ''} ORDER BY f.due_date LIMIT 20`,
-    ...extra, ...p
+     WHERE f.done = 0 AND ${cond}${scope.sql ? ` AND f.${scope.sql}` : ''}${fuCompany.sql}
+     ORDER BY f.due_date LIMIT 20`,
+    ...extra, ...scope.params, ...fuCompany.params
   );
   const followups = {
     overdue: fu('f.due_date < ?', today),
@@ -117,9 +166,12 @@ dashboardRouter.get('/', (req: AuthedRequest, res) => {
   // advance is shared across the invoices raised from that PI, so the split
   // comes from services/receivables.ts rather than being recomputed here.
   const invoicesAll = q<{ id: number; pi_id: number | null; currency: string; grand_total: number; date: string }>(
-    `SELECT id, pi_id, currency, grand_total, date FROM commercial_invoices${scope.sql ? ` WHERE ${scope.sql}` : ''}`,
+    `SELECT id, pi_id, currency, grand_total, date FROM commercial_invoices WHERE 1 = 1${and}`,
     ...p
   );
+  // Allocation stays group-wide on purpose: an advance is split across the
+  // invoices raised from its proforma whether or not they are all on screen.
+  // Filtering here would silently over-credit whichever ones remain.
   const receivedPerInvoice = receivedByInvoice();
   const receivablesMap = new Map<string, { currency: string; invoiced: number; received: number; outstanding: number }>();
 

@@ -8,6 +8,7 @@ import { api } from '../api/client';
 import type { Followup } from '../types';
 import { useIsManager } from '../App';
 import { Card, Select, PageHeader } from '../components/ui';
+import { useCompanies } from '../components/CompanySelect';
 import { ORDER_STATUSES, orderStatusLabel } from './Orders';
 import { fmtDate, fmtMoney, today } from '../lib/format';
 
@@ -84,11 +85,20 @@ export default function DashboardPage() {
   const [rangeIdx, setRangeIdx] = useState(3);
   const [currency, setCurrency] = useState('');
   const [customerBasis, setCustomerBasis] = useState<'invoiced' | 'quoted'>('invoiced');
+  // Only worth offering once the group actually has more than one entity.
+  const companies = useCompanies();
+  const [companyFilter, setCompanyFilter] = useState('');
+  const showCompany = companies.length > 1;
 
   const from = RANGES[rangeIdx].from();
   const { data } = useQuery({
-    queryKey: ['dashboard', from],
-    queryFn: () => api.get<DashboardData>(`/api/dashboard${from ? `?from=${from}` : ''}`),
+    queryKey: ['dashboard', from, companyFilter],
+    queryFn: () => {
+      const params = new URLSearchParams();
+      if (from) params.set('from', from);
+      if (companyFilter) params.set('company', companyFilter);
+      return api.get<DashboardData>(`/api/dashboard${params.toString() ? `?${params}` : ''}`);
+    },
   });
 
   const markDone = useMutation({
@@ -184,9 +194,28 @@ export default function DashboardPage() {
     <div>
       <PageHeader
         title="Dashboard"
-        subtitle="Your order-to-dispatch pipeline at a glance"
+        subtitle={
+          // Several cards below say "all invoices" / "all time", which means the
+          // whole date range, not the whole group. Say which entity is in view.
+          companyFilter
+            ? `${companies.find((c) => String(c.id) === companyFilter)?.company_name ?? 'One company'} only`
+            : 'Your order-to-dispatch pipeline at a glance'
+        }
         actions={
           <div className="flex gap-2">
+            {showCompany && (
+              <Select
+                value={companyFilter}
+                onChange={(e) => setCompanyFilter(e.target.value)}
+                className="w-48"
+                title="Which group entity these figures cover"
+              >
+                <option value="">All companies</option>
+                {companies.map((c) => (
+                  <option key={c.id} value={c.id}>{c.company_name || `Company ${c.id}`}</option>
+                ))}
+              </Select>
+            )}
             {currencies.length > 1 && (
               <Select value={activeCurrency} onChange={(e) => setCurrency(e.target.value)} className="w-24" title="Currency for all money figures">
                 {currencies.map((c) => <option key={c} value={c}>{c}</option>)}
