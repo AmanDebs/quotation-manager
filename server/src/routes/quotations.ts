@@ -66,6 +66,8 @@ quotationsRouter.get('/', (req: AuthedRequest, res) => {
     where.push('q.is_export = ?');
     params.push(Number(req.query.export));
   }
+  // Narrow to one selling entity. Ignored when the group has just one.
+  if (Number(req.query.company) > 0) { where.push('q.company_id = ?'); params.push(Number(req.query.company)); }
   if (req.query.approval) { where.push('q.approval_status = ?'); params.push(String(req.query.approval)); }
   const sql = `${listSql}${where.length ? ' WHERE ' + where.join(' AND ') : ''} ORDER BY q.date DESC, q.id DESC`;
   res.json(db.prepare(sql).all(...(params as never[])));

@@ -36,6 +36,7 @@ export default function QuotationsPage() {
   // Only worth a column once the group actually has more than one entity.
   const companies = useCompanies();
   const showCompany = companies.length > 1;
+  const [companyFilter, setCompanyFilter] = useState('');
   // Which rows have their note panel open. Keyed by quotation id rather than
   // index, so filtering the list cannot open the wrong one.
   const [openNotes, setOpenNotes] = useState<Set<number>>(new Set());
@@ -47,11 +48,12 @@ export default function QuotationsPage() {
       return next;
     });
   const { data: quotations = [] } = useQuery({
-    queryKey: ['quotations', statusFilter, exportFilter],
+    queryKey: ['quotations', statusFilter, exportFilter, companyFilter],
     queryFn: () => {
       const params = new URLSearchParams();
       if (statusFilter) params.set('status', statusFilter);
       if (exportFilter) params.set('export', exportFilter);
+      if (companyFilter) params.set('company', companyFilter);
       return api.get<Quotation[]>(`/api/quotations${params.toString() ? `?${params}` : ''}`);
     },
   });
@@ -79,6 +81,14 @@ export default function QuotationsPage() {
       {creating && <NewDocumentDialog basePath="/quotations" title="New Quotation" onClose={() => setCreating(false)} />}
       <div className="mb-3 flex flex-wrap items-center gap-3">
         <ExportTabs value={exportFilter} onChange={setExportFilter} />
+        {showCompany && (
+          <Select value={companyFilter} onChange={(e) => setCompanyFilter(e.target.value)} className="max-w-56">
+            <option value="">All companies</option>
+            {companies.map((c) => (
+              <option key={c.id} value={c.id}>{c.company_name || `Company ${c.id}`}</option>
+            ))}
+          </Select>
+        )}
         <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="max-w-45">
           <option value="">All statuses</option>
           {['draft', 'sent', 'negotiating', 'accepted', 'rejected', 'expired'].map((s) => (

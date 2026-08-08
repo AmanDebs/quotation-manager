@@ -28,6 +28,7 @@ export default function OrdersPage() {
   // Only worth a column once the group has more than one entity.
   const companies = useCompanies();
   const showCompany = companies.length > 1;
+  const [companyFilter, setCompanyFilter] = useState('');
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [statusFilter, setStatusFilter] = useState('');
@@ -35,11 +36,12 @@ export default function OrdersPage() {
   const [openOnly, setOpenOnly] = useState(false);
 
   const { data: orders = [] } = useQuery({
-    queryKey: ['orders', statusFilter, exportFilter, openOnly],
+    queryKey: ['orders', statusFilter, exportFilter, openOnly, companyFilter],
     queryFn: () => {
       const params = new URLSearchParams();
       if (statusFilter) params.set('status', statusFilter);
       if (exportFilter) params.set('export', exportFilter);
+      if (companyFilter) params.set('company', companyFilter);
       if (openOnly) params.set('open', '1');
       return api.get<Order[]>(`/api/orders${params.toString() ? `?${params}` : ''}`);
     },
@@ -67,6 +69,14 @@ export default function OrdersPage() {
       />
       <div className="mb-3 flex flex-wrap items-center gap-3">
         <ExportTabs value={exportFilter} onChange={setExportFilter} />
+        {showCompany && (
+          <Select value={companyFilter} onChange={(e) => setCompanyFilter(e.target.value)} className="max-w-56">
+            <option value="">All companies</option>
+            {companies.map((c) => (
+              <option key={c.id} value={c.id}>{c.company_name || `Company ${c.id}`}</option>
+            ))}
+          </Select>
+        )}
         <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="max-w-52">
           <option value="">All statuses</option>
           {ORDER_STATUSES.map((s) => <option key={s} value={s}>{orderStatusLabel(s)}</option>)}

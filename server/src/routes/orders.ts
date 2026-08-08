@@ -164,6 +164,8 @@ ordersRouter.get('/', (req: AuthedRequest, res) => {
   if (scope.sql) { where.push(scope.sql); params.push(...scope.params); }
   if (req.query.status) { where.push('o.status = ?'); params.push(String(req.query.status)); }
   if (req.query.export === '1' || req.query.export === '0') { where.push('o.is_export = ?'); params.push(Number(req.query.export)); }
+  // Narrow to one selling entity. Ignored when the group has just one.
+  if (Number(req.query.company) > 0) { where.push('o.company_id = ?'); params.push(Number(req.query.company)); }
   // ?open=1 → the order book: everything not yet completed or cancelled.
   if (req.query.open === '1') where.push("o.status NOT IN ('completed','cancelled')");
   const sql = `${listSql}${where.length ? ' WHERE ' + where.join(' AND ') : ''} ORDER BY o.date DESC, o.id DESC`;

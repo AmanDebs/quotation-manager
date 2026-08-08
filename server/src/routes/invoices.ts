@@ -207,6 +207,8 @@ invoicesRouter.get('/', (req: AuthedRequest, res) => {
   if (scope.sql) { where.push(scope.sql); params.push(...scope.params); }
   if (req.query.status) { where.push('i.status = ?'); params.push(String(req.query.status)); }
   if (req.query.export === '1' || req.query.export === '0') { where.push('i.is_export = ?'); params.push(Number(req.query.export)); }
+  // Narrow to one selling entity. Ignored when the group has just one.
+  if (Number(req.query.company) > 0) { where.push('i.company_id = ?'); params.push(Number(req.query.company)); }
   if (req.query.approval) { where.push('i.approval_status = ?'); params.push(String(req.query.approval)); }
   const sql = `${listSql}${where.length ? ' WHERE ' + where.join(' AND ') : ''} ORDER BY i.date DESC, i.id DESC`;
   res.json(db.prepare(sql).all(...(params as never[])));

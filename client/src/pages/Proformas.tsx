@@ -12,16 +12,18 @@ export default function ProformasPage() {
   // Only worth a column once the group has more than one entity.
   const companies = useCompanies();
   const showCompany = companies.length > 1;
+  const [companyFilter, setCompanyFilter] = useState('');
   const navigate = useNavigate();
   const [statusFilter, setStatusFilter] = useState('');
   const [exportFilter, setExportFilter] = useState('');
   const [creating, setCreating] = useState(false);
   const { data: proformas = [] } = useQuery({
-    queryKey: ['proformas', statusFilter, exportFilter],
+    queryKey: ['proformas', statusFilter, exportFilter, companyFilter],
     queryFn: () => {
       const params = new URLSearchParams();
       if (statusFilter) params.set('status', statusFilter);
       if (exportFilter) params.set('export', exportFilter);
+      if (companyFilter) params.set('company', companyFilter);
       return api.get<Proforma[]>(`/api/proformas${params.toString() ? `?${params}` : ''}`);
     },
   });
@@ -36,6 +38,14 @@ export default function ProformasPage() {
       {creating && <NewDocumentDialog basePath="/proformas" title="New Proforma Invoice" onClose={() => setCreating(false)} />}
       <div className="mb-3 flex flex-wrap items-center gap-3">
         <ExportTabs value={exportFilter} onChange={setExportFilter} />
+        {showCompany && (
+          <Select value={companyFilter} onChange={(e) => setCompanyFilter(e.target.value)} className="max-w-56">
+            <option value="">All companies</option>
+            {companies.map((c) => (
+              <option key={c.id} value={c.id}>{c.company_name || `Company ${c.id}`}</option>
+            ))}
+          </Select>
+        )}
         <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="max-w-52">
           <option value="">All statuses</option>
           {['draft', 'sent', 'order_confirmed', 'advance_received', 'in_production', 'cancelled'].map((s) => (
