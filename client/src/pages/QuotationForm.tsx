@@ -359,12 +359,12 @@ function ReadOnlyItems({ items, currency }: { items: LineItem[]; currency: strin
       <thead>
         <tr className="border-b border-slate-200 text-left text-xs uppercase text-slate-500">
           <th className="pb-1 pr-3">Description</th>
-          <th className="pb-1 pr-3 text-right">Unit Price</th>
-          <th className="pb-1 pr-3">Unit</th>
           {hasPacking && <th className="pb-1 pr-3 text-right">Pcs/Box</th>}
           {hasPacking && <th className="pb-1 pr-3 text-right">Boxes</th>}
           {hasPacking && <th className="pb-1 pr-3 text-right">Total Qty</th>}
           <th className="pb-1 pr-3 text-right">Qty</th>
+          <th className="pb-1 pr-3 text-right">Unit Price</th>
+          <th className="pb-1 pr-3">Unit</th>
           <th className="pb-1 text-right">Amount</th>
         </tr>
       </thead>
@@ -372,12 +372,12 @@ function ReadOnlyItems({ items, currency }: { items: LineItem[]; currency: strin
         {items.map((it, i) => (
           <tr key={i} className="border-b border-slate-100 last:border-0">
             <td className="py-1.5 pr-3">{it.description}</td>
-            <td className="py-1.5 pr-3 text-right tabular-nums">{fmtMoney(it.unit_price, currency)}</td>
-            <td className="py-1.5 pr-3">{it.unit}</td>
             {hasPacking && <td className="py-1.5 pr-3 text-right tabular-nums">{it.pcs_per_pack != null ? fmtQty(it.pcs_per_pack) : '—'}</td>}
             {hasPacking && <td className="py-1.5 pr-3 text-right tabular-nums">{it.packs != null ? fmtQty(it.packs) : '—'}</td>}
             {hasPacking && <td className="py-1.5 pr-3 text-right tabular-nums">{it.total_pcs != null ? fmtQty(it.total_pcs) : '—'}</td>}
             <td className="py-1.5 pr-3 text-right tabular-nums">{it.qty != null ? fmtQty(it.qty) : '—'}</td>
+            <td className="py-1.5 pr-3 text-right tabular-nums">{fmtMoney(it.unit_price, currency)}</td>
+            <td className="py-1.5 pr-3">{it.unit}</td>
             <td className="py-1.5 text-right tabular-nums">{it.qty != null ? fmtMoney((it.amount ?? it.qty * it.unit_price), currency) : '—'}</td>
           </tr>
         ))}

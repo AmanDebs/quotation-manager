@@ -203,19 +203,19 @@ export default function LineItemsEditor({
           <thead>
             <tr className="border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-500">
               <th className="w-8 pb-2 pr-2 font-medium">#</th>
-              {show('image') && <th className="w-14 pb-2 pr-2 font-medium">Photo</th>}
               {/* w-52 fits ~75% of the catalogue's names; longer ones clip, but
                   the full name sits in Description and in the select's title. */}
               <th className="w-52 pb-2 pr-2 font-medium">Product</th>
               <th className="pb-2 pr-2 font-medium">Description</th>
+              {show('image') && <th className="w-14 pb-2 pr-2 font-medium">Photo</th>}
               {show('hsn') && <th className="w-28 pb-2 pr-2 font-medium">HSN</th>}
-              {show('unit_price') && <th className="w-28 pb-2 pr-2 text-right font-medium">Unit Price</th>}
-              <th className="w-32 pb-2 pr-2 font-medium">Unit</th>
               {show('pcs_per_pack') && <th className="w-24 pb-2 pr-2 text-right font-medium">Pcs/Box</th>}
               {show('packs') && <th className="w-20 pb-2 pr-2 text-right font-medium">Boxes</th>}
               {show('total_pcs') && <th className="w-28 pb-2 pr-2 text-right font-medium">Total Qty</th>}
               {show('qty') && <th className="w-24 pb-2 pr-2 text-right font-medium">Qty</th>}
               {show('color') && <th className="w-24 pb-2 pr-2 font-medium">Colour</th>}
+              {show('unit_price') && <th className="w-28 pb-2 pr-2 text-right font-medium">Unit Price</th>}
+              <th className="w-32 pb-2 pr-2 font-medium">Unit</th>
               {taxVisible && <th className="w-20 pb-2 pr-2 text-right font-medium">Tax %</th>}
               <th className="w-36 pb-2 pr-2 text-right font-medium">Amount</th>
               <th className="w-8 pb-2" />
@@ -234,11 +234,6 @@ export default function LineItemsEditor({
               <tbody key={i} className="group border-b border-slate-100 align-top hover:bg-slate-50/60">
                 <tr>
                   <td className="py-2 pr-2 text-xs tabular-nums text-slate-400">{i + 1}</td>
-                  {show('image') && (
-                    <td className="py-2 pr-2">
-                      <PhotoCell value={it.image ?? ''} onChange={(v) => set(i, { image: v })} />
-                    </td>
-                  )}
                   <td className="py-2 pr-2">
                     <div className="flex items-center gap-1.5">
                       <Select
@@ -254,21 +249,16 @@ export default function LineItemsEditor({
                   <td className="py-2 pr-2">
                     <Input value={it.description} onChange={(e) => set(i, { description: e.target.value })} placeholder="Item description incl. weight spec, e.g. (119 ±2) gms" />
                   </td>
+                  {show('image') && (
+                    <td className="py-2 pr-2">
+                      <PhotoCell value={it.image ?? ''} onChange={(v) => set(i, { image: v })} />
+                    </td>
+                  )}
                   {show('hsn') && (
                     <td className="py-2 pr-2">
                       <Input value={it.hsn_code ?? ''} onChange={(e) => set(i, { hsn_code: e.target.value })} />
                     </td>
                   )}
-                  {show('unit_price') && (
-                    <td className="py-2 pr-2">
-                      <Input type="number" min={0} step="any" value={it.unit_price || ''} onChange={(e) => set(i, { unit_price: Number(e.target.value) })} />
-                    </td>
-                  )}
-                  <td className="py-2 pr-2">
-                    <Select value={it.unit} onChange={(e) => set(i, { unit: e.target.value })}>
-                      {UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
-                    </Select>
-                  </td>
                   {show('pcs_per_pack') && (
                     <td className="py-2 pr-2">
                       <Input
@@ -316,6 +306,16 @@ export default function LineItemsEditor({
                       <Input value={it.color ?? ''} onChange={(e) => set(i, { color: e.target.value })} placeholder="Natural" />
                     </td>
                   )}
+                  {show('unit_price') && (
+                    <td className="py-2 pr-2">
+                      <Input type="number" min={0} step="any" value={it.unit_price || ''} onChange={(e) => set(i, { unit_price: Number(e.target.value) })} />
+                    </td>
+                  )}
+                  <td className="py-2 pr-2">
+                    <Select value={it.unit} onChange={(e) => set(i, { unit: e.target.value })}>
+                      {UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
+                    </Select>
+                  </td>
                   {taxVisible && (
                     <td className="py-2 pr-2">
                       <Input type="number" min={0} max={100} step="any" value={it.tax_pct ?? ''} onChange={(e) => set(i, { tax_pct: e.target.value === '' ? 0 : Number(e.target.value) })} />

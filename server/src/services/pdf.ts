@@ -465,8 +465,13 @@ export function buildQuotationPdf(id: number): TDocumentDefinitions {
     margin: [0, 0, 0, 8] as any,
   };
 
+  // Column order, as the user specified it: what the item *is* (description,
+  // photo), then how it packs (pcs/box, boxes, total qty), then what it costs
+  // (unit price, total). UOM sits with Unit Price because it is what makes
+  // "10" mean "INR/1000", and Tax % lands just before the money it applies to.
   const specs: ColumnSpec[] = [
     { key: 'sl', label: 'SL', width: 18, align: 'center', always: true, value: (_it, i) => String(i + 1) },
+    { key: 'description', label: 'Product Description', width: '*', always: true, value: (it) => String(it.description) },
     // Photos are a selling aid, so they appear on the quotation and nowhere
     // else. The column drops out entirely when no line carries one.
     {
@@ -474,16 +479,15 @@ export function buildQuotationPdf(id: number): TDocumentDefinitions {
       value: (it) => String(it.image || ''),
       cell: (it) => (it.image ? { image: String(it.image), fit: [40, 40] as [number, number] } : { text: '' }),
     },
-    { key: 'description', label: 'Product Description', width: '*', always: true, value: (it) => String(it.description) },
     // No HSN: a quotation is not a tax document. The value is still stored and
     // still carries forward to the proforma and invoice, which do print it.
-    { key: 'unit_price', label: 'Unit Price', width: 48, align: 'right', always: true, value: (it) => fmtNum(it.unit_price, 3) },
-    { key: 'uom', label: 'UOM', width: 52, align: 'center', always: true, value: (it) => uomLabel(cur, it.unit) },
     { key: 'pcs_per_pack', label: 'Pcs/Box', width: 42, align: 'right', value: (it) => (it.pcs_per_pack != null ? fmtNum(it.pcs_per_pack, 0) : '') },
     { key: 'packs', label: 'Boxes', width: 40, align: 'right', value: (it) => (it.packs != null ? fmtNum(it.packs, 0) : '') },
     { key: 'total_pcs', label: 'Total Qty', width: 55, align: 'right', value: (it) => (it.total_pcs != null ? fmtNum(it.total_pcs, 0) : '') },
     { key: 'qty', label: 'Qty', width: 50, align: 'right', value: (it) => (it.qty != null ? `${fmtNum(it.qty)} ${it.unit}` : '') },
     { key: 'color', label: 'Color', width: 48, align: 'center', value: (it) => String(it.color || '') },
+    { key: 'unit_price', label: 'Unit Price', width: 48, align: 'right', always: true, value: (it) => fmtNum(it.unit_price, 3) },
+    { key: 'uom', label: 'UOM', width: 52, align: 'center', always: true, value: (it) => uomLabel(cur, it.unit) },
     ...(showTax ? [{ key: 'tax', label: 'Tax %', width: 30, align: 'right' as const, value: (it: Row) => `${it.tax_pct ?? 0}%` }] : []),
     { key: 'amount', label: `Total (${cur})`, width: 62, align: 'right', always: true, value: (it) => (it.qty != null ? fmtMoney(it.amount, cur) : 'price only') },
   ];
