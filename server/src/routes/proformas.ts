@@ -11,9 +11,12 @@ export const proformasRouter = Router();
 
 const listSql = `
   SELECT p.*, c.name AS customer_name, c.country AS customer_country, q.number AS quotation_number,
+         co.company_name AS company_name,
          o.number AS order_number, u.name AS created_by_name, a.name AS approved_by_name
   FROM proforma_invoices p
   JOIN customers c ON c.id = p.customer_id
+  -- LEFT, not JOIN: a document must still list if its company row is gone.
+  LEFT JOIN companies co ON co.id = p.company_id
   LEFT JOIN quotations q ON q.id = p.quotation_id
   LEFT JOIN orders o ON o.id = p.order_id
   LEFT JOIN users u ON u.id = p.created_by

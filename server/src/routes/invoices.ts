@@ -12,9 +12,12 @@ export const invoicesRouter = Router();
 
 const listSql = `
   SELECT i.*, c.name AS customer_name, c.country AS customer_country, p.number AS pi_number,
+         co.company_name AS company_name,
          u.name AS created_by_name, a.name AS approved_by_name
   FROM commercial_invoices i
   JOIN customers c ON c.id = i.customer_id
+  -- LEFT, not JOIN: a document must still list if its company row is gone.
+  LEFT JOIN companies co ON co.id = i.company_id
   LEFT JOIN proforma_invoices p ON p.id = i.pi_id
   LEFT JOIN users u ON u.id = i.created_by
   LEFT JOIN users a ON a.id = i.approved_by`;

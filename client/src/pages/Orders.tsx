@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Order, OrderStatus } from '../types';
 import { Button, Select, PageHeader, EmptyState, Card, ExportTabs, ErrorText } from '../components/ui';
+import { useCompanies } from '../components/CompanySelect';
 import { fmtDate, fmtMoney, today } from '../lib/format';
 
 export const ORDER_STATUSES: OrderStatus[] = [
@@ -24,6 +25,9 @@ const statusTint: Record<string, string> = {
 };
 
 export default function OrdersPage() {
+  // Only worth a column once the group has more than one entity.
+  const companies = useCompanies();
+  const showCompany = companies.length > 1;
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [statusFilter, setStatusFilter] = useState('');
@@ -83,6 +87,7 @@ export default function OrdersPage() {
                 <th className="pb-2 pr-3">Order No.</th>
                 <th className="pb-2 pr-3">Date</th>
                 <th className="pb-2 pr-3">Customer</th>
+                {showCompany && <th className="pb-2 pr-3">Issued By</th>}
                 <th className="pb-2 pr-3">Their PO</th>
                 <th className="pb-2 pr-3">Promised</th>
                 <th className="pb-2 pr-3 text-right">Value</th>
@@ -99,6 +104,9 @@ export default function OrdersPage() {
                   </td>
                   <td className="py-2 pr-3 whitespace-nowrap">{fmtDate(o.date)}</td>
                   <td className="py-2 pr-3">{o.customer_name}</td>
+                  {showCompany && (
+                    <td className="py-2 pr-3 text-xs text-slate-500">{o.company_name ?? "—"}</td>
+                  )}
                   <td className="py-2 pr-3">{o.po_number || '—'}</td>
                   <td className={`py-2 pr-3 whitespace-nowrap ${isOverdue(o) ? 'font-semibold text-red-600' : ''}`}>
                     {fmtDate(o.promised_date)}{isOverdue(o) && ' ⚠'}

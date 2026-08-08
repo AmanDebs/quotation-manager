@@ -4,10 +4,14 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Proforma } from '../types';
 import { Button, Select, PageHeader, EmptyState, Card, StatusBadge, ExportTabs } from '../components/ui';
+import { useCompanies } from '../components/CompanySelect';
 import NewDocumentDialog from '../components/NewDocumentDialog';
 import { fmtDate, fmtMoney } from '../lib/format';
 
 export default function ProformasPage() {
+  // Only worth a column once the group has more than one entity.
+  const companies = useCompanies();
+  const showCompany = companies.length > 1;
   const navigate = useNavigate();
   const [statusFilter, setStatusFilter] = useState('');
   const [exportFilter, setExportFilter] = useState('');
@@ -49,6 +53,7 @@ export default function ProformasPage() {
                 <th className="pb-2 pr-3">Number</th>
                 <th className="pb-2 pr-3">Date</th>
                 <th className="pb-2 pr-3">Customer</th>
+                {showCompany && <th className="pb-2 pr-3">Issued By</th>}
                 <th className="pb-2 pr-3">Ref. Quotation</th>
                 <th className="pb-2 pr-3 text-right">Total</th>
                 <th className="pb-2 pr-3">Status</th>
@@ -60,6 +65,9 @@ export default function ProformasPage() {
                   <td className="py-2 pr-3 font-medium text-brand-600"><Link to={`/proformas/${p.id}`}>{p.number}</Link></td>
                   <td className="py-2 pr-3 whitespace-nowrap">{fmtDate(p.date)}</td>
                   <td className="py-2 pr-3">{p.customer_name}</td>
+                  {showCompany && (
+                    <td className="py-2 pr-3 text-xs text-slate-500">{p.company_name ?? "—"}</td>
+                  )}
                   <td className="py-2 pr-3">{p.quotation_number || '—'}</td>
                   <td className="py-2 pr-3 text-right tabular-nums">{fmtMoney(p.grand_total, p.currency)}</td>
                   <td className="py-2 pr-3">

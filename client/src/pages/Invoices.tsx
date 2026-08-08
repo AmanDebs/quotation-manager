@@ -4,10 +4,14 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Invoice } from '../types';
 import { Button, Select, PageHeader, EmptyState, Card, StatusBadge, ExportTabs } from '../components/ui';
+import { useCompanies } from '../components/CompanySelect';
 import NewDocumentDialog from '../components/NewDocumentDialog';
 import { fmtDate, fmtMoney } from '../lib/format';
 
 export default function InvoicesPage() {
+  // Only worth a column once the group has more than one entity.
+  const companies = useCompanies();
+  const showCompany = companies.length > 1;
   const navigate = useNavigate();
   const [statusFilter, setStatusFilter] = useState('');
   const [exportFilter, setExportFilter] = useState('');
@@ -47,6 +51,7 @@ export default function InvoicesPage() {
                 <th className="pb-2 pr-3">Number</th>
                 <th className="pb-2 pr-3">Date</th>
                 <th className="pb-2 pr-3">Customer</th>
+                {showCompany && <th className="pb-2 pr-3">Issued By</th>}
                 <th className="pb-2 pr-3">Ref. PI</th>
                 <th className="pb-2 pr-3 text-right">Total</th>
                 <th className="pb-2 pr-3">Status</th>
@@ -58,6 +63,9 @@ export default function InvoicesPage() {
                   <td className="py-2 pr-3 font-medium text-brand-600"><Link to={`/invoices/${inv.id}`}>{inv.number}</Link></td>
                   <td className="py-2 pr-3 whitespace-nowrap">{fmtDate(inv.date)}</td>
                   <td className="py-2 pr-3">{inv.customer_name}</td>
+                  {showCompany && (
+                    <td className="py-2 pr-3 text-xs text-slate-500">{inv.company_name ?? "—"}</td>
+                  )}
                   <td className="py-2 pr-3">{inv.pi_number || '—'}</td>
                   <td className="py-2 pr-3 text-right tabular-nums">{fmtMoney(inv.grand_total, inv.currency)}</td>
                   <td className="py-2 pr-3">

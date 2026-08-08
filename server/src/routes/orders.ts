@@ -10,9 +10,12 @@ export const ordersRouter = Router();
 
 const listSql = `
   SELECT o.*, c.name AS customer_name, c.country AS customer_country,
+         co.company_name AS company_name,
          q.number AS quotation_number, u.name AS created_by_name
   FROM orders o
   JOIN customers c ON c.id = o.customer_id
+  -- LEFT, not JOIN: a document must still list if its company row is gone.
+  LEFT JOIN companies co ON co.id = o.company_id
   LEFT JOIN quotations q ON q.id = o.quotation_id
   LEFT JOIN users u ON u.id = o.created_by`;
 

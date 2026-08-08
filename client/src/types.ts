@@ -163,7 +163,7 @@ export interface Order {
   promised_date: string; scheduled_date: string; revised_date: string; actual_production_date: string;
   status: OrderStatus; remarks: string; notes: string;
   subtotal: number; tax_total: number; grand_total: number;
-  customer_name?: string; quotation_number?: string; created_by_name?: string | null;
+  customer_name?: string; quotation_number?: string; company_name?: string; created_by_name?: string | null;
   column_config?: ColumnConfig;
   items?: OrderItem[];
   dispatched_value?: number; pending_value?: number;
@@ -191,7 +191,7 @@ export interface Proforma {
   hs_code: string; prepared_by: string;
   remarks: string; tax_type: TaxType; status: string;
   subtotal: number; tax_total: number; grand_total: number;
-  customer_name?: string; quotation_number?: string;
+  customer_name?: string; quotation_number?: string; company_name?: string;
   items?: LineItem[];
   payments?: Payment[];
   amount_received?: number;
@@ -210,7 +210,7 @@ export interface Invoice {
   notify_party_2: string; method_of_despatch: string; lot_no: string; prepared_by: string;
   remarks: string; tax_type: TaxType; status: string;
   subtotal: number; tax_total: number; grand_total: number;
-  customer_name?: string; pi_number?: string;
+  customer_name?: string; pi_number?: string; company_name?: string;
   items?: LineItem[];
   variance?: { description: string; pi_qty: number; invoice_qty: number; variance_pct: number }[];
   payments?: Payment[];
