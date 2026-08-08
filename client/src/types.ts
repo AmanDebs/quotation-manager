@@ -107,7 +107,11 @@ export type TaxType = 'none' | 'cgst_sgst' | 'igst';
 export interface Quotation {
   id: number; number: string; revision: number; date: string;
   enquiry_id: number | null; customer_id: number; currency: string;
-  validity_date: string; payment_terms: string; delivery_terms: string; notes: string;
+  validity_date: string; payment_terms: string; delivery_terms: string;
+  /** Printed on the quotation as the NOTES & TERMS bullets. */
+  notes: string;
+  /** Never printed — the team's own record. Saved through its own endpoint. */
+  internal_notes?: string;
   freight: number; insurance: number; inco_terms: string; container_count: string; prepared_by: string;
   tax_type: TaxType; status: string; is_export: number;
   subtotal: number; tax_total: number; grand_total: number;

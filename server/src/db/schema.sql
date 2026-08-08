@@ -106,7 +106,10 @@ CREATE TABLE IF NOT EXISTS quotations (
   validity_date TEXT NOT NULL DEFAULT '',
   payment_terms TEXT NOT NULL DEFAULT '',
   delivery_terms TEXT NOT NULL DEFAULT '',
+  -- Printed, as the NOTES & TERMS bullets at the foot of the quotation.
   notes TEXT NOT NULL DEFAULT '',
+  -- Never printed. The team's own record of how the negotiation is going.
+  internal_notes TEXT NOT NULL DEFAULT '',
   freight REAL NOT NULL DEFAULT 0,
   insurance REAL NOT NULL DEFAULT 0,
   inco_terms TEXT NOT NULL DEFAULT '',

@@ -33,6 +33,10 @@ for (const table of ['quotation_items', 'pi_items', 'invoice_items']) {
   addColumnIfMissing(table, 'pcs_per_pack', 'REAL');
   addColumnIfMissing(table, 'total_pcs', 'REAL');
 }
+// A private note on a quotation (2026-08). Distinct from `notes`, which is
+// printed to the customer — this one never reaches a PDF.
+addColumnIfMissing('quotations', 'internal_notes', "TEXT NOT NULL DEFAULT ''");
+
 // Per-line loadability (2026-08). Copied from the catalogue when a product is
 // picked, then owned by the document — editing products must not rewrite the
 // figures an old quotation was sent out with. Carried on all four item tables

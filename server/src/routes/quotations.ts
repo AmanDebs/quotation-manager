@@ -150,6 +150,25 @@ quotationsRouter.put('/:id', (req: AuthedRequest, res) => {
   res.json(getFull(id));
 });
 
+/**
+ * The team's private note on a quotation — never printed, never seen by the
+ * customer.
+ *
+ * Deliberately not folded into PUT /:id. That handler ends with
+ * resetApprovalOnEdit and rewrites every line item, neither of which should
+ * happen because somebody jotted "call back Monday": an approved quotation
+ * must stay approved, and the money must not be touched. It also works on a
+ * superseded revision, which is read-only everywhere else — recording why a
+ * revision was replaced is exactly what this is for.
+ */
+quotationsRouter.patch('/:id/internal-notes', (req: AuthedRequest, res) => {
+  const id = Number(req.params.id);
+  const existing = db.prepare('SELECT customer_id FROM quotations WHERE id = ?').get(id) as { customer_id: number } | undefined;
+  if (!existing || !canAccessCustomer(req, existing.customer_id)) return res.status(404).json({ error: 'Quotation not found' });
+  db.prepare('UPDATE quotations SET internal_notes = ? WHERE id = ?').run(String(req.body?.internal_notes ?? ''), id);
+  res.json(getFull(id));
+});
+
 quotationsRouter.post('/:id/submit', (req: AuthedRequest, res) => {
   const id = Number(req.params.id);
   const existing = db.prepare('SELECT customer_id FROM quotations WHERE id = ?').get(id) as { customer_id: number } | undefined;
@@ -188,8 +207,10 @@ quotationsRouter.post('/:id/revise', (req: AuthedRequest, res) => {
   const newId = transaction(() => {
     const maxRev = db.prepare('SELECT MAX(revision) AS r FROM quotations WHERE number = ?').get(String(existing.number)) as { r: number };
     const info = db.prepare(
-      `INSERT INTO quotations (number, revision, date, customer_id, currency, validity_date, payment_terms, delivery_terms, notes, freight, insurance, inco_terms, container_count, prepared_by, tax_type, is_export, column_config, created_by, status, subtotal, tax_total, grand_total)
-       SELECT number, ?, ?, customer_id, currency, validity_date, payment_terms, delivery_terms, notes, freight, insurance, inco_terms, container_count, prepared_by, tax_type, is_export, column_config, ?, 'negotiating', subtotal, tax_total, grand_total
+      // internal_notes rides along: a revision is the next round of the same
+      // negotiation, so the running commentary should follow it.
+      `INSERT INTO quotations (number, revision, date, customer_id, currency, validity_date, payment_terms, delivery_terms, notes, internal_notes, freight, insurance, inco_terms, container_count, prepared_by, tax_type, is_export, column_config, created_by, status, subtotal, tax_total, grand_total)
+       SELECT number, ?, ?, customer_id, currency, validity_date, payment_terms, delivery_terms, notes, internal_notes, freight, insurance, inco_terms, container_count, prepared_by, tax_type, is_export, column_config, ?, 'negotiating', subtotal, tax_total, grand_total
        FROM quotations WHERE id = ?`
     ).run(maxRev.r + 1, new Date().toISOString().slice(0, 10), req.user!.id, id);
     const newId = Number(info.lastInsertRowid);

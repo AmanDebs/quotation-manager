@@ -5,6 +5,7 @@ import { api } from '../api/client';
 import type { Quotation } from '../types';
 import { Button, Select, PageHeader, EmptyState, Card, ExportTabs, ErrorText } from '../components/ui';
 import NewDocumentDialog from '../components/NewDocumentDialog';
+import InternalNotes from '../components/InternalNotes';
 import { fmtDate, fmtMoney } from '../lib/format';
 
 const approvalBadge: Record<string, { cls: string; label: string }> = {
@@ -31,6 +32,16 @@ export default function QuotationsPage() {
   const [statusFilter, setStatusFilter] = useState('');
   const [exportFilter, setExportFilter] = useState('');
   const [creating, setCreating] = useState(false);
+  // Which rows have their note panel open. Keyed by quotation id rather than
+  // index, so filtering the list cannot open the wrong one.
+  const [openNotes, setOpenNotes] = useState<Set<number>>(new Set());
+
+  const toggleNote = (id: number) =>
+    setOpenNotes((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
   const { data: quotations = [] } = useQuery({
     queryKey: ['quotations', statusFilter, exportFilter],
     queryFn: () => {
@@ -86,11 +97,15 @@ export default function QuotationsPage() {
                 <th className="pb-2 pr-3 text-right">Total</th>
                 <th className="pb-2 pr-3">Status</th>
                 <th className="pb-2 pr-3">Approval</th>
+                <th className="w-8 pb-2" />
               </tr>
             </thead>
-            <tbody>
-              {quotations.map((q) => (
-                <tr key={q.id} className="cursor-pointer border-b border-slate-100 last:border-0 hover:bg-slate-50" onClick={() => navigate(`/quotations/${q.id}`)}>
+            {quotations.map((q) => {
+              const noteOpen = openNotes.has(q.id);
+              const hasNote = !!q.internal_notes?.trim();
+              return (
+              <tbody key={q.id} className="border-b border-slate-100 last:border-0">
+                <tr className="cursor-pointer hover:bg-slate-50" onClick={() => navigate(`/quotations/${q.id}`)}>
                   <td className="py-2 pr-3 font-medium text-brand-600">
                     <Link to={`/quotations/${q.id}`}>{q.number}{q.revision > 0 && <span className="text-slate-400"> R{q.revision}</span>}</Link>
                   </td>
@@ -126,9 +141,32 @@ export default function QuotationsPage() {
                       </span>
                     )}
                   </td>
+                  {/* Opens the note in place — the click must not open the quotation. */}
+                  <td className="py-2 text-right" onClick={(e) => e.stopPropagation()}>
+                    <button
+                      onClick={() => toggleNote(q.id)}
+                      aria-expanded={noteOpen}
+                      className={`rounded px-1 focus:outline-none focus:ring-1 focus:ring-brand-600 ${
+                        hasNote ? 'text-brand-600' : 'text-slate-300 hover:text-slate-500'
+                      }`}
+                      title={hasNote ? 'Internal note' : 'Add an internal note'}
+                      aria-label={hasNote ? `Internal note on ${q.number}` : `Add an internal note to ${q.number}`}
+                    >🗒</button>
+                  </td>
                 </tr>
-              ))}
-            </tbody>
+
+                {noteOpen && (
+                  <tr onClick={(e) => e.stopPropagation()}>
+                    <td colSpan={8} className="cursor-default px-1 pb-3">
+                      <div className="rounded-md border border-slate-200 bg-slate-50/70 p-3">
+                        <InternalNotes quotationId={q.id} value={q.internal_notes ?? ''} autoFocus />
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+              );
+            })}
           </table>
         )}
       </Card>

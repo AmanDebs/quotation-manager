@@ -7,6 +7,7 @@ import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, St
 import LineItemsEditor from '../components/LineItemsEditor';
 import FollowupButton from '../components/FollowupButton';
 import ApprovalStrip from '../components/ApprovalStrip';
+import InternalNotes from '../components/InternalNotes';
 import ColumnsControl, { quotationColumns, quotationOmit } from '../components/ColumnsControl';
 import NotePresetPicker from '../components/NotePresetPicker';
 import { fmtMoney, fmtQty, fmtDate, today } from '../lib/format';
@@ -311,6 +312,14 @@ export default function QuotationFormPage() {
             </>
           )}
         </Card>
+
+        {/* Saved through its own endpoint, so it needs an id — and it stays
+            editable on a superseded revision, unlike everything above. */}
+        {!isNew && (
+          <Card title="Notes for us">
+            <InternalNotes quotationId={Number(id)} value={existing!.internal_notes ?? ''} rows={4} />
+          </Card>
+        )}
 
         {!isNew && existing!.revisions && existing!.revisions.length > 1 && (
           <Card title="Revision History (negotiation)">
