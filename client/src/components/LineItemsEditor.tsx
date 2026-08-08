@@ -72,6 +72,21 @@ function PhotoCell({ value, onChange }: { value: string; onChange: (v: string) =
 }
 
 /**
+ * Pieces in one billing unit, mirroring PIECES_PER_BILLING_UNIT in
+ * server/src/services/totals.ts. The server is the authority — everything
+ * here is a preview of what it will compute on save — but the preview has to
+ * agree with it or the subtotal reads zero while the saved document does not.
+ */
+const PIECES_PER_BILLING_UNIT: Record<string, number> = { 'per 1000': 1000, unit: 1 };
+
+/** Boxes × pcs/box decides the quantity when the rate is priced per piece. */
+function billedQty(it: LineItem): number | null {
+  const per = PIECES_PER_BILLING_UNIT[it.unit ?? ''];
+  if (per && it.total_pcs != null) return it.total_pcs / per;
+  return it.qty ?? null;
+}
+
+/**
  * Shared line-item grid for quotations, orders, proforma invoices and
  * commercial invoices.
  *
@@ -162,8 +177,12 @@ export default function LineItemsEditor({
   };
 
   const taxVisible = (showTax ?? taxType !== 'none') && show('tax');
-  const subtotal = items.reduce((s, it) => s + (it.qty != null ? it.qty * it.unit_price : 0), 0);
-  const tax = taxVisible ? items.reduce((s, it) => s + (it.qty != null ? it.qty * it.unit_price * ((it.tax_pct ?? 0) / 100) : 0), 0) : 0;
+  const lineAmount = (it: LineItem): number | null => {
+    const q = billedQty(it);
+    return q != null ? q * it.unit_price : null;
+  };
+  const subtotal = items.reduce((s, it) => s + (lineAmount(it) ?? 0), 0);
+  const tax = taxVisible ? items.reduce((s, it) => s + (lineAmount(it) ?? 0) * ((it.tax_pct ?? 0) / 100), 0) : 0;
 
   // What is left once packing has its own columns: the fields a line rarely
   // carries. When none of them apply the second row holds only the /1000 rate.
@@ -226,8 +245,9 @@ export default function LineItemsEditor({
             const product = products.find((p) => p.id === it.product_id);
             const isOpen = expanded.has(i);
             const summary = summarise(it);
-            const per1000 = it.total_pcs != null && it.total_pcs > 0 && it.qty != null && it.unit_price > 0
-              ? (it.qty * it.unit_price / it.total_pcs) * 1000
+            const amount = lineAmount(it);
+            const per1000 = it.total_pcs != null && it.total_pcs > 0 && amount != null && it.unit_price > 0
+              ? (amount / it.total_pcs) * 1000
               : null;
 
             return (
@@ -322,7 +342,7 @@ export default function LineItemsEditor({
                     </td>
                   )}
                   <td className="py-2 pr-2 pt-4 text-right font-semibold tabular-nums text-slate-800">
-                    {it.qty != null ? fmtMoney(it.qty * it.unit_price, currency) : <span className="font-normal text-slate-400">price only</span>}
+                    {amount != null ? fmtMoney(amount, currency) : <span className="font-normal text-slate-400">price only</span>}
                   </td>
                   <td className="py-2 pt-4 text-right">
                     <button
@@ -407,7 +427,9 @@ export default function LineItemsEditor({
         </div>
       </div>
       <p className="mt-2 text-xs text-slate-400">
-        Qty × Unit Price is the billed amount (e.g. KGS × price/kg). Leave Qty empty for a price-only quotation.
+        {show('qty')
+          ? 'Qty × Unit Price is the billed amount (e.g. KGS × price/kg). With a per-piece or per-1000 rate, Boxes × Pcs/Box sets the quantity instead.'
+          : 'Boxes × Pcs/Box gives Total Qty, and Total Qty at the Unit Price gives the Amount. Leave the packing figures empty for a price-only quotation.'}
       </p>
     </div>
   );

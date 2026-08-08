@@ -31,6 +31,30 @@ export interface Totals {
 export const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 
 /**
+ * Pieces in one billing unit, for the rate bases that are priced off a piece
+ * count. Only these can have their quantity derived from the packing figures.
+ */
+const PIECES_PER_BILLING_UNIT: Record<string, number> = { 'per 1000': 1000, unit: 1 };
+
+/**
+ * The quantity a line is actually billed on.
+ *
+ * When the rate is per piece or per 1000 *and* the packing figures say how
+ * many pieces there are, the piece count decides: boxes × pcs/box is the
+ * quantity, and a separately typed qty could only ever contradict it. That
+ * contradiction was reachable — the two fields were independent, so a line
+ * could print 60,000 pieces against a total priced on some other number.
+ *
+ * For any other basis (kg, tonne, metre, litre, set, box) the piece count says
+ * nothing about the billed quantity, so the typed qty stands.
+ */
+export function billedQty(it: Pick<LineItemInput, 'qty' | 'unit' | 'total_pcs'>): number | null {
+  const per = PIECES_PER_BILLING_UNIT[it.unit ?? ''];
+  if (per && it.total_pcs != null) return it.total_pcs / per;
+  return it.qty ?? null;
+}
+
+/**
  * Single source of truth for all document math.
  * qty may be null (customer did not share quantity) — then line amount is 0
  * and the document acts as a price list.
@@ -45,20 +69,25 @@ export function computeTotals(
   insurance = 0,
   currency = ''
 ): Totals {
-  const computed: ComputedItem[] = items.map((it) => ({
-    ...it,
-    qty: it.qty ?? null,
-    tax_pct: it.tax_pct ?? 0,
-    color: it.color ?? '',
-    packs: it.packs ?? null,
-    pcs_per_pack: it.pcs_per_pack ?? null,
-    total_pcs: it.total_pcs ?? null,
-    custom1: it.custom1 ?? '',
-    custom2: it.custom2 ?? '',
-    custom3: it.custom3 ?? '',
-    image: it.image ?? '',
-    amount: it.qty != null ? round2(it.qty * it.unit_price) : 0,
-  }));
+  const computed: ComputedItem[] = items.map((it) => {
+    // Derived, then stamped back onto the row, so what is stored can never
+    // disagree with the packing figures printed beside it.
+    const qty = billedQty(it);
+    return {
+      ...it,
+      qty,
+      tax_pct: it.tax_pct ?? 0,
+      color: it.color ?? '',
+      packs: it.packs ?? null,
+      pcs_per_pack: it.pcs_per_pack ?? null,
+      total_pcs: it.total_pcs ?? null,
+      custom1: it.custom1 ?? '',
+      custom2: it.custom2 ?? '',
+      custom3: it.custom3 ?? '',
+      image: it.image ?? '',
+      amount: qty != null ? round2(qty * it.unit_price) : 0,
+    };
+  });
 
   const subtotal = round2(computed.reduce((s, it) => s + it.amount, 0));
   const taxable = round2(subtotal + (freight || 0) + (insurance || 0));

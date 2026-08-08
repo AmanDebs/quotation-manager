@@ -26,11 +26,18 @@ export const ITEM_COLUMNS: ToggleableColumn[] = [
 ];
 
 /**
- * A quotation is not a tax document, so it carries no HSN column — in the
- * editor, in the tick-list, or on the PDF. `hsn_code` is still stored and
+ * Columns a quotation does not carry — in the editor, in the tick-list, or on
+ * the PDF.
+ *
+ * `hsn`: a quotation is not a tax document. The value is still stored and
  * still carries forward to the proforma and invoice, where GST needs it.
+ *
+ * `qty`: the amount follows the packing figures now — boxes × pcs/box gives
+ * Total Qty, and that divided by the rate basis is what gets billed. A second
+ * quantity field could only contradict it. See billedQty() in
+ * server/src/services/totals.ts.
  */
-export const QUOTATION_OMIT = ['hsn'];
+export const QUOTATION_OMIT = ['hsn', 'qty'];
 export const QUOTATION_ITEM_COLUMNS: ToggleableColumn[] =
   ITEM_COLUMNS.filter((c) => !QUOTATION_OMIT.includes(c.key));
 
