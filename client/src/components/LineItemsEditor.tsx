@@ -79,11 +79,17 @@ function PhotoCell({ value, onChange }: { value: string; onChange: (v: string) =
  */
 const PIECES_PER_BILLING_UNIT: Record<string, number> = { 'per 1000': 1000, unit: 1 };
 
-/** Boxes × pcs/box decides the quantity when the rate is priced per piece. */
+/**
+ * Boxes × pcs/box decides the quantity when the rate is priced per piece.
+ * Otherwise the typed Qty stands, and failing that Total Qty is taken at face
+ * value in whatever the rate basis is — quotations and proformas have no Qty
+ * field, so a kg-priced line has nowhere else to say how much is being sold.
+ */
 function billedQty(it: LineItem): number | null {
   const per = PIECES_PER_BILLING_UNIT[it.unit ?? ''];
   if (per && it.total_pcs != null) return it.total_pcs / per;
-  return it.qty ?? null;
+  if (it.qty != null) return it.qty;
+  return it.total_pcs ?? null;
 }
 
 /**
@@ -253,7 +259,10 @@ export default function LineItemsEditor({
             const isOpen = expanded.has(i);
             const summary = summarise(it);
             const amount = lineAmount(it);
+            // Only where Total Qty is a piece count — on a per-kg line it is
+            // kilos, and money ÷ kilos is not a rate per 1000 pieces.
             const per1000 = it.total_pcs != null && it.total_pcs > 0 && amount != null && it.unit_price > 0
+              && PIECES_PER_BILLING_UNIT[it.unit ?? ''] !== undefined
               ? (amount / it.total_pcs) * 1000
               : null;
 
@@ -456,7 +465,7 @@ export default function LineItemsEditor({
       <p className="mt-2 text-xs text-slate-400">
         {show('qty')
           ? 'Qty × Unit Price is the billed amount (e.g. KGS × price/kg). With a per-piece or per-1000 rate, Boxes × Pcs/Box sets the quantity instead.'
-          : 'Boxes × Pcs/Box gives Total Qty, and Total Qty at the Unit Price gives the Amount. Leave the packing figures empty for a price-only quotation.'}
+          : 'Boxes × Pcs/Box gives Total Qty, and Total Qty at the Unit Price gives the Amount — so with a per-1000 rate Total Qty is pieces, and with a per-kg rate it is kilos. Leave it empty for a price-only document.'}
       </p>
     </div>
   );

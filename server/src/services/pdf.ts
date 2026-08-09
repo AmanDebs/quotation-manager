@@ -4,7 +4,7 @@ import type { TDocumentDefinitions, Content } from 'pdfmake/interfaces';
 import { inflateSync } from 'node:zlib';
 import { db } from '../db/connection.js';
 import { amountInWords } from './amountInWords.js';
-import { round2 } from './totals.js';
+import { round2, isPieceBasis } from './totals.js';
 import { invoiceReceivable } from './receivables.js';
 import { getCompany, defaultCompany } from './companies.js';
 
@@ -718,14 +718,21 @@ export function buildProformaPdf(id: number): TDocumentDefinitions {
     // block above (`hs_code`), the way the Emeraude sample does. The value is
     // still stored and still reaches the commercial invoice, which prints it.
     { key: 'description', label: 'Description of Goods', width: '*', always: true, value: (it) => String(it.description) },
-    // Qty stays, unlike on the quotation: a proforma is often billed by weight
-    // (KGS x price/kg), and then this is the only quantity on the document.
-    { key: 'qty', label: 'Qty', width: 52, align: 'right', always: true, value: (it) => (it.qty != null ? `${fmtNum(it.qty)} ${it.unit}` : '—') },
     { key: 'unit_price', label: `Price ${cur}`, width: 46, align: 'right', always: true, value: (it) => `${fmtNum(it.unit_price, 3)} /${it.unit === 'per 1000' ? '1000' : it.unit}` },
     { key: 'color', label: 'Color', width: 48, align: 'center', value: (it) => String(it.color || '') },
     { key: 'packs', label: 'Boxes', width: 40, align: 'right', value: (it) => (it.packs != null ? fmtNum(it.packs, 0) : '') },
-    { key: 'total_pcs', label: 'Total Qty (Pcs)', width: 52, align: 'right', value: (it) => (it.total_pcs != null ? fmtNum(it.total_pcs, 0) : '') },
-    { key: 'per_1000', label: `${cur}/1000 Pcs`, width: 46, align: 'right', value: (it) => (it.total_pcs ? fmtNum(round2((it.amount / it.total_pcs) * 1000), 2) : '') },
+    // One quantity column, not two. Total Qty is what the form now captures —
+    // pieces against a per-1000 rate, kilos against a per-kg one — but a
+    // proforma raised before the Qty field went away has only `qty`, so fall
+    // back to it (with its unit) rather than printing a blank quantity.
+    {
+      key: 'total_pcs', label: 'Total Qty', width: 58, align: 'right', always: true,
+      value: (it) => (it.total_pcs != null ? fmtNum(it.total_pcs, 0)
+        : it.qty != null ? `${fmtNum(it.qty)} ${it.unit}` : '—'),
+    },
+    // Only meaningful where Total Qty is a piece count. On a per-kg line it is
+    // kilos, and dividing money by kilos does not give a rate per 1000 pieces.
+    { key: 'per_1000', label: `${cur}/1000 Pcs`, width: 46, align: 'right', value: (it) => (it.total_pcs && isPieceBasis(it.unit) ? fmtNum(round2((it.amount / it.total_pcs) * 1000), 2) : '') },
     ...(showTax ? [{ key: 'tax', label: 'Tax %', width: 28, align: 'right' as const, value: (it: Row) => `${it.tax_pct ?? 0}%` }] : []),
     { key: 'amount', label: `Amount (${cur})`, width: 60, align: 'right', always: true, value: (it) => fmtMoney(it.amount, cur) },
   ];

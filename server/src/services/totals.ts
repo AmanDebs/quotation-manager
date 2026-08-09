@@ -40,6 +40,14 @@ export const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 10
 const PIECES_PER_BILLING_UNIT: Record<string, number> = { 'per 1000': 1000, unit: 1 };
 
 /**
+ * True when the rate is quoted against a piece count, so Total Qty is pieces.
+ * On any other basis Total Qty is read in that basis instead (kilos, tonnes),
+ * and a "per 1000 pcs" figure derived from it would be meaningless.
+ */
+export const isPieceBasis = (unit: string | undefined | null): boolean =>
+  PIECES_PER_BILLING_UNIT[unit ?? ''] !== undefined;
+
+/**
  * The quantity a line is actually billed on.
  *
  * When the rate is per piece or per 1000 *and* the packing figures say how
@@ -50,11 +58,18 @@ const PIECES_PER_BILLING_UNIT: Record<string, number> = { 'per 1000': 1000, unit
  *
  * For any other basis (kg, tonne, metre, litre, set, box) the piece count says
  * nothing about the billed quantity, so the typed qty stands.
+ *
+ * Failing both, Total Qty is taken at face value in whatever the rate basis is.
+ * Quotations and proformas no longer offer a Qty field at all, so on those a
+ * kg-priced line has nowhere else to state its quantity. This branch only ever
+ * fires where the answer used to be null — a line that already had an amount
+ * keeps exactly the amount it had.
  */
 export function billedQty(it: Pick<LineItemInput, 'qty' | 'unit' | 'total_pcs'>): number | null {
   const per = PIECES_PER_BILLING_UNIT[it.unit ?? ''];
   if (per && it.total_pcs != null) return it.total_pcs / per;
-  return it.qty ?? null;
+  if (it.qty != null) return it.qty;
+  return it.total_pcs ?? null;
 }
 
 /**

@@ -49,12 +49,14 @@ export const QUOTATION_OMIT = ['hsn', 'qty'];
  * `D:\Quotation Doc\`. The per-line value is still stored and still carries
  * forward to the commercial invoice, which does print it.
  *
- * `qty` stays, unlike on a quotation. A proforma is routinely billed by weight
- * — the Emeraude sample prices 32,100 KGS at 1.625 USD/KGS — and for any rate
- * basis other than pieces, Qty is the only quantity there is. Dropping it would
- * make that document impossible to raise.
+ * `qty`: same reasoning as the quotation — one quantity per line, not two that
+ * can disagree. A proforma is often billed by weight rather than by piece, so
+ * Total Qty is read in whatever the rate basis is: pieces against a per-1000
+ * rate, kilos against a per-kg one. See billedQty() in
+ * server/src/services/totals.ts, which falls back to Total Qty for exactly
+ * this reason.
  */
-export const PROFORMA_OMIT = ['hsn'];
+export const PROFORMA_OMIT = ['hsn', 'qty'];
 
 /** Container loadability is meaningless to a domestic GST buyer. */
 export const LOADABILITY_COLUMNS = ['qty_20ft', 'qty_40ft'];
