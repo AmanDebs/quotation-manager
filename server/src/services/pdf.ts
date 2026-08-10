@@ -954,12 +954,9 @@ export function buildProformaPdf(id: number): TDocumentDefinitions {
     infoGrid,
     itemsTable(s, items, specs, cfg, money),
     amountWords(pi, cur),
-    // No REMARKS heading: the proforma carries one block of prose, not two.
-    // The field is still stored and still editable on the form, but nothing
-    // prints it now — and the PI -> invoice prefill does not carry it either,
-    // so anything typed here goes no further. Put standing wording in the
-    // company's default terms instead, which is what this block renders.
-    ...notesAndTerms(s, '', 'TERMS & CONDITIONS:'),
+    // One block of prose, not two: the document's remarks lead the bullet list
+    // and the company's default terms follow, all under TERMS & CONDITIONS.
+    ...notesAndTerms(s, pi.remarks, 'TERMS & CONDITIONS:'),
     signatureBlock(s, { buyerSide: true, preparedBy: pi.prepared_by }),
   ];
   return baseDoc(content);
