@@ -713,38 +713,93 @@ export function buildProformaPdf(id: number): TDocumentDefinitions {
 
   const kvTable = (rows: [string, string][]): Content => ({
     table: {
-      widths: [105, '*'],
+      widths: [92, '*'],
       body: rows.map(([l, v]) => [
-        { text: l, fontSize: 7.5, bold: true, color: '#333333' },
-        { text: v, fontSize: 7.5 },
+        { text: l, fontSize: 7, bold: true, color: '#333333' },
+        { text: v, fontSize: 7 },
       ]),
     },
-    layout: { ...gridLayout, hLineColor: '#dddddd', vLineColor: '#dddddd' },
+    layout: {
+      ...gridLayout, hLineColor: '#dddddd', vLineColor: '#dddddd',
+      paddingTop: () => 1.5, paddingBottom: () => 1.5,
+    },
+  });
+
+  /** A party under an inline heading — one line saved per party over stacking it. */
+  const party = (label: string, value: string): Content => ({
+    text: [{ text: `${label}: `, fontSize: 6.5, bold: true, color: '#333333' }, { text: value, fontSize: 7.5 }],
+    margin: [0, 2, 0, 0] as any,
   });
 
   const buyerStack: Content[] = [
-    { text: customerAddress(c), fontSize: 8 },
-    ...(pi.consignee ? [{ text: 'CONSIGNEE', fontSize: 6.5, bold: true, color: '#333333', margin: [0, 5, 0, 1] as any }, { text: pi.consignee, fontSize: 7.5 }] : []),
-    ...(pi.notify_party ? [{ text: 'NOTIFY PARTY 1', fontSize: 6.5, bold: true, color: '#333333', margin: [0, 5, 0, 1] as any }, { text: pi.notify_party, fontSize: 7.5 }] : []),
-    ...(pi.notify_party_2 ? [{ text: 'NOTIFY PARTY 2', fontSize: 6.5, bold: true, color: '#333333', margin: [0, 5, 0, 1] as any }, { text: pi.notify_party_2, fontSize: 7.5 }] : []),
+    { text: customerAddress(c), fontSize: 7.5, lineHeight: 1.05 } as Content,
+    ...(pi.consignee ? [party('CONSIGNEE', pi.consignee)] : []),
+    ...(pi.notify_party ? [party('NOTIFY PARTY 1', pi.notify_party)] : []),
+    ...(pi.notify_party_2 ? [party('NOTIFY PARTY 2', pi.notify_party_2)] : []),
   ];
 
-  const bankStack: Content[] = pi.bank_account
-    ? [{ text: 'Beneficiary Bank details:', fontSize: 7.5, bold: true }, { text: `${s.company_name}\n${pi.bank_account}`, fontSize: 7.5, margin: [0, 2, 0, 0] as any }]
-    : [{ text: '—', fontSize: 7.5 }];
+  // An empty block still costs a banner and a row, and "BANK DETAILS: —" tells
+  // the reader nothing. Drop it and let customs run the full width instead.
+  const hasBank = !!pi.bank_account;
+  const bankStack: Content[] = [
+    { text: 'Beneficiary Bank details:', fontSize: 7, bold: true },
+    { text: `${s.company_name}\n${pi.bank_account}`, fontSize: 7, margin: [0, 1.5, 0, 0] as any },
+  ];
+  /**
+   * Four blocks laid out whichever way is shorter.
+   *
+   * A row of a 2x2 grid is as tall as its taller cell, so the arrangement only
+   * pays when the pairs are evenly matched. They often are not: the buyer block
+   * runs to a dozen lines against three shipment rows, leaving dead space
+   * beside it. Spanning the buyer cell down the side reclaims that — but it
+   * loses when the right-hand blocks stacked end to end outgrow the buyer, and
+   * then it pushes the goods *further* down.
+   *
+   * So estimate both and take the shorter. Line heights are approximate; only
+   * the comparison matters, and the two forms differ by tens of points.
+   */
+  const LINE = 9.6;   // one line of 7.5pt body text
+  const ROW = 10.5;   // one kvTable row at 7pt plus its padding
+  const BANNER = 13;  // a filled section head
+
+  const countLines = (t: string) => t.split('\n').length;
+  const buyerH = (countLines(customerAddress(c))
+    + (pi.consignee ? 1 : 0) + (pi.notify_party ? 1 : 0) + (pi.notify_party_2 ? 1 : 0)) * LINE;
+  const shipH = shipmentInfo.length * ROW;
+  const customsH = customsInfo.length * ROW;
+  const bankH = hasBank ? 3 * LINE : 0;
+
+  const gridH = BANNER + Math.max(buyerH, shipH) + BANNER + Math.max(customsH, bankH);
+  const stackedRight = shipH + BANNER + customsH + (hasBank ? BANNER + bankH : 0);
+  const spanH = BANNER + Math.max(buyerH, stackedRight);
+
+  const rightRows: Cell[] = [
+    kvTable(shipmentInfo) as Cell,
+    sectionHead('ADDITIONAL INFORMATION FOR CUSTOMS'),
+    kvTable(customsInfo) as Cell,
+    ...(hasBank ? [sectionHead('BANK DETAILS'), { stack: bankStack } as Cell] : []),
+  ];
+
+  const body: Cell[][] = spanH < gridH
+    ? [
+      [sectionHead('NAME & ADDRESS OF BUYER'), sectionHead('SHIPMENT INFORMATION')],
+      [{ stack: buyerStack, rowSpan: rightRows.length }, rightRows[0]],
+      ...rightRows.slice(1).map((cell) => [{} as Cell, cell]),
+    ]
+    : [
+      [sectionHead('NAME & ADDRESS OF BUYER'), sectionHead('SHIPMENT INFORMATION')],
+      [{ stack: buyerStack }, kvTable(shipmentInfo) as Cell],
+      [sectionHead('ADDITIONAL INFORMATION FOR CUSTOMS'),
+        hasBank ? sectionHead('BANK DETAILS') : { text: '', fillColor: s.theme }],
+      [kvTable(customsInfo) as Cell, hasBank ? { stack: bankStack } : { text: '' }],
+    ];
 
   const infoGrid: Content = {
-    table: {
-      widths: ['*', '*'],
-      body: [
-        [sectionHead('NAME & ADDRESS OF BUYER'), sectionHead('SHIPMENT INFORMATION')],
-        [{ stack: buyerStack }, kvTable(shipmentInfo)],
-        [sectionHead('ADDITIONAL INFORMATION FOR CUSTOMS'), sectionHead('BANK DETAILS')],
-        [kvTable(customsInfo), { stack: bankStack }],
-      ],
-    },
-    layout: boxedLayout,
-    margin: [0, 0, 0, 8] as any,
+    table: { widths: ['*', '*'], body },
+    // Tighter than the shared boxed layout: these four blocks sit above every
+    // line item, so padding here is paid before the reader sees any goods.
+    layout: { ...boxedLayout, paddingTop: () => 2, paddingBottom: () => 2 },
+    margin: [0, 0, 0, 6] as any,
   };
 
   /**
