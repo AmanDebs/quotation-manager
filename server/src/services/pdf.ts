@@ -286,8 +286,15 @@ function taxRows(doc: Row, currency: string): [string, string][] {
 }
 
 /** Right-aligned totals band: light rows + theme-filled emphasis bars (Sanya style). */
-function totalsBand(s: Row, doc: Row, currency: string, grandLabel: string): Content {
-  const bandRows: { label: string; value: string; band?: boolean }[] = [];
+export interface MoneyRow { label: string; value: string; band?: boolean }
+
+/**
+ * The money lines that close a document: subtotal, freight and insurance, tax,
+ * round off, grand total. Shared so they read identically whether they are
+ * drawn as a band beside the page or folded into the items table itself.
+ */
+function totalsRows(doc: Row, currency: string, grandLabel: string): MoneyRow[] {
+  const bandRows: MoneyRow[] = [];
   const hasExtras = Number(doc.freight) || Number(doc.insurance) || doc.tax_total > 0 || roundOffOf(doc) !== 0;
   bandRows.push({ label: 'TOTAL PRICE', value: fmtMoney(doc.subtotal, currency), band: hasExtras ? true : false });
   if (Number(doc.freight) && Number(doc.insurance)) {
@@ -300,6 +307,11 @@ function totalsBand(s: Row, doc: Row, currency: string, grandLabel: string): Con
   const ro = roundOffOf(doc);
   if (ro !== 0) bandRows.push({ label: 'Round off', value: (ro > 0 ? '' : '(') + Math.abs(ro).toFixed(2) + (ro > 0 ? '' : ')') });
   bandRows.push({ label: grandLabel, value: fmtMoney(doc.grand_total, currency), band: true });
+  return bandRows;
+}
+
+function totalsBand(s: Row, doc: Row, currency: string, grandLabel: string): Content {
+  const bandRows = totalsRows(doc, currency, grandLabel);
 
   return {
     columns: [
@@ -372,6 +384,14 @@ export interface ColumnSpec {
    * starts a new banner.
    */
   group?: string;
+  /**
+   * Adds this column up in the table's closing TOTAL row.
+   *
+   * Only genuinely additive figures qualify: boxes and pieces add, money adds.
+   * A rate does not, and neither does pcs-per-box — summing those produces a
+   * number that looks authoritative and means nothing.
+   */
+  sum?: (items: Row[]) => string;
 }
 
 export interface ColumnConfig {
@@ -384,7 +404,7 @@ export interface ColumnConfig {
  * explicitly hidden columns are dropped, columns with no data anywhere are
  * dropped automatically, and up to three named custom columns are appended.
  */
-function itemsTable(s: Row, items: Row[], specs: ColumnSpec[], cfg: ColumnConfig) {
+function itemsTable(s: Row, items: Row[], specs: ColumnSpec[], cfg: ColumnConfig, footer: MoneyRow[] = []) {
   const hidden = new Set(cfg.hidden ?? []);
   const customNames = (cfg.custom ?? []).slice(0, 3);
 
@@ -439,6 +459,39 @@ function itemsTable(s: Row, items: Row[], specs: ColumnSpec[], cfg: ColumnConfig
     headers.push(top, bottom);
   }
 
+  /** Spread a label across every column but the last, value in the last. */
+  const spanned = (label: Cell, value: Cell): Cell[] => {
+    const span = Math.max(1, columns.length - 1);
+    const cells: Cell[] = [{ ...label, colSpan: span }];
+    for (let k = 1; k < span; k += 1) cells.push({});
+    cells.push(value);
+    return cells;
+  };
+
+  // Closing TOTAL row: the columns that add up, added up. Skipped when no
+  // column claims to be additive, and when there is nothing to total.
+  const firstSum = columns.findIndex((c) => c.sum);
+  const totalRow: Cell[][] = firstSum > 0 && items.length
+    ? [[
+      { text: 'TOTAL', colSpan: firstSum, bold: true, fontSize: 8, alignment: 'right', fillColor: '#e9e5e2' },
+      ...Array.from({ length: firstSum - 1 }, () => ({} as Cell)),
+      ...columns.slice(firstSum).map((c) => ({
+        text: c.sum ? c.sum(items) : '',
+        bold: true, fontSize: 8, alignment: c.align ?? 'left', fillColor: '#e9e5e2',
+      } as Cell)),
+    ]]
+    : [];
+
+  // Freight, tax and the grand total, inside the table rather than in a band
+  // beside it — the page has no room to spare above the signature.
+  const money = (r: MoneyRow): Cell[] => {
+    const style = {
+      fontSize: r.band ? 8.5 : 8, bold: !!r.band,
+      color: r.band ? '#ffffff' : '#222222', fillColor: r.band ? s.theme : '#f4f2f0',
+    };
+    return spanned({ text: r.label, alignment: 'right', ...style }, { text: r.value, alignment: 'right', ...style });
+  };
+
   const body: Cell[][] = [
     ...headers,
     ...items.map((it, i) =>
@@ -449,6 +502,8 @@ function itemsTable(s: Row, items: Row[], specs: ColumnSpec[], cfg: ColumnConfig
         fillColor: i % 2 ? '#f7f5f4' : undefined,
       }))
     ),
+    ...totalRow,
+    ...footer.map(money),
   ];
 
   return {
@@ -835,7 +890,13 @@ export function buildProformaPdf(id: number): TDocumentDefinitions {
     },
     { key: 'color', label: 'COLOR', width: 38, align: 'center', value: (it) => String(it.color || '') },
     // How it packs, banded under one QUANTITY heading as the real document does.
-    { key: 'packs', label: 'CTN.', width: 30, align: 'right', group: 'QUANTITY', value: (it) => (it.packs != null ? fmtNum(it.packs, 0) : '') },
+    {
+      key: 'packs', label: 'CTN.', width: 30, align: 'right', group: 'QUANTITY',
+      value: (it) => (it.packs != null ? fmtNum(it.packs, 0) : ''),
+      sum: (rows) => fmtNum(rows.reduce((t, it) => t + (Number(it.packs) || 0), 0), 0),
+    },
+    // Pcs per carton is deliberately not summed: adding box sizes across
+    // different products gives a number with no meaning.
     { key: 'pcs_per_pack', label: 'PCS. / CTN.', width: 40, align: 'right', group: 'QUANTITY', value: (it) => (it.pcs_per_pack != null ? fmtNum(it.pcs_per_pack, 0) : '') },
     // One quantity column, not two. Total Qty is what the form now captures —
     // pieces against a per-1000 rate, kilos against a per-kg one — but a
@@ -845,22 +906,32 @@ export function buildProformaPdf(id: number): TDocumentDefinitions {
       key: 'total_pcs', label: 'TOTAL QTY', width: 52, align: 'right', always: true,
       value: (it) => (it.total_pcs != null ? fmtNum(it.total_pcs, 0)
         : it.qty != null ? `${fmtNum(it.qty)} ${it.unit}` : '—'),
+      // Falls back to qty for the same reason the cell does, so a proforma
+      // raised before Total Qty existed still totals to something.
+      sum: (rows) => fmtNum(rows.reduce((t, it) => t + (Number(it.total_pcs ?? it.qty) || 0), 0), 0),
     },
     { key: 'unit_price', label: rateLabel, width: 50, align: 'right', always: true, value: per1000Rate },
     ...(showTax ? [{ key: 'tax', label: 'Tax %', width: 28, align: 'right' as const, value: (it: Row) => `${it.tax_pct ?? 0}%` }] : []),
-    { key: 'amount', label: `TOTAL AMOUNT (${pi.inco_terms || cur})`, width: 58, align: 'right', always: true, value: (it) => fmtMoney(it.amount, cur) },
+    {
+      key: 'amount', label: `TOTAL AMOUNT (${pi.inco_terms || cur})`, width: 58, align: 'right', always: true,
+      value: (it) => fmtMoney(it.amount, cur),
+      sum: (rows) => fmtMoney(round2(rows.reduce((t, it) => t + (Number(it.amount) || 0), 0)), cur),
+    },
   ];
 
   const grandLabel = pi.inco_terms && pi.port_of_discharge
     ? `TOTAL PRICE ${cur} ${pi.inco_terms} ${pi.port_of_discharge.split(',')[0].toUpperCase()}`
     : 'GRAND TOTAL';
 
+  // Freight, tax and the grand total ride inside the items table. The table's
+  // own TOTAL row already states the subtotal, so drop the duplicate first line.
+  const money = totalsRows(pi, cur, grandLabel).slice(1);
+
   const content: Content[] = [
     ...companyHeader(s),
     docTitle(s, 'PROFORMA INVOICE'),
     infoGrid,
-    itemsTable(s, items, specs, cfg),
-    totalsBand(s, pi, cur, grandLabel),
+    itemsTable(s, items, specs, cfg, money),
     amountWords(pi, cur),
     ...(pi.remarks ? [{ text: 'REMARKS:', fontSize: 9, bold: true, color: s.theme, margin: [0, 8, 0, 2] as any }, { text: pi.remarks, fontSize: 8 }] : []),
     ...notesAndTerms(s, '', 'TERMS & CONDITIONS:'),
