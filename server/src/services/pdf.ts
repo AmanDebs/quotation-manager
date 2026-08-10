@@ -1122,7 +1122,9 @@ export function buildInvoicePdf(id: number): TDocumentDefinitions {
             { text: `We certify that the merchandise is of ${(inv.country_of_origin || s.country || 'Indian').replace(/ia$/i, 'ian')} Origin`, fontSize: 8, bold: true },
             ...(inv.inco_terms ? [{ text: `Incoterms® 2020: ${inv.inco_terms}${inv.port_of_discharge ? ` ${inv.port_of_discharge.split(',')[0].toUpperCase()}` : ''}`, fontSize: 8, margin: [0, 2, 0, 0] as any }] : []),
             ...(s.arn_ref ? [{ text: `Application Reference No. (ARN): ${s.arn_ref}`, fontSize: 8, margin: [0, 2, 0, 0] as any }] : []),
-            ...(inv.remarks ? [{ text: inv.remarks, fontSize: 7.5, italics: true, margin: [0, 3, 0, 0] as any }] : []),
+            // Remarks used to sit here as a loose italic line. They are part of
+            // the TERMS & CONDITIONS list below now, so this cell keeps only
+            // the certifications it exists for.
             ...(inv.prepared_by ? [{ text: `Prepared By: ${inv.prepared_by}`, fontSize: 7.5, color: '#666666', margin: [0, 3, 0, 0] as any }] : []),
           ],
         },
@@ -1149,6 +1151,11 @@ export function buildInvoicePdf(id: number): TDocumentDefinitions {
     totalsBand(s, inv, cur, grandLabel),
     ...paymentBand,
     amountWords(inv, cur),
+    // One block of prose, as on the proforma: the invoice's own remarks lead
+    // the list and the company's default terms follow. The AP/EX-101 sample
+    // has no such block — its footer is only the origin certificate, Incoterms
+    // and ARN — so this is a deliberate departure from it.
+    ...notesAndTerms(s, inv.remarks, 'TERMS & CONDITIONS:'),
     certFooter,
   ];
   return baseDoc(content);
