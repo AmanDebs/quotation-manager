@@ -468,20 +468,6 @@ function itemsTable(s: Row, items: Row[], specs: ColumnSpec[], cfg: ColumnConfig
     return cells;
   };
 
-  // Closing TOTAL row: the columns that add up, added up. Skipped when no
-  // column claims to be additive, and when there is nothing to total.
-  const firstSum = columns.findIndex((c) => c.sum);
-  const totalRow: Cell[][] = firstSum > 0 && items.length
-    ? [[
-      { text: 'TOTAL', colSpan: firstSum, bold: true, fontSize: 8, alignment: 'right', fillColor: '#e9e5e2' },
-      ...Array.from({ length: firstSum - 1 }, () => ({} as Cell)),
-      ...columns.slice(firstSum).map((c) => ({
-        text: c.sum ? c.sum(items) : '',
-        bold: true, fontSize: 8, alignment: c.align ?? 'left', fillColor: '#e9e5e2',
-      } as Cell)),
-    ]]
-    : [];
-
   // Freight, tax and the grand total, inside the table rather than in a band
   // beside it — the page has no room to spare above the signature.
   const money = (r: MoneyRow): Cell[] => {
@@ -491,6 +477,42 @@ function itemsTable(s: Row, items: Row[], specs: ColumnSpec[], cfg: ColumnConfig
     };
     return spanned({ text: r.label, alignment: 'right', ...style }, { text: r.value, alignment: 'right', ...style });
   };
+
+  /**
+   * One closing row, not two.
+   *
+   * The additive columns are totalled on the *last* money row rather than on a
+   * TOTAL row of their own, so the table ends once. The final column shows that
+   * row's own figure — the grand total, freight and all — rather than the sum
+   * of the amounts above it, which is why the freight line sits directly above
+   * carrying its own value.
+   */
+  const firstSum = columns.findIndex((c) => c.sum);
+  const canSum = firstSum > 0 && items.length > 0;
+  const closing = footer.length ? footer[footer.length - 1] : null;
+
+  const summedClosing = (r: MoneyRow): Cell[] => {
+    const style = {
+      bold: true, fontSize: r.band ? 8.5 : 8,
+      color: r.band ? '#ffffff' : '#222222', fillColor: r.band ? s.theme : '#f4f2f0',
+    };
+    return [
+      { text: r.label, colSpan: firstSum, alignment: 'right', ...style },
+      ...Array.from({ length: firstSum - 1 }, () => ({} as Cell)),
+      ...columns.slice(firstSum).map((c, i) => ({
+        text: firstSum + i === columns.length - 1 ? r.value : (c.sum ? c.sum(items) : ''),
+        alignment: c.align ?? 'left', ...style,
+      } as Cell)),
+    ];
+  };
+
+  const closingRows: Cell[][] = canSum
+    ? (closing
+      // Sums ride on the grand total; anything before it stays a plain span.
+      ? [...footer.slice(0, -1).map(money), summedClosing(closing)]
+      // No money rows on this document, so the sums get a row of their own.
+      : [summedClosing({ label: 'TOTAL', value: '' })])
+    : footer.map(money);
 
   const body: Cell[][] = [
     ...headers,
@@ -502,8 +524,7 @@ function itemsTable(s: Row, items: Row[], specs: ColumnSpec[], cfg: ColumnConfig
         fillColor: i % 2 ? '#f7f5f4' : undefined,
       }))
     ),
-    ...totalRow,
-    ...footer.map(money),
+    ...closingRows,
   ];
 
   return {
