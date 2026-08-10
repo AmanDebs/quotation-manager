@@ -803,19 +803,22 @@ export function buildProformaPdf(id: number): TDocumentDefinitions {
   };
 
   /**
-   * The price the way the AGLOPACK proforma states it: per single piece, so it
-   * reads straight across as Total Qty x rate = amount. Derived from the line's
-   * own money rather than the unit price, so a per-1000 rate converts (26.20 ->
-   * 0.0262) instead of being restated. A line billed on some other basis (kg)
-   * has no per-piece rate, so it falls back to its own unit price.
+   * The rate per 1000 pieces, the way the Emeraude proforma states it.
+   *
+   * Per single piece reads straight across as Total Qty x rate = amount, which
+   * is tidier in principle, but Aglo's prices are small enough that rounding
+   * eats it: ₹107.50 over 10,750 pieces prints as 0.01. The same rate per 1000
+   * is 10. Derived from the line's own money rather than the unit price, so a
+   * per-piece rate converts up instead of being restated. A line billed on some
+   * other basis (kg) has no piece rate at all, so it shows its own unit price.
    */
-  const pieceRate = (it: Row): string =>
+  const per1000Rate = (it: Row): string =>
     (it.total_pcs && isPieceBasis(it.unit)
-      ? fmtNum(it.amount / it.total_pcs, 4)
+      ? fmtNum(round2((it.amount / it.total_pcs) * 1000), 2)
       : `${fmtNum(it.unit_price, 3)} /${it.unit}`);
-  // Only call the column "/Pc" when something on the document actually is a
-  // piece rate — on a wholly weight-billed proforma that heading would lie.
-  const rateLabel = items.some((it) => it.total_pcs && isPieceBasis(it.unit)) ? `${cur}/Pc` : `Price ${cur}`;
+  // Only call the column "/1000 Pcs" when something on the document actually is
+  // a piece rate — on a wholly weight-billed proforma that heading would lie.
+  const rateLabel = items.some((it) => it.total_pcs && isPieceBasis(it.unit)) ? `${cur}/1000 Pcs` : `Price ${cur}`;
 
   const specs: ColumnSpec[] = [
     { key: 'sl', label: 'SL No.', width: 20, align: 'center', always: true, value: (_it, i) => String(i + 1) },
@@ -841,7 +844,7 @@ export function buildProformaPdf(id: number): TDocumentDefinitions {
       value: (it) => (it.total_pcs != null ? fmtNum(it.total_pcs, 0)
         : it.qty != null ? `${fmtNum(it.qty)} ${it.unit}` : '—'),
     },
-    { key: 'unit_price', label: rateLabel, width: 42, align: 'right', always: true, value: pieceRate },
+    { key: 'unit_price', label: rateLabel, width: 50, align: 'right', always: true, value: per1000Rate },
     ...(showTax ? [{ key: 'tax', label: 'Tax %', width: 28, align: 'right' as const, value: (it: Row) => `${it.tax_pct ?? 0}%` }] : []),
     { key: 'amount', label: `TOTAL AMOUNT (${pi.inco_terms || cur})`, width: 58, align: 'right', always: true, value: (it) => fmtMoney(it.amount, cur) },
   ];
