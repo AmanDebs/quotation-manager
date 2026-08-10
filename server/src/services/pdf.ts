@@ -365,6 +365,13 @@ export interface ColumnSpec {
   cell?: (it: Row, index: number) => Cell;
   /** Always keep this column, even when every value is empty. */
   always?: boolean;
+  /**
+   * Banner shared with the adjacent columns carrying the same name, drawn as a
+   * second header row above them — QUANTITY over CTN. / IMAGE / PCS. per CTN.,
+   * the way the real proformas group them. Only adjacent columns group; a gap
+   * starts a new banner.
+   */
+  group?: string;
 }
 
 export interface ColumnConfig {
@@ -404,8 +411,36 @@ function itemsTable(s: Row, items: Row[], specs: ColumnSpec[], cfg: ColumnConfig
     });
   });
 
+  const head = (c: ColumnSpec): Cell => ({ ...th(s, c.label), alignment: c.key === 'description' ? 'left' : 'center' });
+
+  // One header row unless some column asks to sit under a banner, in which case
+  // ungrouped columns span both rows and each banner spans its own run.
+  const headers: Cell[][] = [];
+  if (!columns.some((c) => c.group)) {
+    headers.push(columns.map(head));
+  } else {
+    const top: Cell[] = [];
+    const bottom: Cell[] = [];
+    for (let i = 0; i < columns.length;) {
+      const c = columns[i];
+      if (!c.group) {
+        top.push({ ...head(c), rowSpan: 2 });
+        bottom.push({});
+        i += 1;
+        continue;
+      }
+      let span = 1;
+      while (i + span < columns.length && columns[i + span].group === c.group) span += 1;
+      top.push({ ...th(s, c.group), colSpan: span });
+      for (let k = 1; k < span; k += 1) top.push({});
+      for (let k = 0; k < span; k += 1) bottom.push(head(columns[i + k]));
+      i += span;
+    }
+    headers.push(top, bottom);
+  }
+
   const body: Cell[][] = [
-    columns.map((c) => ({ ...th(s, c.label), alignment: c.key === 'description' ? 'left' : 'center' })),
+    ...headers,
     ...items.map((it, i) =>
       columns.map((c) => ({
         ...(c.cell ? c.cell(it, i) : { text: c.value(it, i) }),
@@ -417,7 +452,7 @@ function itemsTable(s: Row, items: Row[], specs: ColumnSpec[], cfg: ColumnConfig
   ];
 
   return {
-    table: { headerRows: 1, widths: columns.map((c) => c.width), body },
+    table: { headerRows: headers.length, widths: columns.map((c) => c.width), body },
     layout: gridLayout,
   } as Content;
 }
@@ -712,29 +747,48 @@ export function buildProformaPdf(id: number): TDocumentDefinitions {
     margin: [0, 0, 0, 8] as any,
   };
 
+  /**
+   * The price the way the AGLOPACK proforma states it: per single piece, so it
+   * reads straight across as Total Qty x rate = amount. Derived from the line's
+   * own money rather than the unit price, so a per-1000 rate converts (26.20 ->
+   * 0.0262) instead of being restated. A line billed on some other basis (kg)
+   * has no per-piece rate, so it falls back to its own unit price.
+   */
+  const pieceRate = (it: Row): string =>
+    (it.total_pcs && isPieceBasis(it.unit)
+      ? fmtNum(it.amount / it.total_pcs, 4)
+      : `${fmtNum(it.unit_price, 3)} /${it.unit}`);
+  // Only call the column "/Pc" when something on the document actually is a
+  // piece rate — on a wholly weight-billed proforma that heading would lie.
+  const rateLabel = items.some((it) => it.total_pcs && isPieceBasis(it.unit)) ? `${cur}/Pc` : `Price ${cur}`;
+
   const specs: ColumnSpec[] = [
-    { key: 'sl', label: 'SL', width: 16, align: 'center', always: true, value: (_it, i) => String(i + 1) },
+    { key: 'sl', label: 'SL No.', width: 20, align: 'center', always: true, value: (_it, i) => String(i + 1) },
     // No per-line HSN: Aglo's proformas carry the HS code once, in the customs
-    // block above (`hs_code`), the way the Emeraude sample does. The value is
-    // still stored and still reaches the commercial invoice, which prints it.
-    { key: 'description', label: 'Description of Goods', width: '*', always: true, value: (it) => String(it.description) },
-    { key: 'unit_price', label: `Price ${cur}`, width: 46, align: 'right', always: true, value: (it) => `${fmtNum(it.unit_price, 3)} /${it.unit === 'per 1000' ? '1000' : it.unit}` },
-    { key: 'color', label: 'Color', width: 48, align: 'center', value: (it) => String(it.color || '') },
-    { key: 'packs', label: 'Boxes', width: 40, align: 'right', value: (it) => (it.packs != null ? fmtNum(it.packs, 0) : '') },
+    // block above (`hs_code`). The value is still stored and still reaches the
+    // commercial invoice, which prints it.
+    { key: 'description', label: 'DESCRIPTION OF GOODS', width: '*', always: true, value: (it) => String(it.description) },
+    { key: 'color', label: 'COLOR', width: 38, align: 'center', value: (it) => String(it.color || '') },
+    // How it packs, banded under one QUANTITY heading as the real document does.
+    { key: 'packs', label: 'CTN.', width: 30, align: 'right', group: 'QUANTITY', value: (it) => (it.packs != null ? fmtNum(it.packs, 0) : '') },
+    {
+      key: 'image', label: 'IMAGE', width: 46, align: 'center', group: 'QUANTITY',
+      value: (it) => String(it.image || ''),
+      cell: (it) => (it.image ? { image: String(it.image), fit: [40, 40] as [number, number] } : { text: '' }),
+    },
+    { key: 'pcs_per_pack', label: 'PCS. / CTN.', width: 40, align: 'right', group: 'QUANTITY', value: (it) => (it.pcs_per_pack != null ? fmtNum(it.pcs_per_pack, 0) : '') },
     // One quantity column, not two. Total Qty is what the form now captures —
     // pieces against a per-1000 rate, kilos against a per-kg one — but a
     // proforma raised before the Qty field went away has only `qty`, so fall
     // back to it (with its unit) rather than printing a blank quantity.
     {
-      key: 'total_pcs', label: 'Total Qty', width: 58, align: 'right', always: true,
+      key: 'total_pcs', label: 'TOTAL QTY', width: 52, align: 'right', always: true,
       value: (it) => (it.total_pcs != null ? fmtNum(it.total_pcs, 0)
         : it.qty != null ? `${fmtNum(it.qty)} ${it.unit}` : '—'),
     },
-    // Only meaningful where Total Qty is a piece count. On a per-kg line it is
-    // kilos, and dividing money by kilos does not give a rate per 1000 pieces.
-    { key: 'per_1000', label: `${cur}/1000 Pcs`, width: 46, align: 'right', value: (it) => (it.total_pcs && isPieceBasis(it.unit) ? fmtNum(round2((it.amount / it.total_pcs) * 1000), 2) : '') },
+    { key: 'unit_price', label: rateLabel, width: 42, align: 'right', always: true, value: pieceRate },
     ...(showTax ? [{ key: 'tax', label: 'Tax %', width: 28, align: 'right' as const, value: (it: Row) => `${it.tax_pct ?? 0}%` }] : []),
-    { key: 'amount', label: `Amount (${cur})`, width: 60, align: 'right', always: true, value: (it) => fmtMoney(it.amount, cur) },
+    { key: 'amount', label: `TOTAL AMOUNT (${pi.inco_terms || cur})`, width: 58, align: 'right', always: true, value: (it) => fmtMoney(it.amount, cur) },
   ];
 
   const grandLabel = pi.inco_terms && pi.port_of_discharge

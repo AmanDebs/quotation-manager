@@ -80,6 +80,16 @@ function PhotoCell({ value, onChange }: { value: string; onChange: (v: string) =
 const PIECES_PER_BILLING_UNIT: Record<string, number> = { 'per 1000': 1000, unit: 1 };
 
 /**
+ * Whether a derived "per 1000 pcs" figure says anything the Unit Price does
+ * not: it must be piece-based, and priced on some *other* piece basis. Quote a
+ * line per 1000 and the derived rate is the unit price back again.
+ */
+const showsPer1000Rate = (unit: string | undefined) => {
+  const per = PIECES_PER_BILLING_UNIT[unit ?? ''];
+  return per !== undefined && per !== 1000;
+};
+
+/**
  * Boxes × pcs/box decides the quantity when the rate is priced per piece.
  * Otherwise the typed Qty stands, and failing that Total Qty is taken at face
  * value in whatever the rate basis is — quotations and proformas have no Qty
@@ -259,10 +269,8 @@ export default function LineItemsEditor({
             const isOpen = expanded.has(i);
             const summary = summarise(it);
             const amount = lineAmount(it);
-            // Only where Total Qty is a piece count — on a per-kg line it is
-            // kilos, and money ÷ kilos is not a rate per 1000 pieces.
             const per1000 = it.total_pcs != null && it.total_pcs > 0 && amount != null && it.unit_price > 0
-              && PIECES_PER_BILLING_UNIT[it.unit ?? ''] !== undefined
+              && showsPer1000Rate(it.unit)
               ? (amount / it.total_pcs) * 1000
               : null;
 

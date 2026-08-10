@@ -40,12 +40,17 @@ export const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 10
 const PIECES_PER_BILLING_UNIT: Record<string, number> = { 'per 1000': 1000, unit: 1 };
 
 /**
- * True when the rate is quoted against a piece count, so Total Qty is pieces.
- * On any other basis Total Qty is read in that basis instead (kilos, tonnes),
- * and a "per 1000 pcs" figure derived from it would be meaningless.
+ * Pieces in one billing unit, or null when the rate is not quoted against a
+ * piece count at all. Null means Total Qty is read in that other basis
+ * instead (kilos, tonnes), and a "per 1000 pcs" figure derived from it would
+ * be meaningless — money divided by kilos is not a rate per 1000 pieces.
  */
+export const piecesPerBillingUnit = (unit: string | undefined | null): number | null =>
+  PIECES_PER_BILLING_UNIT[unit ?? ''] ?? null;
+
+/** True when the rate is quoted against a piece count, so Total Qty is pieces. */
 export const isPieceBasis = (unit: string | undefined | null): boolean =>
-  PIECES_PER_BILLING_UNIT[unit ?? ''] !== undefined;
+  piecesPerBillingUnit(unit) != null;
 
 /**
  * The quantity a line is actually billed on.
