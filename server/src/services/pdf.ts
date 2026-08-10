@@ -826,14 +826,16 @@ export function buildProformaPdf(id: number): TDocumentDefinitions {
     // block above (`hs_code`). The value is still stored and still reaches the
     // commercial invoice, which prints it.
     { key: 'description', label: 'DESCRIPTION OF GOODS', width: '*', always: true, value: (it) => String(it.description) },
-    { key: 'color', label: 'COLOR', width: 38, align: 'center', value: (it) => String(it.color || '') },
-    // How it packs, banded under one QUANTITY heading as the real document does.
-    { key: 'packs', label: 'CTN.', width: 30, align: 'right', group: 'QUANTITY', value: (it) => (it.packs != null ? fmtNum(it.packs, 0) : '') },
+    // The photo says what the item *is*, so it belongs beside the description
+    // rather than under QUANTITY, which is about how many there are.
     {
-      key: 'image', label: 'IMAGE', width: 46, align: 'center', group: 'QUANTITY',
+      key: 'image', label: 'IMAGE', width: 46, align: 'center',
       value: (it) => String(it.image || ''),
       cell: (it) => (it.image ? { image: String(it.image), fit: [40, 40] as [number, number] } : { text: '' }),
     },
+    { key: 'color', label: 'COLOR', width: 38, align: 'center', value: (it) => String(it.color || '') },
+    // How it packs, banded under one QUANTITY heading as the real document does.
+    { key: 'packs', label: 'CTN.', width: 30, align: 'right', group: 'QUANTITY', value: (it) => (it.packs != null ? fmtNum(it.packs, 0) : '') },
     { key: 'pcs_per_pack', label: 'PCS. / CTN.', width: 40, align: 'right', group: 'QUANTITY', value: (it) => (it.pcs_per_pack != null ? fmtNum(it.pcs_per_pack, 0) : '') },
     // One quantity column, not two. Total Qty is what the form now captures —
     // pieces against a per-1000 rate, kilos against a per-kg one — but a
