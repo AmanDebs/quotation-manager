@@ -888,13 +888,22 @@ export function buildProformaPdf(id: number): TDocumentDefinitions {
    * per-piece rate converts up instead of being restated. A line billed on some
    * other basis (kg) has no piece rate at all, so it shows its own unit price.
    */
+  /**
+   * A rate per 1000 pieces can only be *read off* a line that has at least a
+   * thousand of them. Below that the division extrapolates: a one-off charge
+   * entered as a line — "Indicative Freight (1 x 40FT HQ)", quantity 1 —
+   * divides its whole value by one piece and prints 45,00,000 against a
+   * $4,500 line. Such a line shows its own price instead.
+   */
+  const quotableInThousands = (it: Row) => isPieceBasis(it.unit) && Number(it.total_pcs) >= 1000;
+
   const per1000Rate = (it: Row): string =>
-    (it.total_pcs && isPieceBasis(it.unit)
+    (quotableInThousands(it)
       ? fmtNum(round2((it.amount / it.total_pcs) * 1000), 2)
-      : `${fmtNum(it.unit_price, 3)} /${it.unit}`);
+      : `${fmtNum(it.unit_price, 3)}${it.unit ? ` /${it.unit}` : ''}`);
   // Only call the column "/1000 Pcs" when something on the document actually is
   // a piece rate — on a wholly weight-billed proforma that heading would lie.
-  const rateLabel = items.some((it) => it.total_pcs && isPieceBasis(it.unit)) ? `${cur}/1000 Pcs` : `Price ${cur}`;
+  const rateLabel = items.some(quotableInThousands) ? `${cur}/1000 Pcs` : `Price ${cur}`;
 
   const specs: ColumnSpec[] = [
     { key: 'sl', label: 'SL No.', width: 20, align: 'center', always: true, value: (_it, i) => String(i + 1) },
