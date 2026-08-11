@@ -195,14 +195,20 @@ function companyHeader(s: Row): Content[] {
     width: '*',
   };
   // The logo column eats into the right block, which gets the rest of the
-  // 515pt content width. At 150 the company lines still fit on one line each
-  // with ~40pt to spare — the longest, the contact row, measures ~316pt.
+  // 515pt content width. **Widening it wraps the contact row**, which costs a
+  // whole line and undoes the point of enlarging the logo — at 176 the demo
+  // company's "Sales cell | Email | website" line broke in two. 158 leaves
+  // 349pt, within a few points of what that row had before.
+  //
+  // The row is as tall as the logo or the text stack, whichever is taller, and
+  // the stack runs about 52pt, so height up to that is free. A wide logo is
+  // bound by the width above, not the height here.
   const cols: Content = s.logo
-    ? { columns: [{ image: s.logo, fit: [140, 72] as [number, number], width: 150 }, right], columnGap: 10 }
+    ? { columns: [{ image: s.logo, fit: [158, 80] as [number, number], width: 158 }, right], columnGap: 8 }
     : right;
   return [
     cols,
-    { canvas: [{ type: 'line', x1: 0, y1: 6, x2: 515, y2: 6, lineWidth: 2, lineColor: s.theme }], margin: [0, 0, 0, 4] as any },
+    { canvas: [{ type: 'line', x1: 0, y1: 4, x2: 515, y2: 4, lineWidth: 2, lineColor: s.theme }], margin: [0, 0, 0, 2] as any },
   ];
 }
 
@@ -216,7 +222,7 @@ function docTitle(s: Row, title: string): Content {
   return {
     text: title,
     fontSize: 14, bold: true, characterSpacing: 1.6, alignment: 'center', color: s.theme,
-    decoration: 'underline', margin: [0, 8, 0, 10] as any,
+    decoration: 'underline', margin: [0, 4, 0, 6] as any,
   };
 }
 
@@ -356,7 +362,9 @@ function customerAddress(c: Row, withContact = true): string {
 function baseDoc(content: Content[]): TDocumentDefinitions {
   return {
     pageSize: 'A4',
-    pageMargins: [40, 34, 40, 42],
+    // Top margin trimmed to pay for a larger logo: 26pt is ~9mm, well inside
+    // the unprintable edge of any office printer.
+    pageMargins: [40, 26, 40, 42],
     content,
     footer: (currentPage, pageCount) => ({
       text: `Page ${currentPage} of ${pageCount}`, alignment: 'center', fontSize: 7, color: '#999999',
