@@ -340,9 +340,17 @@ function amountWords(doc: Row, currency: string): Content {
 }
 
 function customerAddress(c: Row, withContact = true): string {
-  return [c.name, c.contact_person && `Attn: ${c.contact_person}`, c.address, [c.city, c.country].filter(Boolean).join(', '),
-    c.gstin && `GSTIN: ${c.gstin}`, withContact && c.phone && `Phone: ${c.phone}`, withContact && c.email && `Email: ${c.email}`]
-    .filter(Boolean).join('\n');
+  // Phone and email share a line. Each costs a full line of the buyer block
+  // otherwise, and that block sits above every line item on the page.
+  const contact = [c.phone && `Phone: ${c.phone}`, c.email && `Email: ${c.email}`]
+    .filter(Boolean).join('   |   ');
+  const lines = [
+    c.name, c.contact_person && `Attn: ${c.contact_person}`, c.address,
+    [c.city, c.country].filter(Boolean).join(', '),
+    c.gstin && `GSTIN: ${c.gstin}`, withContact && contact,
+  ].filter(Boolean).map(String);
+  // A customer whose address line is just the country prints it twice.
+  return lines.filter((l, i) => l.toLowerCase() !== lines[i - 1]?.toLowerCase()).join('\n');
 }
 
 function baseDoc(content: Content[]): TDocumentDefinitions {
@@ -796,8 +804,11 @@ export function buildProformaPdf(id: number): TDocumentDefinitions {
       ]),
     },
     layout: {
+      // The shipment and customs tables are the tall cells of the header grid
+      // — sixteen rows between them on an export proforma — so their row
+      // padding, not the buyer block, is what decides where the goods start.
       ...gridLayout, hLineColor: '#dddddd', vLineColor: '#dddddd',
-      paddingTop: () => 1.5, paddingBottom: () => 1.5,
+      paddingTop: () => 0.9, paddingBottom: () => 0.9,
     },
   });
 
@@ -817,9 +828,14 @@ export function buildProformaPdf(id: number): TDocumentDefinitions {
   // An empty block still costs a banner and a row, and "BANK DETAILS: —" tells
   // the reader nothing. Drop it and let customs run the full width instead.
   const hasBank = !!pi.bank_account;
+  // Bank details are typed free-hand, so they arrive with blank lines and a
+  // repeated company name. Both cost height in a block that has none to spare.
+  const bankLines = `${s.company_name}\n${pi.bank_account}`
+    .split('\n').map((l) => l.trim()).filter(Boolean)
+    .filter((l, i, a) => l.toLowerCase() !== a[i - 1]?.toLowerCase());
   const bankStack: Content[] = [
     { text: 'Beneficiary Bank details:', fontSize: 7, bold: true },
-    { text: `${s.company_name}\n${pi.bank_account}`, fontSize: 7, margin: [0, 1.5, 0, 0] as any },
+    { text: bankLines.join('\n'), fontSize: 7, lineHeight: 1.05, margin: [0, 1.5, 0, 0] as any },
   ];
   /**
    * Four blocks laid out whichever way is shorter.
@@ -838,12 +854,16 @@ export function buildProformaPdf(id: number): TDocumentDefinitions {
   const ROW = 10.5;   // one kvTable row at 7pt plus its padding
   const BANNER = 13;  // a filled section head
 
-  const countLines = (t: string) => t.split('\n').length;
+  // Count the lines each block will actually occupy. A consignee or notify
+  // party is routinely two or three lines of address, and bank details run to
+  // six; assuming one and three respectively made the estimate pick the taller
+  // arrangement on exactly the documents that most needed the shorter one.
+  const countLines = (t: string) => String(t ?? '').split('\n').filter(Boolean).length;
   const buyerH = (countLines(customerAddress(c))
-    + (pi.consignee ? 1 : 0) + (pi.notify_party ? 1 : 0) + (pi.notify_party_2 ? 1 : 0)) * LINE;
+    + countLines(pi.consignee) + countLines(pi.notify_party) + countLines(pi.notify_party_2)) * LINE;
   const shipH = shipmentInfo.length * ROW;
   const customsH = customsInfo.length * ROW;
-  const bankH = hasBank ? 3 * LINE : 0;
+  const bankH = hasBank ? (1 + bankLines.length) * LINE : 0;
 
   const gridH = BANNER + Math.max(buyerH, shipH) + BANNER + Math.max(customsH, bankH);
   const stackedRight = shipH + BANNER + customsH + (hasBank ? BANNER + bankH : 0);
@@ -874,7 +894,7 @@ export function buildProformaPdf(id: number): TDocumentDefinitions {
     table: { widths: ['*', '*'], body },
     // Tighter than the shared boxed layout: these four blocks sit above every
     // line item, so padding here is paid before the reader sees any goods.
-    layout: { ...boxedLayout, paddingTop: () => 2, paddingBottom: () => 2 },
+    layout: { ...boxedLayout, paddingTop: () => 1.2, paddingBottom: () => 1.2 },
     margin: [0, 0, 0, 6] as any,
   };
 
