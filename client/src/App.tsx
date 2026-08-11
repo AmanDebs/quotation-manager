@@ -10,10 +10,10 @@ import ProductsPage from './pages/Products';
 import ContainerPlannerPage from './pages/ContainerPlanner';
 import QuotationsPage from './pages/Quotations';
 import QuotationFormPage from './pages/QuotationForm';
-import OrdersPage from './pages/Orders';
-import OrderFormPage from './pages/OrderForm';
 import ProformasPage from './pages/Proformas';
 import ProformaFormPage from './pages/ProformaForm';
+import OrdersPage from './pages/Orders';
+import OrderFormPage from './pages/OrderForm';
 import InvoicesPage from './pages/Invoices';
 import InvoiceFormPage from './pages/InvoiceForm';
 import PackingListsPage from './pages/PackingLists';
@@ -61,12 +61,12 @@ export default function App() {
           <Route path="/quotations" element={<QuotationsPage />} />
           <Route path="/quotations/new" element={<QuotationFormPage />} />
           <Route path="/quotations/:id" element={<QuotationFormPage />} />
-          <Route path="/orders" element={<OrdersPage />} />
-          <Route path="/orders/new" element={<OrderFormPage />} />
-          <Route path="/orders/:id" element={<OrderFormPage />} />
           <Route path="/proformas" element={<ProformasPage />} />
           <Route path="/proformas/new" element={<ProformaFormPage />} />
           <Route path="/proformas/:id" element={<ProformaFormPage />} />
+          <Route path="/orders" element={<OrdersPage />} />
+          <Route path="/orders/new" element={<OrderFormPage />} />
+          <Route path="/orders/:id" element={<OrderFormPage />} />
           <Route path="/invoices" element={<InvoicesPage />} />
           <Route path="/invoices/new" element={<InvoiceFormPage />} />
           <Route path="/invoices/:id" element={<InvoiceFormPage />} />
