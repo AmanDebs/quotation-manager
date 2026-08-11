@@ -209,6 +209,42 @@ ordersRouter.get('/prefill/from-quotation/:quotationId', (req: AuthedRequest, re
   });
 });
 
+/**
+ * Prefill payload for booking an order from a proforma the buyer has confirmed.
+ *
+ * The advance is deliberately not carried across. A payment recorded against
+ * the proforma stays there — `services/receivables.ts` allocates it to the
+ * invoices raised from that proforma, and copying the figure onto the order as
+ * well would show the same money twice on the dashboard.
+ */
+ordersRouter.get('/prefill/from-proforma/:piId', (req: AuthedRequest, res) => {
+  const piId = Number(req.params.piId);
+  const pi = db.prepare('SELECT * FROM proforma_invoices WHERE id = ?').get(piId) as Record<string, unknown> | undefined;
+  if (!pi || !canAccessCustomer(req, Number(pi.customer_id))) return res.status(404).json({ error: 'Proforma invoice not found' });
+  const items = db.prepare('SELECT * FROM pi_items WHERE pi_id = ? ORDER BY sort_order, id').all(piId);
+  res.json({
+    // Echoed back on save so the proforma can be pointed at the new order.
+    pi_id: piId,
+    quotation_id: pi.quotation_id,
+    customer_id: pi.customer_id,
+    company_id: pi.company_id,
+    currency: pi.currency,
+    tax_type: pi.tax_type,
+    is_export: pi.is_export,
+    payment_terms: pi.payment_terms,
+    inco_terms: pi.inco_terms,
+    container_count: pi.container_count,
+    freight: pi.freight,
+    insurance: pi.insurance,
+    destination: pi.final_destination,
+    po_number: pi.po_number,
+    po_date: pi.po_date,
+    spoc: pi.prepared_by,
+    column_config: JSON.parse(String(pi.column_config || '{}')),
+    items,
+  });
+});
+
 ordersRouter.post('/', (req: AuthedRequest, res) => {
   const body = req.body ?? {};
   if (!body.customer_id) return res.status(400).json({ error: 'Customer is required' });
@@ -231,6 +267,25 @@ ordersRouter.post('/', (req: AuthedRequest, res) => {
     );
     const id = Number(info.lastInsertRowid);
     saveItems(id, (body.items ?? []) as OrderItemInput[], h.tax_type, h.freight, h.insurance, h.currency);
+
+    /**
+     * Booked from a proforma: point that proforma at this order.
+     *
+     * The link lives on `proforma_invoices.order_id`, not on the order — which
+     * is what `dispatchProgress()` already walks to find invoices raised
+     * through a proforma, so tracking works with no schema change.
+     *
+     * Only claimed when the proforma is unattached. A proforma that already
+     * names an order keeps it: re-pointing it would silently orphan the first
+     * order's dispatch figures.
+     */
+    if (body.pi_id) {
+      const pi = db.prepare('SELECT customer_id, order_id FROM proforma_invoices WHERE id = ?')
+        .get(Number(body.pi_id)) as { customer_id: number; order_id: number | null } | undefined;
+      if (pi && pi.order_id == null && canAccessCustomer(req, pi.customer_id)) {
+        db.prepare('UPDATE proforma_invoices SET order_id = ? WHERE id = ?').run(id, Number(body.pi_id));
+      }
+    }
     return id;
   });
   res.status(201).json(getFull(id));

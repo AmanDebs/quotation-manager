@@ -18,6 +18,11 @@ interface Draft {
   /** Which group entity is selling. Fixed once the document is numbered. */
   company_id?: number;
   quotation_id: number | null;
+  /**
+   * Set only when booking from a proforma. Not a column on the order — the
+   * server uses it to point that proforma's `order_id` at the new order.
+   */
+  pi_id?: number;
   date: string;
   is_export: number;
   order_through: string;
@@ -65,6 +70,9 @@ export default function OrderFormPage() {
   const queryClient = useQueryClient();
   const isNew = !id;
   const fromQuotation = search.get('from_quotation');
+  // Booked from a proforma the buyer has confirmed. The prefill returns pi_id,
+  // which travels in the payload so the server can link the two.
+  const fromProforma = search.get('from_proforma');
 
   const { data: customers = [] } = useQuery({ queryKey: ['customers', ''], queryFn: () => api.get<Customer[]>('/api/customers') });
   const { data: existing, error: loadError } = useQuery({
@@ -95,13 +103,16 @@ export default function OrderFormPage() {
   }, [existing]);
 
   useEffect(() => {
-    if (isNew && fromQuotation && !prefilled) {
-      api.get<Partial<Draft>>(`/api/orders/prefill/from-quotation/${fromQuotation}`).then((p) => {
+    const source = fromQuotation
+      ? `from-quotation/${fromQuotation}`
+      : fromProforma ? `from-proforma/${fromProforma}` : null;
+    if (isNew && source && !prefilled) {
+      api.get<Partial<Draft>>(`/api/orders/prefill/${source}`).then((p) => {
         setDraft((d) => ({ ...d, ...p, customer_id: (p.customer_id as number) ?? d.customer_id }));
         setPrefilled(true);
       });
     }
-  }, [isNew, fromQuotation, prefilled]);
+  }, [isNew, fromQuotation, fromProforma, prefilled]);
 
   const save = useMutation({
     mutationFn: (d: Draft) => (isNew ? api.post<Order>('/api/orders', d) : api.put<Order>(`/api/orders/${id}`, d)),

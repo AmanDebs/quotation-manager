@@ -181,6 +181,8 @@ export interface Payment {
 
 export interface Proforma {
   id: number; number: string; date: string; quotation_id: number | null; customer_id: number; company_id?: number;
+  /** The order this proforma belongs to — set either way round, whichever was raised first. */
+  order_id?: number | null; order_number?: string | null;
   consignee: string; notify_party: string; currency: string; freight: number; insurance: number;
   lead_time: string; bank_account: string; inco_terms: string; payment_terms: string;
   delivery_terms: string; validity_date: string; is_export: number;

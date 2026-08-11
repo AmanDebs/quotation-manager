@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Proforma, Customer, LineItem, TaxType, Settings, ColumnConfig } from '../types';
@@ -192,6 +192,17 @@ export default function ProformaFormPage() {
               <>
                 <a href={`/api/pdf/proforma/${id}`} target="_blank" rel="noreferrer"><Button variant="secondary">📄 PDF</Button></a>
                 <FollowupButton docType="proforma" docId={Number(id)} customerId={existing!.customer_id} />
+                {/* Book the order the buyer has confirmed against this
+                    proforma. Hidden once one exists — the proforma carries the
+                    link, and re-pointing it would orphan the first order's
+                    dispatch figures. */}
+                {existing!.order_id ? (
+                  <Link to={`/orders/${existing!.order_id}`} className="self-center text-xs text-brand-600 hover:underline">
+                    Order {existing!.order_number ?? existing!.order_id}
+                  </Link>
+                ) : ['sent', 'order_confirmed', 'advance_received', 'in_production'].includes(existing!.status) && (
+                  <Button variant="secondary" onClick={() => navigate(`/orders/new?from_proforma=${id}`)}>→ Book Order</Button>
+                )}
                 {['order_confirmed', 'advance_received', 'in_production'].includes(existing!.status) && (
                   <Button onClick={() => navigate(`/invoices/new?from_proforma=${id}`)}>→ Create Commercial Invoice</Button>
                 )}
