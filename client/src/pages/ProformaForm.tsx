@@ -235,8 +235,16 @@ export default function ProformaFormPage() {
         <Card title="Details">
           <div className="grid grid-cols-3 gap-3">
             {!isNew && (
-              <Field label="PI Number (editable)">
-                <Input value={draft.number ?? ''} onChange={(e) => set({ number: e.target.value })} />
+              <Field label="PI Number">
+                {/* Read-only: the number was claimed from this company's series
+                    when the proforma was created. Editing it leaves a gap in
+                    that series and can collide with another document. */}
+                <div
+                  className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-sm text-slate-600"
+                  title="Assigned from this company's numbering series when the proforma was created"
+                >
+                  {draft.number || '—'}
+                </div>
               </Field>
             )}
             <Field label="Buyer (Customer) *">
@@ -270,9 +278,18 @@ export default function ProformaFormPage() {
             <Field label="Payment Terms"><Input value={draft.payment_terms} onChange={(e) => set({ payment_terms: e.target.value })} /></Field>
             <Field label="Delivery Terms"><Input value={draft.delivery_terms} onChange={(e) => set({ delivery_terms: e.target.value })} /></Field>
             <Field label="INCO Terms">
-              <Select value={draft.inco_terms} onChange={(e) => set({ inco_terms: e.target.value })}>
-                {INCO_TERMS.map((t) => <option key={t} value={t}>{t || '— select —'}</option>)}
-              </Select>
+              {/* A list, not a fixed set: the eleven Incoterms are suggestions,
+                  and real proformas qualify them ("CIF Mozambique", "FOB Nhava
+                  Sheva") or use a term this list does not carry. */}
+              <Input
+                list="inco-terms"
+                value={draft.inco_terms}
+                onChange={(e) => set({ inco_terms: e.target.value })}
+                placeholder="e.g. FOB, or type your own"
+              />
+              <datalist id="inco-terms">
+                {INCO_TERMS.filter(Boolean).map((t) => <option key={t} value={t} />)}
+              </datalist>
             </Field>
             <Field label="Method of Despatch">
               <Select value={draft.method_of_despatch} onChange={(e) => set({ method_of_despatch: e.target.value })}>
