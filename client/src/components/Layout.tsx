@@ -7,8 +7,11 @@ import type { User } from '../types';
 const nav = [
   { to: '/', label: 'Dashboard', icon: '📊' },
   { to: '/quotations', label: 'Quotations', icon: '📄' },
-  { to: '/orders', label: 'Orders', icon: '📋' },
+  // Quotation -> Proforma -> Order -> Invoice: the order the desk works in.
+  // The proforma is what the buyer confirms against, so it comes before the
+  // order it produces, even though a proforma can also be raised from one.
   { to: '/proformas', label: 'Proforma Invoices', icon: '🧾' },
+  { to: '/orders', label: 'Orders', icon: '📋' },
   // No Packing Lists entry: the commercial invoice owns its packing list, so it
   // is created and edited on the invoice. The pages remain routed for any
   // bookmarked link, but they are no longer a place you navigate to.
