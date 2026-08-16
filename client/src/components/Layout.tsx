@@ -20,6 +20,7 @@ const nav = [
   { to: '/customers', label: 'Customers', icon: '🏢' },
   { to: '/products', label: 'Products', icon: '🏷️' },
   { to: '/work-orders', label: 'Work Orders', icon: '🔧' },
+  { to: '/despatches', label: 'Despatches', icon: '🚚' },
   { to: '/stock', label: 'Stock', icon: '📦' },
   // Supplier rates are not everyone's business, and committing a spend is not
   // a shop-floor action — so purchasing is manager-only, front and back.

@@ -745,6 +745,58 @@ CREATE TABLE IF NOT EXISTS material_moves (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+/* ==================================================================
+   Despatch
+   ------------------------------------------------------------------
+   The physical record of goods leaving a plant — the Despatch sheet
+   the order desk keeps, roughly 465 lines a month. Separate from the
+   invoice on purpose: a lorry can leave before the invoice is raised,
+   and the sheet shows that it regularly does.
+
+   The invoice remains the money truth. These rows say what went out
+   the gate, and the Dispatch tab shows both so a mismatch is visible
+   rather than quietly reconciled.
+   ================================================================== */
+
+CREATE TABLE IF NOT EXISTS despatches (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  order_id INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+  -- Which plant it left from. The sheet's "From" column: Jungalpur, PACK SKRL.
+  location_id INTEGER REFERENCES locations(id),
+  date TEXT NOT NULL,
+  destination TEXT NOT NULL DEFAULT '',
+  transporter_id INTEGER REFERENCES transporters(id),
+  -- Consignment note / LR number, and the vehicle. Filled on 33 of 465 real
+  -- lines, so both are optional by design rather than by omission.
+  cn_no TEXT NOT NULL DEFAULT '',
+  vehicle_no TEXT NOT NULL DEFAULT '',
+  -- Free text: the real sheet says things like "5-6 Days".
+  tentative_delivery TEXT NOT NULL DEFAULT '',
+  freight_terms TEXT NOT NULL DEFAULT '',
+  -- Nullable: the goods can go before the paperwork catches up.
+  invoice_id INTEGER REFERENCES commercial_invoices(id),
+  notes TEXT NOT NULL DEFAULT '',
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_despatches_order ON despatches(order_id);
+
+CREATE TABLE IF NOT EXISTS despatch_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  despatch_id INTEGER NOT NULL REFERENCES despatches(id) ON DELETE CASCADE,
+  -- Position of the order line, the index-matching rule used throughout.
+  order_line INTEGER NOT NULL DEFAULT 0,
+  description TEXT NOT NULL DEFAULT '',
+  -- Pieces, and the boxes they went in — the sheet records both.
+  qty REAL,
+  packs REAL,
+  notes TEXT NOT NULL DEFAULT '',
+  sort_order INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_despatch_items_despatch ON despatch_items(despatch_id);
+
 CREATE INDEX IF NOT EXISTS idx_material_moves_material ON material_moves(material_id, location_id);
 CREATE INDEX IF NOT EXISTS idx_material_moves_po ON material_moves(po_id);
 CREATE INDEX IF NOT EXISTS idx_material_moves_wo ON material_moves(work_order_id);

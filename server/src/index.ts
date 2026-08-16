@@ -22,6 +22,7 @@ import { ordersRouter } from './routes/orders.js';
 import { workOrdersRouter } from './routes/workOrders.js';
 import { purchaseOrdersRouter } from './routes/purchaseOrders.js';
 import { stockRouter } from './routes/stock.js';
+import { despatchesRouter } from './routes/despatches.js';
 import { proformasRouter } from './routes/proformas.js';
 import { invoicesRouter } from './routes/invoices.js';
 import { packingListsRouter } from './routes/packingLists.js';
@@ -74,6 +75,7 @@ app.use('/api/purchase-orders', requireAuth, requireManager, purchaseOrdersRoute
 // The stock ledger guards its own writes — reads are open because anyone
 // planning a job needs to know whether there is material for it.
 app.use('/api/stock', requireAuth, stockRouter);
+app.use('/api/despatches', requireAuth, despatchesRouter);
 app.use('/api/proformas', requireAuth, proformasRouter);
 app.use('/api/invoices', requireAuth, invoicesRouter);
 app.use('/api/packing-lists', requireAuth, packingListsRouter);

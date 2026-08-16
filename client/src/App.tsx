@@ -20,6 +20,7 @@ import PackingListsPage from './pages/PackingLists';
 import PackingListFormPage from './pages/PackingListForm';
 import FollowupsPage from './pages/Followups';
 import WorkOrdersPage from './pages/WorkOrders';
+import DespatchesPage from './pages/Despatches';
 import StockPage from './pages/Stock';
 import PurchaseOrdersPage from './pages/PurchaseOrders';
 import MastersPage from './pages/Masters';
@@ -79,6 +80,7 @@ export default function App() {
           <Route path="/packing-lists/:id" element={<PackingListFormPage />} />
           <Route path="/followups" element={<FollowupsPage />} />
           <Route path="/work-orders" element={<WorkOrdersPage />} />
+          <Route path="/despatches" element={<DespatchesPage />} />
           <Route path="/stock" element={<StockPage />} />
           <Route path="/purchase-orders" element={managerOnly(<PurchaseOrdersPage />)} />
           <Route path="/masters" element={managerOnly(<MastersPage />)} />

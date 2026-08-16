@@ -237,6 +237,45 @@ export interface PurchaseOrder {
   receipts?: MaterialMove[];
 }
 
+/* ---------------- Despatch ---------------- */
+
+export interface DespatchItem {
+  id?: number;
+  /** Position of the order line, matching the rest of the chain. */
+  order_line: number;
+  description: string;
+  qty: number | null;
+  packs: number | null;
+  notes?: string;
+}
+
+export interface Despatch {
+  id: number;
+  order_id: number;
+  location_id: number | null;
+  date: string;
+  destination: string;
+  transporter_id: number | null;
+  cn_no: string;
+  vehicle_no: string;
+  tentative_delivery: string;
+  freight_terms: string;
+  /** Nullable: goods can leave before the invoice is raised. */
+  invoice_id: number | null;
+  notes: string;
+  order_number?: string; customer_id?: number; customer_name?: string;
+  location_name?: string | null; transporter_name?: string | null;
+  invoice_number?: string | null; created_by_name?: string | null;
+  items?: DespatchItem[];
+}
+
+/** Physically sent per order line — the counterpart to the invoiced figure. */
+export interface LineDespatch {
+  qty: number;
+  packs: number;
+  trips: number;
+}
+
 export interface ImportField { key: string; label: string; required: boolean }
 
 export interface ImportPreviewRow {
@@ -320,6 +359,8 @@ export interface OrderItem extends LineItem {
   qty_pending?: number;
   /** Derived from the work orders raised against this line. */
   production?: LineProduction;
+  /** Derived from the despatch records — what physically left the plant. */
+  despatched?: LineDespatch;
 }
 
 export interface Order {

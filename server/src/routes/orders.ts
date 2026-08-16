@@ -3,6 +3,7 @@ import { db, transaction } from '../db/connection.js';
 import { nextNumber } from '../services/numbering.js';
 import { computeTotals, round2, type LineItemInput } from '../services/totals.js';
 import { productionByOrder } from '../services/production.js';
+import { despatchedByOrder } from './despatches.js';
 import type { AuthedRequest } from '../middleware/auth.js';
 import { scopeClause, canAccessCustomer } from '../middleware/scope.js';
 import { resolveCompanyId } from '../services/companies.js';
@@ -85,10 +86,15 @@ function getFull(id: number) {
   // rest of the chain. A line with no work order reports `work_orders: 0`, so
   // the screen can say "not started" rather than "nothing made".
   const production = productionByOrder(id);
+  // Physically sent, which is not the same question as invoiced — a lorry can
+  // leave before the paperwork. Both are shown; neither is reconciled to the
+  // other behind the user's back.
+  const sent = despatchedByOrder(id);
   order.items = items.map((it, i) => ({
     ...it,
     ...progress.perLine[i],
     production: production.get(i) ?? { planned: 0, produced: 0, rejected: 0, balance: 0, work_orders: 0 },
+    despatched: sent.get(i) ?? { qty: 0, packs: 0, trips: 0 },
   }));
   order.column_config = JSON.parse(String(order.column_config || '{}'));
   order.dispatched_value = progress.dispatched_value;
@@ -345,6 +351,12 @@ ordersRouter.delete('/:id', (req: AuthedRequest, res) => {
   const jobs = db.prepare('SELECT COUNT(*) AS c FROM work_orders WHERE order_id = ?').get(id) as { c: number };
   if (jobs.c > 0) {
     return res.status(409).json({ error: `This order has ${jobs.c} work order${jobs.c === 1 ? '' : 's'} against it and cannot be deleted` });
+  }
+  // Same reasoning: despatches cascade on order_id, and they are the record of
+  // goods that physically left the plant.
+  const trips = db.prepare('SELECT COUNT(*) AS c FROM despatches WHERE order_id = ?').get(id) as { c: number };
+  if (trips.c > 0) {
+    return res.status(409).json({ error: `This order has ${trips.c} despatch${trips.c === 1 ? '' : 'es'} recorded against it and cannot be deleted` });
   }
   transaction(() => {
     db.prepare('DELETE FROM order_items WHERE order_id = ?').run(id);

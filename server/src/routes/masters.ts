@@ -179,6 +179,9 @@ export const MASTERS: MasterConfig[] = [
       { name: 'notes', kind: 'text' },
       activeFlag,
     ],
+    guards: [
+      { sql: 'SELECT COUNT(*) AS c FROM despatches WHERE transporter_id = ?', message: 'This transporter has carried despatches — retire it instead of deleting' },
+    ],
   },
   {
     path: 'materials',
