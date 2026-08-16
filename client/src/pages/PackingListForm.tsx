@@ -5,7 +5,7 @@ import { api } from '../api/client';
 import type { PackingList, PackingListItem, Customer } from '../types';
 import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card } from '../components/ui';
 import { fmtQty, today } from '../lib/format';
-import { UNITS } from './Products';
+import { unitOptions } from './Products';
 
 interface Draft {
   number?: string;
@@ -166,7 +166,7 @@ export default function PackingListFormPage() {
                   </td>
                   <td className="py-1.5 pr-2">
                     <Select value={it.unit} disabled={!!linkedInvoiceId} onChange={(e) => setItem(i, { unit: e.target.value })}>
-                      {UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
+                      {unitOptions(it.unit).map((u) => <option key={u} value={u}>{u}</option>)}
                     </Select>
                   </td>
                   <td className="py-1.5 pr-2"><Input value={it.packages} onChange={(e) => setItem(i, { packages: e.target.value })} placeholder="e.g. 10 cartons" /></td>

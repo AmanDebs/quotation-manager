@@ -61,7 +61,7 @@ export const isPieceBasis = (unit: string | undefined | null): boolean =>
  * contradiction was reachable — the two fields were independent, so a line
  * could print 60,000 pieces against a total priced on some other number.
  *
- * For any other basis (kg, tonne, metre, litre, set, box) the piece count says
+ * For any other basis (kg, tonne, box) the piece count says
  * nothing about the billed quantity, so the typed qty stands.
  *
  * Failing both, Total Qty is taken at face value in whatever the rate basis is.

@@ -6,7 +6,16 @@ import type { Product } from '../types';
 import { Button, Input, Textarea, Select, Field, PageHeader, EmptyState, ErrorText, Modal, Card } from '../components/ui';
 import ProductImportModal from '../components/ProductImportModal';
 
-export const UNITS = ['unit', 'kg', 'tonne', 'per 1000', 'meter', 'litre', 'set', 'box'];
+export const UNITS = ['unit', 'kg', 'tonne', 'per 1000', 'box'];
+
+/**
+ * The list to offer, with whatever the row already says kept on it. Units the
+ * catalogue no longer offers (meter, litre, set) still sit on documents raised
+ * before they were dropped; without this the select would show blank and the
+ * next save would silently rewrite the line's basis.
+ */
+export const unitOptions = (current: string | undefined | null): string[] =>
+  current && !UNITS.includes(current) ? [...UNITS, current] : UNITS;
 
 const empty: Omit<Product, 'id'> = {
   name: '', description: '', hsn_code: '', unit: 'unit', unit_price: 0, country_of_origin: 'India',
@@ -157,7 +166,7 @@ export default function ProductsPage() {
             <Field label="HSN Code"><Input value={editing.hsn_code} onChange={(e) => set({ hsn_code: e.target.value })} /></Field>
             <Field label="Unit of Measure">
               <Select value={editing.unit} onChange={(e) => set({ unit: e.target.value })}>
-                {UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
+                {unitOptions(editing.unit).map((u) => <option key={u} value={u}>{u}</option>)}
               </Select>
             </Field>
             <Field label="Default Unit Price">

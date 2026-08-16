@@ -5,7 +5,7 @@ import type { LineItem, Product, TaxType, ColumnConfig } from '../types';
 import { Button, Input, Select } from './ui';
 import { fmtMoney } from '../lib/format';
 import { shrinkImage } from '../lib/image';
-import { UNITS } from '../pages/Products';
+import { unitOptions } from '../pages/Products';
 
 /**
  * The photo for one line. Clicking the thumbnail replaces it, ✕ clears it.
@@ -377,7 +377,7 @@ export default function LineItemsEditor({
                   )}
                   <td className="py-2 pr-2">
                     <Select value={it.unit} onChange={(e) => set(i, { unit: e.target.value })}>
-                      {UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
+                      {unitOptions(it.unit).map((u) => <option key={u} value={u}>{u}</option>)}
                     </Select>
                   </td>
                   {taxVisible && (
