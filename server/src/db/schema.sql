@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS companies (
   order_pattern TEXT NOT NULL DEFAULT 'SO/{FY}/{SEQ}',
   order_export_pattern TEXT NOT NULL DEFAULT 'SO-EX/{FY}/{SEQ}',
   wo_pattern TEXT NOT NULL DEFAULT 'WO/{FY}/{SEQ}',
+  po_pattern TEXT NOT NULL DEFAULT 'PO/{FY}/{SEQ}',
   -- The one a document falls back to when neither it nor its customer names one.
   is_default INTEGER NOT NULL DEFAULT 0,
   active INTEGER NOT NULL DEFAULT 1,
@@ -93,6 +94,7 @@ CREATE TABLE IF NOT EXISTS settings (
   order_pattern TEXT NOT NULL DEFAULT 'SO/{FY}/{SEQ}',
   order_export_pattern TEXT NOT NULL DEFAULT 'SO-EX/{FY}/{SEQ}',
   wo_pattern TEXT NOT NULL DEFAULT 'WO/{FY}/{SEQ}',
+  po_pattern TEXT NOT NULL DEFAULT 'PO/{FY}/{SEQ}',
   note_presets TEXT NOT NULL DEFAULT '[]'
 );
 INSERT OR IGNORE INTO settings (id) VALUES (1);
@@ -676,3 +678,73 @@ CREATE TABLE IF NOT EXISTS production_entries (
 );
 
 CREATE INDEX IF NOT EXISTS idx_production_entries_wo ON production_entries(work_order_id);
+
+/* ==================================================================
+   Material
+   ------------------------------------------------------------------
+   One ledger, signed. Stock on hand is the sum of the moves for a
+   material at a location — there is no stock column anywhere, so a
+   figure can never disagree with the movements that produced it, and
+   every kilo is traceable to a receipt, an issue or an adjustment.
+   ================================================================== */
+
+CREATE TABLE IF NOT EXISTS purchase_orders (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  number TEXT NOT NULL,
+  company_id INTEGER NOT NULL DEFAULT 1 REFERENCES companies(id),
+  supplier_id INTEGER NOT NULL REFERENCES suppliers(id),
+  -- Where it is to be delivered; receipts default here.
+  location_id INTEGER REFERENCES locations(id),
+  date TEXT NOT NULL,
+  expected_date TEXT NOT NULL DEFAULT '',
+  currency TEXT NOT NULL DEFAULT 'INR',
+  tax_type TEXT NOT NULL DEFAULT 'igst' CHECK (tax_type IN ('none','cgst_sgst','igst')),
+  status TEXT NOT NULL DEFAULT 'draft'
+    CHECK (status IN ('draft','sent','part_received','received','cancelled')),
+  payment_terms TEXT NOT NULL DEFAULT '',
+  notes TEXT NOT NULL DEFAULT '',
+  subtotal REAL NOT NULL DEFAULT 0,
+  tax_total REAL NOT NULL DEFAULT 0,
+  grand_total REAL NOT NULL DEFAULT 0,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS po_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  po_id INTEGER NOT NULL REFERENCES purchase_orders(id) ON DELETE CASCADE,
+  material_id INTEGER REFERENCES materials(id),
+  description TEXT NOT NULL DEFAULT '',
+  qty REAL,
+  unit TEXT NOT NULL DEFAULT 'kg',
+  rate REAL NOT NULL DEFAULT 0,
+  tax_pct REAL NOT NULL DEFAULT 0,
+  amount REAL NOT NULL DEFAULT 0,
+  sort_order INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_po_items_po ON po_items(po_id);
+
+-- The ledger. `qty` is signed: positive in, negative out. How much has been
+-- received against a purchase order is therefore a sum over these rows, not a
+-- column on the order that someone has to remember to update.
+CREATE TABLE IF NOT EXISTS material_moves (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  material_id INTEGER NOT NULL REFERENCES materials(id),
+  location_id INTEGER NOT NULL REFERENCES locations(id),
+  date TEXT NOT NULL,
+  qty REAL NOT NULL,
+  source TEXT NOT NULL DEFAULT 'adjustment'
+    CHECK (source IN ('opening','po_receipt','issue','return','adjustment','transfer')),
+  -- What caused it, where there is something to point at. A transfer between
+  -- plants is two rows, out of one and into the other.
+  po_id INTEGER REFERENCES purchase_orders(id),
+  work_order_id INTEGER REFERENCES work_orders(id),
+  note TEXT NOT NULL DEFAULT '',
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_material_moves_material ON material_moves(material_id, location_id);
+CREATE INDEX IF NOT EXISTS idx_material_moves_po ON material_moves(po_id);
+CREATE INDEX IF NOT EXISTS idx_material_moves_wo ON material_moves(work_order_id);

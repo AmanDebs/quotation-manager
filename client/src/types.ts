@@ -154,7 +154,12 @@ export interface WorkOrder {
   progress?: Progress;
   entries?: ProductionEntry[];
   /** `has_recipe: false` means unanswerable — show "not costed", never zero. */
-  material?: { has_recipe: boolean; lines: { material_id: number; name: string; unit: string; qty: number }[] };
+  material?: {
+    has_recipe: boolean;
+    lines: { material_id: number; name: string; unit: string; qty: number; issued: number }[];
+    /** Issued but not in the recipe — still has to be visible. */
+    extra: { material_id: number; issued: number }[];
+  };
 }
 
 /** Production against one order line, summed over its work orders. */
@@ -164,6 +169,72 @@ export interface LineProduction {
   rejected: number;
   balance: number;
   work_orders: number;
+}
+
+/* ---------------- Material ---------------- */
+
+export type MoveSource = 'opening' | 'po_receipt' | 'issue' | 'return' | 'adjustment' | 'transfer';
+
+/** One row of the ledger. Signed: positive in, negative out. */
+export interface MaterialMove {
+  id: number;
+  material_id: number; location_id: number;
+  date: string; qty: number; source: MoveSource;
+  po_id: number | null; work_order_id: number | null;
+  note: string;
+  material_name?: string; unit?: string; location_name?: string;
+  po_number?: string | null; work_order_number?: string | null;
+  created_by_name?: string | null;
+}
+
+/** On hand at one plant, derived by summing the ledger — never stored. */
+export interface StockRow {
+  material_id: number; location_id: number;
+  material_name: string; unit: string; category: string; location_name: string;
+  qty: number;
+  on_order: number;
+  reorder_level: number;
+  below_reorder: boolean;
+}
+
+export interface ShortfallRow {
+  material_id: number; material_name: string; unit: string; category: string;
+  required: number; on_hand: number; on_order: number; short: number;
+}
+
+export interface Shortfall {
+  rows: ShortfallRow[];
+  /** Open jobs whose product has no recipe — listed, never counted as zero. */
+  uncosted: { id: number; number: string; description: string }[];
+}
+
+export type PoStatus = 'draft' | 'sent' | 'part_received' | 'received' | 'cancelled';
+
+export interface PoItem {
+  id?: number;
+  material_id: number | null;
+  description: string;
+  qty: number | null;
+  unit: string;
+  rate: number;
+  tax_pct?: number;
+  amount?: number;
+  material_name?: string | null;
+  /** Both derived from the ledger on read. */
+  qty_received?: number;
+  qty_pending?: number;
+}
+
+export interface PurchaseOrder {
+  id: number; number: string; company_id?: number;
+  supplier_id: number; location_id: number | null;
+  date: string; expected_date: string;
+  currency: string; tax_type: TaxType; status: PoStatus;
+  payment_terms: string; notes: string;
+  subtotal: number; tax_total: number; grand_total: number;
+  supplier_name?: string; location_name?: string | null; created_by_name?: string | null;
+  items?: PoItem[];
+  receipts?: MaterialMove[];
 }
 
 export interface ImportField { key: string; label: string; required: boolean }

@@ -57,6 +57,8 @@ for (const table of ['quotation_items', 'order_items', 'pi_items', 'invoice_item
 // stays a faithful view of company 1.
 addColumnIfMissing('settings', 'wo_pattern', "TEXT NOT NULL DEFAULT 'WO/{FY}/{SEQ}'");
 addColumnIfMissing('companies', 'wo_pattern', "TEXT NOT NULL DEFAULT 'WO/{FY}/{SEQ}'");
+addColumnIfMissing('settings', 'po_pattern', "TEXT NOT NULL DEFAULT 'PO/{FY}/{SEQ}'");
+addColumnIfMissing('companies', 'po_pattern', "TEXT NOT NULL DEFAULT 'PO/{FY}/{SEQ}'");
 addColumnIfMissing('packing_list_items', 'hsn_code', "TEXT NOT NULL DEFAULT ''");
 addColumnIfMissing('quotations', 'freight', 'REAL NOT NULL DEFAULT 0');
 addColumnIfMissing('quotations', 'insurance', 'REAL NOT NULL DEFAULT 0');
@@ -276,6 +278,7 @@ enforceUniqueNumbers('proforma_invoices', 'idx_proformas_company_number', ['comp
 enforceUniqueNumbers('commercial_invoices', 'idx_invoices_company_number', ['company_id', 'number']);
 enforceUniqueNumbers('packing_lists', 'idx_packing_lists_company_number', ['company_id', 'number']);
 enforceUniqueNumbers('work_orders', 'idx_work_orders_company_number', ['company_id', 'number']);
+enforceUniqueNumbers('purchase_orders', 'idx_purchase_orders_company_number', ['company_id', 'number']);
 
 // One-off backfill: the founding account becomes the manager and inherits
 // ownership of everything that pre-dates the roles feature.

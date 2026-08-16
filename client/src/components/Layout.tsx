@@ -20,6 +20,10 @@ const nav = [
   { to: '/customers', label: 'Customers', icon: '🏢' },
   { to: '/products', label: 'Products', icon: '🏷️' },
   { to: '/work-orders', label: 'Work Orders', icon: '🔧' },
+  { to: '/stock', label: 'Stock', icon: '📦' },
+  // Supplier rates are not everyone's business, and committing a spend is not
+  // a shop-floor action — so purchasing is manager-only, front and back.
+  { to: '/purchase-orders', label: 'Purchase Orders', icon: '🛒', managerOnly: true },
   { to: '/container-planner', label: 'Container Planner', icon: '🚢' },
   // The factory side. Masters are set up once and rarely touched, so they sit
   // low in the list beside the other manager-only pages.

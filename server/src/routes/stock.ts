@@ -1,0 +1,144 @@
+import { Router } from 'express';
+import { db } from '../db/connection.js';
+import { onHandAll, onOrder, shortfall } from '../services/stock.js';
+import { requireManager, type AuthedRequest } from '../middleware/auth.js';
+import { canAccessCustomer } from '../middleware/scope.js';
+
+export const stockRouter = Router();
+
+/**
+ * The material ledger, read and written.
+ *
+ * Reading is open: an employee planning a job needs to know whether there is
+ * resin for it. Writing splits by what the movement *is* — issuing material to
+ * a job is a daily floor action, checked through the job's own scope, while
+ * receipts, opening balances and adjustments change the company's stock
+ * position and stay manager-only, like purchasing.
+ */
+
+const numOrNull = (v: unknown) =>
+  v === '' || v === null || v === undefined || Number.isNaN(Number(v)) ? null : Number(v);
+
+/** On hand per material and location, plus what is still on order. */
+stockRouter.get('/', (req, res) => {
+  const locationId = numOrNull(req.query.location_id);
+  const rows = onHandAll(locationId);
+  const pending = onOrder();
+  const levels = db.prepare('SELECT id, reorder_level FROM materials').all() as
+    { id: number; reorder_level: number }[];
+  const byId = new Map(levels.map((l) => [l.id, l.reorder_level]));
+  res.json(rows.map((r) => ({
+    ...r,
+    on_order: pending.get(r.material_id) ?? 0,
+    reorder_level: byId.get(r.material_id) ?? 0,
+    // Flagged only when a level has actually been set — 0 means "no level",
+    // not "reorder at nothing".
+    below_reorder: (byId.get(r.material_id) ?? 0) > 0 && r.qty < (byId.get(r.material_id) ?? 0),
+  })));
+});
+
+/** Every movement, newest first — the audit trail behind a balance. */
+stockRouter.get('/moves', (req, res) => {
+  const where: string[] = [];
+  const params: unknown[] = [];
+  if (req.query.material_id) { where.push('mm.material_id = ?'); params.push(Number(req.query.material_id)); }
+  if (req.query.location_id) { where.push('mm.location_id = ?'); params.push(Number(req.query.location_id)); }
+  if (req.query.work_order_id) { where.push('mm.work_order_id = ?'); params.push(Number(req.query.work_order_id)); }
+  const limit = Math.min(Number(req.query.limit) || 200, 1000);
+  res.json(db.prepare(
+    `SELECT mm.*, m.name AS material_name, m.unit, l.name AS location_name,
+            p.number AS po_number, w.number AS work_order_number, u.name AS created_by_name
+     FROM material_moves mm
+     JOIN materials m ON m.id = mm.material_id
+     JOIN locations l ON l.id = mm.location_id
+     LEFT JOIN purchase_orders p ON p.id = mm.po_id
+     LEFT JOIN work_orders w ON w.id = mm.work_order_id
+     LEFT JOIN users u ON u.id = mm.created_by
+     ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+     ORDER BY mm.date DESC, mm.id DESC LIMIT ?`
+  ).all(...(params as never[]), limit));
+});
+
+/** What the open jobs need against what we have. */
+stockRouter.get('/shortfall', (req, res) => {
+  res.json(shortfall(numOrNull(req.query.location_id)));
+});
+
+/**
+ * Issue material to a job — the floor's own action, so it is scoped through
+ * the work order's customer rather than reserved to a manager. Stored as a
+ * negative move: out is out.
+ */
+stockRouter.post('/issue', (req: AuthedRequest, res) => {
+  const body = req.body ?? {};
+  const wo = db.prepare(
+    `SELECT w.id, w.location_id, o.customer_id FROM work_orders w
+     JOIN orders o ON o.id = w.order_id WHERE w.id = ?`
+  ).get(Number(body.work_order_id)) as { id: number; location_id: number | null; customer_id: number } | undefined;
+  if (!wo || !canAccessCustomer(req, wo.customer_id)) {
+    return res.status(404).json({ error: 'Work order not found' });
+  }
+  const materialId = Number(body.material_id);
+  if (!db.prepare('SELECT id FROM materials WHERE id = ?').get(materialId)) {
+    return res.status(400).json({ error: 'That material no longer exists' });
+  }
+  const qty = Number(body.qty) || 0;
+  if (qty <= 0) return res.status(400).json({ error: 'Issue a quantity greater than zero' });
+  const locationId = numOrNull(body.location_id) ?? wo.location_id;
+  if (!locationId) return res.status(400).json({ error: 'Say which plant it came out of' });
+  const date = String(body.date ?? '').trim();
+  if (!date) return res.status(400).json({ error: 'Date is required' });
+
+  // Issuing more than is on hand is allowed and left visible as a negative
+  // balance: the material physically moved, and hiding that would make the
+  // ledger agree with the paperwork instead of with the floor.
+  db.prepare(
+    `INSERT INTO material_moves (material_id, location_id, date, qty, source, work_order_id, note, created_by)
+     VALUES (?, ?, ?, ?, 'issue', ?, ?, ?)`
+  ).run(materialId, locationId, date, -Math.abs(qty), wo.id, String(body.note ?? ''), req.user!.id);
+  res.status(201).json({ ok: true });
+});
+
+/**
+ * Opening balances, adjustments, returns and transfers. Manager-only: these
+ * change the company's stock position with nothing on the floor to point at.
+ */
+stockRouter.post('/moves', requireManager, (req: AuthedRequest, res) => {
+  const body = req.body ?? {};
+  const source = String(body.source ?? 'adjustment');
+  if (!['opening', 'adjustment', 'return', 'transfer'].includes(source)) {
+    return res.status(400).json({ error: 'Receipts are booked against a purchase order, and issues against a job' });
+  }
+  const materialId = Number(body.material_id);
+  if (!db.prepare('SELECT id FROM materials WHERE id = ?').get(materialId)) {
+    return res.status(400).json({ error: 'That material no longer exists' });
+  }
+  const locationId = Number(body.location_id);
+  if (!db.prepare('SELECT id FROM locations WHERE id = ?').get(locationId)) {
+    return res.status(400).json({ error: 'That location no longer exists' });
+  }
+  const qty = Number(body.qty);
+  if (!qty) return res.status(400).json({ error: 'A movement of zero is not a movement' });
+  const date = String(body.date ?? '').trim();
+  if (!date) return res.status(400).json({ error: 'Date is required' });
+
+  db.prepare(
+    `INSERT INTO material_moves (material_id, location_id, date, qty, source, note, created_by)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`
+  ).run(materialId, locationId, date, qty, source, String(body.note ?? ''), req.user!.id);
+  res.status(201).json({ ok: true });
+});
+
+/**
+ * Correcting a mis-keyed movement. Manager-only whatever it was: an issue can
+ * be deleted by the person who made it only in the sense that the manager can,
+ * because a balance that anyone can quietly rewrite is not a ledger.
+ */
+stockRouter.delete('/moves/:id', requireManager, (req, res) => {
+  const id = Number(req.params.id);
+  if (!db.prepare('SELECT id FROM material_moves WHERE id = ?').get(id)) {
+    return res.status(404).json({ error: 'Movement not found' });
+  }
+  db.prepare('DELETE FROM material_moves WHERE id = ?').run(id);
+  res.json({ ok: true });
+});

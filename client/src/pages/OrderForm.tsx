@@ -7,6 +7,7 @@ import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, Ta
 import CompanySelect from '../components/CompanySelect';
 import { DocNumber, IncoTermsInput } from '../components/DocFields';
 import ProductionTab from '../components/ProductionTab';
+import MaterialTab from '../components/MaterialTab';
 import LineItemsEditor from '../components/LineItemsEditor';
 import ColumnsControl from '../components/ColumnsControl';
 import NotePresetPicker from '../components/NotePresetPicker';
@@ -85,7 +86,7 @@ export default function OrderFormPage() {
 
   const [draft, setDraft] = useState<Draft>(emptyDraft());
   const [prefilled, setPrefilled] = useState(false);
-  const [tab, setTab] = useState<'details' | 'production'>('details');
+  const [tab, setTab] = useState<'details' | 'production' | 'material'>('details');
 
   // Jobs still to finish, shown on the tab so the floor's state is visible
   // without opening it. Loaded here rather than in the tab so the count is
@@ -220,11 +221,13 @@ export default function OrderFormPage() {
           tabs={[
             { key: 'details', label: 'Details' },
             { key: 'production', label: 'Production', badge: openJobs || undefined },
+            { key: 'material', label: 'Material' },
           ]}
         />
       )}
 
       {tab === 'production' && !isNew && existing && <ProductionTab order={existing} />}
+      {tab === 'material' && !isNew && existing && <MaterialTab order={existing} />}
 
       <div className={`space-y-4 ${tab === 'details' ? '' : 'hidden'}`}>
         <Card

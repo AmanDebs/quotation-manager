@@ -67,7 +67,21 @@ function getFull(req: AuthedRequest, id: number) {
   // false means unanswerable, which the screen shows as "not costed" — never
   // as a requirement of zero.
   const req_ = requirementFor(wo.product_id as number | null, Number(wo.qty_planned) || 0);
-  wo.material = { has_recipe: req_.hasRecipe, lines: req_.lines };
+  // Issued so far, so the screen can show planned against actual consumption —
+  // the point of having a recipe at all.
+  const issued = db.prepare(
+    `SELECT material_id, COALESCE(SUM(-qty), 0) AS q FROM material_moves
+     WHERE work_order_id = ? AND source = 'issue' GROUP BY material_id`
+  ).all(id) as { material_id: number; q: number }[];
+  const byMaterial = new Map(issued.map((r) => [r.material_id, r.q]));
+  wo.material = {
+    has_recipe: req_.hasRecipe,
+    lines: req_.lines.map((l) => ({ ...l, issued: byMaterial.get(l.material_id) ?? 0 })),
+    // Anything issued that the recipe never mentioned still has to show up.
+    extra: issued
+      .filter((r) => !req_.lines.some((l) => l.material_id === r.material_id))
+      .map((r) => ({ material_id: r.material_id, issued: r.q })),
+  };
   return wo;
 }
 
@@ -194,6 +208,15 @@ workOrdersRouter.delete('/:id', (req: AuthedRequest, res) => {
   if (entries.c > 0) {
     return res.status(409).json({
       error: `This job has ${entries.c} production ${entries.c === 1 ? 'entry' : 'entries'} against it — cancel it instead of deleting`,
+    });
+  }
+  // Material issued to it is stock that physically left the store. Deleting the
+  // job would leave those movements pointing at nothing.
+  const issued = db.prepare('SELECT COUNT(*) AS c FROM material_moves WHERE work_order_id = ?')
+    .get(id) as { c: number };
+  if (issued.c > 0) {
+    return res.status(409).json({
+      error: 'Material has been issued to this job — cancel it instead of deleting',
     });
   }
   db.prepare('DELETE FROM work_orders WHERE id = ?').run(id);

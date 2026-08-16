@@ -20,6 +20,8 @@ import { mountMasters } from './routes/masters.js';
 import { quotationsRouter } from './routes/quotations.js';
 import { ordersRouter } from './routes/orders.js';
 import { workOrdersRouter } from './routes/workOrders.js';
+import { purchaseOrdersRouter } from './routes/purchaseOrders.js';
+import { stockRouter } from './routes/stock.js';
 import { proformasRouter } from './routes/proformas.js';
 import { invoicesRouter } from './routes/invoices.js';
 import { packingListsRouter } from './routes/packingLists.js';
@@ -66,6 +68,12 @@ mountMasters((path, router) => app.use(path, requireAuth, router));
 app.use('/api/quotations', requireAuth, quotationsRouter);
 app.use('/api/orders', requireAuth, ordersRouter);
 app.use('/api/work-orders', requireAuth, workOrdersRouter);
+// Purchasing is manager-only in full: supplier rates are not everyone's
+// business, and committing a spend is not a shop-floor action.
+app.use('/api/purchase-orders', requireAuth, requireManager, purchaseOrdersRouter);
+// The stock ledger guards its own writes — reads are open because anyone
+// planning a job needs to know whether there is material for it.
+app.use('/api/stock', requireAuth, stockRouter);
 app.use('/api/proformas', requireAuth, proformasRouter);
 app.use('/api/invoices', requireAuth, invoicesRouter);
 app.use('/api/packing-lists', requireAuth, packingListsRouter);

@@ -146,6 +146,8 @@ export const MASTERS: MasterConfig[] = [
     guards: [
       { sql: 'SELECT COUNT(*) AS c FROM machines WHERE location_id = ?', message: 'Machines belong to this location — move or retire them first' },
       { sql: 'SELECT COUNT(*) AS c FROM work_orders WHERE location_id = ?', message: 'Work orders were run at this location — retire it instead of deleting' },
+      { sql: 'SELECT COUNT(*) AS c FROM material_moves WHERE location_id = ?', message: 'Stock has moved at this location — retire it instead of deleting' },
+      { sql: 'SELECT COUNT(*) AS c FROM purchase_orders WHERE location_id = ?', message: 'Purchase orders are delivered here — retire it instead of deleting' },
     ],
   },
   {
@@ -162,6 +164,9 @@ export const MASTERS: MasterConfig[] = [
       { name: 'payment_terms', kind: 'text' },
       { name: 'notes', kind: 'text' },
       activeFlag,
+    ],
+    guards: [
+      { sql: 'SELECT COUNT(*) AS c FROM purchase_orders WHERE supplier_id = ?', message: 'Purchase orders have been raised on this supplier — retire it instead of deleting' },
     ],
   },
   {
@@ -191,6 +196,8 @@ export const MASTERS: MasterConfig[] = [
     orderBy: 'category, name',
     guards: [
       { sql: 'SELECT COUNT(*) AS c FROM product_materials WHERE material_id = ?', message: 'This material is used in a product recipe and cannot be deleted' },
+      { sql: 'SELECT COUNT(*) AS c FROM material_moves WHERE material_id = ?', message: 'This material has stock movements against it — retire it instead of deleting' },
+      { sql: 'SELECT COUNT(*) AS c FROM po_items WHERE material_id = ?', message: 'This material appears on a purchase order and cannot be deleted' },
     ],
   },
   {
