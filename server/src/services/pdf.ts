@@ -4,7 +4,7 @@ import type { TDocumentDefinitions, Content } from 'pdfmake/interfaces';
 import { inflateSync } from 'node:zlib';
 import { db } from '../db/connection.js';
 import { amountInWords } from './amountInWords.js';
-import { round2, isPieceBasis } from './totals.js';
+import { round2, isPieceBasis, piecesPerBillingUnit } from './totals.js';
 import { invoiceReceivable } from './receivables.js';
 import { getCompany, defaultCompany } from './companies.js';
 
@@ -549,6 +549,44 @@ function itemsTable(s: Row, items: Row[], specs: ColumnSpec[], cfg: ColumnConfig
   } as Content;
 }
 
+/**
+ * Totals the Total Qty column — one figure per basis, never one across all.
+ *
+ * The column holds each line's billing quantity read in whatever its rate is
+ * quoted against: pieces on a per-1000 or per-unit line, kilos on a per-kg
+ * one. Those do not add. A document carrying 30,50,000 pieces and 5 tonnes
+ * summed to `30,50,005`, a number that is true of nothing. Each basis is now
+ * totalled separately and labelled, and only when there is more than one — the
+ * ordinary all-pieces proforma still closes on a single plain figure.
+ *
+ * Lines priced per unit stay in with the pieces: 5,000 units is 5,000 pieces.
+ * That does mean a one-off charge entered as a line ("Freight, 1 x 40FT")
+ * still adds its 1. Telling that apart needs a charge-line flag on the item,
+ * which is a schema change, not a formatting rule.
+ */
+function qtyTotal(rows: Row[]): string {
+  const byBasis = new Map<string, number>();
+  for (const it of rows) {
+    const pieces = isPieceBasis(it.unit);
+    // total_pcs is already a piece count; the legacy `qty` is in billing units,
+    // so 1,785 at "per 1000" is 17,85,000 pieces. Scaling it up is what lets
+    // the two sit in the same bucket at all.
+    const q = it.total_pcs != null
+      ? Number(it.total_pcs)
+      : Number(it.qty) * (pieces ? piecesPerBillingUnit(it.unit)! : 1);
+    if (!Number.isFinite(q) || q === 0) continue;
+    // Every piece basis shares one bucket, keyed '' so it prints bare.
+    const basis = pieces ? '' : String(it.unit ?? '').trim();
+    byBasis.set(basis, (byBasis.get(basis) ?? 0) + q);
+  }
+  if (!byBasis.size) return '';
+  const mixed = byBasis.size > 1;
+  return [...byBasis]
+    .map(([basis, total]) =>
+      `${fmtNum(total, basis ? 3 : 0)}${basis ? ` ${basis}` : mixed ? ' PCS' : ''}`)
+    .join('\n');
+}
+
 /* ------------------------------------------------------------------ */
 /* QUOTATION — modeled on the Sanya Industries sample                  */
 /* ------------------------------------------------------------------ */
@@ -962,11 +1000,14 @@ export function buildProformaPdf(id: number): TDocumentDefinitions {
     // back to it (with its unit) rather than printing a blank quantity.
     {
       key: 'total_pcs', label: 'TOTAL QTY', width: 52, align: 'right', always: true,
-      value: (it) => (it.total_pcs != null ? fmtNum(it.total_pcs, 0)
+      // Pieces are whole; a weight is not, so half a kilo must not round away
+      // here while the closing total keeps it.
+      value: (it) => (it.total_pcs != null ? fmtNum(it.total_pcs, isPieceBasis(it.unit) ? 0 : 3)
         : it.qty != null ? `${fmtNum(it.qty)} ${it.unit}` : '—'),
-      // Falls back to qty for the same reason the cell does, so a proforma
-      // raised before Total Qty existed still totals to something.
-      sum: (rows) => fmtNum(rows.reduce((t, it) => t + (Number(it.total_pcs ?? it.qty) || 0), 0), 0),
+      // One figure per rate basis — see qtyTotal. Falls back to qty for the
+      // same reason the cell does, so a proforma raised before Total Qty
+      // existed still totals to something.
+      sum: qtyTotal,
     },
     { key: 'unit_price', label: rateLabel, width: 50, align: 'right', always: true, value: per1000Rate },
     ...(showTax ? [{ key: 'tax', label: 'Tax %', width: 28, align: 'right' as const, value: (it: Row) => `${it.tax_pct ?? 0}%` }] : []),
