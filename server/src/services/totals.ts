@@ -18,6 +18,12 @@ export interface LineItemInput {
   custom3?: string;
   /** Optional per-line photo as a base64 data URL; printed on quotations. */
   image?: string;
+  /**
+   * This line is a charge, not goods — freight, insurance, tooling, a testing
+   * fee. It bills at its own price (quantity 1) and carries no quantity into
+   * any total.
+   */
+  is_charge?: number | boolean;
 }
 
 export interface ComputedItem extends LineItemInput {
@@ -69,8 +75,13 @@ export const isPieceBasis = (unit: string | undefined | null): boolean =>
  * kg-priced line has nowhere else to state its quantity. This branch only ever
  * fires where the answer used to be null — a line that already had an amount
  * keeps exactly the amount it had.
+ *
+ * A charge line short-circuits all of that at quantity 1, so its price *is* its
+ * amount. There is nothing to count: one freight bill is not one of anything
+ * the goods columns are adding up.
  */
-export function billedQty(it: Pick<LineItemInput, 'qty' | 'unit' | 'total_pcs'>): number | null {
+export function billedQty(it: Pick<LineItemInput, 'qty' | 'unit' | 'total_pcs' | 'is_charge'>): number | null {
+  if (it.is_charge) return 1;
   const per = PIECES_PER_BILLING_UNIT[it.unit ?? ''];
   if (per && it.total_pcs != null) return it.total_pcs / per;
   if (it.qty != null) return it.qty;
@@ -96,16 +107,19 @@ export function computeTotals(
     // Derived, then stamped back onto the row, so what is stored can never
     // disagree with the packing figures printed beside it.
     const qty = billedQty(it);
+    // A charge has no packing at all, so any figures left over from before the
+    // line was marked as one are cleared rather than stored and hidden.
+    const charge = !!it.is_charge;
     return {
       ...it,
       qty,
       tax_pct: it.tax_pct ?? 0,
-      color: it.color ?? '',
-      packs: it.packs ?? null,
-      pcs_per_pack: it.pcs_per_pack ?? null,
-      total_pcs: it.total_pcs ?? null,
-      qty_20ft: it.qty_20ft ?? null,
-      qty_40ft: it.qty_40ft ?? null,
+      color: charge ? '' : (it.color ?? ''),
+      packs: charge ? null : (it.packs ?? null),
+      pcs_per_pack: charge ? null : (it.pcs_per_pack ?? null),
+      total_pcs: charge ? null : (it.total_pcs ?? null),
+      qty_20ft: charge ? null : (it.qty_20ft ?? null),
+      qty_40ft: charge ? null : (it.qty_40ft ?? null),
       custom1: it.custom1 ?? '',
       custom2: it.custom2 ?? '',
       custom3: it.custom3 ?? '',

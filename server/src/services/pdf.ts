@@ -549,6 +549,9 @@ function itemsTable(s: Row, items: Row[], specs: ColumnSpec[], cfg: ColumnConfig
   } as Content;
 }
 
+/** The lines that are actually goods — charges carry no quantity to add up. */
+const goodsOnly = (rows: Row[]): Row[] => rows.filter((it) => !it.is_charge);
+
 /**
  * Totals the Total Qty column — one figure per basis, never one across all.
  *
@@ -560,13 +563,12 @@ function itemsTable(s: Row, items: Row[], specs: ColumnSpec[], cfg: ColumnConfig
  * ordinary all-pieces proforma still closes on a single plain figure.
  *
  * Lines priced per unit stay in with the pieces: 5,000 units is 5,000 pieces.
- * That does mean a one-off charge entered as a line ("Freight, 1 x 40FT")
- * still adds its 1. Telling that apart needs a charge-line flag on the item,
- * which is a schema change, not a formatting rule.
+ * A charge line is not goods and never joins any bucket — one freight bill is
+ * not one of anything these columns are counting.
  */
 function qtyTotal(rows: Row[]): string {
   const byBasis = new Map<string, number>();
-  for (const it of rows) {
+  for (const it of goodsOnly(rows)) {
     const pieces = isPieceBasis(it.unit);
     // total_pcs is already a piece count; the legacy `qty` is in billing units,
     // so 1,785 at "per 1000" is 17,85,000 pieces. Scaling it up is what lets
@@ -674,7 +676,8 @@ export function buildQuotationPdf(id: number): TDocumentDefinitions {
     // amount — it just does not print.
     { key: 'color', label: 'Color', width: 48, align: 'center', value: (it) => String(it.color || '') },
     { key: 'unit_price', label: 'Unit Price', width: 48, align: 'right', always: true, value: (it) => fmtNum(it.unit_price, 3) },
-    { key: 'uom', label: 'UOM', width: 52, align: 'center', always: true, value: (it) => uomLabel(cur, it.unit) },
+    // A charge is priced outright, so it has no basis to state.
+    { key: 'uom', label: 'UOM', width: 52, align: 'center', always: true, value: (it) => (it.is_charge ? '' : uomLabel(cur, it.unit)) },
     ...(showTax ? [{ key: 'tax', label: 'Tax %', width: 30, align: 'right' as const, value: (it: Row) => `${it.tax_pct ?? 0}%` }] : []),
     { key: 'amount', label: `Total (${cur})`, width: 62, align: 'right', always: true, value: (it) => (it.qty != null ? fmtMoney(it.amount, cur) : 'price only') },
   ];
@@ -725,8 +728,9 @@ export function buildOrderPdf(id: number): TDocumentDefinitions {
     { key: 'code', label: 'Code', width: 45, align: 'center', value: (it) => it.code || '' },
     { key: 'hsn', label: 'HSN', width: 45, align: 'center', value: (it) => it.hsn_code || '' },
     { key: 'color', label: 'Colour', width: 50, align: 'center', value: (it) => it.color || '' },
-    { key: 'qty', label: 'Quantity', width: 58, align: 'right', value: (it) => (it.qty != null ? `${fmtNum(it.qty)} ${it.unit}` : '') },
-    { key: 'unit_price', label: `Rate ${cur}`, width: 52, align: 'right', value: (it) => fmtNum(it.unit_price, 3) },
+    // A charge line is a fee, not something to make: no quantity, no rate.
+    { key: 'qty', label: 'Quantity', width: 58, align: 'right', value: (it) => (!it.is_charge && it.qty != null ? `${fmtNum(it.qty)} ${it.unit}` : '') },
+    { key: 'unit_price', label: `Rate ${cur}`, width: 52, align: 'right', value: (it) => (it.is_charge ? '' : fmtNum(it.unit_price, 3)) },
     { key: 'supplier', label: 'Supplier', width: 48, align: 'center', value: (it) => it.supplier || '' },
     { key: 'tax', label: 'Tax %', width: 30, align: 'right', value: (it) => (showTax ? `${it.tax_pct ?? 0}%` : '') },
     { key: 'amount', label: `Amount (${cur})`, width: 62, align: 'right', always: true, value: (it) => fmtMoney(it.amount, cur) },
@@ -959,13 +963,19 @@ export function buildProformaPdf(id: number): TDocumentDefinitions {
    * thousand of them. Below that the division extrapolates: a one-off charge
    * entered as a line — "Indicative Freight (1 x 40FT HQ)", quantity 1 —
    * divides its whole value by one piece and prints 45,00,000 against a
-   * $4,500 line. Such a line shows its own price instead.
+   * $4,500 line. Such a line shows its own price instead. A line marked as a
+   * charge says so outright; the threshold still catches the ones raised
+   * before the flag existed.
    */
-  const quotableInThousands = (it: Row) => isPieceBasis(it.unit) && Number(it.total_pcs) >= 1000;
+  const quotableInThousands = (it: Row) =>
+    !it.is_charge && isPieceBasis(it.unit) && Number(it.total_pcs) >= 1000;
 
   const per1000Rate = (it: Row): string =>
     (quotableInThousands(it)
       ? fmtNum(round2((it.amount / it.total_pcs) * 1000), 2)
+      // A charge has no rate — the amount beside it is the whole story, and
+      // "4,500 /unit" only invites the reader to look for the missing quantity.
+      : it.is_charge ? ''
       : `${fmtNum(it.unit_price, 3)}${it.unit ? ` /${it.unit}` : ''}`);
   // Only call the column "/1000 Pcs" when something on the document actually is
   // a piece rate — on a wholly weight-billed proforma that heading would lie.
@@ -989,7 +999,7 @@ export function buildProformaPdf(id: number): TDocumentDefinitions {
     {
       key: 'packs', label: 'CTN.', width: 30, align: 'right', group: 'QUANTITY',
       value: (it) => (it.packs != null ? fmtNum(it.packs, 0) : ''),
-      sum: (rows) => fmtNum(rows.reduce((t, it) => t + (Number(it.packs) || 0), 0), 0),
+      sum: (rows) => fmtNum(goodsOnly(rows).reduce((t, it) => t + (Number(it.packs) || 0), 0), 0),
     },
     // Pcs per carton is deliberately not summed: adding box sizes across
     // different products gives a number with no meaning.
@@ -1001,8 +1011,10 @@ export function buildProformaPdf(id: number): TDocumentDefinitions {
     {
       key: 'total_pcs', label: 'TOTAL QTY', width: 52, align: 'right', always: true,
       // Pieces are whole; a weight is not, so half a kilo must not round away
-      // here while the closing total keeps it.
-      value: (it) => (it.total_pcs != null ? fmtNum(it.total_pcs, isPieceBasis(it.unit) ? 0 : 3)
+      // here while the closing total keeps it. A charge has no quantity to
+      // state — its billed 1 is an artefact of the arithmetic, not a count.
+      value: (it) => (it.is_charge ? ''
+        : it.total_pcs != null ? fmtNum(it.total_pcs, isPieceBasis(it.unit) ? 0 : 3)
         : it.qty != null ? `${fmtNum(it.qty)} ${it.unit}` : '—'),
       // One figure per rate basis — see qtyTotal. Falls back to qty for the
       // same reason the cell does, so a proforma raised before Total Qty
@@ -1157,8 +1169,10 @@ export function buildInvoicePdf(id: number): TDocumentDefinitions {
   const specs: ColumnSpec[] = [
     { key: 'sl', label: 'SL', width: 16, align: 'center', always: true, value: (_it, i) => String(i + 1) },
     { key: 'description', label: 'Description of Goods', width: '*', always: true, value: (it) => String(it.description) },
-    { key: 'qty', label: 'Quantity', width: 58, align: 'right', always: true, value: (it) => (it.qty != null ? `${fmtNum(it.qty)} ${it.unit}` : '—') },
-    { key: 'unit_price', label: 'Rate', width: 55, align: 'right', always: true, value: (it) => `${fmtNum(it.unit_price, 3)}/${it.unit === 'per 1000' ? '1000' : it.unit}` },
+    // A charge line (freight, insurance) states its amount and nothing else —
+    // its billed quantity of 1 is arithmetic, not a count of anything shipped.
+    { key: 'qty', label: 'Quantity', width: 58, align: 'right', always: true, value: (it) => (it.is_charge ? '' : it.qty != null ? `${fmtNum(it.qty)} ${it.unit}` : '—') },
+    { key: 'unit_price', label: 'Rate', width: 55, align: 'right', always: true, value: (it) => (it.is_charge ? '' : `${fmtNum(it.unit_price, 3)}/${it.unit === 'per 1000' ? '1000' : it.unit}`) },
     { key: 'color', label: 'Color', width: 46, align: 'center', value: (it) => String(it.color || '') },
     { key: 'packs', label: 'Boxes', width: 40, align: 'right', value: (it) => (it.packs != null ? fmtNum(it.packs, 0) : '') },
     { key: 'hsn', label: 'HSN Code', width: 45, align: 'center', value: (it) => String(it.hsn_code || '') },
@@ -1247,7 +1261,11 @@ export function buildPackingListPdf(id: number): TDocumentDefinitions {
   if (!pl) throw new Error('Packing list not found');
   const s = companyProfile(pl.company_id);
   const c = db.prepare('SELECT * FROM customers WHERE id = ?').get(pl.customer_id) as Row;
-  const items = db.prepare('SELECT * FROM packing_list_items WHERE packing_list_id = ? ORDER BY sort_order, id').all(id) as Row[];
+  // Charge lines are stored so the list keeps its index alignment with the
+  // invoice, but nothing is packed against freight — they are not printed.
+  const items = goodsOnly(
+    db.prepare('SELECT * FROM packing_list_items WHERE packing_list_id = ? ORDER BY sort_order, id').all(id) as Row[]
+  );
   const inv = pl.invoice_id
     ? (db.prepare('SELECT * FROM commercial_invoices WHERE id = ?').get(pl.invoice_id) as Row | undefined)
     : undefined;
@@ -1255,7 +1273,10 @@ export function buildPackingListPdf(id: number): TDocumentDefinitions {
 
   const totalGross = round2(items.reduce((sum, it) => sum + (it.gross_weight || 0), 0));
   const totalNet = round2(items.reduce((sum, it) => sum + (it.net_weight || 0), 0));
-  const totalQty = items.reduce((sum, it) => sum + (it.qty || 0), 0);
+  // Quantities here are in each line's own billing unit, so they are totalled
+  // per basis for the same reason the proforma's are — 1,785 (per 1000) and
+  // 5 tonne do not make 1,790 of anything.
+  const totalQty = qtyTotal(items);
 
   const refCells: Cell[] = [
     lv('Packing List No.  /  Date', `${pl.number}   ${fmtDate(pl.date)}`),
@@ -1283,6 +1304,7 @@ export function buildPackingListPdf(id: number): TDocumentDefinitions {
 
   const cfg: ColumnConfig = JSON.parse(String(pl.column_config || '{}'));
   const inPieces = (it: Row) => it.qty != null && ['unit', 'pcs'].includes(String(it.unit || '').toLowerCase());
+  const totalThousands = items.reduce((sum, it) => sum + (inPieces(it) ? it.qty / 1000 : 0), 0);
 
   const specs: ColumnSpec[] = [
     { key: 'sl', label: 'SL', width: 16, align: 'center', always: true, value: (_it, i) => String(i + 1) },
@@ -1302,8 +1324,9 @@ export function buildPackingListPdf(id: number): TDocumentDefinitions {
     const label = String(h.text);
     const cell = (text: string, align: string = 'right') => ({ text, fontSize: 8, bold: true, alignment: align, fillColor: '#efe9e7' });
     if (label === 'Description of Goods') return cell('TOTAL', 'left');
-    if (label === 'Quantity') return cell(totalQty ? fmtNum(totalQty, 0) : '');
-    if (label === 'Thousand Pcs') return cell(totalQty ? fmtNum(totalQty / 1000, 2) : '');
+    if (label === 'Quantity') return cell(totalQty);
+    // Only the lines that actually show a thousand-pieces figure are in it.
+    if (label === 'Thousand Pcs') return cell(totalThousands ? fmtNum(totalThousands, 2) : '');
     if (label === 'Net Wt (kg)') return cell(fmtNum(totalNet));
     if (label === 'Gross Wt (kg)') return cell(fmtNum(totalGross));
     return cell('');

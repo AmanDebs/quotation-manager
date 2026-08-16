@@ -202,6 +202,9 @@ CREATE TABLE IF NOT EXISTS quotation_items (
   -- old document keeps the figures it was quoted on.
   qty_20ft REAL,
   qty_40ft REAL,
+  -- A charge, not goods: freight, insurance, tooling, a testing fee. It bills at
+  -- its own price and is left out of every quantity column and total.
+  is_charge INTEGER NOT NULL DEFAULT 0,
   custom1 TEXT NOT NULL DEFAULT '',
   custom2 TEXT NOT NULL DEFAULT '',
   custom3 TEXT NOT NULL DEFAULT '',
@@ -273,6 +276,9 @@ CREATE TABLE IF NOT EXISTS order_items (
   -- old document keeps the figures it was quoted on.
   qty_20ft REAL,
   qty_40ft REAL,
+  -- A charge, not goods: freight, insurance, tooling, a testing fee. It bills at
+  -- its own price and is left out of every quantity column and total.
+  is_charge INTEGER NOT NULL DEFAULT 0,
   supplier TEXT NOT NULL DEFAULT '',
   scheduled_date TEXT NOT NULL DEFAULT '',
   dispatched_date TEXT NOT NULL DEFAULT '',
@@ -352,6 +358,9 @@ CREATE TABLE IF NOT EXISTS pi_items (
   -- old document keeps the figures it was quoted on.
   qty_20ft REAL,
   qty_40ft REAL,
+  -- A charge, not goods: freight, insurance, tooling, a testing fee. It bills at
+  -- its own price and is left out of every quantity column and total.
+  is_charge INTEGER NOT NULL DEFAULT 0,
   custom1 TEXT NOT NULL DEFAULT '',
   custom2 TEXT NOT NULL DEFAULT '',
   custom3 TEXT NOT NULL DEFAULT '',
@@ -421,6 +430,9 @@ CREATE TABLE IF NOT EXISTS invoice_items (
   -- old document keeps the figures it was quoted on.
   qty_20ft REAL,
   qty_40ft REAL,
+  -- A charge, not goods: freight, insurance, tooling, a testing fee. It bills at
+  -- its own price and is left out of every quantity column and total.
+  is_charge INTEGER NOT NULL DEFAULT 0,
   custom1 TEXT NOT NULL DEFAULT '',
   custom2 TEXT NOT NULL DEFAULT '',
   custom3 TEXT NOT NULL DEFAULT '',
@@ -456,6 +468,9 @@ CREATE TABLE IF NOT EXISTS packing_list_items (
   dimensions TEXT NOT NULL DEFAULT '',
   gross_weight REAL NOT NULL DEFAULT 0,
   net_weight REAL NOT NULL DEFAULT 0,
+  -- Mirrors the invoice line. Nothing is packed against a freight charge, so
+  -- the row is kept (the two lists match by index) but never printed.
+  is_charge INTEGER NOT NULL DEFAULT 0,
   custom1 TEXT NOT NULL DEFAULT '',
   custom2 TEXT NOT NULL DEFAULT '',
   custom3 TEXT NOT NULL DEFAULT '',

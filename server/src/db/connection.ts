@@ -45,6 +45,12 @@ for (const table of ['quotation_items', 'order_items', 'pi_items', 'invoice_item
   addColumnIfMissing(table, 'qty_20ft', 'REAL');
   addColumnIfMissing(table, 'qty_40ft', 'REAL');
 }
+// Charge lines (2026-08). A line that is a fee rather than goods — freight,
+// insurance, tooling — bills at its own price and stays out of the quantity
+// totals. Defaulting to 0 means every existing line stays goods, which it is.
+for (const table of ['quotation_items', 'order_items', 'pi_items', 'invoice_items', 'packing_list_items']) {
+  addColumnIfMissing(table, 'is_charge', 'INTEGER NOT NULL DEFAULT 0');
+}
 addColumnIfMissing('packing_list_items', 'hsn_code', "TEXT NOT NULL DEFAULT ''");
 addColumnIfMissing('quotations', 'freight', 'REAL NOT NULL DEFAULT 0');
 addColumnIfMissing('quotations', 'insurance', 'REAL NOT NULL DEFAULT 0');

@@ -113,6 +113,11 @@ export interface LineItem {
   image?: string;
   /** Order lines carry these too; harmless elsewhere. */
   code?: string; supplier?: string;
+  /**
+   * A charge rather than goods — freight, insurance, tooling, a testing fee.
+   * It bills at its own price and stays out of every quantity total.
+   */
+  is_charge?: number;
 }
 
 export type TaxType = 'none' | 'cgst_sgst' | 'igst';

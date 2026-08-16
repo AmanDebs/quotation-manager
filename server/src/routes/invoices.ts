@@ -128,18 +128,19 @@ function syncPackingList(invoiceId: number, userId: number, packing: PackingInpu
 
   const plId = Number(pl.id);
   const invItems = db.prepare(
-    'SELECT description, hsn_code, qty, unit FROM invoice_items WHERE invoice_id = ? ORDER BY sort_order, id'
-  ).all(invoiceId) as { description: string; hsn_code: string; qty: number | null; unit: string }[];
+    'SELECT description, hsn_code, qty, unit, is_charge FROM invoice_items WHERE invoice_id = ? ORDER BY sort_order, id'
+  ).all(invoiceId) as { description: string; hsn_code: string; qty: number | null; unit: string; is_charge: number }[];
 
   db.prepare('DELETE FROM packing_list_items WHERE packing_list_id = ?').run(plId);
   const ins = db.prepare(
-    `INSERT INTO packing_list_items (packing_list_id, description, hsn_code, qty, unit, packages, dimensions, gross_weight, net_weight, custom1, custom2, custom3, sort_order)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO packing_list_items (packing_list_id, description, hsn_code, qty, unit, packages, dimensions, gross_weight, net_weight, is_charge, custom1, custom2, custom3, sort_order)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   );
   invItems.forEach((it, i) => {
     const p = packing?.items?.[i] ?? {};
     ins.run(plId, it.description, it.hsn_code ?? '', it.qty ?? null, it.unit ?? 'unit',
       String(p.packages ?? ''), String(p.dimensions ?? ''), Number(p.gross_weight ?? 0), Number(p.net_weight ?? 0),
+      it.is_charge ? 1 : 0,
       String(p.custom1 ?? ''), String(p.custom2 ?? ''), String(p.custom3 ?? ''), i);
   });
 }
@@ -148,13 +149,13 @@ function saveItems(invoiceId: number, items: LineItemInput[], taxType: 'none' | 
   const totals = computeTotals(items, taxType, freight, insurance, currency);
   db.prepare('DELETE FROM invoice_items WHERE invoice_id = ?').run(invoiceId);
   const ins = db.prepare(
-    `INSERT INTO invoice_items (invoice_id, product_id, description, hsn_code, qty, unit, unit_price, tax_pct, amount, color, packs, pcs_per_pack, total_pcs, qty_20ft, qty_40ft, custom1, custom2, custom3, image, sort_order)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO invoice_items (invoice_id, product_id, description, hsn_code, qty, unit, unit_price, tax_pct, amount, color, packs, pcs_per_pack, total_pcs, qty_20ft, qty_40ft, is_charge, custom1, custom2, custom3, image, sort_order)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   );
   totals.items.forEach((it, i) =>
     ins.run(invoiceId, it.product_id ?? null, it.description, it.hsn_code ?? '', it.qty ?? null, it.unit ?? 'unit', it.unit_price, it.tax_pct ?? 0, it.amount,
       it.color ?? '', it.packs ?? null, it.pcs_per_pack ?? null, it.total_pcs ?? null,
-      it.qty_20ft ?? null, it.qty_40ft ?? null,
+      it.qty_20ft ?? null, it.qty_40ft ?? null, it.is_charge ? 1 : 0,
       it.custom1 ?? '', it.custom2 ?? '', it.custom3 ?? '', it.image ?? '', i)
   );
   db.prepare('UPDATE commercial_invoices SET subtotal = ?, tax_total = ?, grand_total = ? WHERE id = ?').run(

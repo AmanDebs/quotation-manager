@@ -84,6 +84,9 @@ const PIECES_PER_BILLING_UNIT: Record<string, number> = { 'per 1000': 1000, unit
  * not: it must be piece-based, and priced on some *other* piece basis. Quote a
  * line per 1000 and the derived rate is the unit price back again.
  */
+/** Sentinel value for the product select's "this line is a charge" option. */
+const CHARGE = 'charge';
+
 const showsPer1000Rate = (unit: string | undefined) => {
   const per = PIECES_PER_BILLING_UNIT[unit ?? ''];
   return per !== undefined && per !== 1000;
@@ -96,6 +99,8 @@ const showsPer1000Rate = (unit: string | undefined) => {
  * field, so a kg-priced line has nowhere else to say how much is being sold.
  */
 function billedQty(it: LineItem): number | null {
+  // A charge bills at quantity 1, so its price is its amount.
+  if (it.is_charge) return 1;
   const per = PIECES_PER_BILLING_UNIT[it.unit ?? ''];
   if (per && it.total_pcs != null) return it.total_pcs / per;
   if (it.qty != null) return it.qty;
@@ -170,14 +175,28 @@ export default function LineItemsEditor({
   };
 
   const pickProduct = (i: number, productId: string) => {
+    // "What kind of line is this?" is the same question as "which product?",
+    // so charge lines are the third answer in the same select rather than a
+    // checkbox somewhere else on the row.
+    if (productId === CHARGE) {
+      set(i, {
+        product_id: null, is_charge: 1,
+        // A charge has no packing, no colour and no loadability. Clearing them
+        // matches what the server stores, so the row cannot show figures the
+        // saved document does not have.
+        packs: null, pcs_per_pack: null, total_pcs: null, qty: null,
+        qty_20ft: null, qty_40ft: null, color: '',
+      });
+      return;
+    }
     if (!productId) {
-      set(i, { product_id: null });
+      set(i, { product_id: null, is_charge: 0 });
       return;
     }
     const p = products.find((x) => x.id === Number(productId));
     if (p) {
       set(i, {
-        product_id: p.id,
+        product_id: p.id, is_charge: 0,
         description: p.description ? `${p.name} — ${p.description}` : p.name,
         hsn_code: p.hsn_code,
         unit: p.unit,
@@ -229,6 +248,9 @@ export default function LineItemsEditor({
     return parts.join(' · ');
   };
 
+  /** Stands in for a field a charge line has nothing to put in. */
+  const none = <span className="block pt-2 text-xs text-slate-300">—</span>;
+
   const packField = (label: string, node: ReactNode) => (
     <label className="block">
       <span className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-slate-400">{label}</span>
@@ -266,6 +288,7 @@ export default function LineItemsEditor({
 
           {items.map((it, i) => {
             const product = products.find((p) => p.id === it.product_id);
+            const charge = !!it.is_charge;
             const isOpen = expanded.has(i);
             const summary = summarise(it);
             const amount = lineAmount(it);
@@ -281,11 +304,12 @@ export default function LineItemsEditor({
                   <td className="py-2 pr-2">
                     <div className="flex items-center gap-1.5">
                       <Select
-                        value={it.product_id ?? ''}
-                        title={product?.name ?? 'Custom line'}
+                        value={charge ? CHARGE : (it.product_id ?? '')}
+                        title={charge ? 'A charge, not goods' : product?.name ?? 'Custom line'}
                         onChange={(e) => pickProduct(i, e.target.value)}
                       >
                         <option value="">— custom —</option>
+                        <option value={CHARGE}>— charge (freight, etc.) —</option>
                         {products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
                       </Select>
                     </div>
@@ -295,7 +319,7 @@ export default function LineItemsEditor({
                   </td>
                   {show('image') && (
                     <td className="py-2 pr-2">
-                      <PhotoCell value={it.image ?? ''} onChange={(v) => set(i, { image: v })} />
+                      {charge ? none : <PhotoCell value={it.image ?? ''} onChange={(v) => set(i, { image: v })} />}
                     </td>
                   )}
                   {show('hsn') && (
@@ -305,80 +329,103 @@ export default function LineItemsEditor({
                   )}
                   {show('pcs_per_pack') && (
                     <td className="py-2 pr-2">
-                      <Input
-                        type="number" min={0} step="any"
-                        value={it.pcs_per_pack ?? ''}
-                        placeholder="—"
-                        onChange={(e) => setPacking(i, { pcs_per_pack: e.target.value === '' ? null : Number(e.target.value) })}
-                      />
+                      {charge ? none : (
+                        <Input
+                          type="number" min={0} step="any"
+                          value={it.pcs_per_pack ?? ''}
+                          placeholder="—"
+                          onChange={(e) => setPacking(i, { pcs_per_pack: e.target.value === '' ? null : Number(e.target.value) })}
+                        />
+                      )}
                     </td>
                   )}
                   {show('packs') && (
                     <td className="py-2 pr-2">
-                      <Input
-                        type="number" min={0} step="any"
-                        value={it.packs ?? ''}
-                        placeholder="—"
-                        onChange={(e) => setPacking(i, { packs: e.target.value === '' ? null : Number(e.target.value) })}
-                      />
+                      {charge ? none : (
+                        <Input
+                          type="number" min={0} step="any"
+                          value={it.packs ?? ''}
+                          placeholder="—"
+                          onChange={(e) => setPacking(i, { packs: e.target.value === '' ? null : Number(e.target.value) })}
+                        />
+                      )}
                     </td>
                   )}
                   {show('qty_20ft') && (
                     <td className="py-2 pr-2">
-                      <Input
-                        type="number" min={0} step="any"
-                        value={it.qty_20ft ?? ''}
-                        placeholder="—"
-                        onChange={(e) => set(i, { qty_20ft: e.target.value === '' ? null : Number(e.target.value) })}
-                      />
+                      {charge ? none : (
+                        <Input
+                          type="number" min={0} step="any"
+                          value={it.qty_20ft ?? ''}
+                          placeholder="—"
+                          onChange={(e) => set(i, { qty_20ft: e.target.value === '' ? null : Number(e.target.value) })}
+                        />
+                      )}
                     </td>
                   )}
                   {show('qty_40ft') && (
                     <td className="py-2 pr-2">
-                      <Input
-                        type="number" min={0} step="any"
-                        value={it.qty_40ft ?? ''}
-                        placeholder="—"
-                        onChange={(e) => set(i, { qty_40ft: e.target.value === '' ? null : Number(e.target.value) })}
-                      />
+                      {charge ? none : (
+                        <Input
+                          type="number" min={0} step="any"
+                          value={it.qty_40ft ?? ''}
+                          placeholder="—"
+                          onChange={(e) => set(i, { qty_40ft: e.target.value === '' ? null : Number(e.target.value) })}
+                        />
+                      )}
                     </td>
                   )}
                   {show('total_pcs') && (
                     <td className="py-2 pr-2">
                       {/* Boxes × pcs/box fills this in, but it stays editable —
                           a part-filled last box is normal. */}
-                      <Input
-                        type="number" min={0} step="any"
-                        value={it.total_pcs ?? ''}
-                        placeholder="—"
-                        onChange={(e) => set(i, { total_pcs: e.target.value === '' ? null : Number(e.target.value) })}
-                      />
+                      {charge ? none : (
+                        <Input
+                          type="number" min={0} step="any"
+                          value={it.total_pcs ?? ''}
+                          placeholder="—"
+                          onChange={(e) => set(i, { total_pcs: e.target.value === '' ? null : Number(e.target.value) })}
+                        />
+                      )}
                     </td>
                   )}
                   {show('qty') && (
                     <td className="py-2 pr-2">
-                      <Input
-                        type="number" min={0} step="any"
-                        value={it.qty ?? ''}
-                        placeholder="—"
-                        onChange={(e) => set(i, { qty: e.target.value === '' ? null : Number(e.target.value) })}
-                      />
+                      {charge ? none : (
+                        <Input
+                          type="number" min={0} step="any"
+                          value={it.qty ?? ''}
+                          placeholder="—"
+                          onChange={(e) => set(i, { qty: e.target.value === '' ? null : Number(e.target.value) })}
+                        />
+                      )}
                     </td>
                   )}
                   {show('color') && (
                     <td className="py-2 pr-2">
-                      <Input value={it.color ?? ''} onChange={(e) => set(i, { color: e.target.value })} placeholder="Natural" />
+                      {charge ? none : (
+                        <Input value={it.color ?? ''} onChange={(e) => set(i, { color: e.target.value })} placeholder="Natural" />
+                      )}
                     </td>
                   )}
                   {show('unit_price') && (
                     <td className="py-2 pr-2">
-                      <Input type="number" min={0} step="any" value={it.unit_price || ''} onChange={(e) => set(i, { unit_price: Number(e.target.value) })} />
+                      {/* On a charge line this is the charge itself — there is
+                          no quantity for it to be a rate against. */}
+                      <Input
+                        type="number" min={0} step="any"
+                        value={it.unit_price || ''}
+                        title={charge ? 'The amount of the charge' : undefined}
+                        onChange={(e) => set(i, { unit_price: Number(e.target.value) })}
+                      />
                     </td>
                   )}
                   <td className="py-2 pr-2">
-                    <Select value={it.unit} onChange={(e) => set(i, { unit: e.target.value })}>
-                      {unitOptions(it.unit).map((u) => <option key={u} value={u}>{u}</option>)}
-                    </Select>
+                    {charge ? none : (
+                      <Select value={it.unit} onChange={(e) => set(i, { unit: e.target.value })}>
+                        {unitOptions(it.unit).map((u) => <option key={u} value={u}>{u}</option>)}
+                      </Select>
+                    )}
                   </td>
                   {taxVisible && (
                     <td className="py-2 pr-2">
@@ -474,6 +521,7 @@ export default function LineItemsEditor({
         {show('qty')
           ? 'Qty × Unit Price is the billed amount (e.g. KGS × price/kg). With a per-piece or per-1000 rate, Boxes × Pcs/Box sets the quantity instead.'
           : 'Boxes × Pcs/Box gives Total Qty, and Total Qty at the Unit Price gives the Amount — so with a per-1000 rate Total Qty is pieces, and with a per-kg rate it is kilos. Leave it empty for a price-only document.'}
+        {' '}Pick <em>charge</em> in the Product column for freight, insurance or tooling: it bills at the price you type and is left out of the quantity totals.
       </p>
     </div>
   );

@@ -59,17 +59,18 @@ function getFull(id: number) {
 function saveItems(plId: number, items: PlItemInput[], invoiceId?: number | null) {
   if (invoiceId) {
     const invItems = db.prepare(
-      'SELECT description, hsn_code, qty, unit FROM invoice_items WHERE invoice_id = ? ORDER BY sort_order, id'
-    ).all(invoiceId) as { description: string; hsn_code: string; qty: number | null; unit: string }[];
+      'SELECT description, hsn_code, qty, unit, is_charge FROM invoice_items WHERE invoice_id = ? ORDER BY sort_order, id'
+    ).all(invoiceId) as { description: string; hsn_code: string; qty: number | null; unit: string; is_charge: number }[];
     db.prepare('DELETE FROM packing_list_items WHERE packing_list_id = ?').run(plId);
     const insLinked = db.prepare(
-      `INSERT INTO packing_list_items (packing_list_id, description, hsn_code, qty, unit, packages, dimensions, gross_weight, net_weight, custom1, custom2, custom3, sort_order)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO packing_list_items (packing_list_id, description, hsn_code, qty, unit, packages, dimensions, gross_weight, net_weight, is_charge, custom1, custom2, custom3, sort_order)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     );
     invItems.forEach((inv, i) => {
       const p = items[i] ?? {};
       insLinked.run(plId, inv.description, inv.hsn_code ?? '', inv.qty ?? null, inv.unit ?? 'unit',
         String(p.packages ?? ''), String(p.dimensions ?? ''), Number(p.gross_weight ?? 0), Number(p.net_weight ?? 0),
+        inv.is_charge ? 1 : 0,
         String(p.custom1 ?? ''), String(p.custom2 ?? ''), String(p.custom3 ?? ''), i);
     });
     return;
