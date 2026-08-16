@@ -5,6 +5,7 @@ import { api } from '../api/client';
 import type { Order, OrderItem, Customer, TaxType, ColumnConfig } from '../types';
 import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card } from '../components/ui';
 import CompanySelect from '../components/CompanySelect';
+import { DocNumber, IncoTermsInput } from '../components/DocFields';
 import LineItemsEditor from '../components/LineItemsEditor';
 import ColumnsControl from '../components/ColumnsControl';
 import NotePresetPicker from '../components/NotePresetPicker';
@@ -216,8 +217,11 @@ export default function OrderFormPage() {
         >
           <div className="grid grid-cols-3 gap-3">
             {!isNew && (
-              <Field label="Order Number (editable)">
-                <Input value={draft.number ?? ''} onChange={(e) => set({ number: e.target.value })} />
+              <Field label="Order Number">
+                <DocNumber
+                  value={draft.number}
+                  title="Assigned from this company's numbering series when the order was created"
+                />
               </Field>
             )}
             <Field label="Customer *">
@@ -276,7 +280,9 @@ export default function OrderFormPage() {
             <Field label="Freight Terms"><Input value={draft.freight_terms} onChange={(e) => set({ freight_terms: e.target.value })} placeholder="e.g. Ex-works, To pay" /></Field>
             {!!draft.is_export && (
               <>
-                <Field label="INCO Terms"><Input value={draft.inco_terms} onChange={(e) => set({ inco_terms: e.target.value })} /></Field>
+                <Field label="INCO Terms">
+                  <IncoTermsInput value={draft.inco_terms} onChange={(v) => set({ inco_terms: v })} />
+                </Field>
                 <Field label="Containers"><Input value={draft.container_count} onChange={(e) => set({ container_count: e.target.value })} placeholder="e.g. 2 X 40ft HQ" /></Field>
               </>
             )}
