@@ -16,6 +16,7 @@ import { settingsRouter } from './routes/settings.js';
 import { companiesRouter } from './routes/companies.js';
 import { customersRouter } from './routes/customers.js';
 import { productsRouter } from './routes/products.js';
+import { mountMasters } from './routes/masters.js';
 import { quotationsRouter } from './routes/quotations.js';
 import { ordersRouter } from './routes/orders.js';
 import { proformasRouter } from './routes/proformas.js';
@@ -58,6 +59,9 @@ app.use('/api/settings', requireAuth, (req, res, next) =>
 app.use('/api/companies', requireAuth, companiesRouter);
 app.use('/api/customers', requireAuth, customersRouter);
 app.use('/api/products', requireAuth, productsRouter);
+// Locations, suppliers, transporters, materials, machines, moulds — described
+// once in routes/masters.ts and mounted here under their own paths.
+mountMasters((path, router) => app.use(path, requireAuth, router));
 app.use('/api/quotations', requireAuth, quotationsRouter);
 app.use('/api/orders', requireAuth, ordersRouter);
 app.use('/api/proformas', requireAuth, proformasRouter);

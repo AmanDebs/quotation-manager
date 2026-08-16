@@ -5,6 +5,7 @@ import { useIsManager } from '../App';
 import type { Product } from '../types';
 import { Button, Input, Textarea, Select, Field, PageHeader, EmptyState, ErrorText, Modal, Card } from '../components/ui';
 import ProductImportModal from '../components/ProductImportModal';
+import RecipeModal from '../components/RecipeModal';
 
 export const UNITS = ['unit', 'kg', 'tonne', 'per 1000', 'box'];
 
@@ -55,6 +56,7 @@ export default function ProductsPage() {
   const queryClient = useQueryClient();
   const [q, setQ] = useState('');
   const [editing, setEditing] = useState<Product | Omit<Product, 'id'> | null>(null);
+  const [recipeFor, setRecipeFor] = useState<Product | null>(null);
   const [importing, setImporting] = useState(false);
   // Anyone may add a product mid-quotation, but changing or bulk-replacing the
   // shared catalogue moves everyone's prices — that stays with the manager.
@@ -134,6 +136,10 @@ export default function ProductsPage() {
                   <td className="py-2 text-right whitespace-nowrap">
                     {isManager ? (
                       <>
+                        {/* The recipe is a different question from the catalogue
+                            entry — what it is made of, not what it sells for —
+                            so it gets its own dialog rather than more fields. */}
+                        <Button variant="ghost" onClick={() => setRecipeFor(p)}>Recipe</Button>
                         <Button variant="ghost" onClick={() => { save.reset(); setEditing(p); }}>Edit</Button>
                         <Button
                           variant="danger"
@@ -209,6 +215,7 @@ export default function ProductsPage() {
       )}
 
       {importing && <ProductImportModal onClose={() => setImporting(false)} />}
+      {recipeFor && <RecipeModal product={recipeFor} onClose={() => setRecipeFor(null)} />}
     </div>
   );
 }

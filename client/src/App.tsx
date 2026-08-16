@@ -19,6 +19,7 @@ import InvoiceFormPage from './pages/InvoiceForm';
 import PackingListsPage from './pages/PackingLists';
 import PackingListFormPage from './pages/PackingListForm';
 import FollowupsPage from './pages/Followups';
+import MastersPage from './pages/Masters';
 import ApprovalsPage from './pages/Approvals';
 import TeamPage from './pages/Team';
 import SettingsPage from './pages/Settings';
@@ -74,6 +75,7 @@ export default function App() {
           <Route path="/packing-lists/new" element={<PackingListFormPage />} />
           <Route path="/packing-lists/:id" element={<PackingListFormPage />} />
           <Route path="/followups" element={<FollowupsPage />} />
+          <Route path="/masters" element={managerOnly(<MastersPage />)} />
           <Route path="/approvals" element={managerOnly(<ApprovalsPage />)} />
           <Route path="/team" element={managerOnly(<TeamPage />)} />
           <Route path="/settings" element={managerOnly(<SettingsPage />)} />

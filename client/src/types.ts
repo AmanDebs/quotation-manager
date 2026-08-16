@@ -74,6 +74,41 @@ export interface Product {
   pcs_per_pack: number | null; qty_20ft: number | null; qty_40ft: number | null;
 }
 
+/* ---------------- Production masters ---------------- */
+
+/** Fields every master shares. Retiring beats deleting — history keeps its row. */
+interface MasterBase { id: number; name: string; notes: string; active: number }
+
+export interface Location extends MasterBase { code: string; address: string }
+export interface Supplier extends MasterBase {
+  contact_person: string; phone: string; email: string;
+  address: string; gstin: string; payment_terms: string;
+}
+export interface Transporter extends MasterBase { phone: string }
+export type MaterialCategory = 'resin' | 'masterbatch' | 'packing' | 'other';
+export interface Material extends MasterBase {
+  category: MaterialCategory; unit: string; hsn_code: string; reorder_level: number;
+}
+export interface Machine extends MasterBase {
+  code: string; location_id: number | null; type: 'moulding' | 'assembly' | 'other';
+}
+export interface Mould extends MasterBase { code: string; cavities: number | null }
+
+/**
+ * One line of a product's recipe — what it consumes per 1000 pieces, because
+ * that is the basis the catalogue is quoted on. A product with no lines has no
+ * recipe, which is not the same as needing nothing.
+ */
+export interface RecipeLine {
+  material_id: number;
+  qty_per_1000: number;
+  wastage_pct: number;
+  /** Filled by the server from the material master; read-only here. */
+  name?: string;
+  category?: string;
+  unit?: string;
+}
+
 export interface ImportField { key: string; label: string; required: boolean }
 
 export interface ImportPreviewRow {

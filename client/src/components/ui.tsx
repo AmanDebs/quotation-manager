@@ -140,6 +140,40 @@ export function ExportTabs({ value, onChange }: { value: string; onChange: (v: s
   );
 }
 
+/**
+ * An underlined tab strip, for a page holding several views of one thing —
+ * the masters page, and the order's Details / Production / Material / Dispatch.
+ * Distinct from `ExportTabs`, which is a segmented *filter* over one list.
+ */
+export function Tabs<T extends string>({
+  value, onChange, tabs, className = '',
+}: {
+  value: T;
+  onChange: (v: T) => void;
+  tabs: { key: T; label: string; badge?: ReactNode }[];
+  className?: string;
+}) {
+  return (
+    <div className={`flex flex-wrap items-center gap-1 border-b border-slate-200 ${className}`}>
+      {tabs.map((t) => (
+        <button
+          key={t.key}
+          onClick={() => onChange(t.key)}
+          aria-current={value === t.key ? 'page' : undefined}
+          className={`-mb-px border-b-2 px-3 py-2 text-sm transition-colors ${
+            value === t.key
+              ? 'border-brand-700 font-semibold text-brand-700'
+              : 'border-transparent text-slate-500 hover:border-slate-300 hover:text-slate-700'
+          }`}
+        >
+          {t.label}
+          {t.badge != null && <span className="ml-1.5 text-xs text-slate-400">{t.badge}</span>}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export function EmptyState({ message }: { message: string }) {
   return <div className="py-10 text-center text-sm text-slate-400">{message}</div>;
 }

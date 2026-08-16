@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { db, transaction } from '../db/connection.js';
 import { requireManager } from '../middleware/auth.js';
 import { IMPORT_FIELDS, buildImport, decodeUpload, identityKey, type BuildOptions } from '../services/productImport.js';
+import { recipeFor } from '../services/recipe.js';
 
 export const productsRouter = Router();
 
@@ -101,6 +102,48 @@ productsRouter.post('/import', requireManager, (req, res) => {
   });
 
   res.json({ ...counts, skipped: result.summary.skip, sheet: result.sheet });
+});
+
+/**
+ * The recipe for one product — what it consumes per 1000 pieces.
+ *
+ * Read openly (the production screens need it), rewritten manager-only and
+ * whole: a recipe is a short list, so delete-and-reinsert inside a transaction
+ * is simpler and safer than diffing, and it is how every item list in this
+ * codebase is saved.
+ */
+productsRouter.get('/:id/materials', (req, res) => {
+  const id = Number(req.params.id);
+  if (!db.prepare('SELECT id FROM products WHERE id = ?').get(id)) {
+    return res.status(404).json({ error: 'Product not found' });
+  }
+  res.json(recipeFor(id));
+});
+
+productsRouter.put('/:id/materials', requireManager, (req, res) => {
+  const id = Number(req.params.id);
+  if (!db.prepare('SELECT id FROM products WHERE id = ?').get(id)) {
+    return res.status(404).json({ error: 'Product not found' });
+  }
+  const rows = Array.isArray(req.body?.items) ? (req.body.items as Record<string, unknown>[]) : [];
+  // A line naming no material is an empty row in the editor, not an error.
+  const lines = rows.filter((r) => Number(r.material_id) > 0);
+  const known = new Set(
+    (db.prepare('SELECT id FROM materials').all() as { id: number }[]).map((m) => m.id)
+  );
+  const unknown = lines.find((r) => !known.has(Number(r.material_id)));
+  if (unknown) return res.status(400).json({ error: 'That material no longer exists' });
+
+  transaction(() => {
+    db.prepare('DELETE FROM product_materials WHERE product_id = ?').run(id);
+    const ins = db.prepare(
+      `INSERT INTO product_materials (product_id, material_id, qty_per_1000, wastage_pct, sort_order)
+       VALUES (?, ?, ?, ?, ?)`
+    );
+    lines.forEach((r, i) =>
+      ins.run(id, Number(r.material_id), Number(r.qty_per_1000) || 0, Number(r.wastage_pct) || 0, i));
+  });
+  res.json(recipeFor(id));
 });
 
 productsRouter.get('/', (req, res) => {

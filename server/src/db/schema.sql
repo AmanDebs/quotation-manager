@@ -516,3 +516,107 @@ CREATE TABLE IF NOT EXISTS sequences (
 -- The unique indexes on document numbers are created in db/connection.ts, not
 -- here: this file runs first on every boot, so an existing database holding
 -- duplicates would fail to start before anything could clean them up.
+
+/* ==================================================================
+   Production masters
+   ------------------------------------------------------------------
+   The factory side of the app. Everything physical — stock, work
+   orders, despatches — names a location, because the real order desk
+   despatches from two plants (Jungalpur and PACK SKRL).
+   ================================================================== */
+
+-- A plant or godown. Stock is held per location, never pooled.
+CREATE TABLE IF NOT EXISTS locations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  code TEXT NOT NULL DEFAULT '',
+  address TEXT NOT NULL DEFAULT '',
+  notes TEXT NOT NULL DEFAULT '',
+  -- Retired rather than deleted, so old work orders keep their plant.
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Who we buy from. order_items.supplier stays free text; purchase orders
+-- point here.
+CREATE TABLE IF NOT EXISTS suppliers (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  contact_person TEXT NOT NULL DEFAULT '',
+  phone TEXT NOT NULL DEFAULT '',
+  email TEXT NOT NULL DEFAULT '',
+  address TEXT NOT NULL DEFAULT '',
+  gstin TEXT NOT NULL DEFAULT '',
+  payment_terms TEXT NOT NULL DEFAULT '',
+  notes TEXT NOT NULL DEFAULT '',
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Who carries it. "Self" is nearly half of the real despatches, so it is
+-- seeded rather than typed every time.
+CREATE TABLE IF NOT EXISTS transporters (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  phone TEXT NOT NULL DEFAULT '',
+  notes TEXT NOT NULL DEFAULT '',
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Raw material and packing. Unit is the stock unit (kg for resin, pcs for
+-- cartons) and is what every ledger entry for this material is read in.
+CREATE TABLE IF NOT EXISTS materials (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  category TEXT NOT NULL DEFAULT 'resin' CHECK (category IN ('resin','masterbatch','packing','other')),
+  unit TEXT NOT NULL DEFAULT 'kg',
+  hsn_code TEXT NOT NULL DEFAULT '',
+  -- Below this, the material wants reordering. 0 = no level set.
+  reorder_level REAL NOT NULL DEFAULT 0,
+  notes TEXT NOT NULL DEFAULT '',
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Moulding machines, belonging to a plant.
+CREATE TABLE IF NOT EXISTS machines (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  code TEXT NOT NULL DEFAULT '',
+  location_id INTEGER REFERENCES locations(id),
+  type TEXT NOT NULL DEFAULT 'moulding' CHECK (type IN ('moulding','assembly','other')),
+  notes TEXT NOT NULL DEFAULT '',
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Moulds. `cavities` is recorded because it is worth knowing, and is
+-- deliberately not used for any capacity arithmetic.
+CREATE TABLE IF NOT EXISTS moulds (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  code TEXT NOT NULL DEFAULT '',
+  cavities INTEGER,
+  notes TEXT NOT NULL DEFAULT '',
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- The recipe: what one product consumes, per 1000 pieces.
+--
+-- Per 1000 because that is the basis the whole catalogue is priced and
+-- quoted on. A 119 g preform is 119000 g — i.e. 119 kg — per 1000 pieces.
+-- A product with no rows here has *no recipe*, which is not the same as
+-- needing nothing; every reader must say so rather than showing zero.
+CREATE TABLE IF NOT EXISTS product_materials (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  material_id INTEGER NOT NULL REFERENCES materials(id),
+  qty_per_1000 REAL NOT NULL DEFAULT 0,
+  -- Expected process loss, added on top of the requirement.
+  wastage_pct REAL NOT NULL DEFAULT 0,
+  sort_order INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_product_materials_product ON product_materials(product_id);

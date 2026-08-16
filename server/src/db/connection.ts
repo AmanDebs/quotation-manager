@@ -204,6 +204,29 @@ if (!seqCols.some((c) => c.name === 'company_id')) {
 }
 
 /**
+ * The factory side needs one location to exist before anything physical can be
+ * recorded against it, and a machine or a stock figure with no plant is not
+ * worth having. Rather than invent a plant name, the first one is named after
+ * the default company; renaming it is a one-field edit.
+ *
+ * "Self" is seeded as a transporter because it is nearly half of the real
+ * despatches — an own-vehicle delivery is still a delivery.
+ */
+const locationCount = db.prepare('SELECT COUNT(*) AS c FROM locations').get() as { c: number };
+if (locationCount.c === 0) {
+  const co = db.prepare('SELECT company_name, address, city FROM companies WHERE is_default = 1').get() as
+    { company_name?: string; address?: string; city?: string } | undefined;
+  db.prepare('INSERT INTO locations (name, address) VALUES (?, ?)').run(
+    co?.company_name?.trim() || 'Main Plant',
+    [co?.address, co?.city].filter(Boolean).join(', ')
+  );
+}
+const transporterCount = db.prepare('SELECT COUNT(*) AS c FROM transporters').get() as { c: number };
+if (transporterCount.c === 0) {
+  db.prepare("INSERT INTO transporters (name, notes) VALUES ('Self', 'Own vehicle')").run();
+}
+
+/**
  * A document number is an identity, not a label — it goes on paperwork the
  * customer and the tax authority both keep. Enforce that in the database, so a
  * manual override cannot quietly reuse one. Quotations key on (number,
