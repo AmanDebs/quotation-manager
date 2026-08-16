@@ -5,6 +5,7 @@ import { api } from '../api/client';
 import type { Invoice, Customer, LineItem, TaxType, Settings, ColumnConfig, PackingListItem } from '../types';
 import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, StatusBadge } from '../components/ui';
 import CompanySelect from '../components/CompanySelect';
+import { DocNumber, IncoTermsInput } from '../components/DocFields';
 import LineItemsEditor from '../components/LineItemsEditor';
 import FollowupButton from '../components/FollowupButton';
 import PaymentsCard from '../components/PaymentsCard';
@@ -270,8 +271,11 @@ export default function InvoiceFormPage() {
         <Card title="Details">
           <div className="grid grid-cols-3 gap-3">
             {!isNew && (
-              <Field label="Invoice Number (editable)">
-                <Input value={draft.number ?? ''} onChange={(e) => set({ number: e.target.value })} />
+              <Field label="Invoice Number">
+                <DocNumber
+                  value={draft.number}
+                  title="Assigned from this company's numbering series when the invoice was created"
+                />
               </Field>
             )}
             <Field label="Buyer (Customer) *">
@@ -301,9 +305,7 @@ export default function InvoiceFormPage() {
               </Select>
             </Field>
             <Field label="INCO Terms">
-              <Select value={draft.inco_terms} onChange={(e) => set({ inco_terms: e.target.value })}>
-                {['', 'EXW', 'FCA', 'FOB', 'CFR', 'CIF', 'CPT', 'CIP', 'DAP', 'DPU', 'DDP'].map((t) => <option key={t} value={t}>{t || '— select —'}</option>)}
-              </Select>
+              <IncoTermsInput value={draft.inco_terms} onChange={(v) => set({ inco_terms: v })} />
             </Field>
             <Field label="Payment Terms"><Input value={draft.payment_terms} onChange={(e) => set({ payment_terms: e.target.value })} /></Field>
             <Field label="Method of Despatch">
@@ -399,8 +401,11 @@ export default function InvoiceFormPage() {
           </p>
           <div className="mb-3 grid grid-cols-3 gap-3">
             {!isNew && (
-              <Field label="Packing List Number (editable)">
-                <Input value={draft.packing.number ?? ''} onChange={(e) => setPacking({ number: e.target.value })} />
+              <Field label="Packing List Number">
+                <DocNumber
+                  value={draft.packing.number}
+                  title="Assigned from this company's packing-list series when the invoice was first saved"
+                />
               </Field>
             )}
             <Field label="Packing List Date">

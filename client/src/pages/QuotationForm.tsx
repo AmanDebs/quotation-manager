@@ -5,6 +5,7 @@ import { api } from '../api/client';
 import type { Quotation, Customer, LineItem, TaxType, ColumnConfig } from '../types';
 import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, StatusBadge } from '../components/ui';
 import CompanySelect from '../components/CompanySelect';
+import { DocNumber, IncoTermsInput } from '../components/DocFields';
 import LineItemsEditor from '../components/LineItemsEditor';
 import FollowupButton from '../components/FollowupButton';
 import ApprovalStrip from '../components/ApprovalStrip';
@@ -255,8 +256,11 @@ export default function QuotationFormPage() {
         >
           <div className="grid grid-cols-3 gap-3">
             {!isNew && (
-              <Field label="Quotation Number (editable)">
-                <Input disabled={readOnly} value={draft.number ?? ''} onChange={(e) => set({ number: e.target.value })} />
+              <Field label="Quotation Number">
+                <DocNumber
+                  value={draft.number}
+                  title="Assigned from this company's numbering series when the quotation was created"
+                />
               </Field>
             )}
             <Field label="Customer *">
@@ -291,7 +295,12 @@ export default function QuotationFormPage() {
             <Field label="Delivery Timeline"><Input disabled={readOnly} value={draft.delivery_terms} onChange={(e) => set({ delivery_terms: e.target.value })} placeholder="e.g. 4–6 weeks from order" /></Field>
             <Field label="Prepared By"><Input disabled={readOnly} value={draft.prepared_by} onChange={(e) => set({ prepared_by: e.target.value })} placeholder="Who prepared this quote" /></Field>
             <Field label="INCO Terms / Basis">
-              <Input disabled={readOnly} value={draft.inco_terms} onChange={(e) => set({ inco_terms: e.target.value })} placeholder="e.g. CIF Dakar Port" />
+              <IncoTermsInput
+                disabled={readOnly}
+                value={draft.inco_terms}
+                onChange={(v) => set({ inco_terms: v })}
+                placeholder="e.g. CIF Dakar Port, or type your own"
+              />
             </Field>
             <Field label="Containers"><Input disabled={readOnly} value={draft.container_count} onChange={(e) => set({ container_count: e.target.value })} placeholder="e.g. 5 X 40ft HQ" /></Field>
             <div />
