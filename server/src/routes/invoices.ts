@@ -5,6 +5,7 @@ import { computeTotals, round2, type LineItemInput } from '../services/totals.js
 import type { AuthedRequest } from '../middleware/auth.js';
 import { scopeClause, canAccessCustomer } from '../middleware/scope.js';
 import { resolveCompanyId } from '../services/companies.js';
+import { syncOrderStatus } from '../services/orderStatus.js';
 import { submit, decide, resetApprovalOnEdit, blockUnapprovedTransition } from '../services/approval.js';
 import { invoiceReceivable } from '../services/receivables.js';
 
@@ -277,6 +278,13 @@ invoicesRouter.post('/', (req: AuthedRequest, res) => {
     syncPackingList(id, req.user!.id, body.packing as PackingInput | undefined);
     return id;
   });
+  // Billing is a fact about the order behind it, whether the invoice was raised
+  // from the order directly or through a proforma.
+  const orderId = db.prepare(
+    `SELECT COALESCE(order_id, (SELECT order_id FROM proforma_invoices WHERE id = pi_id)) AS o
+     FROM commercial_invoices WHERE id = ?`
+  ).get(id) as { o: number | null };
+  if (orderId?.o) syncOrderStatus(orderId.o);
   res.status(201).json(getFull(id));
 });
 

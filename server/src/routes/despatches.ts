@@ -3,6 +3,7 @@ import { db, transaction } from '../db/connection.js';
 import { round2 } from '../services/totals.js';
 import type { AuthedRequest } from '../middleware/auth.js';
 import { scopeClause, canAccessCustomer } from '../middleware/scope.js';
+import { syncOrderStatus } from '../services/orderStatus.js';
 
 export const despatchesRouter = Router();
 
@@ -155,6 +156,8 @@ despatchesRouter.post('/', (req: AuthedRequest, res) => {
     return despatchId;
   });
 
+  // Goods leaving is the clearest fact there is about an order's progress.
+  syncOrderStatus(order.id);
   res.status(201).json(withItems(accessible(req, id)!));
 });
 

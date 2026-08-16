@@ -4,6 +4,7 @@ import type { AuthedRequest } from '../middleware/auth.js';
 import { scopeClause } from '../middleware/scope.js';
 import { receivedByInvoice } from '../services/receivables.js';
 import { defaultCompanyId } from '../services/companies.js';
+import { shortfall, onHandAll } from '../services/stock.js';
 
 export const dashboardRouter = Router();
 
@@ -251,6 +252,11 @@ dashboardRouter.get('/', (req: AuthedRequest, res) => {
   // Everything that wants a human today, gathered in one place so the dashboard
   // can lead with it instead of burying it among the charts. These ignore the
   // date range on purpose — an overdue follow-up from March still needs doing.
+  const reorderLevels = new Map(
+    (db.prepare('SELECT id, reorder_level FROM materials').all() as { id: number; reorder_level: number }[])
+      .map((m) => [m.id, m.reorder_level])
+  );
+
   const attention = {
     overdueFollowups: followups.overdue.length,
     followupsToday: followups.today.length,
@@ -263,6 +269,35 @@ dashboardRouter.get('/', (req: AuthedRequest, res) => {
          AND validity_date <> '' AND validity_date < ?${and}`,
       today, ...p
     ),
+    // Jobs past their planned finish with work still to do. Scoped through the
+    // order like everything else on the floor; the company filter applies via
+    // the order too, since a work order has no company of its own to filter on
+    // beyond the one it inherited.
+    overdueWorkOrders: one(
+      `SELECT COUNT(*) AS c FROM work_orders w
+       JOIN orders o ON o.id = w.order_id
+       WHERE w.status NOT IN ('done','cancelled')
+         AND w.planned_end <> '' AND w.planned_end < ?
+         ${scope.sql ? ` AND o.${scope.sql}` : ''}${companyId ? ' AND o.company_id = ?' : ''}`,
+      today, ...scope.params, ...(companyId ? [companyId] : [])
+    ),
+    // Goods that left the plant with no invoice against them yet — the reason
+    // despatch is recorded separately from billing in the first place.
+    unbilledDespatches: one(
+      `SELECT COUNT(*) AS c FROM despatches d
+       JOIN orders o ON o.id = d.order_id
+       WHERE d.invoice_id IS NULL
+         ${scope.sql ? ` AND o.${scope.sql}` : ''}${companyId ? ' AND o.company_id = ?' : ''}`,
+      ...scope.params, ...(companyId ? [companyId] : [])
+    ),
+    // Material short across the open order book. Group-wide and unscoped by
+    // design: the store is not the customer's, and a buyer needs the whole
+    // picture to raise one purchase order rather than several.
+    materialShort: shortfall().rows.filter((r) => r.short > 0).length,
+    materialBelowReorder: onHandAll().filter((r) => {
+      const level = reorderLevels.get(r.material_id) ?? 0;
+      return level > 0 && r.qty < level;
+    }).length,
   };
 
   res.json({

@@ -3,6 +3,7 @@ import { db, transaction } from '../db/connection.js';
 import { nextNumber } from '../services/numbering.js';
 import { progressFor, progressForMany } from '../services/production.js';
 import { requirementFor } from '../services/recipe.js';
+import { syncOrderStatus } from '../services/orderStatus.js';
 import type { AuthedRequest } from '../middleware/auth.js';
 import { scopeClause, canAccessCustomer } from '../middleware/scope.js';
 import { resolveCompanyId } from '../services/companies.js';
@@ -154,6 +155,8 @@ workOrdersRouter.post('/', (req: AuthedRequest, res) => {
     return Number(info.lastInsertRowid);
   });
 
+  // Raising a job is a fact about the order, so the order's status follows it.
+  syncOrderStatus(order.id);
   res.status(201).json(getFull(req, id));
 });
 
@@ -241,6 +244,8 @@ workOrdersRouter.post('/:id/entries', (req: AuthedRequest, res) => {
   ).run(id, String(body.date), String(body.shift ?? ''), ok, reject,
     String(body.operator ?? ''), String(body.notes ?? ''), req.user!.id);
 
+  const job = db.prepare('SELECT order_id FROM work_orders WHERE id = ?').get(id) as { order_id: number };
+  syncOrderStatus(job.order_id);
   res.status(201).json(getFull(req, id));
 });
 

@@ -41,6 +41,12 @@ interface DashboardData {
   attention: {
     overdueFollowups: number; followupsToday: number; overdueOrders: number;
     overdueInvoices: number; pendingApprovals: number; expiringQuotations: number;
+    // The factory side. Optional because a server that has not been redeployed
+    // yet will not send them, and a NaN in the strip is worse than a zero.
+    // Material figures are group-wide on purpose — the store is not any one
+    // customer's, and a buyer needs the whole picture.
+    overdueWorkOrders?: number; unbilledDespatches?: number;
+    materialShort?: number; materialBelowReorder?: number;
   };
 }
 
@@ -169,12 +175,21 @@ export default function DashboardPage() {
 
   const pendingCount = data.followups.overdue.length + data.followups.today.length;
   // Defensive: a response from an older server build would lack these.
-  const a = data.attention ?? {
+  // Defensive: a response from an older server build would lack these.
+  const raw = data.attention ?? {
     overdueFollowups: 0, followupsToday: 0, overdueOrders: 0,
     overdueInvoices: 0, pendingApprovals: 0, expiringQuotations: 0,
   };
+  const a = {
+    ...raw,
+    overdueWorkOrders: raw.overdueWorkOrders ?? 0,
+    unbilledDespatches: raw.unbilledDespatches ?? 0,
+    materialShort: raw.materialShort ?? 0,
+    materialBelowReorder: raw.materialBelowReorder ?? 0,
+  };
   const attentionTotal = a.overdueFollowups + a.followupsToday + a.overdueOrders + a.overdueInvoices
-    + a.expiringQuotations + (isManager ? a.pendingApprovals : 0);
+    + a.expiringQuotations + a.overdueWorkOrders + a.unbilledDespatches + a.materialShort
+    + a.materialBelowReorder + (isManager ? a.pendingApprovals : 0);
 
   // Headline money, all in the selected currency.
   const cur = activeCurrency;
@@ -242,6 +257,12 @@ export default function DashboardPage() {
             <AttentionChip to="/followups" count={a.followupsToday} label="follow-ups due today" tone="amber" />
             <AttentionChip to="/quotations" count={a.expiringQuotations} label="quotations past validity" tone="amber" />
             {isManager && <AttentionChip to="/approvals" count={a.pendingApprovals} label="awaiting your approval" tone="amber" />}
+            {/* The floor. Short material is red because it stops production;
+                a reorder level is a warning, not a stoppage. */}
+            <AttentionChip to="/work-orders" count={a.overdueWorkOrders} label="jobs past planned finish" tone="red" />
+            <AttentionChip to="/stock" count={a.materialShort} label="materials short for open jobs" tone="red" />
+            <AttentionChip to="/stock" count={a.materialBelowReorder} label="materials below reorder level" tone="amber" />
+            <AttentionChip to="/despatches" count={a.unbilledDespatches} label="despatches not yet billed" tone="amber" />
           </div>
         )}
       </div>
