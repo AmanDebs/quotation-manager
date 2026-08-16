@@ -1,6 +1,6 @@
 import { db } from '../db/connection.js';
 
-type DocType = 'quotation' | 'order' | 'proforma' | 'invoice' | 'packing_list';
+type DocType = 'quotation' | 'order' | 'proforma' | 'invoice' | 'packing_list' | 'work_order';
 
 /** Indian fiscal year (April–March) as "25-26". */
 export function fiscalYear(date = new Date()): string {
@@ -18,6 +18,9 @@ const patternColumn: Record<DocType, { std: string; export?: string }> = {
   proforma: { std: 'pi_pattern', export: 'pi_export_pattern' },
   invoice: { std: 'inv_pattern', export: 'inv_export_pattern' },
   packing_list: { std: 'pl_pattern' },
+  // Internal, so no export/domestic split — the floor does not care who the
+  // buyer is, and a second series would only make the numbers harder to trace.
+  work_order: { std: 'wo_pattern' },
 };
 
 /**

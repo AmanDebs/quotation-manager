@@ -109,6 +109,63 @@ export interface RecipeLine {
   unit?: string;
 }
 
+/* ---------------- Production ---------------- */
+
+export type WorkOrderStatus = 'planned' | 'released' | 'running' | 'paused' | 'done' | 'cancelled';
+
+/** All derived on the server from the shift entries — never stored. */
+export interface Progress {
+  produced: number;
+  rejected: number;
+  balance: number;
+  reject_pct: number | null;
+  entry_count: number;
+}
+
+export interface ProductionEntry {
+  id: number;
+  work_order_id: number;
+  date: string;
+  shift: string;
+  qty_ok: number;
+  qty_reject: number;
+  operator: string;
+  notes: string;
+  created_by_name?: string | null;
+}
+
+export interface WorkOrder {
+  id: number; number: string; company_id?: number;
+  order_id: number;
+  /** Position of the order line this job is against. */
+  order_line: number;
+  product_id: number | null;
+  description: string;
+  /** Pieces to make — the floor counts pieces whatever the line is billed in. */
+  qty_planned: number;
+  location_id: number | null; machine_id: number | null; mould_id: number | null;
+  planned_start: string; planned_end: string;
+  status: WorkOrderStatus;
+  notes: string;
+  order_number?: string; customer_id?: number; customer_name?: string;
+  product_name?: string | null;
+  location_name?: string | null; machine_name?: string | null; mould_name?: string | null;
+  created_by_name?: string | null;
+  progress?: Progress;
+  entries?: ProductionEntry[];
+  /** `has_recipe: false` means unanswerable — show "not costed", never zero. */
+  material?: { has_recipe: boolean; lines: { material_id: number; name: string; unit: string; qty: number }[] };
+}
+
+/** Production against one order line, summed over its work orders. */
+export interface LineProduction {
+  planned: number;
+  produced: number;
+  rejected: number;
+  balance: number;
+  work_orders: number;
+}
+
 export interface ImportField { key: string; label: string; required: boolean }
 
 export interface ImportPreviewRow {
@@ -190,6 +247,8 @@ export interface OrderItem extends LineItem {
   /** Derived on the server from downstream invoices. */
   qty_dispatched?: number;
   qty_pending?: number;
+  /** Derived from the work orders raised against this line. */
+  production?: LineProduction;
 }
 
 export interface Order {

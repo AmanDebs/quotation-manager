@@ -51,6 +51,7 @@ CREATE TABLE IF NOT EXISTS companies (
   pl_pattern TEXT NOT NULL DEFAULT 'PL/{FY}/{SEQ}',
   order_pattern TEXT NOT NULL DEFAULT 'SO/{FY}/{SEQ}',
   order_export_pattern TEXT NOT NULL DEFAULT 'SO-EX/{FY}/{SEQ}',
+  wo_pattern TEXT NOT NULL DEFAULT 'WO/{FY}/{SEQ}',
   -- The one a document falls back to when neither it nor its customer names one.
   is_default INTEGER NOT NULL DEFAULT 0,
   active INTEGER NOT NULL DEFAULT 1,
@@ -91,6 +92,7 @@ CREATE TABLE IF NOT EXISTS settings (
   pl_pattern TEXT NOT NULL DEFAULT 'PL/{FY}/{SEQ}',
   order_pattern TEXT NOT NULL DEFAULT 'SO/{FY}/{SEQ}',
   order_export_pattern TEXT NOT NULL DEFAULT 'SO-EX/{FY}/{SEQ}',
+  wo_pattern TEXT NOT NULL DEFAULT 'WO/{FY}/{SEQ}',
   note_presets TEXT NOT NULL DEFAULT '[]'
 );
 INSERT OR IGNORE INTO settings (id) VALUES (1);
@@ -620,3 +622,57 @@ CREATE TABLE IF NOT EXISTS product_materials (
 );
 
 CREATE INDEX IF NOT EXISTS idx_product_materials_product ON product_materials(product_id);
+
+/* ==================================================================
+   Production
+   ------------------------------------------------------------------
+   A work order is one job on the floor: make this much of this line
+   of this sales order. Progress is never stored — it is the sum of
+   the day entries below, the same rule dispatch and receivables use.
+   ================================================================== */
+
+CREATE TABLE IF NOT EXISTS work_orders (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  number TEXT NOT NULL,
+  company_id INTEGER NOT NULL DEFAULT 1 REFERENCES companies(id),
+  -- Every job belongs to a sales order, which is also what decides who may
+  -- see it: the scope rules run through the order's customer. Make-to-stock
+  -- would need its own answer to that and is deliberately not modelled yet.
+  order_id INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+  -- Position of the order line this job is against — the same index-matching
+  -- rule syncPackingList() and dispatchProgress() use.
+  order_line INTEGER NOT NULL DEFAULT 0,
+  product_id INTEGER REFERENCES products(id),
+  description TEXT NOT NULL DEFAULT '',
+  -- Pieces to make. Pieces, not billing units: the floor counts pieces.
+  qty_planned REAL NOT NULL DEFAULT 0,
+  location_id INTEGER REFERENCES locations(id),
+  machine_id INTEGER REFERENCES machines(id),
+  mould_id INTEGER REFERENCES moulds(id),
+  planned_start TEXT NOT NULL DEFAULT '',
+  planned_end TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'planned'
+    CHECK (status IN ('planned','released','running','paused','done','cancelled')),
+  notes TEXT NOT NULL DEFAULT '',
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_work_orders_order ON work_orders(order_id);
+
+-- One shift's output. Several rows a day is normal, and deleting one has to
+-- reduce the progress — which it does, because progress is only ever a sum.
+CREATE TABLE IF NOT EXISTS production_entries (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  work_order_id INTEGER NOT NULL REFERENCES work_orders(id) ON DELETE CASCADE,
+  date TEXT NOT NULL,
+  shift TEXT NOT NULL DEFAULT '',
+  qty_ok REAL NOT NULL DEFAULT 0,
+  qty_reject REAL NOT NULL DEFAULT 0,
+  operator TEXT NOT NULL DEFAULT '',
+  notes TEXT NOT NULL DEFAULT '',
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_production_entries_wo ON production_entries(work_order_id);

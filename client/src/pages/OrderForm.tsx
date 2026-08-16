@@ -2,10 +2,11 @@ import { useEffect, useState } from 'react';
 import { useNavigate, useParams, useSearchParams, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
-import type { Order, OrderItem, Customer, TaxType, ColumnConfig } from '../types';
-import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card } from '../components/ui';
+import type { Order, OrderItem, Customer, TaxType, ColumnConfig, WorkOrder } from '../types';
+import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, Tabs } from '../components/ui';
 import CompanySelect from '../components/CompanySelect';
 import { DocNumber, IncoTermsInput } from '../components/DocFields';
+import ProductionTab from '../components/ProductionTab';
 import LineItemsEditor from '../components/LineItemsEditor';
 import ColumnsControl from '../components/ColumnsControl';
 import NotePresetPicker from '../components/NotePresetPicker';
@@ -84,6 +85,17 @@ export default function OrderFormPage() {
 
   const [draft, setDraft] = useState<Draft>(emptyDraft());
   const [prefilled, setPrefilled] = useState(false);
+  const [tab, setTab] = useState<'details' | 'production'>('details');
+
+  // Jobs still to finish, shown on the tab so the floor's state is visible
+  // without opening it. Loaded here rather than in the tab so the count is
+  // there before the tab is ever clicked.
+  const { data: jobs = [] } = useQuery({
+    queryKey: ['work-orders', String(id)],
+    queryFn: () => api.get<WorkOrder[]>(`/api/work-orders?order_id=${id}`),
+    enabled: !isNew,
+  });
+  const openJobs = jobs.filter((w) => !['done', 'cancelled'].includes(w.status)).length;
 
   useEffect(() => {
     if (existing) {
@@ -198,7 +210,23 @@ export default function OrderFormPage() {
         </div>
       )}
 
-      <div className="space-y-4">
+      {/* Tabs only once the order exists: production has nothing to attach to
+          until there are saved lines to raise a job against. */}
+      {!isNew && (
+        <Tabs
+          className="mb-4"
+          value={tab}
+          onChange={setTab}
+          tabs={[
+            { key: 'details', label: 'Details' },
+            { key: 'production', label: 'Production', badge: openJobs || undefined },
+          ]}
+        />
+      )}
+
+      {tab === 'production' && !isNew && existing && <ProductionTab order={existing} />}
+
+      <div className={`space-y-4 ${tab === 'details' ? '' : 'hidden'}`}>
         <Card
           title="Order Details"
           actions={

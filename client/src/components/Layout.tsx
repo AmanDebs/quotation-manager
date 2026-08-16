@@ -19,6 +19,7 @@ const nav = [
   { to: '/followups', label: 'Follow-ups', icon: '🔔' },
   { to: '/customers', label: 'Customers', icon: '🏢' },
   { to: '/products', label: 'Products', icon: '🏷️' },
+  { to: '/work-orders', label: 'Work Orders', icon: '🔧' },
   { to: '/container-planner', label: 'Container Planner', icon: '🚢' },
   // The factory side. Masters are set up once and rarely touched, so they sit
   // low in the list beside the other manager-only pages.

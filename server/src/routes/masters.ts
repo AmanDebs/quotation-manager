@@ -145,6 +145,7 @@ export const MASTERS: MasterConfig[] = [
     ],
     guards: [
       { sql: 'SELECT COUNT(*) AS c FROM machines WHERE location_id = ?', message: 'Machines belong to this location — move or retire them first' },
+      { sql: 'SELECT COUNT(*) AS c FROM work_orders WHERE location_id = ?', message: 'Work orders were run at this location — retire it instead of deleting' },
     ],
   },
   {
@@ -204,6 +205,9 @@ export const MASTERS: MasterConfig[] = [
       { name: 'notes', kind: 'text' },
       activeFlag,
     ],
+    guards: [
+      { sql: 'SELECT COUNT(*) AS c FROM work_orders WHERE machine_id = ?', message: 'Jobs have been run on this machine — retire it instead of deleting' },
+    ],
   },
   {
     path: 'moulds',
@@ -215,6 +219,9 @@ export const MASTERS: MasterConfig[] = [
       { name: 'cavities', kind: 'int' },
       { name: 'notes', kind: 'text' },
       activeFlag,
+    ],
+    guards: [
+      { sql: 'SELECT COUNT(*) AS c FROM work_orders WHERE mould_id = ?', message: 'Jobs have been run with this mould — retire it instead of deleting' },
     ],
   },
 ];

@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { db, transaction } from '../db/connection.js';
 import { nextNumber } from '../services/numbering.js';
 import { computeTotals, round2, type LineItemInput } from '../services/totals.js';
+import { productionByOrder } from '../services/production.js';
 import type { AuthedRequest } from '../middleware/auth.js';
 import { scopeClause, canAccessCustomer } from '../middleware/scope.js';
 import { resolveCompanyId } from '../services/companies.js';
@@ -80,7 +81,15 @@ function getFull(id: number) {
   const items = db.prepare('SELECT * FROM order_items WHERE order_id = ? ORDER BY sort_order, id').all(id) as
     Record<string, unknown>[];
   const progress = dispatchProgress(id, items as unknown as { qty: number | null; unit_price: number }[]);
-  order.items = items.map((it, i) => ({ ...it, ...progress.perLine[i] }));
+  // Production sits beside dispatch on every line, keyed by position like the
+  // rest of the chain. A line with no work order reports `work_orders: 0`, so
+  // the screen can say "not started" rather than "nothing made".
+  const production = productionByOrder(id);
+  order.items = items.map((it, i) => ({
+    ...it,
+    ...progress.perLine[i],
+    production: production.get(i) ?? { planned: 0, produced: 0, rejected: 0, balance: 0, work_orders: 0 },
+  }));
   order.column_config = JSON.parse(String(order.column_config || '{}'));
   order.dispatched_value = progress.dispatched_value;
   order.pending_value = progress.pending_value;
@@ -331,6 +340,12 @@ ordersRouter.delete('/:id', (req: AuthedRequest, res) => {
             (SELECT COUNT(*) FROM commercial_invoices WHERE order_id = ?) AS c`
   ).get(id, id) as { c: number };
   if (used.c > 0) return res.status(409).json({ error: 'This order has documents raised against it and cannot be deleted' });
+  // work_orders cascades on order_id, so without this the delete would take a
+  // job and its shift entries with it — a day's production, gone quietly.
+  const jobs = db.prepare('SELECT COUNT(*) AS c FROM work_orders WHERE order_id = ?').get(id) as { c: number };
+  if (jobs.c > 0) {
+    return res.status(409).json({ error: `This order has ${jobs.c} work order${jobs.c === 1 ? '' : 's'} against it and cannot be deleted` });
+  }
   transaction(() => {
     db.prepare('DELETE FROM order_items WHERE order_id = ?').run(id);
     db.prepare('DELETE FROM orders WHERE id = ?').run(id);
