@@ -12,7 +12,7 @@ const METHODS = ['Bank Transfer', 'Letter of Credit', 'Cheque', 'Cash', 'Other']
  * The linked document's detail query is invalidated so received/balance figures refresh.
  */
 export default function PaymentsCard({
-  docType, docId, currency, payments, received, total, balanceDue,
+  docType, docId, currency, payments, received, total, balanceDue, currencyMismatch,
 }: {
   docType: 'proforma' | 'invoice';
   docId: number;
@@ -21,6 +21,8 @@ export default function PaymentsCard({
   received: number;
   total: number;
   balanceDue?: number;
+  /** Money against this document in another currency, credited to nothing. */
+  currencyMismatch?: { currency: string; amount: number }[];
 }) {
   const queryClient = useQueryClient();
   const [adding, setAdding] = useState(false);
@@ -140,6 +142,21 @@ export default function PaymentsCard({
             <Button variant="secondary" onClick={() => setAdding(false)}>Cancel</Button>
             <Button onClick={() => create.mutate()} disabled={create.isPending || !Number(amount)}>Save Payment</Button>
           </div>
+        </div>
+      )}
+
+      {/* Money in another currency cannot be added to this document's total, and
+          converting it would invent a rate. Shown so it can be corrected rather
+          than quietly ignored — normally the document's currency was changed
+          after the payment was recorded. */}
+      {!!currencyMismatch?.length && (
+        <div className="mb-2 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+          <div className="font-semibold">Not counted: payment in another currency</div>
+          <p className="mt-0.5 text-amber-800">
+            {currencyMismatch.map((m) => `${fmtMoney(m.amount, m.currency)}`).join(', ')}
+            {' '}is recorded against this document, which is billed in {currency}. It is not
+            included in Received. Correct the document's currency, or re-record the payment.
+          </p>
         </div>
       )}
 

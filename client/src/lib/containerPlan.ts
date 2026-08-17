@@ -179,3 +179,49 @@ export function planRequirement(lines: PlanInput[], size: ContainerSize, basis: 
 export function capacityFor(p: { qty_20ft: number | null; qty_40ft: number | null }, size: ContainerSize): number | null {
   return size === '20ft' ? p.qty_20ft : p.qty_40ft;
 }
+
+/** The fields a document line has to offer for its fitment to be worked out. */
+export interface FitmentLine {
+  description?: string;
+  packs?: number | null;
+  pcs_per_pack?: number | null;
+  total_pcs?: number | null;
+  qty_20ft?: number | null;
+  qty_40ft?: number | null;
+  is_charge?: number | boolean;
+}
+
+/** Boxes on a line: what was typed, else derived from the piece count. */
+export function boxesOnLine(it: FitmentLine): number {
+  if (it.packs != null && Number(it.packs) > 0) return Number(it.packs);
+  if (it.total_pcs != null && it.pcs_per_pack != null && Number(it.pcs_per_pack) > 0) {
+    return Number(it.total_pcs) / Number(it.pcs_per_pack);
+  }
+  return 0;
+}
+
+/**
+ * What a document's own lines need, in containers of one size.
+ *
+ * The requirement direction of the planner applied to a document rather than to
+ * a hypothetical mix: these are the goods, how much space are they?
+ *
+ * Charge lines are excluded outright — freight is not something that goes in a
+ * box, the same call `goodsOnly()` makes on the PDFs. Lines are keyed by
+ * position rather than by product, because a custom line has no product id and
+ * still occupies real space.
+ */
+export function fitmentPlan(items: FitmentLine[], size: ContainerSize): PlanResult {
+  const lines: PlanInput[] = items
+    .map((it, i) => ({ it, i }))
+    .filter(({ it }) => !it.is_charge)
+    .map(({ it, i }) => ({
+      productId: i,
+      name: it.description || `Line ${i + 1}`,
+      pcsPerBox: it.pcs_per_pack ?? null,
+      boxesPerContainer: (size === '20ft' ? it.qty_20ft : it.qty_40ft) ?? null,
+      value: boxesOnLine(it),
+    }))
+    .filter((l) => l.value > 0);
+  return planRequirement(lines, size, 'boxes');
+}

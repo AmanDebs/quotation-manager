@@ -3,7 +3,7 @@ import { db, transaction } from '../db/connection.js';
 import { nextNumber } from '../services/numbering.js';
 import { computeTotals, type LineItemInput } from '../services/totals.js';
 import type { AuthedRequest } from '../middleware/auth.js';
-import { scopeClause, canAccessCustomer } from '../middleware/scope.js';
+import { scopeClause, canAccessCustomer, customerChangeError } from '../middleware/scope.js';
 import { submit, decide, resetApprovalOnEdit, blockUnapprovedTransition } from '../services/approval.js';
 import { resolveCompanyId } from '../services/companies.js';
 
@@ -128,6 +128,8 @@ quotationsRouter.put('/:id', (req: AuthedRequest, res) => {
   const body = req.body ?? {};
   const existing = db.prepare('SELECT * FROM quotations WHERE id = ?').get(id) as Record<string, unknown> | undefined;
   if (!existing || !canAccessCustomer(req, Number(existing.customer_id))) return res.status(404).json({ error: 'Quotation not found' });
+  const moved = customerChangeError(req, existing.customer_id as number, Number(body.customer_id ?? existing.customer_id));
+  if (moved) return res.status(403).json({ error: moved });
   const taxType = (body.tax_type ?? existing.tax_type ?? 'none') as 'none' | 'cgst_sgst' | 'igst';
   const currency = String(body.currency ?? existing.currency);
   const freight = Number(body.freight ?? existing.freight ?? 0);

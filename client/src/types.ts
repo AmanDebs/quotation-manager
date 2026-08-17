@@ -456,6 +456,12 @@ export interface Invoice {
   payments?: Payment[];
   amount_received?: number;
   balance_due?: number;
+  /**
+   * Money recorded against this invoice or its proforma in a currency it is not
+   * billed in, so credited to nothing. Optional: a server that has not been
+   * redeployed yet simply omits it.
+   */
+  currency_mismatch?: { currency: string; amount: number }[];
   approval_status: ApprovalStatus;
   approved_at?: string; approval_note?: string;
   approved_by_name?: string | null; created_by_name?: string | null;

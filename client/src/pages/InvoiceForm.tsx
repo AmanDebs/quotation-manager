@@ -483,6 +483,7 @@ export default function InvoiceFormPage() {
             received={existing!.amount_received ?? 0}
             total={existing!.grand_total}
             balanceDue={existing!.balance_due}
+            currencyMismatch={existing!.currency_mismatch}
           />
         )}
 

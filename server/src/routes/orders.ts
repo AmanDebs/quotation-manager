@@ -6,7 +6,7 @@ import { productionByOrder } from '../services/production.js';
 import { despatchedByOrder } from './despatches.js';
 import { orderLines, productDemand, type Filters } from '../services/orderLines.js';
 import type { AuthedRequest } from '../middleware/auth.js';
-import { scopeClause, canAccessCustomer } from '../middleware/scope.js';
+import { scopeClause, canAccessCustomer, linkError, customerChangeError } from '../middleware/scope.js';
 import { resolveCompanyId } from '../services/companies.js';
 
 export const ordersRouter = Router();
@@ -294,6 +294,8 @@ ordersRouter.post('/', (req: AuthedRequest, res) => {
   if (!body.customer_id) return res.status(400).json({ error: 'Customer is required' });
   if (!canAccessCustomer(req, Number(body.customer_id))) return res.status(403).json({ error: 'That customer is not assigned to you' });
   const h = headerValues(body);
+  const link = linkError(req, 'quotations', h.quotation_id, h.customer_id, 'Quotation');
+  if (link) return res.status(404).json({ error: link });
   // Fixed at creation: the number below comes from this company's series.
   const companyId = resolveCompanyId(body.company_id, Number(body.customer_id));
   const id = transaction(() => {
@@ -326,7 +328,10 @@ ordersRouter.post('/', (req: AuthedRequest, res) => {
     if (body.pi_id) {
       const pi = db.prepare('SELECT customer_id, order_id FROM proforma_invoices WHERE id = ?')
         .get(Number(body.pi_id)) as { customer_id: number; order_id: number | null } | undefined;
-      if (pi && pi.order_id == null && canAccessCustomer(req, pi.customer_id)) {
+      // Same customer as well as in scope: a proforma raised for one buyer must
+      // not end up carrying another buyer's order.
+      if (pi && pi.order_id == null && canAccessCustomer(req, pi.customer_id)
+        && Number(pi.customer_id) === Number(h.customer_id)) {
         db.prepare('UPDATE proforma_invoices SET order_id = ? WHERE id = ?').run(id, Number(body.pi_id));
       }
     }
@@ -341,6 +346,10 @@ ordersRouter.put('/:id', (req: AuthedRequest, res) => {
   const existing = db.prepare('SELECT * FROM orders WHERE id = ?').get(id) as Record<string, unknown> | undefined;
   if (!existing || !canAccessCustomer(req, Number(existing.customer_id))) return res.status(404).json({ error: 'Order not found' });
   const h = headerValues(body, existing);
+  const moved = customerChangeError(req, existing.customer_id as number, h.customer_id);
+  if (moved) return res.status(403).json({ error: moved });
+  const link = linkError(req, 'quotations', h.quotation_id, h.customer_id, 'Quotation');
+  if (link) return res.status(404).json({ error: link });
   transaction(() => {
     db.prepare(
       `UPDATE orders SET number = ?, column_config = ?, ${headerFields.map((f) => `${f} = ?`).join(', ')} WHERE id = ?`

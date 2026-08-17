@@ -7,6 +7,7 @@ import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, St
 import CompanySelect from '../components/CompanySelect';
 import { DocNumber, IncoTermsInput } from '../components/DocFields';
 import LineItemsEditor from '../components/LineItemsEditor';
+import ContainerFitment from '../components/ContainerFitment';
 import FollowupButton from '../components/FollowupButton';
 import PaymentsCard from '../components/PaymentsCard';
 import ApprovalStrip from '../components/ApprovalStrip';
@@ -387,6 +388,10 @@ export default function ProformaFormPage() {
             </Field>
           </div>
         </Card>
+
+        {/* Working information, deliberately not on the PDF: it answers
+            "does the Container field above say the right thing?" */}
+        <ContainerFitment items={draft.items} containerCount={draft.container_count} />
 
         <Card title="Remarks" actions={<NotePresetPicker value={draft.remarks} onChange={(v) => set({ remarks: v })} />}>
           <Textarea rows={3} value={draft.remarks} onChange={(e) => set({ remarks: e.target.value })} placeholder="Any other conditions specific to this customer…" />

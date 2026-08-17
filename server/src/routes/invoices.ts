@@ -3,7 +3,7 @@ import { db, transaction } from '../db/connection.js';
 import { nextNumber } from '../services/numbering.js';
 import { computeTotals, round2, type LineItemInput } from '../services/totals.js';
 import type { AuthedRequest } from '../middleware/auth.js';
-import { scopeClause, canAccessCustomer } from '../middleware/scope.js';
+import { scopeClause, canAccessCustomer, linkError, customerChangeError } from '../middleware/scope.js';
 import { resolveCompanyId } from '../services/companies.js';
 import { syncOrderStatus } from '../services/orderStatus.js';
 import { submit, decide, resetApprovalOnEdit, blockUnapprovedTransition } from '../services/approval.js';
@@ -50,6 +50,9 @@ function getFull(id: number) {
   inv.amount_received = money.amount_received;
   inv.balance_due = money.balance_due;
   inv.advance_applied = money.advance_applied;
+  // Money against this invoice or its proforma in another currency, credited to
+  // nothing. Carried so the page can say so rather than silently under-reporting.
+  inv.currency_mismatch = money.currency_mismatch;
 
   // The paired packing list travels with the invoice everywhere.
   const pl = db.prepare('SELECT * FROM packing_lists WHERE invoice_id = ?').get(id) as Record<string, unknown> | undefined;
@@ -259,6 +262,11 @@ invoicesRouter.post('/', (req: AuthedRequest, res) => {
   if (!body.customer_id) return res.status(400).json({ error: 'Customer is required' });
   if (!canAccessCustomer(req, Number(body.customer_id))) return res.status(403).json({ error: 'That customer is not assigned to you' });
   const h = headerValues(body);
+  // The source documents are checked as carefully as the customer is: an
+  // unchecked pi_id let another owner's advances be read and re-allocated.
+  const link = linkError(req, 'proforma_invoices', h.pi_id, h.customer_id, 'Proforma invoice')
+    ?? linkError(req, 'orders', h.order_id, h.customer_id, 'Order');
+  if (link) return res.status(404).json({ error: link });
   // Fixed at creation: the number below comes from this company's series.
   const companyId = resolveCompanyId(body.company_id, Number(body.customer_id));
   const id = transaction(() => {
@@ -294,6 +302,11 @@ invoicesRouter.put('/:id', (req: AuthedRequest, res) => {
   const existing = db.prepare('SELECT * FROM commercial_invoices WHERE id = ?').get(id) as Record<string, unknown> | undefined;
   if (!existing || !canAccessCustomer(req, Number(existing.customer_id))) return res.status(404).json({ error: 'Invoice not found' });
   const h = headerValues(body, existing);
+  const moved = customerChangeError(req, existing.customer_id as number, h.customer_id);
+  if (moved) return res.status(403).json({ error: moved });
+  const link = linkError(req, 'proforma_invoices', h.pi_id, h.customer_id, 'Proforma invoice')
+    ?? linkError(req, 'orders', h.order_id, h.customer_id, 'Order');
+  if (link) return res.status(404).json({ error: link });
   transaction(() => {
     db.prepare(
       `UPDATE commercial_invoices SET number = ?, column_config = ?, ${headerFields.map((f) => `${f} = ?`).join(', ')} WHERE id = ?`

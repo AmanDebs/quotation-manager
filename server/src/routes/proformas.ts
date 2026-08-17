@@ -3,7 +3,7 @@ import { db, transaction } from '../db/connection.js';
 import { nextNumber } from '../services/numbering.js';
 import { computeTotals, round2, type LineItemInput } from '../services/totals.js';
 import type { AuthedRequest } from '../middleware/auth.js';
-import { scopeClause, canAccessCustomer } from '../middleware/scope.js';
+import { scopeClause, canAccessCustomer, linkError, customerChangeError } from '../middleware/scope.js';
 import { resolveCompanyId } from '../services/companies.js';
 import { submit, decide, resetApprovalOnEdit, blockUnapprovedTransition } from '../services/approval.js';
 
@@ -190,6 +190,11 @@ proformasRouter.post('/', (req: AuthedRequest, res) => {
   if (!body.customer_id) return res.status(400).json({ error: 'Customer is required' });
   if (!canAccessCustomer(req, Number(body.customer_id))) return res.status(403).json({ error: 'That customer is not assigned to you' });
   const h = headerValues(body);
+  // An order_id pointing at another owner's order would fold this proforma's
+  // invoices into that order's dispatch figures — checked, like the customer.
+  const link = linkError(req, 'quotations', h.quotation_id, h.customer_id, 'Quotation')
+    ?? linkError(req, 'orders', h.order_id, h.customer_id, 'Order');
+  if (link) return res.status(404).json({ error: link });
   // Fixed at creation: the number below comes from this company's series.
   const companyId = resolveCompanyId(body.company_id, Number(body.customer_id));
   const id = transaction(() => {
@@ -217,6 +222,11 @@ proformasRouter.put('/:id', (req: AuthedRequest, res) => {
   const existing = db.prepare('SELECT * FROM proforma_invoices WHERE id = ?').get(id) as Record<string, unknown> | undefined;
   if (!existing || !canAccessCustomer(req, Number(existing.customer_id))) return res.status(404).json({ error: 'Proforma invoice not found' });
   const h = headerValues(body, existing);
+  const moved = customerChangeError(req, existing.customer_id as number, h.customer_id);
+  if (moved) return res.status(403).json({ error: moved });
+  const link = linkError(req, 'quotations', h.quotation_id, h.customer_id, 'Quotation')
+    ?? linkError(req, 'orders', h.order_id, h.customer_id, 'Order');
+  if (link) return res.status(404).json({ error: link });
   transaction(() => {
     db.prepare(
       `UPDATE proforma_invoices SET number = ?, column_config = ?, ${headerFields.map((f) => `${f} = ?`).join(', ')} WHERE id = ?`
