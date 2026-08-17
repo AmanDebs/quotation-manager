@@ -1,5 +1,5 @@
-import type { ReactNode } from 'react';
-import { NavLink } from 'react-router-dom';
+import { useEffect, useState, type ReactNode } from 'react';
+import { NavLink, useLocation } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { User } from '../types';
@@ -14,9 +14,9 @@ interface NavItem { to: string; label: string; icon: string; managerOnly?: boole
  * equally important. Grouping them costs nothing (everything is still one
  * click) and lets the eye skip three quarters of the list.
  *
- * Nothing collapses. A fold would save lines, but every group here is used
- * daily by *somebody*, and hiding a page behind a disclosure is how people
- * stop knowing it exists.
+ * Each group folds. Two things keep a folded page from being a forgotten one:
+ * the group holding the current page is always open whatever the stored state
+ * says, and a closed group shows how many entries are inside it.
  *
  * Dashboard sits outside any group: it is the landing page, not a category.
  */
@@ -72,8 +72,42 @@ const NAV: { heading: string; items: NavItem[] }[] = [
 
 const DASHBOARD: NavItem = { to: '/', label: 'Dashboard', icon: '📊' };
 
+/**
+ * Which groups are open, remembered between visits.
+ *
+ * Stored rather than reset each load because the group you work in is a
+ * property of your job, not of this page view — a despatch clerk should not
+ * have to reopen Factory every morning.
+ */
+const OPEN_KEY = 'qm.nav.open';
+
+function readOpen(): string[] | null {
+  try {
+    const raw = localStorage.getItem(OPEN_KEY);
+    return raw ? (JSON.parse(raw) as string[]) : null;
+  } catch {
+    // A blocked or corrupt localStorage must not take the sidebar down with it.
+    return null;
+  }
+}
+
 export default function Layout({ user, onLogout, children }: { user: User; onLogout: () => void; children: ReactNode }) {
   const isManager = user.role === 'manager';
+  const { pathname } = useLocation();
+
+  // The group holding the current page is always open: navigating somewhere and
+  // not being able to see where you are would be worse than a long list.
+  const activeHeading = NAV.find((g) =>
+    g.items.some((i) => pathname === i.to || pathname.startsWith(`${i.to}/`))
+  )?.heading;
+
+  const [open, setOpen] = useState<string[]>(() => readOpen() ?? [NAV[0].heading]);
+  useEffect(() => {
+    try { localStorage.setItem(OPEN_KEY, JSON.stringify(open)); } catch { /* not worth failing over */ }
+  }, [open]);
+
+  const toggle = (heading: string) =>
+    setOpen((prev) => (prev.includes(heading) ? prev.filter((h) => h !== heading) : [...prev, heading]));
   const { data: approvals } = useQuery({
     queryKey: ['approval-count'],
     queryFn: () => api.get<{ pending: number }>('/api/approvals/count'),
@@ -119,12 +153,22 @@ export default function Layout({ user, onLogout, children }: { user: User; onLog
             // A group an employee may see nothing in takes no space at all —
             // a heading over an empty list is worse than no heading.
             if (items.length === 0) return null;
+            const expanded = open.includes(group.heading) || group.heading === activeHeading;
             return (
-              <div key={group.heading} className="mt-3">
-                <div className="px-4 pb-1 text-[11px] font-semibold uppercase tracking-wider text-white/35">
-                  {group.heading}
-                </div>
-                {items.map(link)}
+              <div key={group.heading} className="mt-2">
+                <button
+                  type="button"
+                  onClick={() => toggle(group.heading)}
+                  aria-expanded={expanded}
+                  className="flex w-full items-center gap-1.5 px-4 py-1 text-[11px] font-semibold uppercase tracking-wider text-white/40 transition-colors hover:text-white/80"
+                >
+                  <span className={`inline-block text-[9px] transition-transform ${expanded ? 'rotate-90' : ''}`}>▶</span>
+                  <span className="flex-1 text-left">{group.heading}</span>
+                  {/* Closed groups say how much is inside, so folding one away
+                      does not make you forget what it held. */}
+                  {!expanded && <span className="font-normal text-white/30">{items.length}</span>}
+                </button>
+                {expanded && items.map(link)}
               </div>
             );
           })}
