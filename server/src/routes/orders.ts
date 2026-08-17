@@ -7,6 +7,7 @@ import { despatchedByOrder } from './despatches.js';
 import { orderLines, productDemand, type Filters } from '../services/orderLines.js';
 import type { AuthedRequest } from '../middleware/auth.js';
 import { scopeClause, canAccessCustomer, linkError, customerChangeError } from '../middleware/scope.js';
+import { syncOrderStatus } from '../services/orderStatus.js';
 import { resolveCompanyId } from '../services/companies.js';
 
 export const ordersRouter = Router();
@@ -361,6 +362,9 @@ ordersRouter.put('/:id', (req: AuthedRequest, res) => {
     );
     if (Array.isArray(body.items)) saveItems(id, body.items as OrderItemInput[], h.tax_type, h.freight, h.insurance, h.currency);
   });
+  // Changing what was ordered changes whether it has all been billed: asking
+  // for more than has shipped re-opens an order the invoices had closed.
+  syncOrderStatus(id);
   res.json(getFull(id));
 });
 
@@ -371,7 +375,10 @@ ordersRouter.post('/:id/status', (req: AuthedRequest, res) => {
   if (!allowed.includes(status)) return res.status(400).json({ error: 'Invalid status' });
   const existing = db.prepare('SELECT customer_id FROM orders WHERE id = ?').get(id) as { customer_id: number } | undefined;
   if (!existing || !canAccessCustomer(req, existing.customer_id)) return res.status(404).json({ error: 'Order not found' });
-  db.prepare('UPDATE orders SET status = ? WHERE id = ?').run(String(status), id);
+  // Clearing the memory is what makes a hand-closed order stay closed: with
+  // nothing remembered, syncOrderStatus will never re-open it, which is right
+  // when a short shipment has been accepted and the invoices will never add up.
+  db.prepare("UPDATE orders SET status = ?, status_before_completed = '' WHERE id = ?").run(String(status), id);
   res.json(getFull(id));
 });
 

@@ -56,6 +56,10 @@ for (const table of ['quotation_items', 'order_items', 'pi_items', 'invoice_item
 // This remembers what the status was before the payment record promoted it, so
 // deleting a mis-keyed payment restores it instead of guessing.
 addColumnIfMissing('commercial_invoices', 'status_before_paid', "TEXT NOT NULL DEFAULT ''");
+// And an order's `completed` follows the shipping record, with the same memory
+// so that re-opening one puts back what was there. Empty means a human closed
+// it, which is deliberately never undone.
+addColumnIfMissing('orders', 'status_before_completed', "TEXT NOT NULL DEFAULT ''");
 
 // Work orders (2026-08). Their own series per company, like every other
 // numbered document; `settings` gets it too so the old single-company row

@@ -22,6 +22,21 @@ import { productionByOrder } from './production.js';
  * what the facts imply, the next production entry or despatch will advance it
  * again. That is intended — the alternative is a status that quietly contradicts
  * the shipping record.
+ *
+ * **`completed` is the one status that also moves back**, and it is worth being
+ * clear why it is special. Everything below it is an observation that only
+ * accumulates: a shift booked cannot be un-booked, a lorry cannot un-leave. But
+ * an order is complete only while every line stays fully billed, and an invoice
+ * can be deleted or an ordered quantity raised. Leaving a re-opened order shut
+ * would hide work still to do, on the one status people use to stop looking.
+ *
+ * Which leaves the question the original design was right to worry about:
+ * closing an order is often a commercial decision, taken when a short shipment
+ * is accepted rather than when the last piece ships. That is why `orders`
+ * remembers `status_before_completed`. It is filled only when *this* code
+ * closes an order, so only an order closed by the shipping record is ever
+ * re-opened by it. An order a human closed has nothing remembered, and stays
+ * closed no matter what the invoices later say.
  */
 
 /** Forward order of the ladder. `cancelled` is deliberately absent. */
@@ -87,11 +102,55 @@ export function impliedStatus(orderId: number): StatusFacts {
     implied = 'partially_dispatched';
     reason = despatched.c > 0 ? 'goods have been despatched' : 'an invoice has been raised';
   }
+  if (fullyBilled(orderId)) {
+    implied = 'completed';
+    reason = 'every line has been billed in full';
+  }
 
-  // `completed` is left to a human. "Fully dispatched" by the invoice walk is a
-  // billing statement, and closing an order is a commercial decision that often
-  // waits on payment or a short-shipment being accepted.
   return rank(implied) > rank(order.status) ? { implied, reason } : { implied: null, reason: '' };
+}
+
+/**
+ * Has every goods line been billed in full?
+ *
+ * The invoice walk, not the despatch record: `dispatchProgress()` has always
+ * been the money truth for an order, and the two are shown side by side rather
+ * than reconciled precisely because a lorry can leave before the paperwork.
+ * Closing on the paperwork is the conservative direction — an order stays open
+ * until it has actually been billed.
+ *
+ * Reproduces that walk here rather than importing it, because `routes/orders.ts`
+ * imports this file and the cycle would be worse than eight lines of SQL. The
+ * check that keeps them honest is in the test: `fully_dispatched` from
+ * `GET /orders/:id` agrees with this on every order.
+ *
+ * **Charge lines are excluded** (`is_charge`), as everywhere else — freight is
+ * not a thing that ships, and an order whose only outstanding line is a freight
+ * charge is finished. A line with no quantity cannot be complete either: a
+ * price-only line has no target to reach.
+ */
+function fullyBilled(orderId: number): boolean {
+  const items = db.prepare(
+    'SELECT qty, is_charge FROM order_items WHERE order_id = ? ORDER BY sort_order, id'
+  ).all(orderId) as { qty: number | null; is_charge: number }[];
+  const goods = items.map((it, i) => ({ ...it, line: i })).filter((it) => !it.is_charge);
+  if (!goods.length || goods.some((it) => !it.qty || it.qty <= 0)) return false;
+
+  const invoices = db.prepare(
+    `SELECT id FROM commercial_invoices
+     WHERE order_id = ? OR pi_id IN (SELECT id FROM proforma_invoices WHERE order_id = ?)`
+  ).all(orderId, orderId) as { id: number }[];
+  if (!invoices.length) return false;
+
+  const billed = items.map(() => 0);
+  for (const inv of invoices) {
+    const rows = db.prepare('SELECT qty FROM invoice_items WHERE invoice_id = ? ORDER BY sort_order, id')
+      .all(inv.id) as { qty: number | null }[];
+    // Matched by position, the same index rule syncPackingList() and
+    // dispatchProgress() use.
+    rows.forEach((r, i) => { if (i < billed.length && r.qty != null) billed[i] += r.qty; });
+  }
+  return goods.every((it) => billed[it.line] + 1e-9 >= (it.qty ?? 0));
 }
 
 /**
@@ -103,11 +162,27 @@ export function impliedStatus(orderId: number): StatusFacts {
  * the status stored.
  */
 export function syncOrderStatus(orderId: number): string | null {
-  const { implied } = impliedStatus(orderId);
-  if (!implied) {
-    const row = db.prepare('SELECT status FROM orders WHERE id = ?').get(orderId) as { status: string } | undefined;
-    return row?.status ?? null;
+  const row = db.prepare('SELECT status, status_before_completed FROM orders WHERE id = ?').get(orderId) as
+    | { status: string; status_before_completed: string } | undefined;
+  if (!row) return null;
+  if (row.status === 'cancelled') return row.status;
+
+  // Re-opening: the order was closed by the shipping record, and the shipping
+  // record no longer says so — an invoice was deleted, or a quantity raised.
+  // Only ever undone if this code closed it; `status_before_completed` is empty
+  // when a human did, and a deliberate close stays closed.
+  if (row.status === 'completed' && !fullyBilled(orderId)) {
+    if (!row.status_before_completed) return row.status;
+    const back = row.status_before_completed;
+    db.prepare("UPDATE orders SET status = ?, status_before_completed = '' WHERE id = ?").run(back, orderId);
+    return back;
   }
-  db.prepare('UPDATE orders SET status = ? WHERE id = ?').run(implied, orderId);
+
+  const { implied } = impliedStatus(orderId);
+  if (!implied) return row.status;
+  // Remember what to re-open to, but only when closing the order automatically.
+  const before = implied === 'completed' ? row.status : row.status_before_completed;
+  db.prepare('UPDATE orders SET status = ?, status_before_completed = ? WHERE id = ?')
+    .run(implied, before, orderId);
   return implied;
 }

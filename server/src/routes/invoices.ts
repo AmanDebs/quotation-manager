@@ -23,6 +23,32 @@ function syncMoneyStatus(invoiceId: number | null, ...piIds: (number | null | un
   for (const piId of new Set(piIds.filter((p): p is number => !!p))) syncInvoicesForProforma(piId);
 }
 
+/**
+ * Every order an invoice bills against — its own `order_id`, or the one its
+ * proforma carries. Both the current links and any it is moving away from, so
+ * that re-pointing an invoice re-opens the order it used to close.
+ */
+function orderIdsBehind(invoiceId: number | null, ...links: (number | null | undefined)[]): number[] {
+  const ids = new Set<number>();
+  if (invoiceId) {
+    const row = db.prepare(
+      `SELECT COALESCE(order_id, (SELECT order_id FROM proforma_invoices WHERE id = pi_id)) AS o
+       FROM commercial_invoices WHERE id = ?`
+    ).get(invoiceId) as { o: number | null } | undefined;
+    if (row?.o) ids.add(row.o);
+  }
+  for (const link of links) {
+    if (!link) continue;
+    ids.add(link);
+    const viaPi = db.prepare('SELECT order_id FROM proforma_invoices WHERE id = ?').get(link) as
+      { order_id: number | null } | undefined;
+    if (viaPi?.order_id) ids.add(viaPi.order_id);
+  }
+  // A proforma id is not an order id; keep only rows that are actually orders.
+  return [...ids].filter((id) =>
+    !!db.prepare('SELECT id FROM orders WHERE id = ?').get(id));
+}
+
 export const invoicesRouter = Router();
 
 const listSql = `
@@ -338,6 +364,11 @@ invoicesRouter.put('/:id', (req: AuthedRequest, res) => {
   // The total may have changed, and so may the proforma it draws its advance
   // from — sync against both the old link and the new one.
   syncMoneyStatus(id, existing.pi_id as number | null, h.pi_id);
+  // Changing what was billed changes whether the order behind it is finished,
+  // in either direction: raising a quantity re-opens an order this closed.
+  for (const o of orderIdsBehind(id, existing.order_id as number | null, existing.pi_id as number | null)) {
+    syncOrderStatus(o);
+  }
   res.json(getFull(id));
 });
 
@@ -387,11 +418,13 @@ invoicesRouter.post('/:id/status', (req: AuthedRequest, res) => {
 
 invoicesRouter.delete('/:id', (req: AuthedRequest, res) => {
   const id = Number(req.params.id);
-  const existing = db.prepare('SELECT customer_id, pi_id FROM commercial_invoices WHERE id = ?').get(id) as
-    { customer_id: number; pi_id: number | null } | undefined;
+  const existing = db.prepare('SELECT customer_id, pi_id, order_id FROM commercial_invoices WHERE id = ?').get(id) as
+    { customer_id: number; pi_id: number | null; order_id: number | null } | undefined;
   if (!existing || !canAccessCustomer(req, existing.customer_id)) return res.status(404).json({ error: 'Invoice not found' });
   const paid = db.prepare('SELECT COUNT(*) AS c FROM payments WHERE invoice_id = ?').get(id) as { c: number };
   if (paid.c > 0) return res.status(409).json({ error: 'Invoice has recorded payments and cannot be deleted' });
+  // Read the links before the row is gone.
+  const orders = orderIdsBehind(id, existing.order_id, existing.pi_id);
   transaction(() => {
     // The packing list belongs to the invoice, so it goes with it.
     const pls = db.prepare('SELECT id FROM packing_lists WHERE invoice_id = ?').all(id) as { id: number }[];
@@ -403,7 +436,9 @@ invoicesRouter.delete('/:id', (req: AuthedRequest, res) => {
     db.prepare('DELETE FROM commercial_invoices WHERE id = ?').run(id);
   });
   // Removing this invoice hands its share of the proforma's advance back to the
-  // others, which can settle one that was short.
+  // others, which can settle one that was short — and un-bills the order behind
+  // it, which re-opens it if this invoice was what closed it.
   syncMoneyStatus(null, existing.pi_id);
+  for (const o of orders) syncOrderStatus(o);
   res.json({ ok: true });
 });

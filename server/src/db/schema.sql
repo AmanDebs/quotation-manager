@@ -250,6 +250,11 @@ CREATE TABLE IF NOT EXISTS orders (
   revised_date TEXT NOT NULL DEFAULT '',
   actual_production_date TEXT NOT NULL DEFAULT '',
   status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','confirmed','scheduled','in_production','ready','partially_dispatched','completed','cancelled')),
+  -- What the status was when the shipping record closed the order, so that
+  -- deleting an invoice re-opens it to where it was. Empty when a human closed
+  -- it, which is what keeps a deliberately short-shipped order closed.
+  -- See services/orderStatus.ts.
+  status_before_completed TEXT NOT NULL DEFAULT '',
   remarks TEXT NOT NULL DEFAULT '',
   notes TEXT NOT NULL DEFAULT '',
   column_config TEXT NOT NULL DEFAULT '{}',
