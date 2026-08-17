@@ -33,8 +33,16 @@ const patternColumn: Record<DocType, { std: string; export?: string }> = {
  * Sequences advance per company, per doc type (export series separate), per
  * fiscal year. Per company because a GST-registered entity keeps one
  * consecutive series per GSTIN — sharing a series across the group would leave
- * gaps in each company's books. Tokens: {FY} fiscal year "25-26", {SEQ}
- * 3-digit sequence.
+ * gaps in each company's books.
+ *
+ * Tokens:
+ *   {FY}    fiscal year, "25-26"
+ *   {SEQ}   sequence padded to 3 digits — AGLO/EX/25-26/118
+ *   {SEQ4}  the same number padded to 4 — AP/0196/26-27
+ *
+ * Two widths because Aglo's own books use both: the export invoice runs
+ * `AP/EX/101/25-26` while the domestic one runs `AP/0196/26-27`. Padding is
+ * a minimum, not a limit — a series that passes 999 simply prints in full.
  */
 export function nextNumber(
   docType: DocType,
@@ -58,5 +66,7 @@ export function nextNumber(
   const pattern = company?.[useExport ? cols.export! : cols.std] || `${docType.toUpperCase()}/{FY}/{SEQ}`;
   return pattern
     .replaceAll('{FY}', fiscalYear())
+    // {SEQ4} first: replacing {SEQ} first would leave a stray "4" behind.
+    .replaceAll('{SEQ4}', String(row.next_num).padStart(4, '0'))
     .replaceAll('{SEQ}', String(row.next_num).padStart(3, '0'));
 }

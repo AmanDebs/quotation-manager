@@ -318,11 +318,15 @@ db.prepare("UPDATE customers SET is_export = 1 WHERE is_export = 0 AND lower(tri
 db.prepare('UPDATE quotations SET is_export = 1 WHERE is_export = 0 AND customer_id IN (SELECT id FROM customers WHERE is_export = 1)').run();
 
 /**
- * The proforma series matches Aglo's own paperwork (2026-08).
+ * The proforma and invoice series match Aglo's own paperwork (2026-08).
  *
- * The samples in `D:\Quotation Doc\` number proformas `AGLO/EX/25-26/118A`
- * (export) and `AGLO/PI/25-26/094` (the domestic tax invoice), not the generic
- * `PI/…` and `EX-PI/…` this app shipped with.
+ * Read off the real documents rather than invented. Proformas:
+ * `AGLO/EX/25-26/118A` export, `AGLO/PI/25-26/094` domestic. Invoices:
+ * `AP/EX/101/25-26` export — note the sequence sits *before* the fiscal year,
+ * the other way round from the proforma — and `AP/0196/26-27` domestic, which
+ * runs to four digits, hence `{SEQ4}`. The domestic figures come from the
+ * `Invoice No.` column of the desk's own workbook, where 35 entries divide
+ * between `AP/####` shorthand and the full `AP/####/##-##`.
  *
  * Only rows still holding the *old default* are moved: a pattern anyone has
  * edited is a deliberate choice, and a migration that overwrites settings
@@ -333,6 +337,8 @@ db.prepare('UPDATE quotations SET is_export = 1 WHERE is_export = 0 AND customer
 for (const [column, oldDefault, aglo] of [
   ['pi_pattern', 'PI/{FY}/{SEQ}', 'AGLO/PI/{FY}/{SEQ}'],
   ['pi_export_pattern', 'EX-PI/{FY}/{SEQ}', 'AGLO/EX/{FY}/{SEQ}'],
+  ['inv_pattern', 'INV/{FY}/{SEQ}', 'AP/{SEQ4}/{FY}'],
+  ['inv_export_pattern', 'EX/{FY}/{SEQ}', 'AP/EX/{SEQ}/{FY}'],
 ] as const) {
   const moved = db.prepare(`UPDATE companies SET ${column} = ? WHERE ${column} = ?`).run(aglo, oldDefault);
   if (Number(moved.changes) > 0) {
