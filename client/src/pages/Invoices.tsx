@@ -1,12 +1,25 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Invoice } from '../types';
-import { Button, Select, PageHeader, EmptyState, Card, StatusBadge, ExportTabs } from '../components/ui';
+import { Button, Select, PageHeader, EmptyState, Card, ExportTabs, ErrorText } from '../components/ui';
 import { useCompanies } from '../components/CompanySelect';
 import NewDocumentDialog from '../components/NewDocumentDialog';
 import { fmtDate, fmtMoney } from '../lib/format';
+
+const STATUSES = ['draft', 'final', 'dispatched', 'paid'];
+
+// Tint the inline picker so the column still reads at a glance, like the badge
+// did. The ramp follows the stage: nothing sent yet, issued, gone, settled.
+const statusTint: Record<string, string> = {
+  draft: 'bg-slate-100 text-slate-700 border-slate-300',
+  final: 'bg-blue-50 text-blue-700 border-blue-300',
+  dispatched: 'bg-amber-50 text-amber-800 border-amber-300',
+  paid: 'bg-green-50 text-green-700 border-green-300',
+};
+
+const label = (s: string) => s[0].toUpperCase() + s.slice(1);
 
 export default function InvoicesPage() {
   // Only worth a column once the group has more than one entity.
@@ -14,6 +27,7 @@ export default function InvoicesPage() {
   const showCompany = companies.length > 1;
   const [companyFilter, setCompanyFilter] = useState('');
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [statusFilter, setStatusFilter] = useState('');
   const [exportFilter, setExportFilter] = useState('');
   const [creating, setCreating] = useState(false);
@@ -25,6 +39,20 @@ export default function InvoicesPage() {
       if (exportFilter) params.set('export', exportFilter);
       if (companyFilter) params.set('company', companyFilter);
       return api.get<Invoice[]>(`/api/invoices${params.toString() ? `?${params}` : ''}`);
+    },
+  });
+
+  // Change status without opening the invoice. The server still owns the
+  // approval rule — moving an unapproved invoice to an outgoing status comes
+  // back as a 409, which surfaces above the table rather than failing silently.
+  const setStatus = useMutation({
+    mutationFn: ({ id, status }: { id: number; status: string }) =>
+      api.post<Invoice>(`/api/invoices/${id}/status`, { status }),
+    onSuccess: (inv) => {
+      queryClient.invalidateQueries({ queryKey: ['invoices'] });
+      queryClient.invalidateQueries({ queryKey: ['invoice', String(inv.id)] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+      queryClient.invalidateQueries({ queryKey: ['approval-count'] });
     },
   });
 
@@ -48,9 +76,10 @@ export default function InvoicesPage() {
         )}
         <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="max-w-45">
           <option value="">All statuses</option>
-          {['draft', 'final', 'dispatched', 'paid'].map((s) => <option key={s} value={s}>{s[0].toUpperCase() + s.slice(1)}</option>)}
+          {STATUSES.map((s) => <option key={s} value={s}>{label(s)}</option>)}
         </Select>
       </div>
+      <ErrorText error={setStatus.error} />
       <Card className="overflow-x-auto">
         {invoices.length === 0 ? (
           <EmptyState message="No commercial invoices yet. Create one from a confirmed proforma invoice at dispatch time." />
@@ -78,9 +107,25 @@ export default function InvoicesPage() {
                   )}
                   <td className="py-2 pr-3">{inv.pi_number || '—'}</td>
                   <td className="py-2 pr-3 text-right tabular-nums">{fmtMoney(inv.grand_total, inv.currency)}</td>
-                  <td className="py-2 pr-3">
-                    <StatusBadge status={inv.status} />
-                    {inv.approval_status === 'pending' && <span className="ml-1 text-xs text-amber-700">⏳</span>}
+                  {/* Editable in place — the click must not open the invoice. */}
+                  <td className="py-2 pr-3" onClick={(e) => e.stopPropagation()}>
+                    <select
+                      value={inv.status}
+                      disabled={setStatus.isPending}
+                      onChange={(e) => {
+                        setStatus.reset();
+                        setStatus.mutate({ id: inv.id, status: e.target.value });
+                      }}
+                      className={`cursor-pointer rounded-full border px-2 py-0.5 text-xs font-medium focus:outline-none focus:ring-1 focus:ring-brand-600 disabled:opacity-50 ${statusTint[inv.status] ?? 'bg-slate-100 text-slate-600 border-slate-300'}`}
+                      title="Change status"
+                    >
+                      {STATUSES.map((s) => (
+                        <option key={s} value={s} className="bg-white text-slate-800">{label(s)}</option>
+                      ))}
+                    </select>
+                    {inv.approval_status === 'pending' && (
+                      <span className="ml-1 text-xs text-amber-700" title="Awaiting manager approval">⏳</span>
+                    )}
                   </td>
                 </tr>
               ))}
