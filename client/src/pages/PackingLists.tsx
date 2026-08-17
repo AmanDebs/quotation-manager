@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { PackingList } from '../types';
 import { Button, PageHeader, EmptyState, Card } from '../components/ui';
-import { fmtDate, fmtQty } from '../lib/format';
+import { fmtDate } from '../lib/format';
 
 export default function PackingListsPage() {
   const navigate = useNavigate();

@@ -22,7 +22,18 @@ The **product catalogue carries packing and loadability** — `pcs_per_pack` (pi
 cd server && npm run dev     # API on :4000 (tsx watch — auto-restarts on change)
 cd client && npm run dev     # Vite on :5173 (proxies /api → :4000)
 npx tsc --noEmit             # type-check (run in server/ and client/ separately; no tests exist)
+cd client && npm run lint    # eslint — run it on any client change, see below
 ```
+
+**`npm run lint` is not optional on client changes.** It exists for
+`react-hooks/rules-of-hooks`, which catches a hook called below an early
+return — the hook then runs on some renders and not others, React sees the
+order change and unmounts the page, and every existing document opens blank.
+That shipped once. Neither `tsc` nor `vite build` says a word about it, because
+it is neither a type error nor a syntax error. The config is deliberately
+narrow (`client/eslint.config.js`): hooks rules as errors, unused vars as
+warnings, no style policing — a lint step that shouts about formatting is one
+that gets ignored.
 
 `start-app.bat` launches both and opens the browser. Node lives at `C:\Program Files\nodejs` — it was installed mid-session, so fresh shells may need it prepended to PATH.
 

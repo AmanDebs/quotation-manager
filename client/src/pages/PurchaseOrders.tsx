@@ -13,8 +13,8 @@ import { fmtMoney, fmtQty, fmtDate, today } from '../lib/format';
  * booked without keying the same number twice.
  */
 
-const STATUSES: PoStatus[] = ['draft', 'sent', 'part_received', 'received', 'cancelled'];
-
+// The order of the keys below is the ladder; `statusStyle` is the list itself,
+// so a separate STATUSES array was one more place to forget to update.
 const statusStyle: Record<PoStatus, string> = {
   draft: 'bg-slate-100 text-slate-600',
   sent: 'bg-blue-100 text-blue-700',
