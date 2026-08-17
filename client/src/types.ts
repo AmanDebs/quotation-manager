@@ -287,6 +287,8 @@ export type LineState = 'not_started' | 'in_production' | 'made' | 'part_shipped
 export interface OrderLine {
   order_id: number; order_number: string; date: string; promised_date: string;
   customer_id: number; customer_name: string; company_name: string | null;
+  /** Who booked the order. Null on one whose author has since been removed. */
+  created_by_name: string | null;
   is_export: number; order_status: string; currency: string;
   order_line: number;
   product_id: number | null;

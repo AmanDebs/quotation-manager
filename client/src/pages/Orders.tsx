@@ -264,12 +264,12 @@ function LinesTable({ lines, showCompany }: { lines: OrderLine[]; showCompany: b
                 <th className="pb-2 pr-3">Customer</th>
                 {showCompany && <th className="pb-2 pr-3">Issued By</th>}
                 <th className="pb-2 pr-3">Item</th>
-                <th className="pb-2 pr-3">Code</th>
                 <th className="pb-2 pr-3">Colour</th>
                 <th className="pb-2 pr-3 text-right">Qty</th>
                 <th className="pb-2 pr-3 text-right">Made</th>
                 <th className="pb-2 pr-3 text-right">Sent</th>
                 <th className="pb-2 pr-3">Promised</th>
+                <th className="pb-2 pr-3">Added By</th>
                 <th className="pb-2 pr-3">State</th>
               </tr>
             </thead>
@@ -304,7 +304,6 @@ function LinesTable({ lines, showCompany }: { lines: OrderLine[]; showCompany: b
                       <td className="py-1.5 pr-3 text-xs text-slate-500">{repeat ? '' : l.company_name ?? '—'}</td>
                     )}
                     <td className="py-1.5 pr-3">{l.description || '—'}</td>
-                    <td className="py-1.5 pr-3 text-slate-500">{l.code || '—'}</td>
                     <td className="py-1.5 pr-3 text-slate-500">{l.color || '—'}</td>
                     <td className="py-1.5 pr-3 text-right tabular-nums">{l.ordered ? fmtQty(l.ordered) : '—'}</td>
                     <td className="py-1.5 pr-3 text-right tabular-nums text-slate-500">{l.made ? fmtQty(l.made) : '—'}</td>
@@ -313,6 +312,11 @@ function LinesTable({ lines, showCompany }: { lines: OrderLine[]; showCompany: b
                     </td>
                     <td className={`whitespace-nowrap py-1.5 pr-3 ${overdue ? 'font-semibold text-red-600' : ''}`}>
                       {l.promised_date ? fmtDate(l.promised_date) : '—'}{overdue && ' ⚠'}
+                    </td>
+                    {/* A property of the order, not the line — printed once per
+                        order like the number and the date above it. */}
+                    <td className={`whitespace-nowrap py-1.5 pr-3 text-slate-500 ${repeat ? 'text-slate-300' : ''}`}>
+                      {repeat ? '' : l.created_by_name || '—'}
                     </td>
                     <td className="py-1.5 pr-3">
                       <span className={`inline-block whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ${LINE_STATE[l.state].className}`}>

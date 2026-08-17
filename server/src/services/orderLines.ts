@@ -33,6 +33,8 @@ export interface OrderLine {
   customer_id: number;
   customer_name: string;
   company_name: string | null;
+  /** Who booked the order. Null on one raised before the column existed. */
+  created_by_name: string | null;
   is_export: number;
   order_status: string;
   /** Position of this line within its order — the index the whole chain uses. */
@@ -78,6 +80,7 @@ const SQL = `
   SELECT
     o.id AS order_id, o.number AS order_number, o.date, o.promised_date,
     o.customer_id, c.name AS customer_name, co.company_name,
+    u.name AS created_by_name,
     o.is_export, o.status AS order_status, o.currency,
     l.pos AS order_line, l.product_id, l.description, l.code, l.color, l.unit,
     COALESCE(l.total_pcs, l.qty, 0) AS ordered,
@@ -110,6 +113,8 @@ const SQL = `
   JOIN orders o ON o.id = l.order_id
   JOIN customers c ON c.id = o.customer_id
   LEFT JOIN companies co ON co.id = o.company_id
+  -- LEFT, not JOIN: an order whose author has since been deleted must still list.
+  LEFT JOIN users u ON u.id = o.created_by
   WHERE l.is_charge = 0`;
 
 function stateOf(ordered: number, made: number, sent: number, billed: number): LineState {
