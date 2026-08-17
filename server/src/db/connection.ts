@@ -317,6 +317,29 @@ if (founder) {
 db.prepare("UPDATE customers SET is_export = 1 WHERE is_export = 0 AND lower(trim(country)) <> 'india' AND country <> ''").run();
 db.prepare('UPDATE quotations SET is_export = 1 WHERE is_export = 0 AND customer_id IN (SELECT id FROM customers WHERE is_export = 1)').run();
 
+/**
+ * The proforma series matches Aglo's own paperwork (2026-08).
+ *
+ * The samples in `D:\Quotation Doc\` number proformas `AGLO/EX/25-26/118A`
+ * (export) and `AGLO/PI/25-26/094` (the domestic tax invoice), not the generic
+ * `PI/…` and `EX-PI/…` this app shipped with.
+ *
+ * Only rows still holding the *old default* are moved: a pattern anyone has
+ * edited is a deliberate choice, and a migration that overwrites settings
+ * someone chose is worse than one that leaves a few rows behind. Existing
+ * document numbers are never touched — they are what went to the customer and
+ * to the tax authority. Only the next number issued changes.
+ */
+for (const [column, oldDefault, aglo] of [
+  ['pi_pattern', 'PI/{FY}/{SEQ}', 'AGLO/PI/{FY}/{SEQ}'],
+  ['pi_export_pattern', 'EX-PI/{FY}/{SEQ}', 'AGLO/EX/{FY}/{SEQ}'],
+] as const) {
+  const moved = db.prepare(`UPDATE companies SET ${column} = ? WHERE ${column} = ?`).run(aglo, oldDefault);
+  if (Number(moved.changes) > 0) {
+    console.warn(`companies: ${column} moved to the Aglo series on ${moved.changes} row(s); documents already numbered keep their numbers.`);
+  }
+}
+
 // Starter note presets so the feature is useful immediately.
 const presetRow = db.prepare('SELECT id, note_presets FROM companies WHERE is_default = 1 ORDER BY id LIMIT 1').get() as
   { id: number; note_presets: string } | undefined;
