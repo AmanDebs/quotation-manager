@@ -269,6 +269,33 @@ export interface Despatch {
   items?: DespatchItem[];
 }
 
+/* ---------------- The order book, per line ---------------- */
+
+/** All derived from what has been made, sent and billed — never typed. */
+export type LineState = 'not_started' | 'in_production' | 'made' | 'part_shipped' | 'shipped';
+
+export interface OrderLine {
+  order_id: number; order_number: string; date: string; promised_date: string;
+  customer_id: number; customer_name: string; company_name: string | null;
+  is_export: number; order_status: string; currency: string;
+  order_line: number;
+  product_id: number | null;
+  description: string; code: string; color: string; unit: string;
+  ordered: number; amount: number;
+  made: number; sent: number; billed: number;
+  state: LineState;
+}
+
+/** The same lines folded up: how much of this product is on order altogether. */
+export interface ProductDemand {
+  key: string;
+  product_id: number | null;
+  description: string; code: string; color: string; unit: string;
+  ordered: number; made: number; shipped: number; to_ship: number;
+  orders: number;
+  next_due: string;
+}
+
 /** Physically sent per order line — the counterpart to the invoiced figure. */
 export interface LineDespatch {
   qty: number;

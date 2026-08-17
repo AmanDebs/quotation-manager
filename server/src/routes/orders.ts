@@ -4,6 +4,7 @@ import { nextNumber } from '../services/numbering.js';
 import { computeTotals, round2, type LineItemInput } from '../services/totals.js';
 import { productionByOrder } from '../services/production.js';
 import { despatchedByOrder } from './despatches.js';
+import { orderLines, productDemand, type Filters } from '../services/orderLines.js';
 import type { AuthedRequest } from '../middleware/auth.js';
 import { scopeClause, canAccessCustomer } from '../middleware/scope.js';
 import { resolveCompanyId } from '../services/companies.js';
@@ -192,6 +193,34 @@ ordersRouter.get('/', (req: AuthedRequest, res) => {
     const p = dispatchProgress(Number(o.id), items);
     return { ...o, dispatched_value: p.dispatched_value, pending_value: p.pending_value, any_dispatched: p.any_dispatched };
   }));
+});
+
+/**
+ * The order book one item at a time, and the same lines folded up per product.
+ *
+ * Declared **above** `/:id`: both are single-segment paths, so Express would
+ * otherwise read "lines" as an order id. The `/prefill/...` routes below are
+ * safe where they are only because they carry more than one segment.
+ */
+function lineFilters(req: AuthedRequest): Filters {
+  const scope = scopeClause(req, 'customer_id');
+  return {
+    scopeSql: scope.sql || undefined,
+    scopeParams: scope.params,
+    status: req.query.status ? String(req.query.status) : undefined,
+    isExport: req.query.export === '1' ? 1 : req.query.export === '0' ? 0 : undefined,
+    companyId: Number(req.query.company) > 0 ? Number(req.query.company) : undefined,
+    openOnly: req.query.open === '1',
+    q: String(req.query.q ?? '').trim() || undefined,
+  };
+}
+
+ordersRouter.get('/lines', (req: AuthedRequest, res) => {
+  res.json(orderLines(lineFilters(req)));
+});
+
+ordersRouter.get('/by-product', (req: AuthedRequest, res) => {
+  res.json(productDemand(lineFilters(req)));
 });
 
 ordersRouter.get('/:id', (req: AuthedRequest, res) => {
