@@ -1,8 +1,56 @@
 import { Router } from 'express';
 import { db } from '../db/connection.js';
 import { defaultCompany, defaultCompanyId } from '../services/companies.js';
+import { listSeries, setNextNumber } from '../services/numbering.js';
+import { requireManager } from '../middleware/auth.js';
 
 export const settingsRouter = Router();
+
+/**
+ * Where each numbering series has got to, and what the next document will be
+ * called. Declared above `/` so neither swallows the other.
+ *
+ * `?company=` narrows to one entity; each counts its own series, so the default
+ * company is the only sensible fallback.
+ *
+ * Guarded explicitly rather than riding the mount in index.ts, which lets any
+ * GET on /api/settings through: how many invoices the group has raised is
+ * administrative, and an employee who can see two customers should not learn
+ * the whole book's volume from it.
+ */
+settingsRouter.get('/sequences', requireManager, (req, res) => {
+  const companyId = Number(req.query.company) > 0 ? Number(req.query.company) : defaultCompanyId();
+  if (!db.prepare('SELECT id FROM companies WHERE id = ?').get(companyId)) {
+    return res.status(404).json({ error: 'Company not found' });
+  }
+  res.json({ company_id: companyId, series: listSeries(companyId) });
+});
+
+/**
+ * Set the number the next document in a series will take — the way to carry a
+ * book that already runs to AP/0262 into the app without re-issuing numbers.
+ *
+ * Manager-only by the mount in index.ts, which sends every non-GET here through
+ * `requireManager`.
+ */
+settingsRouter.put('/sequences', (req, res) => {
+  const body = req.body ?? {};
+  const companyId = Number(body.company_id) > 0 ? Number(body.company_id) : defaultCompanyId();
+  if (!db.prepare('SELECT id FROM companies WHERE id = ?').get(companyId)) {
+    return res.status(404).json({ error: 'Company not found' });
+  }
+  const key = String(body.key ?? '');
+  if (!listSeries(companyId).some((s) => s.key === key)) {
+    return res.status(400).json({ error: 'Unknown numbering series' });
+  }
+  try {
+    res.json(setNextNumber(companyId, key, Number(body.next_number), { force: body.force === true }));
+  } catch (err) {
+    const status = (err as { status?: number }).status ?? 500;
+    if (status === 500) throw err;
+    res.status(status).json({ error: (err as Error).message });
+  }
+});
 
 /**
  * The company profile moved to `companies` when the group gained a second

@@ -92,6 +92,133 @@ function BackupCard() {
   );
 }
 
+interface SeriesState {
+  doc_type: string;
+  is_export: boolean;
+  key: string;
+  fy: string;
+  pattern: string;
+  next_number: number;
+  preview: string;
+}
+
+const SERIES_LABEL: Record<string, string> = {
+  quotation: 'Quotation',
+  order: 'Order',
+  proforma: 'Proforma Invoice',
+  invoice: 'Commercial Invoice',
+  packing_list: 'Packing List',
+  work_order: 'Work Order',
+  purchase_order: 'Purchase Order',
+};
+
+/**
+ * Where each series has got to, and a way to move it on.
+ *
+ * The reason this exists: a book that already runs to AP/0262 elsewhere has to
+ * carry into the app without re-issuing numbers a customer already holds. The
+ * server refuses to move a series backwards unless told twice, so the confirm
+ * below is the second telling rather than decoration.
+ */
+function SequenceCard({ companyId }: { companyId: number }) {
+  const queryClient = useQueryClient();
+  const [edits, setEdits] = useState<Record<string, string>>({});
+
+  const { data } = useQuery({
+    queryKey: ['sequences', companyId],
+    queryFn: () => api.get<{ series: SeriesState[] }>(`/api/settings/sequences?company=${companyId}`),
+  });
+
+  const save = useMutation({
+    mutationFn: (body: { key: string; next_number: number; force?: boolean }) =>
+      api.put('/api/settings/sequences', { ...body, company_id: companyId }),
+    onSuccess: (_r, body) => {
+      setEdits((e) => { const { [body.key]: _drop, ...rest } = e; return rest; });
+      queryClient.invalidateQueries({ queryKey: ['sequences', companyId] });
+    },
+  });
+
+  const apply = (s: SeriesState) => {
+    const next = Number(edits[s.key]);
+    if (!Number.isInteger(next) || next < 1) return;
+    save.reset();
+    if (next < s.next_number) {
+      const ok = confirm(
+        `${SERIES_LABEL[s.doc_type] ?? s.doc_type} is already at ${s.next_number}.\n\n` +
+        `Going back to ${next} will re-issue numbers that have been used, and the next document will be refused ` +
+        `if that number already exists.\n\nSet it anyway?`
+      );
+      if (!ok) return;
+      save.mutate({ key: s.key, next_number: next, force: true });
+      return;
+    }
+    save.mutate({ key: s.key, next_number: next });
+  };
+
+  return (
+    <Card title="Next Document Number">
+      <p className="mb-3 text-sm text-slate-500">
+        What the next document of each kind will be called. Set these when moving an existing book into the app,
+        so the app carries on from where your own numbering had got to instead of starting at 1.
+      </p>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-slate-200 text-left text-xs uppercase text-slate-500">
+              <th className="pb-2 pr-3">Series</th>
+              <th className="pb-2 pr-3">Pattern</th>
+              <th className="pb-2 pr-3 text-right">Next no.</th>
+              <th className="pb-2 pr-3">Will be</th>
+              <th className="pb-2 w-24" />
+            </tr>
+          </thead>
+          <tbody>
+            {(data?.series ?? []).map((s) => {
+              const typed = edits[s.key];
+              const dirty = typed !== undefined && Number(typed) !== s.next_number && typed !== '';
+              return (
+                <tr key={s.key} className="border-b border-slate-100 last:border-0">
+                  <td className="py-2 pr-3">
+                    {SERIES_LABEL[s.doc_type] ?? s.doc_type}
+                    {s.is_export && <span className="ml-1 text-xs text-slate-400">export</span>}
+                  </td>
+                  <td className="py-2 pr-3"><code className="rounded bg-slate-100 px-1 text-xs">{s.pattern}</code></td>
+                  <td className="py-2 pr-3 text-right">
+                    <Input
+                      type="number"
+                      min={1}
+                      className="w-24 text-right"
+                      value={typed ?? String(s.next_number)}
+                      onChange={(e) => setEdits((prev) => ({ ...prev, [s.key]: e.target.value }))}
+                    />
+                  </td>
+                  <td className="py-2 pr-3 tabular-nums text-slate-500">
+                    {dirty ? s.pattern
+                      .replaceAll('{FY}', s.fy)
+                      .replaceAll('{SEQ4}', String(Number(typed)).padStart(4, '0'))
+                      .replaceAll('{SEQ}', String(Number(typed)).padStart(3, '0'))
+                      : s.preview}
+                  </td>
+                  <td className="py-2 text-right">
+                    {dirty && (
+                      <Button variant="secondary" onClick={() => apply(s)} disabled={save.isPending}>Set</Button>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <ErrorText error={save.error} />
+      <p className="mt-2 text-xs text-slate-400">
+        Counters run per company and per fiscal year ({data?.series?.[0]?.fy ?? '—'}), and export series count
+        separately from domestic. Changing a number here never touches a document already issued.
+      </p>
+    </Card>
+  );
+}
+
 export default function SettingsPage() {
   const queryClient = useQueryClient();
   const { data: companies = [] } = useQuery({
@@ -269,9 +396,12 @@ export default function SettingsPage() {
           </div>
           <p className="mt-2 text-xs text-slate-400">
             Tokens: <code className="rounded bg-slate-100 px-1">{'{FY}'}</code> = fiscal year (Apr–Mar, e.g. 26-27), <code className="rounded bg-slate-100 px-1">{'{SEQ}'}</code> = sequence (001, 002…).
+            Also <code className="rounded bg-slate-100 px-1">{'{SEQ4}'}</code> for a four-digit sequence (0001, 0002…).
             Example: <code className="rounded bg-slate-100 px-1">AGLO/EX/{'{FY}'}/{'{SEQ}'}</code> → AGLO/EX/26-27/001. Export and domestic series count separately; you can also edit any document's number manually on its page.
           </p>
         </Card>
+
+        <SequenceCard companyId={form.id} />
         <Card title="Default Terms & Conditions">
           <Textarea rows={4} value={form.default_terms} onChange={(e) => set({ default_terms: e.target.value })} placeholder="Printed at the bottom of every document…" />
           <p className="mt-2 text-xs text-slate-400">One clause per line — each line prints as a bullet.</p>

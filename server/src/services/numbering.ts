@@ -1,6 +1,6 @@
 import { db } from '../db/connection.js';
 
-type DocType =
+export type DocType =
   | 'quotation' | 'order' | 'proforma' | 'invoice' | 'packing_list'
   | 'work_order' | 'purchase_order';
 
@@ -62,11 +62,111 @@ export function nextNumber(
      RETURNING next_num`
   ).get(opts.companyId, seqKey, fyStart) as { next_num: number };
 
-  const company = db.prepare('SELECT * FROM companies WHERE id = ?').get(opts.companyId) as Record<string, string> | undefined;
-  const pattern = company?.[useExport ? cols.export! : cols.std] || `${docType.toUpperCase()}/{FY}/{SEQ}`;
+  return applyPattern(patternFor(docType, opts.companyId, useExport), row.next_num);
+}
+
+/** The stored pattern for one series, or a last-resort generic one. */
+function patternFor(docType: DocType, companyId: number, useExport: boolean): string {
+  const cols = patternColumn[docType];
+  const company = db.prepare('SELECT * FROM companies WHERE id = ?').get(companyId) as Record<string, string> | undefined;
+  return company?.[useExport ? cols.export! : cols.std] || `${docType.toUpperCase()}/{FY}/{SEQ}`;
+}
+
+/** Fill the tokens for a given sequence value. */
+function applyPattern(pattern: string, seq: number): string {
   return pattern
     .replaceAll('{FY}', fiscalYear())
     // {SEQ4} first: replacing {SEQ} first would leave a stray "4" behind.
-    .replaceAll('{SEQ4}', String(row.next_num).padStart(4, '0'))
-    .replaceAll('{SEQ}', String(row.next_num).padStart(3, '0'));
+    .replaceAll('{SEQ4}', String(seq).padStart(4, '0'))
+    .replaceAll('{SEQ}', String(seq).padStart(3, '0'));
+}
+
+/**
+ * The series a document type counts on. Export documents count separately,
+ * because a separate pattern with a shared counter would leave gaps in both.
+ */
+export const seriesKey = (docType: DocType, isExport: boolean): string =>
+  isExport && patternColumn[docType].export ? `${docType}_export` : docType;
+
+export interface SeriesState {
+  doc_type: DocType;
+  is_export: boolean;
+  /** The row key in `sequences`. */
+  key: string;
+  /** Fiscal year label the counter belongs to, e.g. "26-27". */
+  fy: string;
+  pattern: string;
+  /** The number the *next* document will be given. */
+  next_number: number;
+  /** What that document's number will look like. */
+  preview: string;
+}
+
+/** Every series a company counts on, and where each has got to. */
+export function listSeries(companyId: number): SeriesState[] {
+  const fyStart = fiscalYearStart();
+  const out: SeriesState[] = [];
+  for (const docType of Object.keys(patternColumn) as DocType[]) {
+    for (const isExport of patternColumn[docType].export ? [false, true] : [false]) {
+      const key = seriesKey(docType, isExport);
+      const row = db.prepare(
+        'SELECT next_num FROM sequences WHERE company_id = ? AND doc_type = ? AND year = ?'
+      ).get(companyId, key, fyStart) as { next_num: number } | undefined;
+      // `next_num` holds the number last *issued*; a missing row means none yet.
+      const next = (row?.next_num ?? 0) + 1;
+      const pattern = patternFor(docType, companyId, isExport);
+      out.push({
+        doc_type: docType, is_export: isExport, key, fy: fiscalYear(),
+        pattern, next_number: next, preview: applyPattern(pattern, next),
+      });
+    }
+  }
+  return out;
+}
+
+/**
+ * Set the number the next document in a series will get.
+ *
+ * The counter stores the number last issued, so "next is N" is stored as N-1.
+ *
+ * Moving a series **forward** is safe and is the normal reason to be here: the
+ * app is taking over a book that already runs to AP/0262, and its counter has
+ * to start above that rather than re-issuing numbers the customer already has.
+ * Moving one **backward** is refused unless `force` is set, because the next
+ * document would then take a number the unique index has already seen — the
+ * failure would surface at save time, to whoever happened to be raising a
+ * document, rather than here to the person who caused it.
+ */
+export function setNextNumber(
+  companyId: number,
+  key: string,
+  next: number,
+  opts: { force?: boolean } = {}
+): { previous: number; next_number: number; preview: string } {
+  if (!Number.isInteger(next) || next < 1) {
+    throw Object.assign(new Error('The next number must be a whole number of 1 or more'), { status: 400 });
+  }
+  const fyStart = fiscalYearStart();
+  const row = db.prepare(
+    'SELECT next_num FROM sequences WHERE company_id = ? AND doc_type = ? AND year = ?'
+  ).get(companyId, key, fyStart) as { next_num: number } | undefined;
+  const previous = (row?.next_num ?? 0) + 1;
+
+  if (next < previous && !opts.force) {
+    throw Object.assign(
+      new Error(`This series is already at ${previous}. Going back to ${next} would re-issue numbers that have been used.`),
+      { status: 409 }
+    );
+  }
+
+  db.prepare(
+    `INSERT INTO sequences (company_id, doc_type, year, next_num) VALUES (?, ?, ?, ?)
+     ON CONFLICT(company_id, doc_type, year) DO UPDATE SET next_num = excluded.next_num`
+  ).run(companyId, key, fyStart, next - 1);
+
+  // The pattern is looked up from the key's own doc type so the preview is the
+  // real thing rather than a guess.
+  const docType = (key.endsWith('_export') ? key.slice(0, -'_export'.length) : key) as DocType;
+  const pattern = patternFor(docType, companyId, key.endsWith('_export'));
+  return { previous, next_number: next, preview: applyPattern(pattern, next) };
 }
