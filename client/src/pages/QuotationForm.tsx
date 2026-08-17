@@ -13,6 +13,7 @@ import InternalNotes from '../components/InternalNotes';
 import ColumnsControl, { quotationColumns, quotationOmit } from '../components/ColumnsControl';
 import NotePresetPicker from '../components/NotePresetPicker';
 import { fmtMoney, fmtQty, fmtDate, today } from '../lib/format';
+import { useDefaultNotes } from '../lib/useDefaultNotes';
 
 interface Draft {
   number?: string;
@@ -163,6 +164,8 @@ export default function QuotationFormPage() {
   if (!isNew && !existing) return <div className="text-slate-400">Loading…</div>;
 
   const set = (patch: Partial<Draft>) => setDraft((d) => ({ ...d, ...patch }));
+  // The standard clauses, already written in on a new quotation.
+  useDefaultNotes(isNew, draft.notes, (notes) => set({ notes }));
   const isSuperseded = !!existing?.superseded_by;
   const readOnly = isSuperseded;
 

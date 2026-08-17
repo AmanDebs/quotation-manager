@@ -7,7 +7,17 @@ export interface User {
 
 export interface BankAccount { label: string; details: string }
 
-export interface NotePreset { label: string; body: string }
+/**
+ * A reusable clause. `use_by_default` means it is written into a new document's
+ * notes straight away, so the standard terms are already there to edit rather
+ * than something to remember to insert. Absent means no — a preset that has
+ * never been ticked must not start appearing on documents by itself.
+ */
+export interface NotePreset { label: string; body: string; use_by_default?: boolean }
+
+/** The clauses ticked as standard, as one block of text for a new document. */
+export const defaultNotes = (presets: NotePreset[] | undefined): string =>
+  (presets ?? []).filter((p) => p.use_by_default && p.body.trim()).map((p) => p.body.trim()).join('\n');
 
 export type ApprovalStatus = 'not_submitted' | 'pending' | 'approved' | 'rejected';
 

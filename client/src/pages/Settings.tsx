@@ -289,6 +289,8 @@ export default function SettingsPage() {
         >
           <p className="mb-3 text-sm text-slate-500">
             Reusable clauses your team can insert into any document's notes or remarks with one click, then edit freely on that document.
+            Tick <span className="font-medium">Use by default</span> and the clause is already written in when a new document is created —
+            still editable, and still removable on that document alone.
           </p>
           {(form.note_presets ?? []).length === 0 && <p className="text-sm text-slate-400">No presets yet.</p>}
           <div className="space-y-3">
@@ -301,7 +303,17 @@ export default function SettingsPage() {
                     onChange={(e) => set({ note_presets: form.note_presets.map((x, idx) => (idx === i ? { ...x, label: e.target.value } : x)) })}
                     className="max-w-xs"
                   />
-                  <Button variant="danger" onClick={() => set({ note_presets: form.note_presets.filter((_, idx) => idx !== i) })}>Remove</Button>
+                  <div className="flex items-center gap-3">
+                    <label className="flex cursor-pointer items-center gap-1.5 whitespace-nowrap text-sm text-slate-600">
+                      <input
+                        type="checkbox"
+                        checked={!!p.use_by_default}
+                        onChange={(e) => set({ note_presets: form.note_presets.map((x, idx) => (idx === i ? { ...x, use_by_default: e.target.checked } : x)) })}
+                      />
+                      Use by default
+                    </label>
+                    <Button variant="danger" onClick={() => set({ note_presets: form.note_presets.filter((_, idx) => idx !== i) })}>Remove</Button>
+                  </div>
                 </div>
                 <Textarea
                   rows={2}

@@ -14,6 +14,7 @@ import ApprovalStrip from '../components/ApprovalStrip';
 import ColumnsControl, { proformaColumns, proformaOmit } from '../components/ColumnsControl';
 import NotePresetPicker from '../components/NotePresetPicker';
 import { today } from '../lib/format';
+import { useDefaultNotes } from '../lib/useDefaultNotes';
 
 interface Draft {
   number?: string;
@@ -163,6 +164,8 @@ export default function ProformaFormPage() {
   if (!isNew && !existing) return <div className="text-slate-400">Loading…</div>;
 
   const set = (patch: Partial<Draft>) => setDraft((d) => ({ ...d, ...patch }));
+  // The standard clauses, already written in on a new proforma.
+  useDefaultNotes(isNew, draft.remarks, (remarks) => set({ remarks }));
 
   const onCustomerChange = (cid: number | '') => {
     const c = customers.find((x) => x.id === cid);

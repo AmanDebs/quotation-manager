@@ -15,6 +15,7 @@ import NotePresetPicker from '../components/NotePresetPicker';
 import FollowupButton from '../components/FollowupButton';
 import { ORDER_STATUSES, orderStatusLabel } from './Orders';
 import { today } from '../lib/format';
+import { useDefaultNotes } from '../lib/useDefaultNotes';
 
 interface Draft {
   number?: string;
@@ -159,6 +160,8 @@ export default function OrderFormPage() {
   if (!isNew && !existing) return <div className="text-slate-400">Loading…</div>;
 
   const set = (patch: Partial<Draft>) => setDraft((d) => ({ ...d, ...patch }));
+  // The standard clauses, already written in on a new order.
+  useDefaultNotes(isNew, draft.notes, (notes) => set({ notes }));
 
   const onCustomerChange = (cid: number | '') => {
     const c = customers.find((x) => x.id === cid);

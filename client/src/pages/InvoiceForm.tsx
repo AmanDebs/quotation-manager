@@ -13,6 +13,7 @@ import ApprovalStrip from '../components/ApprovalStrip';
 import ColumnsControl, { PACKING_COLUMNS } from '../components/ColumnsControl';
 import NotePresetPicker from '../components/NotePresetPicker';
 import { fmtQty, today } from '../lib/format';
+import { useDefaultNotes } from '../lib/useDefaultNotes';
 
 interface Draft {
   number?: string;
@@ -193,6 +194,8 @@ export default function InvoiceFormPage() {
   if (!isNew && !existing) return <div className="text-slate-400">Loading…</div>;
 
   const set = (patch: Partial<Draft>) => setDraft((d) => ({ ...d, ...patch }));
+  // The standard clauses, already written in on a new invoice.
+  useDefaultNotes(isNew, draft.remarks, (remarks) => set({ remarks }));
   const setPacking = (patch: Partial<PackingDraft>) =>
     setDraft((d) => ({ ...d, packing: { ...d.packing, ...patch } }));
   // Packing rows follow the invoice's items positionally, so a row may not exist yet.
