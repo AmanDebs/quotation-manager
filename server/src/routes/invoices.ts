@@ -8,6 +8,20 @@ import { resolveCompanyId } from '../services/companies.js';
 import { syncOrderStatus } from '../services/orderStatus.js';
 import { submit, decide, resetApprovalOnEdit, blockUnapprovedTransition } from '../services/approval.js';
 import { invoiceReceivable } from '../services/receivables.js';
+import { syncInvoiceStatus, syncInvoicesForProforma } from '../services/invoiceStatus.js';
+
+/**
+ * Bring the paid/unpaid status back into line after anything that moves money.
+ *
+ * The invoice itself, plus every sibling raised from the same proforma: they
+ * share one advance pool, allocated earliest-invoice-first, so changing this
+ * invoice's total — or adding it, or deleting it — can settle or un-settle a
+ * different one that was never touched.
+ */
+function syncMoneyStatus(invoiceId: number | null, ...piIds: (number | null | undefined)[]) {
+  if (invoiceId) syncInvoiceStatus(invoiceId);
+  for (const piId of new Set(piIds.filter((p): p is number => !!p))) syncInvoicesForProforma(piId);
+}
 
 export const invoicesRouter = Router();
 
@@ -293,6 +307,7 @@ invoicesRouter.post('/', (req: AuthedRequest, res) => {
      FROM commercial_invoices WHERE id = ?`
   ).get(id) as { o: number | null };
   if (orderId?.o) syncOrderStatus(orderId.o);
+  syncMoneyStatus(id, h.pi_id);
   res.status(201).json(getFull(id));
 });
 
@@ -320,6 +335,9 @@ invoicesRouter.put('/:id', (req: AuthedRequest, res) => {
     syncPackingList(id, req.user!.id, body.packing as PackingInput | undefined);
     resetApprovalOnEdit('commercial_invoices', id);
   });
+  // The total may have changed, and so may the proforma it draws its advance
+  // from — sync against both the old link and the new one.
+  syncMoneyStatus(id, existing.pi_id as number | null, h.pi_id);
   res.json(getFull(id));
 });
 
@@ -336,6 +354,9 @@ invoicesRouter.post('/:id/approve', (req: AuthedRequest, res) => {
   const id = Number(req.params.id);
   if (!db.prepare('SELECT id FROM commercial_invoices WHERE id = ?').get(id)) return res.status(404).json({ error: 'Invoice not found' });
   decide('commercial_invoices', id, req.user!, req.body?.approve !== false, String(req.body?.note ?? ''));
+  // Approval can be the last thing standing between an already-settled invoice
+  // and 'paid', since an unapproved one is deliberately never promoted.
+  syncInvoiceStatus(id);
   res.json(getFull(id));
 });
 
@@ -344,17 +365,30 @@ invoicesRouter.post('/:id/status', (req: AuthedRequest, res) => {
   const { status } = req.body ?? {};
   const allowed = ['draft', 'final', 'dispatched', 'paid'];
   if (!allowed.includes(status)) return res.status(400).json({ error: 'Invalid status' });
-  const existing = db.prepare('SELECT customer_id FROM commercial_invoices WHERE id = ?').get(id) as { customer_id: number } | undefined;
+  const existing = db.prepare('SELECT customer_id, status FROM commercial_invoices WHERE id = ?').get(id) as
+    { customer_id: number; status: string } | undefined;
   if (!existing || !canAccessCustomer(req, existing.customer_id)) return res.status(404).json({ error: 'Invoice not found' });
   const blocked = blockUnapprovedTransition('commercial_invoices', id, String(status), req);
   if (blocked) return res.status(409).json({ error: blocked });
-  db.prepare('UPDATE commercial_invoices SET status = ? WHERE id = ?').run(String(status), id);
+  // Setting anything else by hand makes that the new baseline, so a stale
+  // memory cannot later restore something the user has moved away from. Setting
+  // 'paid' by hand records what it was *before*, so that if the payment record
+  // disagrees and the sync below puts it back, it goes back to where it was —
+  // a rejected "mark as paid" must not quietly demote a dispatched invoice.
+  const before = String(status) === 'paid' ? existing.status : '';
+  db.prepare('UPDATE commercial_invoices SET status = ?, status_before_paid = ? WHERE id = ?')
+    .run(String(status), before, id);
+  // The payment record has the last word, as it does everywhere else. Marking a
+  // half-paid invoice Paid does not make it paid, and parking a settled one at
+  // Dispatched is undone the same way the shop floor undoes an order's status.
+  syncInvoiceStatus(id);
   res.json(getFull(id));
 });
 
 invoicesRouter.delete('/:id', (req: AuthedRequest, res) => {
   const id = Number(req.params.id);
-  const existing = db.prepare('SELECT customer_id FROM commercial_invoices WHERE id = ?').get(id) as { customer_id: number } | undefined;
+  const existing = db.prepare('SELECT customer_id, pi_id FROM commercial_invoices WHERE id = ?').get(id) as
+    { customer_id: number; pi_id: number | null } | undefined;
   if (!existing || !canAccessCustomer(req, existing.customer_id)) return res.status(404).json({ error: 'Invoice not found' });
   const paid = db.prepare('SELECT COUNT(*) AS c FROM payments WHERE invoice_id = ?').get(id) as { c: number };
   if (paid.c > 0) return res.status(409).json({ error: 'Invoice has recorded payments and cannot be deleted' });
@@ -368,5 +402,8 @@ invoicesRouter.delete('/:id', (req: AuthedRequest, res) => {
     db.prepare('DELETE FROM invoice_items WHERE invoice_id = ?').run(id);
     db.prepare('DELETE FROM commercial_invoices WHERE id = ?').run(id);
   });
+  // Removing this invoice hands its share of the proforma's advance back to the
+  // others, which can settle one that was short.
+  syncMoneyStatus(null, existing.pi_id);
   res.json({ ok: true });
 });

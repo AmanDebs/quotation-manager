@@ -52,6 +52,11 @@ for (const table of ['quotation_items', 'order_items', 'pi_items', 'invoice_item
   addColumnIfMissing(table, 'is_charge', 'INTEGER NOT NULL DEFAULT 0');
 }
 
+// The invoice's status now follows what has actually been received (2026-08).
+// This remembers what the status was before the payment record promoted it, so
+// deleting a mis-keyed payment restores it instead of guessing.
+addColumnIfMissing('commercial_invoices', 'status_before_paid', "TEXT NOT NULL DEFAULT ''");
+
 // Work orders (2026-08). Their own series per company, like every other
 // numbered document; `settings` gets it too so the old single-company row
 // stays a faithful view of company 1.

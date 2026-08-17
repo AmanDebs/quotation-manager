@@ -403,6 +403,10 @@ CREATE TABLE IF NOT EXISTS commercial_invoices (
   remarks TEXT NOT NULL DEFAULT '',
   tax_type TEXT NOT NULL DEFAULT 'none' CHECK (tax_type IN ('none','cgst_sgst','igst')),
   status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','final','dispatched','paid')),
+  -- What the status was when the payment record promoted it to 'paid', so that
+  -- deleting a mis-keyed payment puts back what was there rather than guessing.
+  -- See services/invoiceStatus.ts.
+  status_before_paid TEXT NOT NULL DEFAULT '',
   created_by INTEGER REFERENCES users(id),
   approval_status TEXT NOT NULL DEFAULT 'not_submitted' CHECK (approval_status IN ('not_submitted','pending','approved','rejected')),
   approved_by INTEGER REFERENCES users(id),

@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { db } from '../db/connection.js';
 import type { AuthedRequest } from '../middleware/auth.js';
 import { canAccessCustomer } from '../middleware/scope.js';
+import { syncInvoicesForPayment } from '../services/invoiceStatus.js';
 
 export const paymentsRouter = Router();
 
@@ -44,14 +45,22 @@ paymentsRouter.post('/', (req: AuthedRequest, res) => {
     String(body.reference ?? ''),
     String(body.notes ?? '')
   );
-  res.status(201).json(db.prepare('SELECT * FROM payments WHERE id = ?').get(Number(info.lastInsertRowid)));
+  const payment = db.prepare('SELECT * FROM payments WHERE id = ?').get(Number(info.lastInsertRowid)) as
+    { invoice_id: number | null; pi_id: number | null };
+  // Being paid is a fact about the invoice, so its status follows it. An
+  // advance moves every invoice raised from that proforma, not just one.
+  syncInvoicesForPayment(payment);
+  res.status(201).json(payment);
 });
 
 paymentsRouter.delete('/:id', (req: AuthedRequest, res) => {
   const id = Number(req.params.id);
-  const payment = db.prepare('SELECT customer_id FROM payments WHERE id = ?').get(id) as
-    | { customer_id: number | null } | undefined;
+  const payment = db.prepare('SELECT customer_id, invoice_id, pi_id FROM payments WHERE id = ?').get(id) as
+    | { customer_id: number | null; invoice_id: number | null; pi_id: number | null } | undefined;
   if (!payment || !canAccessCustomer(req, payment.customer_id)) return res.status(404).json({ error: 'Payment not found' });
   db.prepare('DELETE FROM payments WHERE id = ?').run(id);
+  // Deleting a mis-keyed payment reopens the balance, so anything it had marked
+  // paid goes back to what it was. Read the links before the row is gone.
+  syncInvoicesForPayment(payment);
   res.json({ ok: true });
 });
