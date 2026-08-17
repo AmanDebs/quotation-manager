@@ -14,7 +14,7 @@ import ColumnsControl from '../components/ColumnsControl';
 import NotePresetPicker from '../components/NotePresetPicker';
 import FollowupButton from '../components/FollowupButton';
 import { ORDER_STATUSES, orderStatusLabel } from './Orders';
-import { fmtMoney, fmtQty, today } from '../lib/format';
+import { today } from '../lib/format';
 
 interface Draft {
   number?: string;
@@ -301,6 +301,20 @@ export default function OrderFormPage() {
               </Field>
             )}
           </div>
+
+          {/* The advance is part of the payment terms, not a subject of its own —
+              three fields did not earn a card between the order and its dates. */}
+          <div className="mt-3 grid grid-cols-3 gap-3 border-t border-slate-100 pt-3">
+            <Field label={`Advance Due (${draft.currency})`}>
+              <Input type="number" min={0} step="any" value={draft.advance_due || ''} onChange={(e) => set({ advance_due: Number(e.target.value) })} />
+            </Field>
+            <Field label={`Advance Received (${draft.currency})`}>
+              <Input type="number" min={0} step="any" value={draft.advance_amount || ''} onChange={(e) => set({ advance_amount: Number(e.target.value) })} />
+            </Field>
+            <Field label="Date of Credit">
+              <Input type="date" value={draft.advance_received_date} onChange={(e) => set({ advance_received_date: e.target.value })} />
+            </Field>
+          </div>
         </Card>
 
         <Card title="Production Plan & Delivery">
@@ -323,20 +337,6 @@ export default function OrderFormPage() {
           </div>
         </Card>
 
-        <Card title="Advance Payment">
-          <div className="grid grid-cols-3 gap-3">
-            <Field label={`Advance Due (${draft.currency})`}>
-              <Input type="number" min={0} step="any" value={draft.advance_due || ''} onChange={(e) => set({ advance_due: Number(e.target.value) })} />
-            </Field>
-            <Field label={`Advance Received (${draft.currency})`}>
-              <Input type="number" min={0} step="any" value={draft.advance_amount || ''} onChange={(e) => set({ advance_amount: Number(e.target.value) })} />
-            </Field>
-            <Field label="Date of Credit">
-              <Input type="date" value={draft.advance_received_date} onChange={(e) => set({ advance_received_date: e.target.value })} />
-            </Field>
-          </div>
-        </Card>
-
         <Card
           title="Order Items"
           actions={<ColumnsControl config={draft.column_config} onChange={(c) => set({ column_config: c })} />}
@@ -352,54 +352,9 @@ export default function OrderFormPage() {
           </div>
         </Card>
 
-        {!isNew && (existing!.items?.length ?? 0) > 0 && (
-          <Card title="Dispatch Progress">
-            <p className="mb-3 text-sm text-slate-500">
-              Calculated from the commercial invoices raised against this order — nothing to keep up to date by hand.
-            </p>
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-slate-200 text-left text-xs uppercase text-slate-500">
-                  <th className="pb-1 pr-3">Item</th>
-                  <th className="pb-1 pr-3 text-right">Ordered</th>
-                  <th className="pb-1 pr-3 text-right">Dispatched</th>
-                  <th className="pb-1 pr-3 text-right">Pending</th>
-                </tr>
-              </thead>
-              <tbody>
-                {existing!.items!.map((it, i) => (
-                  <tr key={i} className="border-b border-slate-100 last:border-0">
-                    <td className="py-1.5 pr-3">{it.description}</td>
-                    <td className="py-1.5 pr-3 text-right tabular-nums">{fmtQty(it.qty)} {it.unit}</td>
-                    <td className="py-1.5 pr-3 text-right tabular-nums text-green-700">{fmtQty(it.qty_dispatched ?? 0)}</td>
-                    <td className={`py-1.5 pr-3 text-right tabular-nums ${(it.qty_pending ?? 0) > 0 ? 'text-amber-700' : 'text-green-700'}`}>
-                      {fmtQty(it.qty_pending ?? 0)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            <div className="mt-2 flex flex-wrap gap-x-6 border-t border-slate-100 pt-2 text-sm">
-              <span>Order value: <span className="font-semibold tabular-nums">{fmtMoney(existing!.grand_total, existing!.currency)}</span></span>
-              <span>Dispatched: <span className="font-semibold tabular-nums text-green-700">{fmtMoney(existing!.dispatched_value ?? 0, existing!.currency)}</span></span>
-              <span>Pending: <span className="font-semibold tabular-nums text-amber-700">{fmtMoney(existing!.pending_value ?? 0, existing!.currency)}</span></span>
-            </div>
-            {((existing!.proformas?.length ?? 0) > 0 || (existing!.invoices?.length ?? 0) > 0) && (
-              <div className="mt-3 flex flex-wrap gap-2 border-t border-slate-100 pt-3 text-sm">
-                {existing!.proformas?.map((p) => (
-                  <Link key={`p${p.id}`} to={`/proformas/${p.id}`} className="rounded border border-slate-200 px-2 py-1 hover:border-brand-600">
-                    PI {p.number}
-                  </Link>
-                ))}
-                {existing!.invoices?.map((inv) => (
-                  <Link key={`i${inv.id}`} to={`/invoices/${inv.id}`} className="rounded border border-slate-200 px-2 py-1 hover:border-brand-600">
-                    Invoice {inv.number}
-                  </Link>
-                ))}
-              </div>
-            )}
-          </Card>
-        )}
+        {/* The old Dispatch Progress card lived here. It has moved to the
+            Dispatch tab, which says the same thing and more — sent as well as
+            billed — and keeping a second copy invited the two to disagree. */}
 
         <Card title="Remarks & Notes" actions={<NotePresetPicker value={draft.notes} onChange={(v) => set({ notes: v })} />}>
           <div className="grid grid-cols-2 gap-3">

@@ -1,9 +1,10 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Order, Despatch, DespatchItem, Location, Transporter } from '../types';
 import { Button, Input, Textarea, Select, Field, Card, EmptyState, ErrorText, Modal } from './ui';
-import { fmtQty, fmtDate, today } from '../lib/format';
+import { fmtQty, fmtMoney, fmtDate, today } from '../lib/format';
 
 /**
  * Made, sent, billed — three different questions, shown together.
@@ -43,6 +44,7 @@ export default function DispatchTab({ order }: { order: Order }) {
 
   const items = order.items ?? [];
   const invoices = order.invoices ?? [];
+  const proformas = order.proformas ?? [];
 
   const newTrip = (): Partial<Despatch> => ({
     order_id: order.id,
@@ -116,6 +118,28 @@ export default function DispatchTab({ order }: { order: Order }) {
             </tbody>
           </table>
         )}
+        <div className="mt-3 flex flex-wrap gap-x-6 gap-y-1 border-t border-slate-100 pt-2 text-sm">
+          <span>Order value <strong className="tabular-nums">{fmtMoney(order.grand_total, order.currency)}</strong></span>
+          <span>Billed <strong className="tabular-nums text-green-700">{fmtMoney(order.dispatched_value ?? 0, order.currency)}</strong></span>
+          <span>Still to bill <strong className="tabular-nums text-amber-700">{fmtMoney(order.pending_value ?? 0, order.currency)}</strong></span>
+        </div>
+
+        {(proformas.length > 0 || invoices.length > 0) && (
+          <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3 text-sm">
+            <span className="text-xs uppercase tracking-wide text-slate-400">Raised from this order</span>
+            {proformas.map((p) => (
+              <Link key={`p${p.id}`} to={`/proformas/${p.id}`} className="rounded border border-slate-200 px-2 py-1 hover:border-brand-600">
+                PI {p.number}
+              </Link>
+            ))}
+            {invoices.map((inv) => (
+              <Link key={`i${inv.id}`} to={`/invoices/${inv.id}`} className="rounded border border-slate-200 px-2 py-1 hover:border-brand-600">
+                Invoice {inv.number}
+              </Link>
+            ))}
+          </div>
+        )}
+
         <p className="mt-2 text-xs text-slate-400">
           <strong>Sent</strong> is what left the gate; <strong>billed</strong> comes from the invoices raised.
           They are shown separately on purpose — goods often go before the invoice, and the difference is
