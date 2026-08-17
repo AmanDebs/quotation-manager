@@ -160,12 +160,15 @@ export default function QuotationFormPage() {
     },
   });
 
+  // The standard clauses, already written in on a new quotation. Above the
+  // early returns below: a hook after them runs on some renders and not others,
+  // which React treats as a changed hook order and unmounts the whole page for.
+  useDefaultNotes(isNew, draft.notes, (notes) => setDraft((d) => ({ ...d, notes })));
+
   if (loadError) return <ErrorText error={loadError} />;
   if (!isNew && !existing) return <div className="text-slate-400">Loading…</div>;
 
   const set = (patch: Partial<Draft>) => setDraft((d) => ({ ...d, ...patch }));
-  // The standard clauses, already written in on a new quotation.
-  useDefaultNotes(isNew, draft.notes, (notes) => set({ notes }));
   const isSuperseded = !!existing?.superseded_by;
   const readOnly = isSuperseded;
 

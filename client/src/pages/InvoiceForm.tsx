@@ -190,12 +190,15 @@ export default function InvoiceFormPage() {
     },
   });
 
+  // The standard clauses, already written in on a new invoice. Above the early
+  // returns below: a hook after them runs on some renders and not others, which
+  // React treats as a changed hook order and unmounts the whole page for.
+  useDefaultNotes(isNew, draft.remarks, (remarks) => setDraft((d) => ({ ...d, remarks })));
+
   if (loadError) return <ErrorText error={loadError} />;
   if (!isNew && !existing) return <div className="text-slate-400">Loading…</div>;
 
   const set = (patch: Partial<Draft>) => setDraft((d) => ({ ...d, ...patch }));
-  // The standard clauses, already written in on a new invoice.
-  useDefaultNotes(isNew, draft.remarks, (remarks) => set({ remarks }));
   const setPacking = (patch: Partial<PackingDraft>) =>
     setDraft((d) => ({ ...d, packing: { ...d.packing, ...patch } }));
   // Packing rows follow the invoice's items positionally, so a row may not exist yet.
