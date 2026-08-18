@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
-import { db } from '../db/connection.js';
+import { db, transaction } from '../db/connection.js';
 import type { AuthedRequest } from '../middleware/auth.js';
 
 export const usersRouter = Router();
@@ -33,23 +33,33 @@ usersRouter.put('/:id', (req: AuthedRequest, res) => {
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(id) as Record<string, unknown> | undefined;
   if (!user) return res.status(404).json({ error: 'User not found' });
 
+  // Everything is checked before anything is written. The password rule used to
+  // run *after* the row had been updated, so a rejected password change still
+  // committed the role and active flags beside it — a 400 that had quietly
+  // half-succeeded, and the half that landed was the one about privilege.
+  if (body.password !== undefined && String(body.password).length < 6) {
+    return res.status(400).json({ error: 'Password must be at least 6 characters' });
+  }
+
   // The last active manager must stay a manager, or nobody can administer the app.
   if ((body.role === 'employee' || body.active === false) && user.role === 'manager') {
     const others = db.prepare("SELECT COUNT(*) AS c FROM users WHERE role = 'manager' AND active = 1 AND id <> ?").get(id) as { c: number };
     if (others.c === 0) return res.status(409).json({ error: 'There must always be at least one active manager' });
   }
 
-  db.prepare('UPDATE users SET name = ?, email = ?, role = ?, active = ? WHERE id = ?').run(
-    String(body.name ?? user.name),
-    String(body.email ?? user.email).toLowerCase(),
-    body.role === 'manager' || body.role === 'employee' ? body.role : String(user.role),
-    body.active === undefined ? Number(user.active) : body.active ? 1 : 0,
-    id
-  );
-  if (body.password) {
-    if (String(body.password).length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
-    db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(bcrypt.hashSync(String(body.password), 10), id);
-  }
+  // One transaction, so the profile and the password land together or not at all.
+  transaction(() => {
+    db.prepare('UPDATE users SET name = ?, email = ?, role = ?, active = ? WHERE id = ?').run(
+      String(body.name ?? user.name),
+      String(body.email ?? user.email).toLowerCase(),
+      body.role === 'manager' || body.role === 'employee' ? body.role : String(user.role),
+      body.active === undefined ? Number(user.active) : body.active ? 1 : 0,
+      id
+    );
+    if (body.password) {
+      db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(bcrypt.hashSync(String(body.password), 10), id);
+    }
+  });
   res.json(db.prepare(`SELECT ${publicFields} FROM users WHERE id = ?`).get(id));
 });
 

@@ -23,6 +23,15 @@ interface FieldSpec {
   kind: Kind;
   /** Reject the row when this field is blank. */
   required?: boolean;
+  /**
+   * The values the column's CHECK constraint allows. Repeated here so a bad one
+   * is a 400 naming the choices, rather than the constraint firing and reaching
+   * the user as "Internal server error" — the same reason the delete guards
+   * name what is blocking them instead of leaving it to the foreign key.
+   */
+  oneOf?: readonly string[];
+  /** Used when the field arrives blank, where the column will not accept ''. */
+  fallback?: string;
 }
 
 interface Guard {
@@ -41,6 +50,9 @@ interface MasterConfig {
   guards?: Guard[];
 }
 
+/** Mirrors the CHECK on `materials.category` in schema.sql. */
+const MATERIAL_CATEGORIES = ['resin', 'masterbatch', 'packing', 'other'] as const;
+
 /** Blank must persist as NULL, not 0 — an unrecorded cavity count is not zero. */
 const numOrNull = (v: unknown) =>
   v === '' || v === null || v === undefined || Number.isNaN(Number(v)) ? null : Number(v);
@@ -55,8 +67,10 @@ function read(spec: FieldSpec, body: Record<string, unknown>, existing?: Record<
     case 'bool':
       // Absent means "leave as it was", and a new row defaults to active.
       return raw === undefined || raw === null ? 1 : raw ? 1 : 0;
-    default:
-      return String(raw ?? '');
+    default: {
+      const text = String(raw ?? '');
+      return text.trim() || spec.fallback || text;
+    }
   }
 }
 
@@ -68,8 +82,14 @@ function masterRouter(cfg: MasterConfig): Router {
 
   const validate = (body: Record<string, unknown>, existing?: Record<string, unknown>) => {
     for (const f of cfg.fields) {
-      if (f.required && !String(body[f.name] ?? existing?.[f.name] ?? '').trim()) {
+      const value = String(body[f.name] ?? existing?.[f.name] ?? '').trim();
+      if (f.required && !value) {
         return `${f.name.replace(/_/g, ' ')} is required`;
+      }
+      // Blank is allowed through where the column permits it; the CHECK
+      // constraints below all include '' or the column is nullable.
+      if (f.oneOf && value && !f.oneOf.includes(value)) {
+        return `${f.name.replace(/_/g, ' ')} must be one of: ${f.oneOf.join(', ')}`;
       }
     }
     return null;
@@ -189,7 +209,9 @@ export const MASTERS: MasterConfig[] = [
     label: 'Material',
     fields: [
       { name: 'name', kind: 'text', required: true },
-      { name: 'category', kind: 'text' },
+      // The column carries a CHECK; blank is not one of the choices, so an
+      // omitted category takes the same default the column declares.
+      { name: 'category', kind: 'text', oneOf: MATERIAL_CATEGORIES, fallback: 'resin' },
       { name: 'unit', kind: 'text' },
       { name: 'hsn_code', kind: 'text' },
       { name: 'reorder_level', kind: 'num' },

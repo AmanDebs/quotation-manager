@@ -424,6 +424,17 @@ invoicesRouter.delete('/:id', (req: AuthedRequest, res) => {
   if (!existing || !canAccessCustomer(req, existing.customer_id)) return res.status(404).json({ error: 'Invoice not found' });
   const paid = db.prepare('SELECT COUNT(*) AS c FROM payments WHERE invoice_id = ?').get(id) as { c: number };
   if (paid.c > 0) return res.status(409).json({ error: 'Invoice has recorded payments and cannot be deleted' });
+  // A despatch points at the invoice it was billed under. Without this the
+  // foreign key still stops the delete, but the caller is told only that "this
+  // record is still referenced by another document" — true, and useless.
+  const trips = db.prepare(
+    `SELECT COUNT(*) AS c FROM despatches WHERE invoice_id = ?`
+  ).get(id) as { c: number };
+  if (trips.c > 0) {
+    return res.status(409).json({
+      error: `This invoice is on ${trips.c} despatch record${trips.c === 1 ? '' : 's'}. Clear the invoice from ${trips.c === 1 ? 'it' : 'them'} first, or keep the invoice.`,
+    });
+  }
   // Read the links before the row is gone.
   const orders = orderIdsBehind(id, existing.order_id, existing.pi_id);
   transaction(() => {

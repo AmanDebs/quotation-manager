@@ -86,6 +86,12 @@ stockRouter.post('/issue', (req: AuthedRequest, res) => {
   if (qty <= 0) return res.status(400).json({ error: 'Issue a quantity greater than zero' });
   const locationId = numOrNull(body.location_id) ?? wo.location_id;
   if (!locationId) return res.status(400).json({ error: 'Say which plant it came out of' });
+  // Checked like POST /moves does. Without it a bad id reached the foreign key
+  // and came back as "still referenced by another document", which is not what
+  // went wrong and points at the wrong record.
+  if (!db.prepare('SELECT id FROM locations WHERE id = ?').get(locationId)) {
+    return res.status(400).json({ error: 'That location no longer exists' });
+  }
   const date = String(body.date ?? '').trim();
   if (!date) return res.status(400).json({ error: 'Date is required' });
 
