@@ -44,16 +44,44 @@ export interface AuthedRequest extends Request {
   user?: SessionUser;
 }
 
+/**
+ * Signs a session for this user at their current token version.
+ *
+ * Every token carries the version it was signed under; `requireAuth` compares
+ * it against the row. Raising the row's version therefore ends every session
+ * issued before it, which is what makes a password change mean something —
+ * see `bumpTokenVersion`.
+ */
+export function signToken(userId: number): string {
+  const row = db.prepare('SELECT token_version FROM users WHERE id = ?').get(userId) as
+    { token_version: number } | undefined;
+  return jwt.sign({ userId, tv: row?.token_version ?? 0 }, JWT_SECRET, { expiresIn: '30d' });
+}
+
+/** Ends every session this user currently holds. Returns the new version. */
+export function bumpTokenVersion(userId: number): number {
+  const row = db
+    .prepare('UPDATE users SET token_version = token_version + 1 WHERE id = ? RETURNING token_version')
+    .get(userId) as { token_version: number } | undefined;
+  return row?.token_version ?? 0;
+}
+
 export function requireAuth(req: AuthedRequest, res: Response, next: NextFunction) {
   const token = req.cookies?.[COOKIE_NAME];
   if (!token) return res.status(401).json({ error: 'Not authenticated' });
   try {
-    const payload = jwt.verify(token, JWT_SECRET) as { userId: number };
+    const payload = jwt.verify(token, JWT_SECRET) as { userId: number; tv?: number };
     const user = db
-      .prepare('SELECT id, name, email, role, active FROM users WHERE id = ?')
-      .get(payload.userId) as (SessionUser & { active: number }) | undefined;
+      .prepare('SELECT id, name, email, role, active, token_version FROM users WHERE id = ?')
+      .get(payload.userId) as (SessionUser & { active: number; token_version: number }) | undefined;
     if (!user) return res.status(401).json({ error: 'User not found' });
     if (!user.active) return res.status(403).json({ error: 'This account has been deactivated' });
+    // A token signed before this claim existed reads as version 0, which is
+    // where every existing row starts — so adding the check signs nobody out.
+    // It only bites once a password has actually been changed.
+    if ((payload.tv ?? 0) !== user.token_version) {
+      return res.status(401).json({ error: 'Your password was changed — please sign in again' });
+    }
     req.user = { id: user.id, name: user.name, email: user.email, role: user.role };
     next();
   } catch {

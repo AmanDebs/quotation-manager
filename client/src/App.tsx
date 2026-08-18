@@ -1,6 +1,7 @@
-import { createContext, useContext, useEffect, useState } from 'react';
+import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
-import { api, ApiError } from './api/client';
+import { useQueryClient } from '@tanstack/react-query';
+import { api, ApiError, setUnauthorizedHandler } from './api/client';
 import type { User } from './types';
 import Layout from './components/Layout';
 import LoginPage from './pages/Login';
@@ -36,6 +37,13 @@ export const useIsManager = () => useContext(UserContext)?.role === 'manager';
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const [expired, setExpired] = useState(false);
+  const queryClient = useQueryClient();
+
+  // Read by the 401 handler below, which is registered once and would otherwise
+  // close over the user as it was on mount — always null.
+  const userRef = useRef<User | null>(null);
+  userRef.current = user;
 
   useEffect(() => {
     api.get<User>('/api/auth/me')
@@ -46,11 +54,34 @@ export default function App() {
       .finally(() => setLoading(false));
   }, []);
 
+  /**
+   * A session can end while the app is open — the cookie expires, or a password
+   * is changed elsewhere. `/auth/me` is only asked once, on mount, so nothing
+   * noticed: every query on the page simply started failing and the screen
+   * looked broken rather than signed out.
+   *
+   * Any 401 that is not itself an answer (see EXPECTS_401 in the api client)
+   * now drops straight back to the login screen, saying why. The cache is
+   * cleared with it, or the next person to sign in on this machine would see
+   * the previous one's customers until each query refetched.
+   */
+  useEffect(() => {
+    setUnauthorizedHandler(() => {
+      if (!userRef.current) return;
+      setUser(null);
+      setExpired(true);
+      queryClient.clear();
+    });
+    return () => setUnauthorizedHandler(null);
+  }, [queryClient]);
+
   if (loading) {
     return <div className="flex h-screen items-center justify-center text-slate-400">Loading…</div>;
   }
 
-  if (!user) return <LoginPage onLogin={setUser} />;
+  if (!user) {
+    return <LoginPage onLogin={(u) => { setExpired(false); setUser(u); }} expired={expired} />;
+  }
 
   const managerOnly = (element: JSX.Element) =>
     user.role === 'manager' ? element : <Navigate to="/" replace />;

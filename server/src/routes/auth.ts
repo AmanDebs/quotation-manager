@@ -1,8 +1,7 @@
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
-import jwt from 'jsonwebtoken';
 import { db } from '../db/connection.js';
-import { JWT_SECRET, COOKIE_NAME, requireAuth, type AuthedRequest } from '../middleware/auth.js';
+import { COOKIE_NAME, requireAuth, signToken, bumpTokenVersion, type AuthedRequest } from '../middleware/auth.js';
 import { loginRateLimit } from '../middleware/rateLimit.js';
 
 export const authRouter = Router();
@@ -40,8 +39,7 @@ authRouter.post('/register', loginRateLimit, (req, res) => {
     .prepare("INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, ?, 'manager')")
     .run(String(name), String(email).toLowerCase(), hash);
   const id = Number(info.lastInsertRowid);
-  const token = jwt.sign({ userId: id }, JWT_SECRET, { expiresIn: '30d' });
-  res.cookie(COOKIE_NAME, token, cookieOpts);
+  res.cookie(COOKIE_NAME, signToken(id), cookieOpts);
   res.json({ id, name, email, role: 'manager' });
 });
 
@@ -54,8 +52,7 @@ authRouter.post('/login', loginRateLimit, (req, res) => {
     return res.status(401).json({ error: 'Invalid email or password' });
   }
   if (!user.active) return res.status(403).json({ error: 'This account has been deactivated' });
-  const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: '30d' });
-  res.cookie(COOKIE_NAME, token, cookieOpts);
+  res.cookie(COOKIE_NAME, signToken(user.id), cookieOpts);
   res.json({ id: user.id, name: user.name, email: user.email, role: user.role });
 });
 
@@ -141,5 +138,10 @@ authRouter.post('/change-password', requireAuth, (req: AuthedRequest, res) => {
     return res.status(401).json({ error: 'Current password is incorrect' });
   }
   db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(bcrypt.hashSync(String(new_password), 10), req.user!.id);
+  // Every session signed under the old password stops here — that is the point
+  // of changing it. The caller keeps working: they are handed a fresh cookie at
+  // the new version, so the browser doing the changing is the one that stays in.
+  bumpTokenVersion(req.user!.id);
+  res.cookie(COOKIE_NAME, signToken(req.user!.id), cookieOpts);
   res.json({ ok: true });
 });

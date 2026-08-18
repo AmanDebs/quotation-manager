@@ -99,6 +99,10 @@ addColumnIfMissing('users', 'role', "TEXT NOT NULL DEFAULT 'employee'");
 addColumnIfMissing('users', 'active', 'INTEGER NOT NULL DEFAULT 1');
 // Per-user dashboard layout (2026-08). Blank means the built-in order.
 addColumnIfMissing('users', 'dashboard_layout', "TEXT NOT NULL DEFAULT ''");
+// Session invalidation on password change (2026-08). Existing sessions were
+// signed without the claim; they read as version 0, which is what every
+// existing row starts at, so nobody is signed out by the migration itself.
+addColumnIfMissing('users', 'token_version', 'INTEGER NOT NULL DEFAULT 0');
 addColumnIfMissing('customers', 'owner_id', 'INTEGER');
 addColumnIfMissing('customers', 'is_export', 'INTEGER NOT NULL DEFAULT 0');
 addColumnIfMissing('products', 'image', "TEXT NOT NULL DEFAULT ''");

@@ -3,7 +3,11 @@ import { api } from '../api/client';
 import type { User } from '../types';
 import { Button, Input, Field, ErrorText } from '../components/ui';
 
-export default function LoginPage({ onLogin }: { onLogin: (u: User) => void }) {
+export default function LoginPage({ onLogin, expired = false }: {
+  onLogin: (u: User) => void;
+  /** True when the app dropped back here mid-use, rather than starting here. */
+  expired?: boolean;
+}) {
   const [needsSetup, setNeedsSetup] = useState(false);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -40,6 +44,12 @@ export default function LoginPage({ onLogin }: { onLogin: (u: User) => void }) {
             {needsSetup ? 'Welcome! Create the first user account to get started.' : 'Sign in to your account'}
           </p>
         </div>
+        {expired && !needsSetup && (
+          <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+            Your session ended — either it expired, or the password on this account was changed.
+            Sign in again to carry on.
+          </p>
+        )}
         {needsSetup && (
           <Field label="Your Name">
             <Input value={name} onChange={(e) => setName(e.target.value)} required placeholder="e.g. Aman Saraogi" />

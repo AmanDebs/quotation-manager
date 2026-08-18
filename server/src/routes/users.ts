@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import { db, transaction } from '../db/connection.js';
-import type { AuthedRequest } from '../middleware/auth.js';
+import { bumpTokenVersion, type AuthedRequest } from '../middleware/auth.js';
 
 export const usersRouter = Router();
 
@@ -58,6 +58,12 @@ usersRouter.put('/:id', (req: AuthedRequest, res) => {
     );
     if (body.password) {
       db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(bcrypt.hashSync(String(body.password), 10), id);
+      // Inside the same transaction as the hash, so a reset can never land
+      // without ending the sessions it was meant to end. Unlike the self-service
+      // change in auth.ts there is no fresh cookie to hand back: the whole point
+      // of a manager resetting someone's password is that whoever is holding
+      // that account is signed out of it, wherever they are.
+      bumpTokenVersion(id);
     }
   });
   res.json(db.prepare(`SELECT ${publicFields} FROM users WHERE id = ?`).get(id));

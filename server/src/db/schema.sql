@@ -13,6 +13,12 @@ CREATE TABLE IF NOT EXISTS users (
   -- A display preference, so it lives on the user rather than in the browser:
   -- the same desk gets used from more than one machine.
   dashboard_layout TEXT NOT NULL DEFAULT '',
+  -- Bumped whenever this account's password changes. Every token carries the
+  -- version it was signed under, so raising it makes every session issued
+  -- before the change stop verifying. Without it a stolen login survived the
+  -- password reset meant to end it: requireAuth caught a deactivated account
+  -- but had nothing to check a reset against.
+  token_version INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
