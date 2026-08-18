@@ -198,7 +198,7 @@ proformasRouter.post('/', (req: AuthedRequest, res) => {
   // Fixed at creation: the number below comes from this company's series.
   const companyId = resolveCompanyId(body.company_id, Number(body.customer_id));
   const id = transaction(() => {
-    const number = nextNumber('proforma', { isExport: h.is_export === 1, companyId });
+    const number = nextNumber('proforma', { isExport: h.is_export === 1, companyId, date: h.date });
     const info = db.prepare(
       `INSERT INTO proforma_invoices (number, company_id, ${headerFields.join(', ')}, created_by, column_config, status)
        VALUES (?, ?, ${headerFields.map(() => '?').join(', ')}, ?, ?, 'draft')`

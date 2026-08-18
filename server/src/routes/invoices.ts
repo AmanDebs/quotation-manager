@@ -138,7 +138,8 @@ function syncPackingList(invoiceId: number, userId: number, packing: PackingInpu
     // The packing list is the invoice's other half, so it is issued by the
     // same company and numbered from that company's series.
     const plCompanyId = Number(inv.company_id) || resolveCompanyId(null, Number(inv.customer_id));
-    const number = nextNumber('packing_list', { companyId: plCompanyId });
+    // Dated with the invoice it belongs to, so it is numbered in that year too.
+    const number = nextNumber('packing_list', { companyId: plCompanyId, date: String(packing?.date ?? inv.date ?? '') });
     const info = db.prepare(
       `INSERT INTO packing_lists (number, date, invoice_id, customer_id, company_id, shipping_marks, lot_no, remarks, created_by, column_config)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
@@ -310,7 +311,7 @@ invoicesRouter.post('/', (req: AuthedRequest, res) => {
   // Fixed at creation: the number below comes from this company's series.
   const companyId = resolveCompanyId(body.company_id, Number(body.customer_id));
   const id = transaction(() => {
-    const number = nextNumber('invoice', { isExport: h.is_export === 1, companyId });
+    const number = nextNumber('invoice', { isExport: h.is_export === 1, companyId, date: h.date });
     const info = db.prepare(
       `INSERT INTO commercial_invoices (number, company_id, ${headerFields.join(', ')}, created_by, column_config, status)
        VALUES (?, ?, ${headerFields.map(() => '?').join(', ')}, ?, ?, 'draft')`

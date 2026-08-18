@@ -14,6 +14,35 @@ function fiscalYearStart(date = new Date()): number {
   return date.getMonth() >= 3 ? date.getFullYear() : date.getFullYear() - 1;
 }
 
+/**
+ * The fiscal year a **document** belongs to, from its own date.
+ *
+ * A number is a claim about when the document was issued, and an invoice dated
+ * 30 March belongs to the year ending that day whoever happens to be raising it
+ * in April. Taking the year from `new Date()` put a 26-27 number on it and drew
+ * from the 26-27 counter — a gap in one series and a stray in the other, on the
+ * consecutive-per-GSTIN numbering a GST return is checked against.
+ *
+ * The date arrives as a 'YYYY-MM-DD' string and is parsed as digits rather than
+ * handed to `new Date()`: that constructor reads a bare date as UTC midnight
+ * and then answers `getMonth()` in local time, so a document dated the 1st of
+ * April would fall into the previous year on any server running behind UTC.
+ * Production runs in UTC today, which is exactly the kind of thing that stays
+ * true until it doesn't.
+ *
+ * Anything unparseable falls back to today — a document with no usable date
+ * still has to be numbered.
+ */
+export function fiscalYearOf(date?: string | null): { start: number; label: string } {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(date ?? '').trim());
+  if (!m) return { start: fiscalYearStart(), label: fiscalYear() };
+  const year = Number(m[1]);
+  const month = Number(m[2]); // 1–12
+  if (month < 1 || month > 12) return { start: fiscalYearStart(), label: fiscalYear() };
+  const start = month >= 4 ? year : year - 1;
+  return { start, label: `${String(start).slice(2)}-${String(start + 1).slice(2)}` };
+}
+
 const patternColumn: Record<DocType, { std: string; export?: string }> = {
   quotation: { std: 'quote_pattern' },
   order: { std: 'order_pattern', export: 'order_export_pattern' },
@@ -46,12 +75,15 @@ const patternColumn: Record<DocType, { std: string; export?: string }> = {
  */
 export function nextNumber(
   docType: DocType,
-  opts: { isExport?: boolean; companyId: number }
+  opts: { isExport?: boolean; companyId: number; date?: string | null }
 ): string {
   const cols = patternColumn[docType];
   const useExport = !!opts.isExport && !!cols.export;
   const seqKey = useExport ? `${docType}_export` : docType;
-  const fyStart = fiscalYearStart();
+  // Both the printed year and the counter come from the document's own date:
+  // a back-dated invoice takes the next number in *that* year's series, not a
+  // number borrowed from this one.
+  const fy = fiscalYearOf(opts.date);
 
   // Claim the next number in a single statement. Read-then-update would hand
   // the same number to two people creating documents at the same moment; that
@@ -60,9 +92,9 @@ export function nextNumber(
     `INSERT INTO sequences (company_id, doc_type, year, next_num) VALUES (?, ?, ?, 1)
      ON CONFLICT(company_id, doc_type, year) DO UPDATE SET next_num = next_num + 1
      RETURNING next_num`
-  ).get(opts.companyId, seqKey, fyStart) as { next_num: number };
+  ).get(opts.companyId, seqKey, fy.start) as { next_num: number };
 
-  return applyPattern(patternFor(docType, opts.companyId, useExport), row.next_num);
+  return applyPattern(patternFor(docType, opts.companyId, useExport), row.next_num, fy.label);
 }
 
 /** The stored pattern for one series, or a last-resort generic one. */
@@ -72,10 +104,10 @@ function patternFor(docType: DocType, companyId: number, useExport: boolean): st
   return company?.[useExport ? cols.export! : cols.std] || `${docType.toUpperCase()}/{FY}/{SEQ}`;
 }
 
-/** Fill the tokens for a given sequence value. */
-function applyPattern(pattern: string, seq: number): string {
+/** Fill the tokens for a given sequence value, in a given fiscal year. */
+function applyPattern(pattern: string, seq: number, fyLabel = fiscalYear()): string {
   return pattern
-    .replaceAll('{FY}', fiscalYear())
+    .replaceAll('{FY}', fyLabel)
     // {SEQ4} first: replacing {SEQ} first would leave a stray "4" behind.
     .replaceAll('{SEQ4}', String(seq).padStart(4, '0'))
     .replaceAll('{SEQ}', String(seq).padStart(3, '0'));

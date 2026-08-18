@@ -128,7 +128,7 @@ purchaseOrdersRouter.post('/', (req: AuthedRequest, res) => {
   }
   const id = transaction(() => {
     const companyId = resolveCompanyId(body.company_id);
-    const number = String(body.number ?? '').trim() || nextNumber('purchase_order', { companyId });
+    const number = String(body.number ?? '').trim() || nextNumber('purchase_order', { companyId, date: String(body.date ?? '') });
     const info = db.prepare(
       `INSERT INTO purchase_orders (number, company_id, ${headerFields.join(', ')}, status, created_by)
        VALUES (?, ?, ${headerFields.map(() => '?').join(', ')}, ?, ?)`

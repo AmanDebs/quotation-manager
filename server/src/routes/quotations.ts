@@ -92,7 +92,7 @@ quotationsRouter.post('/', (req: AuthedRequest, res) => {
   // number below is drawn from this company's series.
   const companyId = resolveCompanyId(body.company_id, Number(body.customer_id));
   const result = transaction(() => {
-    const number = nextNumber('quotation', { companyId });
+    const number = nextNumber('quotation', { companyId, date: String(body.date ?? '') });
     const info = db.prepare(
       `INSERT INTO quotations (number, revision, date, customer_id, currency, validity_date, payment_terms, delivery_terms, notes, freight, insurance, inco_terms, container_count, prepared_by, tax_type, is_export, created_by, column_config, company_id, status)
        VALUES (?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft')`

@@ -122,7 +122,7 @@ packingListsRouter.post('/', (req: AuthedRequest, res) => {
     : undefined;
   const companyId = resolveCompanyId(linked?.company_id ?? body.company_id, Number(body.customer_id));
   const id = transaction(() => {
-    const number = nextNumber('packing_list', { companyId });
+    const number = nextNumber('packing_list', { companyId, date: String(body.date ?? '') });
     const info = db.prepare(
       `INSERT INTO packing_lists (number, date, invoice_id, customer_id, company_id, shipping_marks, lot_no, remarks, created_by, column_config)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
