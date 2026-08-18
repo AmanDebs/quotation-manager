@@ -7,6 +7,7 @@ import { Button, Select, PageHeader, EmptyState, Card, ExportTabs, ErrorText } f
 import { useCompanies } from '../components/CompanySelect';
 import NewDocumentDialog from '../components/NewDocumentDialog';
 import { fmtDate, fmtMoney } from '../lib/format';
+import { useUrlFilter } from '../lib/useUrlFilter';
 
 const STATUSES = ['draft', 'final', 'dispatched', 'paid'];
 
@@ -25,11 +26,13 @@ export default function InvoicesPage() {
   // Only worth a column once the group has more than one entity.
   const companies = useCompanies();
   const showCompany = companies.length > 1;
-  const [companyFilter, setCompanyFilter] = useState('');
+  const [companyFilter, setCompanyFilter] = useUrlFilter('company');
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [statusFilter, setStatusFilter] = useState('');
-  const [exportFilter, setExportFilter] = useState('');
+  // In the URL, so the dashboard can link to one slice of the list and the
+  // back button undoes a filter instead of leaving the page.
+  const [statusFilter, setStatusFilter] = useUrlFilter('status');
+  const [exportFilter, setExportFilter] = useUrlFilter('export');
   const [creating, setCreating] = useState(false);
   const { data: invoices = [] } = useQuery({
     queryKey: ['invoices', statusFilter, exportFilter, companyFilter],

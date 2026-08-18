@@ -8,6 +8,7 @@ import NewDocumentDialog from '../components/NewDocumentDialog';
 import InternalNotes from '../components/InternalNotes';
 import { useCompanies } from '../components/CompanySelect';
 import { fmtDate, fmtMoney } from '../lib/format';
+import { useUrlFilter } from '../lib/useUrlFilter';
 
 const approvalBadge: Record<string, { cls: string; label: string }> = {
   pending: { cls: 'bg-amber-100 text-amber-700', label: 'Awaiting approval' },
@@ -30,13 +31,15 @@ const statusTint: Record<string, string> = {
 export default function QuotationsPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [statusFilter, setStatusFilter] = useState('');
-  const [exportFilter, setExportFilter] = useState('');
+  // In the URL, so the dashboard can link to one slice of the list and the
+  // back button undoes a filter instead of leaving the page.
+  const [statusFilter, setStatusFilter] = useUrlFilter('status');
+  const [exportFilter, setExportFilter] = useUrlFilter('export');
   const [creating, setCreating] = useState(false);
   // Only worth a column once the group actually has more than one entity.
   const companies = useCompanies();
   const showCompany = companies.length > 1;
-  const [companyFilter, setCompanyFilter] = useState('');
+  const [companyFilter, setCompanyFilter] = useUrlFilter('company');
   // Which rows have their note panel open. Keyed by quotation id rather than
   // index, so filtering the list cannot open the wrong one.
   const [openNotes, setOpenNotes] = useState<Set<number>>(new Set());

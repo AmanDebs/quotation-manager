@@ -5,6 +5,7 @@ import { api } from '../api/client';
 import type { WorkOrder, WorkOrderStatus, Location, Machine } from '../types';
 import { PageHeader, Card, Select, EmptyState } from '../components/ui';
 import { fmtQty, fmtDate } from '../lib/format';
+import { useUrlFilter } from '../lib/useUrlFilter';
 
 /**
  * Every job across every order — the shop floor's own view.
@@ -27,7 +28,8 @@ const statusStyle: Record<WorkOrderStatus, string> = {
 const todayIso = new Date().toISOString().slice(0, 10);
 
 export default function WorkOrdersPage() {
-  const [status, setStatus] = useState('');
+  // Status in the URL so the dashboard's factory card can link to one stage.
+  const [status, setStatus] = useUrlFilter('status');
   const [machine, setMachine] = useState('');
   const [location, setLocation] = useState('');
   const [openOnly, setOpenOnly] = useState(true);

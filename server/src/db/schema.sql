@@ -8,6 +8,11 @@ CREATE TABLE IF NOT EXISTS users (
   password_hash TEXT NOT NULL,
   role TEXT NOT NULL DEFAULT 'employee' CHECK (role IN ('manager','employee')),
   active INTEGER NOT NULL DEFAULT 1,
+  -- Which dashboard cards this person keeps, and in what order. JSON
+  -- {"hidden":[],"order":[]} of card ids; blank means the built-in layout.
+  -- A display preference, so it lives on the user rather than in the browser:
+  -- the same desk gets used from more than one machine.
+  dashboard_layout TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 

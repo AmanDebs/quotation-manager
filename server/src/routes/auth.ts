@@ -66,8 +66,69 @@ authRouter.post('/logout', (_req, res) => {
   res.json({ ok: true });
 });
 
+/**
+ * The session, plus the caller's own dashboard layout.
+ *
+ * The layout rides along here rather than on a request of its own because the
+ * dashboard needs it before it can draw anything, and `/auth/me` is already
+ * the gate every page waits on. It is not part of `SessionUser`: the session
+ * is an identity, and every route that reads `req.user` would then be carrying
+ * a display preference it has no use for.
+ */
 authRouter.get('/me', requireAuth, (req: AuthedRequest, res) => {
-  res.json(req.user);
+  const row = db.prepare('SELECT dashboard_layout FROM users WHERE id = ?').get(req.user!.id) as
+    { dashboard_layout: string } | undefined;
+  res.json({ ...req.user, dashboard_layout: readLayout(row?.dashboard_layout) });
+});
+
+/**
+ * Which dashboard cards this person keeps, and in what order.
+ *
+ * Card ids are the client's vocabulary, so the server cannot check a list
+ * against the real one — but it does not have to store whatever arrives
+ * either. What is written is a **normalised** `{hidden, order}` of plausible
+ * ids: an unknown id is harmless (the dashboard simply never draws it) while
+ * an unbounded blob on a user row is a junk drawer that grows forever.
+ *
+ * The layout is the caller's own and nobody else's, so there is no role check
+ * here; a manager cannot set an employee's, which is the right way round.
+ */
+const ID = /^[a-z0-9_-]{1,40}$/;
+const MAX_IDS = 60;
+
+function cleanIds(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  for (const v of value) {
+    const id = String(v ?? '').trim();
+    if (ID.test(id)) seen.add(id);
+    if (seen.size >= MAX_IDS) break;
+  }
+  return [...seen];
+}
+
+export interface DashboardLayout { hidden: string[]; order: string[] }
+
+/** Blank, or anything that stopped being valid JSON, reads as "the default". */
+function readLayout(raw: string | null | undefined): DashboardLayout {
+  if (!String(raw ?? '').trim()) return { hidden: [], order: [] };
+  try {
+    const parsed = JSON.parse(String(raw));
+    return { hidden: cleanIds(parsed?.hidden), order: cleanIds(parsed?.order) };
+  } catch {
+    return { hidden: [], order: [] };
+  }
+}
+
+authRouter.put('/dashboard-layout', requireAuth, (req: AuthedRequest, res) => {
+  const body = req.body ?? {};
+  const layout: DashboardLayout = { hidden: cleanIds(body.hidden), order: cleanIds(body.order) };
+  // An empty layout is stored as '' rather than '{"hidden":[],"order":[]}',
+  // so "reset to the default" and "never customised" are the same row value
+  // and a later change to the built-in order reaches both.
+  const json = layout.hidden.length || layout.order.length ? JSON.stringify(layout) : '';
+  db.prepare('UPDATE users SET dashboard_layout = ? WHERE id = ?').run(json, req.user!.id);
+  res.json(layout);
 });
 
 authRouter.post('/change-password', requireAuth, (req: AuthedRequest, res) => {

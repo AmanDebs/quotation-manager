@@ -5,6 +5,7 @@ import type { Customer, User } from '../types';
 import { useIsManager } from '../App';
 import { Button, Input, Textarea, Select, Field, PageHeader, EmptyState, ErrorText, Modal, Card, ExportTabs } from '../components/ui';
 import CompanySelect, { useCompanies } from '../components/CompanySelect';
+import { useUrlFilter } from '../lib/useUrlFilter';
 
 const empty: Omit<Customer, 'id'> = {
   name: '', contact_person: '', email: '', phone: '', address: '', city: '', country: 'India',
@@ -16,8 +17,9 @@ export default function CustomersPage() {
   const queryClient = useQueryClient();
   const isManager = useIsManager();
   const companies = useCompanies();
-  const [q, setQ] = useState('');
-  const [exportFilter, setExportFilter] = useState('');
+  // In the URL, so Top Customers on the dashboard can land on one name.
+  const [q, setQ] = useUrlFilter('q');
+  const [exportFilter, setExportFilter] = useUrlFilter('export');
   const [editing, setEditing] = useState<Customer | Omit<Customer, 'id'> | null>(null);
   const { data: customers = [] } = useQuery({
     queryKey: ['customers', q, exportFilter],

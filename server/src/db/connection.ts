@@ -97,6 +97,8 @@ addColumnIfMissing('settings', 'pl_pattern', "TEXT NOT NULL DEFAULT 'PL/{FY}/{SE
 // Team roles, approval workflow, flexible columns (2026-07).
 addColumnIfMissing('users', 'role', "TEXT NOT NULL DEFAULT 'employee'");
 addColumnIfMissing('users', 'active', 'INTEGER NOT NULL DEFAULT 1');
+// Per-user dashboard layout (2026-08). Blank means the built-in order.
+addColumnIfMissing('users', 'dashboard_layout', "TEXT NOT NULL DEFAULT ''");
 addColumnIfMissing('customers', 'owner_id', 'INTEGER');
 addColumnIfMissing('customers', 'is_export', 'INTEGER NOT NULL DEFAULT 0');
 addColumnIfMissing('products', 'image', "TEXT NOT NULL DEFAULT ''");

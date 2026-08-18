@@ -1,8 +1,17 @@
 export type Role = 'manager' | 'employee';
 
+/**
+ * Which dashboard cards this person keeps, and in what order. Ids not in
+ * `order` fall in after the ones that are, in the built-in order, so a card
+ * added in a later release appears rather than silently going missing.
+ */
+export interface DashboardLayout { hidden: string[]; order: string[] }
+
 export interface User {
   id: number; name: string; email: string; role: Role;
   active?: number; customer_count?: number; created_at?: string;
+  /** Only sent by /api/auth/me — the team list has no use for it. */
+  dashboard_layout?: DashboardLayout;
 }
 
 export interface BankAccount { label: string; details: string }

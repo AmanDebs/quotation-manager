@@ -85,6 +85,38 @@ dashboardRouter.get('/', (req: AuthedRequest, res) => {
     from, to, ...p
   );
 
+  /**
+   * Cash actually collected, per month. Invoiced value is what was asked for;
+   * this is what came in, and the gap between the two lines is the collection
+   * problem stated in one picture.
+   *
+   * A payment carries no company of its own, so it inherits one the way a
+   * follow-up does: from the document it was paid against, else the customer's
+   * usual entity, else the group default. Invoice first, then proforma — a row
+   * can only carry one of the two, and the order just makes the intent plain.
+   *
+   * Not converted between currencies and never summed across them: there is no
+   * rate stored anywhere, and inventing one would put a fiction on a ledger.
+   */
+  const payCompany = companyId
+    ? {
+        sql: ` AND COALESCE(
+            (SELECT company_id FROM commercial_invoices WHERE id = pay.invoice_id),
+            (SELECT company_id FROM proforma_invoices WHERE id = pay.pi_id),
+            (SELECT company_id FROM customers WHERE id = pay.customer_id),
+            ?) = ?`,
+        params: [defaultCompanyId(), companyId] as unknown[],
+      }
+    : { sql: '', params: [] as unknown[] };
+
+  const receivedByMonth = q(
+    `SELECT substr(pay.date, 1, 7) AS month, pay.currency, SUM(pay.amount) AS total
+     FROM payments pay
+     WHERE pay.date BETWEEN ? AND ?${scope.sql ? ` AND pay.${scope.sql}` : ''}${payCompany.sql}
+     GROUP BY month, pay.currency ORDER BY month`,
+    from, to, ...scope.params, ...payCompany.params
+  );
+
   // These join in the customer, so the filters need the document's own alias.
   const dq = docFilter('q');
   const di = docFilter('i');
@@ -256,6 +288,13 @@ dashboardRouter.get('/', (req: AuthedRequest, res) => {
     (db.prepare('SELECT id, reorder_level FROM materials').all() as { id: number; reorder_level: number }[])
       .map((m) => [m.id, m.reorder_level])
   );
+  // Both of these walk the whole open job list, so they are read once here and
+  // shared with the production block below rather than run twice.
+  const shortRows = shortfall().rows.filter((r) => r.short > 0);
+  const belowReorder = onHandAll().filter((r) => {
+    const level = reorderLevels.get(r.material_id) ?? 0;
+    return level > 0 && r.qty < level;
+  });
 
   const attention = {
     overdueFollowups: followups.overdue.length,
@@ -293,16 +332,75 @@ dashboardRouter.get('/', (req: AuthedRequest, res) => {
     // Material short across the open order book. Group-wide and unscoped by
     // design: the store is not the customer's, and a buyer needs the whole
     // picture to raise one purchase order rather than several.
-    materialShort: shortfall().rows.filter((r) => r.short > 0).length,
-    materialBelowReorder: onHandAll().filter((r) => {
-      const level = reorderLevels.get(r.material_id) ?? 0;
-      return level > 0 && r.qty < level;
-    }).length,
+    materialShort: shortRows.length,
+    materialBelowReorder: belowReorder.length,
+  };
+
+  /**
+   * The floor, in the same shape as the sales figures above it.
+   *
+   * Scoped through the order like everything else on the factory side, and
+   * filtered by the order's company — a work order carries a `company_id` of
+   * its own, but reading the order's keeps this identical to the attention
+   * strip, which is what the two are compared against.
+   *
+   * The job counts are **current state, not the date range**: "how many jobs
+   * are open" is a question about now, the same way the order book and the
+   * receivables are. Pieces made and pieces despatched *are* range-filtered —
+   * those are things that happened on a date.
+   */
+  const floorFilter = `${scope.sql ? ` AND o.${scope.sql}` : ''}${companyId ? ' AND o.company_id = ?' : ''}`;
+  const floorParams = [...scope.params, ...(companyId ? [companyId] : [])];
+
+  const workOrdersByStatus = q(
+    `SELECT w.status, COUNT(*) AS count FROM work_orders w
+     JOIN orders o ON o.id = w.order_id
+     WHERE 1 = 1${floorFilter} GROUP BY w.status`,
+    ...floorParams
+  );
+
+  const made = db.prepare(
+    `SELECT COALESCE(SUM(pe.qty_ok), 0) AS ok, COALESCE(SUM(pe.qty_reject), 0) AS reject
+     FROM production_entries pe
+     JOIN work_orders w ON w.id = pe.work_order_id
+     JOIN orders o ON o.id = w.order_id
+     WHERE pe.date BETWEEN ? AND ?${floorFilter}`
+  ).get(from, to, ...(floorParams as never[])) as { ok: number; reject: number };
+
+  const sent = db.prepare(
+    `SELECT COALESCE(SUM(di.qty), 0) AS pieces, COUNT(DISTINCT d.id) AS trips
+     FROM despatches d
+     JOIN orders o ON o.id = d.order_id
+     LEFT JOIN despatch_items di ON di.despatch_id = d.id
+     WHERE d.date BETWEEN ? AND ?${floorFilter}`
+  ).get(from, to, ...(floorParams as never[])) as { pieces: number; trips: number };
+
+  const production = {
+    workOrdersByStatus,
+    piecesMade: Math.round(made.ok),
+    piecesRejected: Math.round(made.reject),
+    // Zero made is not a zero reject rate, it is no answer at all.
+    rejectRate: made.ok + made.reject > 0
+      ? Math.round((made.reject / (made.ok + made.reject)) * 1000) / 10
+      : null,
+    piecesDespatched: Math.round(sent.pieces),
+    despatches: sent.trips,
+    // Group-wide and unscoped, like the two material chips: the store is not
+    // any one customer's, and a buyer needs the whole picture to raise one
+    // purchase order rather than several. Worst shortfall first.
+    shortMaterials: [...shortRows]
+      .sort((a, b) => b.short - a.short)
+      .slice(0, 6)
+      .map((r) => ({
+        material_id: r.material_id, name: r.material_name, unit: r.unit,
+        required: r.required, on_hand: r.on_hand, on_order: r.on_order, short: r.short,
+      })),
   };
 
   res.json({
     counts, quotationsByStatus, ordersByStatus, businessSplit, quotedByMonth, invoicedByMonth,
+    receivedByMonth,
     topCustomers, topCustomersInvoiced, topProducts, currencyTotals, followups, funnel,
-    receivables, receivablesAgeing, orderBook, overdueOrders, attention,
+    receivables, receivablesAgeing, orderBook, overdueOrders, attention, production,
   });
 });
