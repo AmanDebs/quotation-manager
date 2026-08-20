@@ -129,13 +129,37 @@ export function computeTotals(
   });
 
   const subtotal = round2(computed.reduce((s, it) => s + it.amount, 0));
-  const taxable = round2(subtotal + (freight || 0) + (insurance || 0));
+  const charges = (freight || 0) + (insurance || 0);
+  const taxable = round2(subtotal + charges);
 
   let tax_total = 0;
   if (taxType !== 'none') {
-    tax_total = round2(
-      computed.reduce((s, it) => s + it.amount * ((it.tax_pct ?? 0) / 100), 0)
-    );
+    const onItems = computed.reduce((s, it) => s + it.amount * ((it.tax_pct ?? 0) / 100), 0);
+    /**
+     * Header freight and insurance are taxed too. They used to be added into
+     * `taxable` and then left out of `tax_total`, which under-charged GST by
+     * the tax on them on every domestic invoice that used the header fields.
+     * Freight entered as a **charge line** was always taxed correctly, because
+     * a line carries its own `tax_pct`; only the two header fields missed.
+     *
+     * They have no rate of their own, and there is nowhere to put one. Under
+     * GST a delivery charge is part of the same composite supply and follows
+     * the goods, so the charge is apportioned across the lines in proportion
+     * to their amounts and each share taxed at that line's own rate. Where
+     * every line shares one rate — the ordinary case here — that is exactly
+     * `charges × rate`, and where they differ it is the invoice's own
+     * weighted rate rather than a rate picked from one arbitrary line.
+     *
+     * A price-only document (no quantities, so `subtotal` is 0) has no rate
+     * to follow and no value to tax, so the charges attract nothing.
+     */
+    const onCharges = charges > 0 && subtotal > 0
+      ? computed.reduce(
+          (s, it) => s + charges * (it.amount / subtotal) * ((it.tax_pct ?? 0) / 100),
+          0
+        )
+      : 0;
+    tax_total = round2(onItems + onCharges);
   }
 
   let grand_total = round2(taxable + tax_total);
