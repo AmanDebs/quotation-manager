@@ -10,7 +10,7 @@ import ProductionTab from '../components/ProductionTab';
 import MaterialTab from '../components/MaterialTab';
 import DispatchTab from '../components/DispatchTab';
 import LineItemsEditor from '../components/LineItemsEditor';
-import ColumnsControl from '../components/ColumnsControl';
+import ColumnsControl, { newColumnConfig, hasColumnPrefs } from '../components/ColumnsControl';
 import NotePresetPicker from '../components/NotePresetPicker';
 import FollowupButton from '../components/FollowupButton';
 import { ORDER_STATUSES, orderStatusLabel } from './Orders';
@@ -63,7 +63,7 @@ const emptyDraft = (): Draft => ({
   currency: 'INR', tax_type: 'igst', payment_terms: '', freight: 0, insurance: 0,
   inco_terms: '', container_count: '', advance_due: 0, advance_amount: 0, advance_received_date: '',
   destination: '', transport: '', freight_terms: '', promised_date: '', scheduled_date: '',
-  revised_date: '', actual_production_date: '', remarks: '', notes: '', column_config: {}, items: [],
+  revised_date: '', actual_production_date: '', remarks: '', notes: '', column_config: newColumnConfig(), items: [],
 });
 
 const ORDER_THROUGH = ['Phone', 'Email', 'WhatsApp', 'Meeting', 'Portal', 'Other'];
@@ -124,7 +124,14 @@ export default function OrderFormPage() {
       : fromProforma ? `from-proforma/${fromProforma}` : null;
     if (isNew && source && !prefilled) {
       api.get<Partial<Draft>>(`/api/orders/prefill/${source}`).then((p) => {
-        setDraft((d) => ({ ...d, ...p, customer_id: (p.customer_id as number) ?? d.customer_id }));
+        setDraft((d) => ({
+          ...d, ...p,
+          customer_id: (p.customer_id as number) ?? d.customer_id,
+          // Carry the source's columns forward only when it actually has some. A
+          // document saved before these defaults existed carries a blank config,
+          // and spreading that over the draft would quietly undo them.
+          column_config: hasColumnPrefs(p.column_config) ? p.column_config : d.column_config,
+        }));
         setPrefilled(true);
       });
     }

@@ -10,7 +10,7 @@ import LineItemsEditor from '../components/LineItemsEditor';
 import FollowupButton from '../components/FollowupButton';
 import ApprovalStrip from '../components/ApprovalStrip';
 import InternalNotes from '../components/InternalNotes';
-import ColumnsControl, { quotationColumns, quotationOmit } from '../components/ColumnsControl';
+import ColumnsControl, { quotationColumns, quotationOmit, newColumnConfig } from '../components/ColumnsControl';
 import NotePresetPicker from '../components/NotePresetPicker';
 import { fmtMoney, fmtQty, fmtDate, today } from '../lib/format';
 import { useDefaultNotes } from '../lib/useDefaultNotes';
@@ -42,7 +42,7 @@ const emptyDraft = (): Draft => ({
   customer_id: '', enquiry_id: null, date: today(), currency: 'INR', validity_date: '',
   payment_terms: '', delivery_terms: '', notes: '', freight: 0, insurance: 0,
   inco_terms: '', container_count: '', prepared_by: '', tax_type: 'igst',
-  is_export: 0, column_config: {}, items: [],
+  is_export: 0, column_config: newColumnConfig(), items: [],
 });
 
 export default function QuotationFormPage() {

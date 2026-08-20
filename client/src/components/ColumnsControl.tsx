@@ -61,6 +61,41 @@ export const PROFORMA_OMIT = ['hsn', 'qty'];
 /** Container loadability is meaningless to a domestic GST buyer. */
 export const LOADABILITY_COLUMNS = ['qty_20ft', 'qty_40ft'];
 
+/**
+ * Columns a **new** document starts with turned off.
+ *
+ * Loadability is planning information, not something most documents need to
+ * state: it answers "how many boxes fill a container", which matters while a
+ * shipment is being worked out and clutters every line the rest of the time.
+ * The Container Planner and the proforma's Container Fitment panel are where
+ * that question actually gets asked. Ticking the box brings the column back
+ * for that one document.
+ *
+ * This is a **default, not a rule** — it is written into the document's own
+ * `column_config` when it is created, so the choice is stored with the
+ * document rather than re-applied on every read. Two things follow from that:
+ * a document already raised keeps whatever it was saved with, and changing
+ * this list later does not silently reformat anything on file.
+ */
+export const DEFAULT_HIDDEN_COLUMNS = [...LOADABILITY_COLUMNS];
+
+/** The column config a new document starts from. */
+export function newColumnConfig(): ColumnConfig {
+  return { hidden: [...DEFAULT_HIDDEN_COLUMNS] };
+}
+
+/**
+ * Whether a config carries a choice somebody actually made.
+ *
+ * Carry-forward copies the source document's columns onto the new one, which
+ * is right when the source has preferences and wrong when it has none — an
+ * older quotation saved before these defaults existed would otherwise hand a
+ * blank config to the proforma and undo them.
+ */
+export function hasColumnPrefs(config?: ColumnConfig | null): config is ColumnConfig {
+  return !!(config?.hidden?.length || config?.custom?.some(Boolean));
+}
+
 const withLoadability = (omit: string[], isExport: boolean) =>
   (isExport ? omit : [...omit, ...LOADABILITY_COLUMNS]);
 

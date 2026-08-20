@@ -10,7 +10,7 @@ import LineItemsEditor from '../components/LineItemsEditor';
 import FollowupButton from '../components/FollowupButton';
 import PaymentsCard from '../components/PaymentsCard';
 import ApprovalStrip from '../components/ApprovalStrip';
-import ColumnsControl, { PACKING_COLUMNS } from '../components/ColumnsControl';
+import ColumnsControl, { PACKING_COLUMNS, newColumnConfig, hasColumnPrefs } from '../components/ColumnsControl';
 import NotePresetPicker from '../components/NotePresetPicker';
 import { fmtQty, today } from '../lib/format';
 import { useDefaultNotes } from '../lib/useDefaultNotes';
@@ -67,7 +67,7 @@ const emptyDraft = (): Draft => ({
   freight: 0, insurance: 0, shipping_details: '', bank_account: '', inco_terms: '', payment_terms: '',
   is_export: 0, country_of_origin: '', port_of_loading: '', port_of_discharge: '', final_destination: '',
   notify_party_2: '', method_of_despatch: '', lot_no: '', prepared_by: '',
-  remarks: '', tax_type: 'igst', column_config: {}, items: [],
+  remarks: '', tax_type: 'igst', column_config: newColumnConfig(), items: [],
   packing: { date: today(), shipping_marks: '', remarks: '', column_config: {}, items: [] },
 });
 
@@ -119,7 +119,14 @@ export default function InvoiceFormPage() {
   useEffect(() => {
     if (isNew && fromProforma && !prefilled) {
       api.get<Partial<Draft>>(`/api/invoices/prefill/from-proforma/${fromProforma}`).then((p) => {
-        setDraft((d) => ({ ...d, ...p, customer_id: (p.customer_id as number) ?? d.customer_id }));
+        setDraft((d) => ({
+          ...d, ...p,
+          customer_id: (p.customer_id as number) ?? d.customer_id,
+          // Carry the source's columns forward only when it actually has some. A
+          // document saved before these defaults existed carries a blank config,
+          // and spreading that over the draft would quietly undo them.
+          column_config: hasColumnPrefs(p.column_config) ? p.column_config : d.column_config,
+        }));
         setPrefilled(true);
       });
     }
@@ -134,7 +141,7 @@ export default function InvoiceFormPage() {
         ...d,
         ...(rest as Partial<Draft>),
         order_id: Number(fromOrder),
-        column_config: (column_config as ColumnConfig) ?? {},
+        column_config: hasColumnPrefs(column_config as ColumnConfig) ? (column_config as ColumnConfig) : d.column_config,
         customer_id: (p.customer_id as number) ?? d.customer_id,
       }));
       setPrefilled(true);

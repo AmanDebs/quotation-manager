@@ -11,7 +11,7 @@ import ContainerFitment from '../components/ContainerFitment';
 import FollowupButton from '../components/FollowupButton';
 import PaymentsCard from '../components/PaymentsCard';
 import ApprovalStrip from '../components/ApprovalStrip';
-import ColumnsControl, { proformaColumns, proformaOmit } from '../components/ColumnsControl';
+import ColumnsControl, { proformaColumns, proformaOmit, newColumnConfig, hasColumnPrefs } from '../components/ColumnsControl';
 import NotePresetPicker from '../components/NotePresetPicker';
 import { today } from '../lib/format';
 import { useDefaultNotes } from '../lib/useDefaultNotes';
@@ -60,7 +60,7 @@ const emptyDraft = (): Draft => ({
   delivery_terms: '', validity_date: '', is_export: 0, country_of_origin: '', port_of_loading: '',
   port_of_discharge: '', final_destination: '', container_count: '', partial_shipment: 'Not Allowed',
   po_number: '', po_date: '', notify_party_2: '', method_of_despatch: '', quantity_tolerance: '',
-  hs_code: '', prepared_by: '', remarks: '', tax_type: 'igst', column_config: {}, items: [],
+  hs_code: '', prepared_by: '', remarks: '', tax_type: 'igst', column_config: newColumnConfig(), items: [],
 });
 
 export default function ProformaFormPage() {
@@ -104,7 +104,14 @@ export default function ProformaFormPage() {
         : null;
     if (!source) return;
     api.get<Partial<Draft>>(source).then((p) => {
-      setDraft((d) => ({ ...d, ...p, customer_id: (p.customer_id as number) ?? d.customer_id }));
+      setDraft((d) => ({
+        ...d, ...p,
+        customer_id: (p.customer_id as number) ?? d.customer_id,
+        // Carry the source's columns forward only when it actually has some. A
+        // document saved before these defaults existed carries a blank config,
+        // and spreading that over the draft would quietly undo them.
+        column_config: hasColumnPrefs(p.column_config) ? p.column_config : d.column_config,
+      }));
       setPrefilled(true);
     });
   }, [isNew, fromQuotation, fromOrder, prefilled]);
