@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { db, transaction } from '../db/connection.js';
 import { nextNumber } from '../services/numbering.js';
 import { progressFor, progressForMany } from '../services/production.js';
+import { materialCostByWorkOrder } from '../services/costing.js';
 import { requirementFor } from '../services/recipe.js';
 import { syncOrderStatus } from '../services/orderStatus.js';
 import type { AuthedRequest } from '../middleware/auth.js';
@@ -64,6 +65,11 @@ function getFull(req: AuthedRequest, id: number) {
      WHERE e.work_order_id = ? ORDER BY e.date, e.id`
   ).all(id);
   wo.progress = progressFor(id, Number(wo.qty_planned) || 0);
+  // What the material issued to this job has cost, at the moving average in
+  // force when each issue was made. Zero means nothing has been issued yet,
+  // which is a real answer — unlike an uncosted product, whose need is
+  // unknown rather than nil.
+  wo.material_cost = materialCostByWorkOrder().get(id) ?? 0;
   // What this job will eat, if the product has a recipe at all. `has_recipe`
   // false means unanswerable, which the screen shows as "not costed" — never
   // as a requirement of zero.

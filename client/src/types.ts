@@ -198,6 +198,12 @@ export interface WorkOrder {
   location_id: number | null; machine_id: number | null; mould_id: number | null;
   planned_start: string; planned_end: string;
   status: WorkOrderStatus;
+  /**
+   * What the material issued to this job has cost, at the moving average in
+   * force when each issue was made. 0 means nothing issued yet — a real answer,
+   * unlike an uncosted product whose need is unknown. Only sent by GET /:id.
+   */
+  material_cost?: number;
   notes: string;
   order_number?: string; customer_id?: number; customer_name?: string;
   product_name?: string | null;
@@ -247,6 +253,23 @@ export interface StockRow {
   on_order: number;
   reorder_level: number;
   below_reorder: boolean;
+  /**
+   * Moving-average cost and value. Group-wide per material — a kilo is worth
+   * the same at either plant. `unpriced_qty` is how much arrived with no rate
+   * recorded, so `value` is extrapolating onto it; optional because a server
+   * that has not been redeployed yet does not send any of this.
+   */
+  avg_rate?: number;
+  value?: number;
+  unpriced_qty?: number;
+  unpriced_receipts?: number;
+}
+
+export interface OrderCosting {
+  material_cost: number;
+  jobs_issued: number;
+  /** Open jobs that have drawn nothing yet, so the cost so far is not the final one. */
+  jobs_without_issues: number;
 }
 
 export interface ShortfallRow {
@@ -453,6 +476,9 @@ export interface Order {
   advance_due: number; advance_amount: number; advance_received_date: string;
   destination: string; transport: string; freight_terms: string;
   promised_date: string; scheduled_date: string; revised_date: string; actual_production_date: string;
+  /** Material issued against this order's jobs, at moving average. GET /:id only. */
+  material_cost?: number;
+  costing?: OrderCosting;
   status: OrderStatus; remarks: string; notes: string;
   subtotal: number; tax_total: number; grand_total: number;
   customer_name?: string; quotation_number?: string; company_name?: string; created_by_name?: string | null;

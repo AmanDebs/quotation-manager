@@ -103,6 +103,9 @@ addColumnIfMissing('users', 'dashboard_layout', "TEXT NOT NULL DEFAULT ''");
 // signed without the claim; they read as version 0, which is what every
 // existing row starts at, so nobody is signed out by the migration itself.
 addColumnIfMissing('users', 'token_version', 'INTEGER NOT NULL DEFAULT 0');
+// Material costing (2026-08). Nullable on purpose: an existing receipt has no
+// rate recorded, and treating that as zero would value the shed at nothing.
+addColumnIfMissing('material_moves', 'rate', 'REAL');
 addColumnIfMissing('customers', 'owner_id', 'INTEGER');
 addColumnIfMissing('customers', 'is_export', 'INTEGER NOT NULL DEFAULT 0');
 addColumnIfMissing('products', 'image', "TEXT NOT NULL DEFAULT ''");

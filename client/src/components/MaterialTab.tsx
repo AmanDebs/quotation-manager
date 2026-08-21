@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Order, WorkOrder, Material, Location, StockRow } from '../types';
 import { Button, Input, Select, Field, Card, EmptyState, ErrorText, Modal } from './ui';
-import { fmtQty, today } from '../lib/format';
+import { fmtQty, fmtMoney, today } from '../lib/format';
 
 /**
  * What this order needs, and whether it is in the store.
@@ -56,8 +56,50 @@ export default function MaterialTab({ order }: { order: Order }) {
   const onOrderFor = (materialId: number) =>
     stock.find((s) => s.material_id === materialId)?.on_order ?? 0;
 
+  // What has actually been consumed against this order so far, at the moving
+  // average in force when each issue was made. Deliberately shown beside the
+  // order's own value rather than as a margin: the cost is only as complete as
+  // the issues behind it, which `jobs_without_issues` says plainly.
+  const cost = order.costing;
+
   return (
     <div className="space-y-4">
+      {!!cost && (cost.material_cost > 0 || cost.jobs_issued > 0) && (
+        <Card title="Material cost so far">
+          <div className="flex flex-wrap items-baseline gap-x-8 gap-y-2">
+            <div>
+              <div className="text-xs text-slate-500">Issued to this order</div>
+              <div className="text-xl font-bold tabular-nums">{fmtMoney(cost.material_cost, order.currency)}</div>
+            </div>
+            <div>
+              <div className="text-xs text-slate-500">Order value</div>
+              <div className="text-xl font-bold tabular-nums text-slate-500">
+                {fmtMoney(Number(order.grand_total) || 0, order.currency)}
+              </div>
+            </div>
+            {Number(order.grand_total) > 0 && cost.jobs_without_issues === 0 && cost.material_cost > 0 && (
+              <div>
+                <div className="text-xs text-slate-500">Material as a share of value</div>
+                <div className="text-xl font-bold tabular-nums">
+                  {Math.round((cost.material_cost / Number(order.grand_total)) * 100)}%
+                </div>
+              </div>
+            )}
+          </div>
+          {cost.jobs_without_issues > 0 && (
+            <p className="mt-2 text-xs text-amber-700">
+              {cost.jobs_without_issues} job{cost.jobs_without_issues === 1 ? ' has' : 's have'} drawn no
+              material yet, so this is the cost of what has been issued — not the finished order.
+            </p>
+          )}
+          <p className="mt-1 text-xs text-slate-400">
+            Valued at the moving average when each issue was made, so a later purchase at a different rate
+            does not re-price what has already been consumed. Material only — labour and overhead are not
+            tracked.
+          </p>
+        </Card>
+      )}
+
       <Card title="Material for what is still to make">
         {open.length === 0 ? (
           <EmptyState message="No open jobs on this order, so nothing is needed." />

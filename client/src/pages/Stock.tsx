@@ -4,7 +4,7 @@ import { api } from '../api/client';
 import { useIsManager } from '../App';
 import type { StockRow, MaterialMove, Shortfall, Material, Location } from '../types';
 import { PageHeader, Card, Tabs, Select, Input, Field, Button, EmptyState, ErrorText, Modal } from '../components/ui';
-import { fmtQty, fmtDate, today } from '../lib/format';
+import { fmtQty, fmtMoney, fmtDate, today } from '../lib/format';
 
 /**
  * The material ledger.
@@ -43,6 +43,15 @@ export default function StockPage() {
   });
 
   const lowCount = rows.filter((r) => r.below_reorder).length;
+  // What the shed is worth, and how much of that figure is an estimate. Summing
+  // the rows is safe: the value on each is that plant's quantity at the
+  // material's own average, so the parts add up to the whole.
+  const stockValue = rows.reduce((s, r) => s + (r.value ?? 0), 0);
+  // Per material, not per row — the same material is flagged at every plant it
+  // sits at, and counting it once is what makes the sentence true.
+  const unpricedMaterials = new Set(
+    rows.filter((r) => (r.unpriced_qty ?? 0) > 0).map((r) => r.material_id)
+  ).size;
 
   return (
     <div>
@@ -89,6 +98,8 @@ export default function StockPage() {
                   <th className="pb-2 pr-3 text-right">On hand</th>
                   <th className="pb-2 pr-3 text-right">On order</th>
                   <th className="pb-2 pr-3 text-right">Reorder at</th>
+                  <th className="pb-2 pr-3 text-right">Avg rate</th>
+                  <th className="pb-2 text-right">Value</th>
                 </tr>
               </thead>
               <tbody>
@@ -102,10 +113,37 @@ export default function StockPage() {
                     </td>
                     <td className="py-2 pr-3 text-right tabular-nums text-slate-500">{r.on_order ? fmtQty(r.on_order) : '—'}</td>
                     <td className="py-2 pr-3 text-right tabular-nums text-slate-400">{r.reorder_level ? fmtQty(r.reorder_level) : '—'}</td>
+                    <td className="py-2 pr-3 text-right tabular-nums text-slate-500">
+                      {r.avg_rate ? fmtMoney(r.avg_rate, 'INR') : <span className="text-slate-300">—</span>}
+                    </td>
+                    <td className="py-2 text-right tabular-nums">
+                      {r.value ? fmtMoney(r.value, 'INR') : <span className="text-slate-300">—</span>}
+                      {/* Some of this material arrived with no rate, so the
+                          figure beside it is the known rate applied to stock
+                          nobody costed. Say so on the row it affects. */}
+                      {(r.unpriced_qty ?? 0) > 0 && (
+                        <span
+                          className="ml-1 cursor-help text-amber-600"
+                          title={`${fmtQty(r.unpriced_qty)} ${r.unit} of this material has no purchase rate recorded — its value is estimated at the average of the rest.`}
+                        >*</span>
+                      )}
+                    </td>
                   </tr>
                 ))}
+                <tr className="border-t-2 border-slate-200 font-semibold">
+                  <td className="py-2 pr-3" colSpan={6}>Total stock value</td>
+                  <td className="py-2 text-right tabular-nums">{fmtMoney(stockValue, 'INR')}</td>
+                </tr>
               </tbody>
             </table>
+          )}
+          {unpricedMaterials > 0 && (
+            <p className="mt-2 rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              <b>{unpricedMaterials} material{unpricedMaterials === 1 ? '' : 's'}</b> (marked *) arrived
+              without a purchase rate — usually an opening balance entered before costing existed. Their
+              value is estimated at the average of the priced stock. Record a rate on those movements to
+              make the total exact.
+            </p>
           )}
           <p className="mt-2 text-xs text-slate-400">
             A negative balance means more was issued than the ledger knew about — the material really left, so

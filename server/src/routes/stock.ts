@@ -1,6 +1,8 @@
 import { Router } from 'express';
 import { db } from '../db/connection.js';
 import { onHandAll, onOrder, shortfall } from '../services/stock.js';
+import { valuation } from '../services/costing.js';
+import { round2 } from '../services/totals.js';
 import { requireManager, type AuthedRequest } from '../middleware/auth.js';
 import { canAccessCustomer } from '../middleware/scope.js';
 
@@ -27,14 +29,30 @@ stockRouter.get('/', (req, res) => {
   const levels = db.prepare('SELECT id, reorder_level FROM materials').all() as
     { id: number; reorder_level: number }[];
   const byId = new Map(levels.map((l) => [l.id, l.reorder_level]));
-  res.json(rows.map((r) => ({
-    ...r,
-    on_order: pending.get(r.material_id) ?? 0,
-    reorder_level: byId.get(r.material_id) ?? 0,
-    // Flagged only when a level has actually been set — 0 means "no level",
-    // not "reorder at nothing".
-    below_reorder: (byId.get(r.material_id) ?? 0) > 0 && r.qty < (byId.get(r.material_id) ?? 0),
-  })));
+  // One average per material, applied to whatever each plant holds. Valuation
+  // is group-wide by design — a kilo is worth the same at either plant, and a
+  // per-location average would make a transfer change the company's stock
+  // value. See services/costing.ts.
+  const value = valuation();
+  res.json(rows.map((r) => {
+    const cost = value.get(r.material_id);
+    return {
+      ...r,
+      on_order: pending.get(r.material_id) ?? 0,
+      reorder_level: byId.get(r.material_id) ?? 0,
+      // Flagged only when a level has actually been set — 0 means "no level",
+      // not "reorder at nothing".
+      below_reorder: (byId.get(r.material_id) ?? 0) > 0 && r.qty < (byId.get(r.material_id) ?? 0),
+      avg_rate: cost?.avg_rate ?? 0,
+      value: round2(r.qty * (cost?.avg_rate ?? 0)),
+      // How much of this material never had a purchase rate recorded, so the
+      // value above is extrapolated onto it from what the rest cost. Group-wide
+      // like the average itself. The screen says so rather than letting the
+      // figure read as fully costed.
+      unpriced_qty: cost?.unpriced_qty ?? 0,
+      unpriced_receipts: cost?.unpriced_receipts ?? 0,
+    };
+  }));
 });
 
 /** Every movement, newest first — the audit trail behind a balance. */
@@ -128,10 +146,20 @@ stockRouter.post('/moves', requireManager, (req: AuthedRequest, res) => {
   const date = String(body.date ?? '').trim();
   if (!date) return res.status(400).json({ error: 'Date is required' });
 
+  // A rate only means something on the way in — what this material cost to
+  // acquire. On the way out the value is the running average, which costing.ts
+  // derives, so anything sent here would be ignored at best and a lie at worst.
+  // Omitted is NULL: unknown, which leaves the average undisturbed rather than
+  // valuing the movement at nothing.
+  const rate = qty > 0 && body.rate !== '' && body.rate !== null && body.rate !== undefined
+    && !Number.isNaN(Number(body.rate))
+    ? Number(body.rate)
+    : null;
+
   db.prepare(
-    `INSERT INTO material_moves (material_id, location_id, date, qty, source, note, created_by)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`
-  ).run(materialId, locationId, date, qty, source, String(body.note ?? ''), req.user!.id);
+    `INSERT INTO material_moves (material_id, location_id, date, qty, rate, source, note, created_by)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(materialId, locationId, date, qty, rate, source, String(body.note ?? ''), req.user!.id);
   res.status(201).json({ ok: true });
 });
 

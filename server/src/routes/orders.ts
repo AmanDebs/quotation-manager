@@ -4,6 +4,7 @@ import { nextNumber } from '../services/numbering.js';
 import { computeTotals, round2, type LineItemInput } from '../services/totals.js';
 import { productionByOrder } from '../services/production.js';
 import { despatchedByOrder } from './despatches.js';
+import { orderMaterialCost } from '../services/costing.js';
 import { orderLines, productDemand, type Filters } from '../services/orderLines.js';
 import type { AuthedRequest } from '../middleware/auth.js';
 import { scopeClause, canAccessCustomer, linkError, customerChangeError } from '../middleware/scope.js';
@@ -92,6 +93,12 @@ function getFull(id: number) {
   // leave before the paperwork. Both are shown; neither is reconciled to the
   // other behind the user's back.
   const sent = despatchedByOrder(id);
+  // Material actually issued against this order's jobs, at moving average.
+  // Partial by nature — `jobs_without_issues` says how much of the order has
+  // not drawn material yet, so a margin is not read off half a job.
+  const cost = orderMaterialCost(id);
+  order.material_cost = cost.material_cost;
+  order.costing = cost;
   order.items = items.map((it, i) => ({
     ...it,
     ...progress.perLine[i],

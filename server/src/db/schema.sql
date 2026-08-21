@@ -754,6 +754,15 @@ CREATE TABLE IF NOT EXISTS material_moves (
   location_id INTEGER NOT NULL REFERENCES locations(id),
   date TEXT NOT NULL,
   qty REAL NOT NULL,
+  -- What a unit was worth **coming in**, stamped at the time of the movement.
+  -- NULL on the way out: an issue is valued at the running average, which is a
+  -- reading of the ledger and so is derived, never stored. NULL is also what a
+  -- receipt booked before costing existed carries — unknown, not free.
+  --
+  -- Stamped rather than read back through `po_id` later, because editing a
+  -- purchase order after delivery would otherwise rewrite what the stock in
+  -- the shed cost.
+  rate REAL,
   source TEXT NOT NULL DEFAULT 'adjustment'
     CHECK (source IN ('opening','po_receipt','issue','return','adjustment','transfer')),
   -- What caused it, where there is something to point at. A transfer between

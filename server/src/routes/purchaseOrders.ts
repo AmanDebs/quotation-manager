@@ -237,12 +237,24 @@ purchaseOrdersRouter.post('/:id/receipts', (req: AuthedRequest, res) => {
   if (!booked.length) return res.status(400).json({ error: 'Record a quantity against at least one line' });
 
   transaction(() => {
+    // What each line was bought at, stamped onto the movement as it is booked.
+    // Read from the order now rather than through `po_id` at valuation time:
+    // editing this purchase order next month must not change what the material
+    // already in the shed cost. See services/costing.ts.
+    const rates = new Map(
+      (db.prepare('SELECT material_id, rate FROM po_items WHERE po_id = ? AND material_id IS NOT NULL')
+        .all(id) as { material_id: number; rate: number }[])
+        .map((r) => [r.material_id, r.rate])
+    );
     const ins = db.prepare(
-      `INSERT INTO material_moves (material_id, location_id, date, qty, source, po_id, note, created_by)
-       VALUES (?, ?, ?, ?, 'po_receipt', ?, ?, ?)`
+      `INSERT INTO material_moves (material_id, location_id, date, qty, rate, source, po_id, note, created_by)
+       VALUES (?, ?, ?, ?, ?, 'po_receipt', ?, ?, ?)`
     );
     for (const r of booked) {
-      ins.run(r.material_id, locationId, date, r.qty, id, String(req.body?.note ?? ''), req.user!.id);
+      // A rate of zero is a rate somebody typed; a missing line is not. NULL
+      // means unknown, and costing.ts leaves the average undisturbed for it.
+      const rate = rates.has(r.material_id) ? Number(rates.get(r.material_id)) : null;
+      ins.run(r.material_id, locationId, date, r.qty, rate, id, String(req.body?.note ?? ''), req.user!.id);
     }
     // Fully received when nothing is outstanding on any line that names a material.
     const items = db.prepare('SELECT material_id, qty FROM po_items WHERE po_id = ? AND material_id IS NOT NULL')
