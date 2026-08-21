@@ -8,6 +8,26 @@
   --color-brand-800: #142c46;
 }
 
+/*
+ * UI density, in one number.
+ *
+ * Tailwind sizes type *and* spacing in rem, so the root font size scales the
+ * whole interface together — labels, inputs, row heights, card padding, gaps,
+ * even the sidebar's width. Shrinking only the text would leave the same
+ * whitespace around smaller letters, which reads as sparser rather than
+ * denser; this keeps the proportions and fits more of a form on screen.
+ *
+ * A percentage rather than a pixel value on purpose: 87.5% is 14px against a
+ * stock 16px browser, but someone who has raised their browser's default font
+ * for readability keeps that benefit. Hard-coding 14px would override them.
+ *
+ * To tune: 93.75% is a gentle 15px, 81.25% a tight 13px. Nothing else needs
+ * touching. PDFs are unaffected — pdfmake lays out in points, server-side.
+ */
+html {
+  font-size: 87.5%;
+}
+
 body {
   @apply bg-slate-100 text-slate-800 antialiased;
 }

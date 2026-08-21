@@ -253,7 +253,7 @@ export default function LineItemsEditor({
 
   const packField = (label: string, node: ReactNode) => (
     <label className="block">
-      <span className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-slate-400">{label}</span>
+      <span className="mb-1 block text-[0.6875rem] font-medium uppercase tracking-wide text-slate-400">{label}</span>
       {node}
     </label>
   );

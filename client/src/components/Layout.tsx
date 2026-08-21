@@ -160,9 +160,9 @@ export default function Layout({ user, onLogout, children }: { user: User; onLog
                   type="button"
                   onClick={() => toggle(group.heading)}
                   aria-expanded={expanded}
-                  className="flex w-full items-center gap-1.5 px-4 py-1 text-[11px] font-semibold uppercase tracking-wider text-white/40 transition-colors hover:text-white/80"
+                  className="flex w-full items-center gap-1.5 px-4 py-1 text-[0.6875rem] font-semibold uppercase tracking-wider text-white/40 transition-colors hover:text-white/80"
                 >
-                  <span className={`inline-block text-[9px] transition-transform ${expanded ? 'rotate-90' : ''}`}>▶</span>
+                  <span className={`inline-block text-[0.5625rem] transition-transform ${expanded ? 'rotate-90' : ''}`}>▶</span>
                   <span className="flex-1 text-left">{group.heading}</span>
                   {/* Closed groups say how much is inside, so folding one away
                       does not make you forget what it held. */}
