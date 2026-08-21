@@ -204,6 +204,8 @@ export interface WorkOrder {
    * unlike an uncosted product whose need is unknown. Only sent by GET /:id.
    */
   material_cost?: number;
+  /** Specification, inspections and their verdicts. GET /:id only. */
+  qc?: { params: QcParam[]; checks: QcCheck[]; summary: QcSummary };
   notes: string;
   order_number?: string; customer_id?: number; customer_name?: string;
   product_name?: string | null;
@@ -263,6 +265,65 @@ export interface StockRow {
   value?: number;
   unpriced_qty?: number;
   unpriced_receipts?: number;
+}
+
+export type QcKind = 'numeric' | 'boolean';
+
+/** What to measure on a product, and what passes. Rewritten whole, like a recipe. */
+export interface QcParam {
+  id?: number;
+  product_id?: number;
+  name: string;
+  kind: QcKind;
+  unit: string;
+  /** Either end may be open — a wall can be too thin but never too thick. */
+  min_value: number | null;
+  max_value: number | null;
+  notes: string;
+  sort_order?: number;
+}
+
+/**
+ * One measurement. `min_value`/`max_value` are the tolerance **as it stood when
+ * the check was taken**, copied from the parameter, so tightening a spec later
+ * cannot retroactively fail a batch. `ok` is derived and never stored.
+ */
+export interface QcResult {
+  id: number;
+  check_id: number;
+  param_id: number | null;
+  name: string;
+  kind: QcKind;
+  unit: string;
+  value: number | null;
+  min_value: number | null;
+  max_value: number | null;
+  notes: string;
+  ok: boolean | null;
+}
+
+export interface QcCheck {
+  id: number;
+  work_order_id: number;
+  date: string;
+  shift: string;
+  sample_size: number | null;
+  inspector: string;
+  notes: string;
+  results: QcResult[];
+  /** null when nothing was measured — which is not a pass. */
+  passed: boolean | null;
+  failed_count: number;
+}
+
+export interface QcSummary {
+  /** False when nobody has said what to measure. Not "everything passed". */
+  has_spec: boolean;
+  checks: number;
+  passed: number;
+  failed: number;
+  last_result: boolean | null;
+  last_date: string;
 }
 
 export interface OrderCosting {

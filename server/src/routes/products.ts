@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { db, transaction } from '../db/connection.js';
 import { requireManager } from '../middleware/auth.js';
+import { paramsFor } from '../services/qc.js';
 import { IMPORT_FIELDS, buildImport, decodeUpload, identityKey, type BuildOptions } from '../services/productImport.js';
 import { recipeFor } from '../services/recipe.js';
 
@@ -112,6 +113,63 @@ productsRouter.post('/import', requireManager, (req, res) => {
  * is simpler and safer than diffing, and it is how every item list in this
  * codebase is saved.
  */
+/**
+ * The QC specification for one product: what to measure, and what passes.
+ *
+ * Read openly and rewritten manager-only and whole, exactly like the recipe
+ * above it — a spec is a short list, so delete-and-reinsert in a transaction
+ * beats diffing. Editing it does **not** disturb checks already recorded:
+ * those carry their own copy of the tolerance they were judged against.
+ */
+productsRouter.get('/:id/qc-params', (req, res) => {
+  const id = Number(req.params.id);
+  if (!db.prepare('SELECT id FROM products WHERE id = ?').get(id)) {
+    return res.status(404).json({ error: 'Product not found' });
+  }
+  res.json(paramsFor(id));
+});
+
+productsRouter.put('/:id/qc-params', requireManager, (req, res) => {
+  const id = Number(req.params.id);
+  if (!db.prepare('SELECT id FROM products WHERE id = ?').get(id)) {
+    return res.status(404).json({ error: 'Product not found' });
+  }
+  const rows = Array.isArray(req.body?.items) ? (req.body.items as Record<string, unknown>[]) : [];
+  // A row with no name is an empty line in the editor, not an error.
+  const lines = rows.filter((r) => String(r.name ?? '').trim());
+  for (const line of lines) {
+    const kind = String(line.kind ?? 'numeric');
+    if (kind !== 'numeric' && kind !== 'boolean') {
+      return res.status(400).json({ error: 'A check is either a measurement or a pass/fail' });
+    }
+    const min = numOrNull(line.min_value);
+    const max = numOrNull(line.max_value);
+    // Caught here rather than left to produce a spec nothing can ever satisfy.
+    if (kind === 'numeric' && min !== null && max !== null && min > max) {
+      return res.status(400).json({ error: `${String(line.name)}: the minimum is above the maximum` });
+    }
+  }
+
+  transaction(() => {
+    db.prepare('DELETE FROM product_qc_params WHERE product_id = ?').run(id);
+    const ins = db.prepare(
+      `INSERT INTO product_qc_params (product_id, name, kind, unit, min_value, max_value, notes, sort_order)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    );
+    lines.forEach((r, i) => {
+      const kind = String(r.kind ?? 'numeric');
+      ins.run(
+        id, String(r.name).trim(), kind, String(r.unit ?? ''),
+        // A pass/fail check has no tolerance to hold.
+        kind === 'boolean' ? null : numOrNull(r.min_value),
+        kind === 'boolean' ? null : numOrNull(r.max_value),
+        String(r.notes ?? ''), i
+      );
+    });
+  });
+  res.json(paramsFor(id));
+});
+
 productsRouter.get('/:id/materials', (req, res) => {
   const id = Number(req.params.id);
   if (!db.prepare('SELECT id FROM products WHERE id = ?').get(id)) {

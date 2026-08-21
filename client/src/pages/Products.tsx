@@ -6,6 +6,7 @@ import type { Product } from '../types';
 import { Button, Input, Textarea, Select, Field, PageHeader, EmptyState, ErrorText, Modal, Card } from '../components/ui';
 import ProductImportModal from '../components/ProductImportModal';
 import RecipeModal from '../components/RecipeModal';
+import QcSpecModal from '../components/QcSpecModal';
 
 export const UNITS = ['unit', 'kg', 'tonne', 'per 1000', 'box'];
 
@@ -57,6 +58,7 @@ export default function ProductsPage() {
   const [q, setQ] = useState('');
   const [editing, setEditing] = useState<Product | Omit<Product, 'id'> | null>(null);
   const [recipeFor, setRecipeFor] = useState<Product | null>(null);
+  const [qcFor, setQcFor] = useState<Product | null>(null);
   const [importing, setImporting] = useState(false);
   // Anyone may add a product mid-quotation, but changing or bulk-replacing the
   // shared catalogue moves everyone's prices — that stays with the manager.
@@ -140,6 +142,8 @@ export default function ProductsPage() {
                             entry — what it is made of, not what it sells for —
                             so it gets its own dialog rather than more fields. */}
                         <Button variant="ghost" onClick={() => setRecipeFor(p)}>Recipe</Button>
+                        {/* And what makes one good — a different question again. */}
+                        <Button variant="ghost" onClick={() => setQcFor(p)}>QC</Button>
                         <Button variant="ghost" onClick={() => { save.reset(); setEditing(p); }}>Edit</Button>
                         <Button
                           variant="danger"
@@ -216,6 +220,7 @@ export default function ProductsPage() {
 
       {importing && <ProductImportModal onClose={() => setImporting(false)} />}
       {recipeFor && <RecipeModal product={recipeFor} onClose={() => setRecipeFor(null)} />}
+      {qcFor && <QcSpecModal product={qcFor} onClose={() => setQcFor(null)} />}
     </div>
   );
 }

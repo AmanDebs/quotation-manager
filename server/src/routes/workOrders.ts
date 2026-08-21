@@ -3,6 +3,7 @@ import { db, transaction } from '../db/connection.js';
 import { nextNumber } from '../services/numbering.js';
 import { progressFor, progressForMany } from '../services/production.js';
 import { materialCostByWorkOrder } from '../services/costing.js';
+import { paramsFor, checksForWorkOrder, summaryForWorkOrder } from '../services/qc.js';
 import { requirementFor } from '../services/recipe.js';
 import { syncOrderStatus } from '../services/orderStatus.js';
 import type { AuthedRequest } from '../middleware/auth.js';
@@ -70,6 +71,14 @@ function getFull(req: AuthedRequest, id: number) {
   // which is a real answer — unlike an uncosted product, whose need is
   // unknown rather than nil.
   wo.material_cost = materialCostByWorkOrder().get(id) ?? 0;
+  // The product's QC specification and every inspection against this job.
+  // `has_spec: false` means nobody has said what to measure — not that
+  // everything passed, the same distinction `has_recipe` draws for material.
+  wo.qc = {
+    params: paramsFor(wo.product_id as number | null),
+    checks: checksForWorkOrder(id),
+    summary: summaryForWorkOrder(id, wo.product_id as number | null),
+  };
   // What this job will eat, if the product has a recipe at all. `has_recipe`
   // false means unanswerable, which the screen shows as "not costed" — never
   // as a requirement of zero.
@@ -253,6 +262,80 @@ workOrdersRouter.post('/:id/entries', (req: AuthedRequest, res) => {
   const job = db.prepare('SELECT order_id FROM work_orders WHERE id = ?').get(id) as { order_id: number };
   syncOrderStatus(job.order_id);
   res.status(201).json(getFull(req, id));
+});
+
+/* ---------------- quality control ---------------- */
+
+/**
+ * Record an inspection: a few pieces off the machine, measured.
+ *
+ * The tolerance for each measurement is **copied from the product's parameter
+ * as the check is saved**, so tightening a spec later cannot retroactively
+ * fail a batch that met the spec in force at the time — the same reasoning
+ * that stamps a purchase rate onto a stock movement. Pass and fail are never
+ * stored; `services/qc.ts` derives them from the measurement and the copy.
+ *
+ * Scoped through the job's own order, like every other floor action.
+ */
+workOrdersRouter.post('/:id/qc-checks', (req: AuthedRequest, res) => {
+  const id = Number(req.params.id);
+  const wo = accessible(req, id);
+  if (!wo) return res.status(404).json({ error: 'Work order not found' });
+  const body = req.body ?? {};
+  const date = String(body.date ?? '').trim();
+  if (!date) return res.status(400).json({ error: 'Date is required' });
+
+  const spec = new Map(paramsFor(wo.product_id as number | null).map((p) => [p.id, p]));
+  const rows = Array.isArray(body.results) ? (body.results as Record<string, unknown>[]) : [];
+  // A parameter left blank was not measured; it is not a failure, and it is
+  // not recorded as one. Only what somebody actually read is stored.
+  const measured = rows.filter((r) => r.value !== '' && r.value !== null && r.value !== undefined);
+  if (!measured.length) {
+    return res.status(400).json({ error: 'Record at least one measurement' });
+  }
+  const stray = measured.find((r) => !spec.has(Number(r.param_id)));
+  if (stray) return res.status(400).json({ error: 'That check is not on the specification for this product' });
+
+  let checkId = 0;
+  transaction(() => {
+    const info = db.prepare(
+      `INSERT INTO qc_checks (work_order_id, date, shift, sample_size, inspector, notes, created_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ).run(id, date, String(body.shift ?? ''), numOrNull(body.sample_size),
+      String(body.inspector ?? ''), String(body.notes ?? ''), req.user!.id);
+    checkId = Number(info.lastInsertRowid);
+
+    const ins = db.prepare(
+      `INSERT INTO qc_results (check_id, param_id, name, kind, unit, value, min_value, max_value, notes, sort_order)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    );
+    measured.forEach((r, i) => {
+      const param = spec.get(Number(r.param_id))!;
+      ins.run(
+        checkId, param.id, param.name, param.kind, param.unit,
+        // A visual check comes in as true/false and is stored as 1/0, so one
+        // column holds both kinds and `resultOk` reads them the same way.
+        param.kind === 'boolean' ? (r.value ? 1 : 0) : Number(r.value),
+        param.min_value, param.max_value, String(r.notes ?? ''), i
+      );
+    });
+  });
+  res.status(201).json(getFull(req, id));
+});
+
+workOrdersRouter.delete('/qc-checks/:checkId', (req: AuthedRequest, res) => {
+  const checkId = Number(req.params.checkId);
+  const check = db.prepare('SELECT work_order_id FROM qc_checks WHERE id = ?')
+    .get(checkId) as { work_order_id: number } | undefined;
+  // Checked through the parent job, so an employee cannot delete an inspection
+  // on somebody else's order.
+  if (!check || !accessible(req, check.work_order_id)) {
+    return res.status(404).json({ error: 'Check not found' });
+  }
+  // Results cascade on the foreign key; a deleted check simply stops counting,
+  // because the verdicts were never stored to go stale.
+  db.prepare('DELETE FROM qc_checks WHERE id = ?').run(checkId);
+  res.json(getFull(req, check.work_order_id));
 });
 
 workOrdersRouter.delete('/entries/:entryId', (req: AuthedRequest, res) => {

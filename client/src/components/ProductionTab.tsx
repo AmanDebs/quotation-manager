@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Order, WorkOrder, WorkOrderStatus, Location, Machine, Mould } from '../types';
 import { Button, Input, Textarea, Select, Field, Card, EmptyState, ErrorText, Modal } from './ui';
+import QcCheckModal from './QcCheckModal';
 import { fmtQty, today } from '../lib/format';
 
 /**
@@ -31,6 +32,7 @@ export default function ProductionTab({ order }: { order: Order }) {
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState<Draft | null>(null);
   const [logging, setLogging] = useState<WorkOrder | null>(null);
+  const [inspecting, setInspecting] = useState<WorkOrder | null>(null);
 
   const key = ['work-orders', String(order.id)];
   const { data: jobs = [] } = useQuery({
@@ -210,6 +212,7 @@ export default function ProductionTab({ order }: { order: Order }) {
                     </td>
                     <td className="whitespace-nowrap py-2 text-right">
                       <Button variant="ghost" onClick={() => setLogging(w)}>Log output</Button>
+                      <Button variant="ghost" onClick={() => setInspecting(w)}>QC</Button>
                       <Button variant="ghost" onClick={() => { save.reset(); setEditing(w); }}>Edit</Button>
                       <Button
                         variant="danger"
@@ -290,6 +293,7 @@ export default function ProductionTab({ order }: { order: Order }) {
       )}
 
       {logging && <LogOutput job={logging} onClose={() => setLogging(null)} onSaved={refresh} />}
+      {inspecting && <QcCheckModal job={inspecting} onClose={() => setInspecting(null)} onSaved={refresh} />}
     </div>
   );
 }

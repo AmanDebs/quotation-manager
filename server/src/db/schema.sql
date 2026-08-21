@@ -645,6 +645,70 @@ CREATE TABLE IF NOT EXISTS product_materials (
 
 CREATE INDEX IF NOT EXISTS idx_product_materials_product ON product_materials(product_id);
 
+/* What to measure on this product, and what counts as good. The QC spec the
+   demo made the case for: dimensions per SKU, plus the visual checks a
+   multicolour range needs. Like the recipe, it is a short list rewritten
+   whole. */
+CREATE TABLE IF NOT EXISTS product_qc_params (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  -- 'numeric' takes a measurement and compares it to the tolerance below.
+  -- 'boolean' is the eye: colour match, flash, short shot — pass or fail.
+  kind TEXT NOT NULL DEFAULT 'numeric' CHECK (kind IN ('numeric','boolean')),
+  unit TEXT NOT NULL DEFAULT '',
+  -- Either end may be open: a wall thickness can have a floor and no ceiling.
+  min_value REAL,
+  max_value REAL,
+  notes TEXT NOT NULL DEFAULT '',
+  sort_order INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_product_qc_params_product ON product_qc_params(product_id);
+
+/* One inspection of a job: a few pieces off the machine, measured. */
+CREATE TABLE IF NOT EXISTS qc_checks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  work_order_id INTEGER NOT NULL REFERENCES work_orders(id) ON DELETE CASCADE,
+  date TEXT NOT NULL,
+  shift TEXT NOT NULL DEFAULT '',
+  -- How many pieces were looked at. Not a quantity of production; a sample.
+  sample_size REAL,
+  inspector TEXT NOT NULL DEFAULT '',
+  notes TEXT NOT NULL DEFAULT '',
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_qc_checks_wo ON qc_checks(work_order_id);
+
+/* One measurement. The tolerance is copied here from the parameter as the
+   check is recorded, for the same reason material_moves.rate is stamped at
+   receipt: tightening a spec next month must not retroactively fail a batch
+   that passed against the spec in force at the time. Pass/fail is derived
+   from these two columns and never stored. */
+CREATE TABLE IF NOT EXISTS qc_results (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  check_id INTEGER NOT NULL REFERENCES qc_checks(id) ON DELETE CASCADE,
+  -- ON DELETE SET NULL, not a hard reference: the spec is rewritten whole
+  -- every time it is edited, and a result must survive that. Everything
+  -- needed to read one is copied below, so the link is a convenience for
+  -- grouping and nothing depends on it still pointing somewhere.
+  param_id INTEGER REFERENCES product_qc_params(id) ON DELETE SET NULL,
+  -- Kept so a result still reads after its parameter is renamed or removed.
+  name TEXT NOT NULL DEFAULT '',
+  kind TEXT NOT NULL DEFAULT 'numeric',
+  unit TEXT NOT NULL DEFAULT '',
+  -- The measurement: a dimension, or 1/0 for a visual check.
+  value REAL,
+  min_value REAL,
+  max_value REAL,
+  notes TEXT NOT NULL DEFAULT '',
+  sort_order INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_qc_results_check ON qc_results(check_id);
+
 /* ==================================================================
    Production
    ------------------------------------------------------------------
