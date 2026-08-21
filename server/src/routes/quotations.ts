@@ -6,6 +6,7 @@ import type { AuthedRequest } from '../middleware/auth.js';
 import { scopeClause, canAccessCustomer, customerChangeError } from '../middleware/scope.js';
 import { submit, decide, resetApprovalOnEdit, blockUnapprovedTransition } from '../services/approval.js';
 import { resolveCompanyId } from '../services/companies.js';
+import { enquiryLinkId, syncEnquiryStatus } from '../services/enquiries.js';
 
 export const quotationsRouter = Router();
 
@@ -91,15 +92,24 @@ quotationsRouter.post('/', (req: AuthedRequest, res) => {
   // Which entity is selling. Fixed here and never changed afterwards: the
   // number below is drawn from this company's series.
   const companyId = resolveCompanyId(body.company_id, Number(body.customer_id));
+  // Only an enquiry the caller may see, and only one belonging to the same
+  // customer — pointing a quotation at somebody else's enquiry would leak its
+  // existence through this quotation's own responses. Same rule as `linkError`.
+  const enquiryId = enquiryLinkId(req, body.enquiry_id, Number(body.customer_id));
+  if (enquiryId === undefined) return res.status(404).json({ error: 'Enquiry not found' });
   const result = transaction(() => {
     const number = nextNumber('quotation', { companyId, date: String(body.date ?? '') });
     const info = db.prepare(
-      `INSERT INTO quotations (number, revision, date, customer_id, currency, validity_date, payment_terms, delivery_terms, notes, freight, insurance, inco_terms, container_count, prepared_by, tax_type, is_export, created_by, column_config, company_id, status)
-       VALUES (?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft')`
+      `INSERT INTO quotations (number, revision, date, customer_id, enquiry_id, currency, validity_date, payment_terms, delivery_terms, notes, freight, insurance, inco_terms, container_count, prepared_by, tax_type, is_export, created_by, column_config, company_id, status)
+       VALUES (?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft')`
     ).run(
       number,
       String(body.date ?? new Date().toISOString().slice(0, 10)),
       Number(body.customer_id),
+      // Which enquiry this answers, when it came from one. The column has been
+      // here since the beginning and nothing wrote it, so the link the
+      // enquiries list needs to close its own loop never existed.
+      enquiryId,
       String(body.currency ?? 'INR'),
       String(body.validity_date ?? ''),
       String(body.payment_terms ?? ''),
@@ -118,6 +128,10 @@ quotationsRouter.post('/', (req: AuthedRequest, res) => {
     );
     const id = Number(info.lastInsertRowid);
     saveItems(id, (body.items ?? []) as LineItemInput[], taxType, Number(body.freight ?? 0), Number(body.insurance ?? 0), String(body.currency ?? 'INR'));
+    // Inside the transaction: an enquiry marked quoted with no quotation to
+    // show for it would be exactly the kind of drift status syncing exists to
+    // prevent.
+    syncEnquiryStatus(enquiryId);
     return id;
   });
   res.status(201).json(getFull(result));
@@ -221,8 +235,12 @@ quotationsRouter.post('/:id/revise', (req: AuthedRequest, res) => {
     const info = db.prepare(
       // internal_notes rides along: a revision is the next round of the same
       // negotiation, so the running commentary should follow it.
-      `INSERT INTO quotations (number, revision, date, customer_id, company_id, currency, validity_date, payment_terms, delivery_terms, notes, internal_notes, freight, insurance, inco_terms, container_count, prepared_by, tax_type, is_export, column_config, created_by, status, subtotal, tax_total, grand_total)
-       SELECT number, ?, ?, customer_id, company_id, currency, validity_date, payment_terms, delivery_terms, notes, internal_notes, freight, insurance, inco_terms, container_count, prepared_by, tax_type, is_export, column_config, ?, 'negotiating', subtotal, tax_total, grand_total
+      // enquiry_id rides along with internal_notes: a revision answers the same
+      // question the first round did. Without it the link dies at the first
+      // renegotiation — the original is superseded and excluded from the
+      // count, and the new one points at nothing.
+      `INSERT INTO quotations (number, revision, date, customer_id, company_id, enquiry_id, currency, validity_date, payment_terms, delivery_terms, notes, internal_notes, freight, insurance, inco_terms, container_count, prepared_by, tax_type, is_export, column_config, created_by, status, subtotal, tax_total, grand_total)
+       SELECT number, ?, ?, customer_id, company_id, enquiry_id, currency, validity_date, payment_terms, delivery_terms, notes, internal_notes, freight, insurance, inco_terms, container_count, prepared_by, tax_type, is_export, column_config, ?, 'negotiating', subtotal, tax_total, grand_total
        FROM quotations WHERE id = ?`
     ).run(maxRev.r + 1, new Date().toISOString().slice(0, 10), req.user!.id, id);
     const newId = Number(info.lastInsertRowid);

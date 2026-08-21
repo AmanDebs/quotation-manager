@@ -267,6 +267,25 @@ export interface StockRow {
   unpriced_receipts?: number;
 }
 
+export type EnquiryStatus = 'open' | 'quoted' | 'lost';
+
+/**
+ * Somebody asked before there was anything to quote — the front of the funnel.
+ * `quotation_count` is derived and excludes superseded revisions, so a
+ * renegotiated quote does not read as two answers.
+ */
+export interface Enquiry {
+  id: number;
+  customer_id: number;
+  date: string;
+  notes: string;
+  status: EnquiryStatus;
+  created_at?: string;
+  customer_name?: string;
+  customer_country?: string;
+  quotation_count?: number;
+}
+
 export type QcKind = 'numeric' | 'boolean';
 
 /** What to measure on a product, and what passes. Rewritten whole, like a recipe. */

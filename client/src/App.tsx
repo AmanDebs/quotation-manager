@@ -9,6 +9,7 @@ import DashboardPage from './pages/Dashboard';
 import CustomersPage from './pages/Customers';
 import ProductsPage from './pages/Products';
 import ContainerPlannerPage from './pages/ContainerPlanner';
+import EnquiriesPage from './pages/Enquiries';
 import QuotationsPage from './pages/Quotations';
 import QuotationFormPage from './pages/QuotationForm';
 import ProformasPage from './pages/Proformas';
@@ -94,6 +95,7 @@ export default function App() {
           <Route path="/customers" element={<CustomersPage />} />
           <Route path="/products" element={<ProductsPage />} />
           <Route path="/container-planner" element={<ContainerPlannerPage />} />
+          <Route path="/enquiries" element={<EnquiriesPage />} />
           <Route path="/quotations" element={<QuotationsPage />} />
           <Route path="/quotations/new" element={<QuotationFormPage />} />
           <Route path="/quotations/:id" element={<QuotationFormPage />} />

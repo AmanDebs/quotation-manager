@@ -6,23 +6,28 @@ import { scopeClause, canAccessCustomer } from '../middleware/scope.js';
 /**
  * Enquiries — a customer asking before there is anything to quote.
  *
- * **Not mounted.** `index.ts` does not register this router and there is no
- * client page, so nothing reaches it today. The table is real: the seed writes
- * to it, `quotations.enquiry_id` points at it, follow-ups have an `enquiry`
- * doc type, and deleting a customer counts them.
+ * Mounted at `/api/enquiries`. It sat written-but-unregistered for a long
+ * while; the table was always real (the seed writes it, `quotations.enquiry_id`
+ * points at it, follow-ups have an `enquiry` doc type, and deleting a customer
+ * counts them) and only the HTTP surface was missing.
  *
- * It is scoped anyway. Every route here was written before data scoping
- * existed and had none of it — no `scopeClause`, no `canAccessCustomer` — so
- * whoever mounts it would have shipped a hole that looked finished, in a file
- * with nothing to suggest anything was missing. Scoping it now costs a few
- * lines and removes that trap; the rules are the same ones every other
- * document route follows, including answering **404** rather than 403 for an
- * id out of scope, so an employee cannot probe for another owner's records.
+ * Every route here was written before data scoping existed and had none of it.
+ * It was scoped ahead of being mounted, precisely so wiring it up could not
+ * ship a hole that looked finished in a file with nothing to suggest anything
+ * was missing. The rules are the ones every other document route follows,
+ * including answering **404** rather than 403 for an id out of scope, so an
+ * employee cannot probe for another owner's records.
+ *
+ * `quotation_count` is derived, never stored: how many live quotations answer
+ * this enquiry is a question about the quotations, and superseded revisions are
+ * excluded so a renegotiated quote does not read as two answers.
  */
 export const enquiriesRouter = Router();
 
 const withCustomer = `
-  SELECT e.*, c.name AS customer_name, c.country AS customer_country
+  SELECT e.*, c.name AS customer_name, c.country AS customer_country,
+         (SELECT COUNT(*) FROM quotations q
+           WHERE q.enquiry_id = e.id AND q.superseded_by IS NULL) AS quotation_count
   FROM enquiries e JOIN customers c ON c.id = e.customer_id`;
 
 enquiriesRouter.get('/', (req: AuthedRequest, res) => {

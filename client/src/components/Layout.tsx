@@ -27,6 +27,9 @@ const NAV: { heading: string; items: NavItem[] }[] = [
     // order it produces, even though a proforma can also be raised from one.
     heading: 'Sales',
     items: [
+      // Before quotations: an enquiry is what arrives first, and the desk
+      // works down this list in the order the work happens.
+      { to: '/enquiries', label: 'Enquiries', icon: '❓' },
       { to: '/quotations', label: 'Quotations', icon: '📄' },
       { to: '/proformas', label: 'Proforma Invoices', icon: '🧾' },
       { to: '/orders', label: 'Orders', icon: '📋' },

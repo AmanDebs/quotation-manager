@@ -87,18 +87,28 @@ export default function QuotationFormPage() {
     }
   }, [existing]);
 
-  // Arriving from the export/domestic dialog with a chosen customer.
+  // Arriving from the export/domestic dialog with a chosen customer, or from
+  // an enquiry this quotation is going to answer.
   useEffect(() => {
     if (!isNew) return;
     const type = search.get('type');
     const customer = search.get('customer');
-    if (!type && !customer) return;
+    const enquiry = search.get('enquiry');
+    if (!type && !customer && !enquiry) return;
     const isExport = type === 'export';
     setDraft((d) => ({
       ...d,
-      is_export: isExport ? 1 : 0,
-      tax_type: isExport ? 'none' : d.tax_type === 'none' ? 'igst' : d.tax_type,
+      // `type` is absent when coming from an enquiry, and the customer's own
+      // export flag has not been read yet — so leave the draft's value alone
+      // rather than forcing it domestic.
+      ...(type ? {
+        is_export: isExport ? 1 : 0,
+        tax_type: isExport ? 'none' : d.tax_type === 'none' ? 'igst' : d.tax_type,
+      } : {}),
       customer_id: customer ? Number(customer) : d.customer_id,
+      // The server checks this belongs to the same customer and is in scope;
+      // it is only carried here so the link is stored when the quotation saves.
+      enquiry_id: enquiry ? Number(enquiry) : d.enquiry_id,
     }));
   }, [isNew, search]);
 

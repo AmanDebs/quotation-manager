@@ -234,11 +234,28 @@ transaction(() => {
   ins.run(id, 'MS Forged Flange, DIN 2633, DN 100 PN16', '7307', 2000, 'unit', '6 crates', '100 x 80 x 50 cm', 2380, 2210, 1);
 });
 
+/*
+ * Enquiries: the front of the funnel. The summary below claimed five of these
+ * for a long time while the seed wrote none — the router was unmounted, so
+ * nothing ever looked.
+ */
+const insertEnquiry = db.prepare(
+  'INSERT INTO enquiries (customer_id, date, notes, status) VALUES (?, ?, ?, ?)'
+);
+insertEnquiry.run(customers.shakti, daysFromNow(-6), 'Rang about 20L handles — wants a price for 50,000 pcs', 'open');
+insertEnquiry.run(customers.titan, daysFromNow(-12), 'Email asking whether we can hold 3.2mm wall on the bar', 'open');
+// One that was answered, and the quotation that answered it.
+const quotedEnquiry = Number(insertEnquiry.run(
+  customers.acme, daysFromNow(-92), 'Introduced by the Dubai agent; asked for forging pricing', 'quoted'
+).lastInsertRowid);
+db.prepare('UPDATE quotations SET enquiry_id = ? WHERE id = ?').run(quotedEnquiry, qAcme.id);
+insertEnquiry.run(customers.bharat, daysFromNow(-40), 'Wanted seal caps in a colour we do not run', 'lost');
+
 // Follow-ups: one overdue, one today, one upcoming
 const insertFollowup = db.prepare('INSERT INTO followups (doc_type, doc_id, customer_id, due_date, note) VALUES (?, ?, ?, ?, ?)');
 insertFollowup.run('invoice', invId, customers.acme, daysFromNow(-3), 'Chase balance payment against BL copy');
 insertFollowup.run('quotation', 5, customers.shakti, daysFromNow(0), 'Call Priya — quote sent, confirm bolt grade');
 insertFollowup.run('quotation', 4, customers.titan, daysFromNow(3), 'Titan negotiating bar price — follow up with revised offer');
 
-console.log('Demo data created: 4 customers, 5 products, 5 enquiries, 8 quotations (incl. 1 revision),');
+console.log('Demo data created: 4 customers, 5 products, 4 enquiries, 8 quotations (incl. 1 revision),');
 console.log('1 proforma (PO + 30% advance, in production), 1 dispatched invoice (partly paid), 1 packing list, 3 follow-ups.');
