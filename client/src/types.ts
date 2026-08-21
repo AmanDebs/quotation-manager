@@ -14,6 +14,39 @@ export interface User {
   dashboard_layout?: DashboardLayout;
 }
 
+/**
+ * A line of "what we are short of", ready to become a purchase order line.
+ * `shortfall` and the `last_*` fields are working detail for the screen — they
+ * are not part of the document and are dropped when it is saved.
+ */
+export interface ShortfallDraftLine {
+  material_id: number;
+  description: string;
+  unit: string;
+  qty: number;
+  rate: number;
+  tax_pct: number;
+  shortfall: { required: number; on_hand: number; on_order: number; short: number };
+  last_supplier_id: number | null;
+  last_supplier_name: string;
+  last_rate: number | null;
+  last_rate_currency: string;
+  last_purchase_date: string;
+  last_purchase_number: string;
+}
+
+export interface ShortfallDraft {
+  supplier_id: number | null;
+  location_id: number | null;
+  date: string;
+  currency: string;
+  tax_type: 'none' | 'cgst_sgst' | 'igst';
+  items: ShortfallDraftLine[];
+  /** Jobs whose product has no recipe: their material need is unknown, not zero. */
+  uncosted: { id: number; number: string; description: string }[];
+  filtered: boolean;
+}
+
 export interface BankAccount { label: string; details: string }
 
 /**

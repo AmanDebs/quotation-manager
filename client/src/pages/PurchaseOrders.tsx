@@ -1,7 +1,10 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
-import type { PurchaseOrder, PoStatus, PoItem, Supplier, Material, Location, TaxType } from '../types';
+import type {
+  PurchaseOrder, PoStatus, PoItem, Supplier, Material, Location, TaxType,
+  ShortfallDraft, ShortfallDraftLine,
+} from '../types';
 import { PageHeader, Card, Select, Input, Textarea, Field, Button, EmptyState, ErrorText, Modal } from '../components/ui';
 import { fmtMoney, fmtQty, fmtDate, today } from '../lib/format';
 
@@ -32,6 +35,7 @@ export default function PurchaseOrdersPage() {
   const [openOnly, setOpenOnly] = useState(false);
   const [editing, setEditing] = useState<Draft | null>(null);
   const [receiving, setReceiving] = useState<PurchaseOrder | null>(null);
+  const [fromShortfall, setFromShortfall] = useState(false);
 
   const { data: pos = [] } = useQuery({
     queryKey: ['purchase-orders', openOnly],
@@ -74,6 +78,32 @@ export default function PurchaseOrdersPage() {
     });
   };
 
+  /**
+   * Turn one supplier's slice of the shortfall into a draft, then hand it to
+   * the ordinary edit modal. The server has already worked out the quantities,
+   * the suggested rates and who we last bought each material from; nothing is
+   * recomputed here, and nothing is saved until the buyer presses Save like
+   * any other purchase order.
+   */
+  const openFromShortfall = (draft: ShortfallDraft, supplierId: number, lines: ShortfallDraftLine[]) => {
+    save.reset();
+    setFromShortfall(false);
+    setEditing({
+      supplier_id: supplierId,
+      location_id: draft.location_id ?? locations[0]?.id ?? null,
+      date: draft.date,
+      expected_date: '',
+      currency: draft.currency,
+      tax_type: draft.tax_type as TaxType,
+      payment_terms: '',
+      notes: '',
+      // Only the document's own fields survive: the shortfall working figures
+      // were for deciding, not for recording.
+      items: lines.map(({ material_id, description, unit, qty, rate, tax_pct }) =>
+        ({ material_id, description, unit, qty, rate, tax_pct })),
+    });
+  };
+
   const openExisting = async (po: PurchaseOrder) => {
     save.reset();
     const full = await api.get<PurchaseOrder>(`/api/purchase-orders/${po.id}`);
@@ -88,7 +118,14 @@ export default function PurchaseOrdersPage() {
       <PageHeader
         title="Purchase Orders"
         subtitle="Material bought in — receipts land straight in the stock ledger"
-        actions={<Button onClick={openNew} disabled={suppliers.length === 0}>+ New PO</Button>}
+        actions={
+          <div className="flex gap-2">
+            <Button variant="secondary" onClick={() => setFromShortfall(true)} disabled={suppliers.length === 0}>
+              From shortfall
+            </Button>
+            <Button onClick={openNew} disabled={suppliers.length === 0}>+ New PO</Button>
+          </div>
+        }
       />
 
       {suppliers.length === 0 && (
@@ -256,6 +293,13 @@ export default function PurchaseOrdersPage() {
       )}
 
       {receiving && <ReceiveModal po={receiving} onClose={() => setReceiving(null)} onSaved={refresh} />}
+      {fromShortfall && (
+        <ShortfallModal
+          suppliers={suppliers}
+          onClose={() => setFromShortfall(false)}
+          onPick={openFromShortfall}
+        />
+      )}
     </div>
   );
 }
@@ -330,6 +374,137 @@ function ReceiveModal({ po, onClose, onSaved }: { po: PurchaseOrder; onClose: ()
           {receive.isPending ? 'Booking…' : 'Book receipt'}
         </Button>
       </div>
+    </Modal>
+  );
+}
+
+/**
+ * "What are we short of, and who do we buy it from?"
+ *
+ * One purchase order goes to one supplier, so the shortfall is grouped by the
+ * supplier we last bought each material from — derived from the purchase
+ * history, since a material belongs to no one supplier. A material never
+ * bought before has nobody to suggest and lands in its own group, where the
+ * buyer picks.
+ *
+ * Nothing here writes. Choosing a group opens the ordinary edit modal with the
+ * lines filled in, and it is saved like any other purchase order.
+ */
+function ShortfallModal({ suppliers, onClose, onPick }: {
+  suppliers: Supplier[];
+  onClose: () => void;
+  onPick: (draft: ShortfallDraft, supplierId: number, lines: ShortfallDraftLine[]) => void;
+}) {
+  const [pickedSupplier, setPickedSupplier] = useState('');
+  const { data: draft, isLoading } = useQuery({
+    queryKey: ['po-shortfall-draft'],
+    queryFn: () => api.get<ShortfallDraft>('/api/purchase-orders/prefill/from-shortfall'),
+  });
+
+  // Grouped by the suggested supplier; the unmatched ones keep id 0 so they
+  // sort last and can be given a supplier by hand.
+  const groups = new Map<number, { name: string; lines: ShortfallDraftLine[] }>();
+  for (const line of draft?.items ?? []) {
+    const id = line.last_supplier_id ?? 0;
+    const group = groups.get(id) ?? { name: line.last_supplier_name || 'Not bought before', lines: [] };
+    group.lines.push(line);
+    groups.set(id, group);
+  }
+  const ordered = [...groups.entries()].sort((a, b) => (a[0] === 0 ? 1 : b[0] === 0 ? -1 : 0));
+
+  return (
+    <Modal title="Raise a purchase order from the shortfall" onClose={onClose} wide>
+      {isLoading && <p className="text-sm text-slate-400">Working out what the open jobs need…</p>}
+
+      {draft && draft.items.length === 0 && (
+        <EmptyState message="Nothing is short. Every open job has the material it needs, counting what is already on order." />
+      )}
+
+      {/* A job with no recipe needs an unknown amount, not none. Saying so is
+          the difference between a shortfall report and a misleading one. */}
+      {!!draft?.uncosted.length && (
+        <div className="mb-3 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          <b>{draft.uncosted.length} job{draft.uncosted.length === 1 ? ' has' : 's have'} no recipe</b>, so
+          nothing below covers {draft.uncosted.length === 1 ? 'it' : 'them'}:{' '}
+          {draft.uncosted.map((u) => u.number).join(', ')}. Add materials to those products to include them.
+        </div>
+      )}
+
+      <div className="space-y-4">
+        {ordered.map(([supplierId, group]) => {
+          const target = supplierId || Number(pickedSupplier);
+          return (
+            <div key={supplierId} className="rounded-lg border border-slate-200">
+              <div className="flex items-center justify-between gap-2 border-b border-slate-100 px-3 py-2">
+                <div className="text-sm font-semibold text-slate-700">
+                  {group.name}
+                  <span className="ml-2 font-normal text-slate-400">
+                    {group.lines.length} material{group.lines.length === 1 ? '' : 's'}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  {supplierId === 0 && (
+                    <div className="w-52">
+                      <Select value={pickedSupplier} onChange={(e) => setPickedSupplier(e.target.value)}>
+                        <option value="">— choose a supplier —</option>
+                        {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                      </Select>
+                    </div>
+                  )}
+                  <Button
+                    onClick={() => draft && onPick(draft, target, group.lines)}
+                    disabled={!target}
+                  >
+                    Raise PO
+                  </Button>
+                </div>
+              </div>
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-slate-100 text-left text-xs uppercase text-slate-500">
+                    <th className="px-3 py-1">Material</th>
+                    <th className="px-3 py-1 text-right">Needed</th>
+                    <th className="px-3 py-1 text-right">On hand</th>
+                    <th className="px-3 py-1 text-right">On order</th>
+                    <th className="px-3 py-1 text-right">To buy</th>
+                    <th className="px-3 py-1 text-right">Rate</th>
+                    <th className="px-3 py-1">Last bought</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {group.lines.map((line) => (
+                    <tr key={line.material_id} className="border-b border-slate-50 last:border-0">
+                      <td className="px-3 py-1.5">{line.description}</td>
+                      <td className="px-3 py-1.5 text-right tabular-nums text-slate-500">{fmtQty(line.shortfall.required)}</td>
+                      <td className="px-3 py-1.5 text-right tabular-nums text-slate-500">{fmtQty(line.shortfall.on_hand)}</td>
+                      <td className="px-3 py-1.5 text-right tabular-nums text-slate-500">{fmtQty(line.shortfall.on_order)}</td>
+                      <td className="px-3 py-1.5 text-right font-semibold tabular-nums">
+                        {fmtQty(line.qty)} {line.unit}
+                      </td>
+                      <td className="px-3 py-1.5 text-right tabular-nums">
+                        {line.rate ? fmtMoney(line.rate, draft?.currency ?? 'INR') : <span className="text-slate-300">—</span>}
+                      </td>
+                      <td className="px-3 py-1.5 text-xs text-slate-400">
+                        {line.last_purchase_date
+                          ? `${fmtDate(line.last_purchase_date)} · ${line.last_purchase_number}`
+                          : 'never'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          );
+        })}
+      </div>
+
+      {!!draft?.items.length && (
+        <p className="mt-3 text-xs text-slate-400">
+          To buy is what the open jobs need, less what is on hand and less what is already on order — so
+          raising these will not order the same material twice. Rates are what we last paid; check them
+          before sending.
+        </p>
+      )}
     </Modal>
   );
 }

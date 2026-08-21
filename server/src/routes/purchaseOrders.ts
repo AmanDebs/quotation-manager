@@ -3,6 +3,7 @@ import { db, transaction } from '../db/connection.js';
 import { nextNumber } from '../services/numbering.js';
 import { computeTotals, round2 } from '../services/totals.js';
 import { receivedByPo } from '../services/stock.js';
+import { shortfallDraft } from '../services/purchasing.js';
 import { resolveCompanyId } from '../services/companies.js';
 import type { AuthedRequest } from '../middleware/auth.js';
 
@@ -112,6 +113,29 @@ purchaseOrdersRouter.get('/', (req, res) => {
   res.json(db.prepare(
     `${listSql} ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY p.date DESC, p.id DESC`
   ).all(...(params as never[])));
+});
+
+/**
+ * A draft purchase order for whatever the open jobs are short of.
+ *
+ * The carry-forward pattern, with the shortfall standing in for a source
+ * document — hence no id in the path: "what are we short of" is one question
+ * about the whole factory, not about one record. Never writes; the buyer
+ * reviews the lines and saves normally, like every other conversion here.
+ *
+ * `?supplier_id=` narrows to the materials we last bought from them, since one
+ * order goes to one supplier. `?location_id=` scopes the stock side to one
+ * plant.
+ *
+ * **Declared above `/:id`**, or Express reads "prefill" as an id — the same
+ * trap the document routes' own prefill endpoints sit above.
+ */
+purchaseOrdersRouter.get('/prefill/from-shortfall', (req, res) => {
+  res.json(shortfallDraft({
+    locationId: numOrNull(req.query.location_id),
+    supplierId: numOrNull(req.query.supplier_id),
+    date: new Date().toISOString().slice(0, 10),
+  }));
 });
 
 purchaseOrdersRouter.get('/:id', (req, res) => {
