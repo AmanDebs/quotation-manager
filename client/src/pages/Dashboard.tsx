@@ -903,46 +903,45 @@ export default function DashboardPage() {
             : 'Your order-to-dispatch pipeline at a glance'
         }
         actions={
-          // `Select` and `Input` carry `w-full` in their own base class, so a
-          // width passed through `className` does not win. The size has to come
-          // from a wrapper — and it has to come from somewhere, because a
-          // wrapping row gives each control its full basis instead of squashing
-          // them all onto one line the way a non-wrapping row did.
+          // Widths go straight on the controls: `Select` and `Input` only
+          // default to `w-full` when the caller has not set one, so a wrapping
+          // row no longer makes every control claim a line of its own.
           <div className="flex flex-wrap items-center justify-end gap-2">
             {showCompany && (
-              <div className="w-48 shrink-0">
-                <Select
-                  value={companyFilter}
-                  onChange={(e) => setCompanyFilter(e.target.value)}
-                  title="Which group entity these figures cover"
-                >
-                  <option value="">All companies</option>
-                  {companies.map((c) => (
-                    <option key={c.id} value={c.id}>{c.company_name || `Company ${c.id}`}</option>
-                  ))}
-                </Select>
-              </div>
+              <Select
+                value={companyFilter}
+                onChange={(e) => setCompanyFilter(e.target.value)}
+                className="w-48 shrink-0"
+                title="Which group entity these figures cover"
+              >
+                <option value="">All companies</option>
+                {companies.map((c) => (
+                  <option key={c.id} value={c.id}>{c.company_name || `Company ${c.id}`}</option>
+                ))}
+              </Select>
             )}
             {currencies.length > 1 && (
-              <div className="w-24 shrink-0">
-                <Select value={activeCurrency} onChange={(e) => setCurrency(e.target.value)} title="Currency for all money figures">
-                  {currencies.map((c) => <option key={c} value={c}>{c}</option>)}
-                </Select>
-              </div>
-            )}
-            <div className="w-44 shrink-0">
-              <Select value={rangeKey} onChange={(e) => setRangeKey(e.target.value)} title="Period every figure covers">
-                {RANGES.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}
+              <Select
+                value={activeCurrency}
+                onChange={(e) => setCurrency(e.target.value)}
+                className="w-24 shrink-0"
+                title="Currency for all money figures"
+              >
+                {currencies.map((c) => <option key={c} value={c}>{c}</option>)}
               </Select>
-            </div>
+            )}
+            <Select
+              value={rangeKey}
+              onChange={(e) => setRangeKey(e.target.value)}
+              className="w-44 shrink-0"
+              title="Period every figure covers"
+            >
+              {RANGES.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}
+            </Select>
             {rangeKey === 'custom' && (
               <>
-                <div className="w-36 shrink-0">
-                  <Input type="date" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} title="From" />
-                </div>
-                <div className="w-36 shrink-0">
-                  <Input type="date" value={customTo} onChange={(e) => setCustomTo(e.target.value)} title="To" />
-                </div>
+                <Input type="date" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} className="w-36 shrink-0" title="From" />
+                <Input type="date" value={customTo} onChange={(e) => setCustomTo(e.target.value)} className="w-36 shrink-0" title="To" />
               </>
             )}
             <Button variant="secondary" onClick={() => setCustomising(true)}>Customise</Button>

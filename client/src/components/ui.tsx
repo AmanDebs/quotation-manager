@@ -16,6 +16,38 @@ export function Button({ variant = 'primary', className = '', ...props }: Button
 }
 
 /**
+ * These controls default to full width, which is right almost everywhere — a
+ * field in a form should fill its column. But a default expressed as a class
+ * cannot be overridden by another class: `w-full` and `w-48` are both width
+ * utilities of equal specificity, so which one wins is decided by their order
+ * in the generated stylesheet, not by the order they appear in the attribute.
+ * Passing `className="w-48"` therefore did nothing reliable, and the only
+ * reason nobody noticed for months is that a non-wrapping flex row squashes
+ * its children anyway. Put the same controls in a *wrapping* row and every one
+ * of them claims the full width and drops onto its own line — which is exactly
+ * how the dashboard header broke.
+ *
+ * So the default is only applied when the caller has not set a width. A class
+ * list is a string, and reading it is unglamorous but honest; the alternative
+ * is a class-merging dependency, and the bar for those here is high.
+ *
+ * `max-w-*` deliberately does not count: `w-full max-w-sm` is a legitimate
+ * pairing — fill the space, up to a limit — and suppressing `w-full` there
+ * would break it.
+ */
+const setsWidth = (className: string) => /(?:^|\s)(?:[\w-]+:)*w-\S+/.test(className);
+
+/** The shared field styling, with `w-full` unless the caller chose a width. */
+const fieldClass = (className: string, extra = '') =>
+  [
+    setsWidth(className) ? '' : 'w-full',
+    'rounded-md border border-slate-300 bg-white py-1.5 text-sm',
+    'focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600',
+    extra,
+    className,
+  ].filter(Boolean).join(' ');
+
+/**
  * Number fields get the spinner arrows removed and their figures right-aligned.
  * The arrows are never used for quantities like 17,850 and cost ~16px of width,
  * which is enough to clip the value in a narrow column. Applied here so every
@@ -29,29 +61,17 @@ export function Input({ className = '', ...props }: InputHTMLAttributes<HTMLInpu
   return (
     <input
       {...props}
-      className={`w-full rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-sm focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600 ${
-        props.type === 'number' ? numberInputClass : ''
-      } ${className}`}
+      className={fieldClass(className, `px-2.5 ${props.type === 'number' ? numberInputClass : ''}`)}
     />
   );
 }
 
 export function Select({ className = '', ...props }: SelectHTMLAttributes<HTMLSelectElement>) {
-  return (
-    <select
-      {...props}
-      className={`w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600 ${className}`}
-    />
-  );
+  return <select {...props} className={fieldClass(className, 'px-2')} />;
 }
 
 export function Textarea({ className = '', ...props }: TextareaHTMLAttributes<HTMLTextAreaElement>) {
-  return (
-    <textarea
-      {...props}
-      className={`w-full rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-sm focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600 ${className}`}
-    />
-  );
+  return <textarea {...props} className={fieldClass(className, 'px-2.5')} />;
 }
 
 export function Field({ label, children, className = '' }: { label: string; children: ReactNode; className?: string }) {
