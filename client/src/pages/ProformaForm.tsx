@@ -15,6 +15,7 @@ import ColumnsControl, { proformaColumns, proformaOmit, newColumnConfig, hasColu
 import NotePresetPicker from '../components/NotePresetPicker';
 import { today } from '../lib/format';
 import { useDefaultNotes } from '../lib/useDefaultNotes';
+import HistoryCard from '../components/HistoryCard';
 
 interface Draft {
   number?: string;
@@ -434,6 +435,8 @@ export default function ProformaFormPage() {
             </Button>
           </div>
         </div>
+
+        <HistoryCard entity="proformas" id={id ? Number(id) : undefined} />
       </div>
     </div>
   );

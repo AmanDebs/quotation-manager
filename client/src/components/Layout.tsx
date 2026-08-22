@@ -67,6 +67,9 @@ const NAV: { heading: string; items: NavItem[] }[] = [
     items: [
       { to: '/masters', label: 'Production Masters', icon: '🏭', managerOnly: true },
       { to: '/approvals', label: 'Approvals', icon: '✅', managerOnly: true },
+      // The whole trail. A document's own history sits on the document, where
+      // whoever owns it can read it without being a manager.
+      { to: '/activity', label: 'Activity', icon: '🕘', managerOnly: true },
       { to: '/team', label: 'Team', icon: '👥', managerOnly: true },
       { to: '/settings', label: 'Settings', icon: '⚙️', managerOnly: true },
     ],

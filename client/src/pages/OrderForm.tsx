@@ -16,6 +16,7 @@ import FollowupButton from '../components/FollowupButton';
 import { ORDER_STATUSES, orderStatusLabel } from './Orders';
 import { today } from '../lib/format';
 import { useDefaultNotes } from '../lib/useDefaultNotes';
+import HistoryCard from '../components/HistoryCard';
 
 interface Draft {
   number?: string;
@@ -393,6 +394,8 @@ export default function OrderFormPage() {
             </Button>
           </div>
         </div>
+
+        <HistoryCard entity="orders" id={id ? Number(id) : undefined} />
       </div>
     </div>
   );

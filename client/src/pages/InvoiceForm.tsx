@@ -14,6 +14,7 @@ import ColumnsControl, { PACKING_COLUMNS, newColumnConfig, hasColumnPrefs } from
 import NotePresetPicker from '../components/NotePresetPicker';
 import { fmtQty, today } from '../lib/format';
 import { useDefaultNotes } from '../lib/useDefaultNotes';
+import HistoryCard from '../components/HistoryCard';
 
 interface Draft {
   number?: string;
@@ -529,6 +530,8 @@ export default function InvoiceFormPage() {
             </Button>
           </div>
         </div>
+
+        <HistoryCard entity="invoices" id={id ? Number(id) : undefined} />
       </div>
     </div>
   );

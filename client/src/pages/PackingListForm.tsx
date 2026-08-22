@@ -6,6 +6,7 @@ import type { PackingList, PackingListItem, Customer } from '../types';
 import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card } from '../components/ui';
 import { fmtQty, today } from '../lib/format';
 import { unitOptions } from './Products';
+import HistoryCard from '../components/HistoryCard';
 
 interface Draft {
   number?: string;
@@ -209,6 +210,8 @@ export default function PackingListFormPage() {
             </Button>
           </div>
         </div>
+
+        <HistoryCard entity="packing-lists" id={id ? Number(id) : undefined} />
       </div>
     </div>
   );

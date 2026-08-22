@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import { db } from '../db/connection.js';
 import { COOKIE_NAME, requireAuth, signToken, bumpTokenVersion, type AuthedRequest } from '../middleware/auth.js';
 import { loginRateLimit } from '../middleware/rateLimit.js';
+import { record } from '../services/audit.js';
 
 export const authRouter = Router();
 
@@ -40,7 +41,9 @@ authRouter.post('/register', loginRateLimit, (req, res) => {
     .run(String(name), String(email).toLowerCase(), hash);
   const id = Number(info.lastInsertRowid);
   res.cookie(COOKIE_NAME, signToken(id), cookieOpts);
-  res.json({ id, name, email, role: 'manager' });
+  const created = { id, name: String(name), email: String(email), role: 'manager' as const };
+  record({ user: created, entity: 'users', entity_id: id, action: 'register', label: String(email) });
+  res.json(created);
 });
 
 authRouter.post('/login', loginRateLimit, (req, res) => {
@@ -48,12 +51,25 @@ authRouter.post('/login', loginRateLimit, (req, res) => {
   const user = db.prepare('SELECT * FROM users WHERE email = ?').get(String(email ?? '').toLowerCase()) as
     | { id: number; name: string; email: string; password_hash: string; role: string; active: number }
     | undefined;
+  // Sign-in is the one place the audit middleware deliberately does not reach,
+  // because it is the one place a request body holds a secret. The entries are
+  // written here instead, naming the single field worth keeping.
+  const attempted = String(email ?? '').toLowerCase().slice(0, 120);
   if (!user || !bcrypt.compareSync(String(password ?? ''), user.password_hash)) {
+    // A refused sign-in is worth more than an accepted one: a run of them
+    // against one address is the thing somebody would want to look back for.
+    record({ user: undefined, entity: 'auth', action: 'login_failed', label: attempted });
     return res.status(401).json({ error: 'Invalid email or password' });
   }
-  if (!user.active) return res.status(403).json({ error: 'This account has been deactivated' });
+  if (!user.active) {
+    record({ user: undefined, entity: 'auth', action: 'login_refused', label: attempted,
+      note: 'account deactivated' });
+    return res.status(403).json({ error: 'This account has been deactivated' });
+  }
   res.cookie(COOKIE_NAME, signToken(user.id), cookieOpts);
-  res.json({ id: user.id, name: user.name, email: user.email, role: user.role });
+  const session = { id: user.id, name: user.name, email: user.email, role: user.role as 'manager' | 'employee' };
+  record({ user: session, entity: 'auth', entity_id: user.id, action: 'login', label: attempted });
+  res.json(session);
 });
 
 authRouter.post('/logout', (_req, res) => {
@@ -143,5 +159,9 @@ authRouter.post('/change-password', requireAuth, (req: AuthedRequest, res) => {
   // the new version, so the browser doing the changing is the one that stays in.
   bumpTokenVersion(req.user!.id);
   res.cookie(COOKIE_NAME, signToken(req.user!.id), cookieOpts);
+  record({
+    user: req.user, entity: 'users', entity_id: req.user!.id, action: 'change-password',
+    label: req.user!.email, note: 'every other session signed out',
+  });
   res.json({ ok: true });
 });

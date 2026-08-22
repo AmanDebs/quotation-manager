@@ -31,6 +31,8 @@ import { followupsRouter } from './routes/followups.js';
 import { paymentsRouter } from './routes/payments.js';
 import { dashboardRouter } from './routes/dashboard.js';
 import { pdfRouter } from './routes/pdf.js';
+import { auditRouter } from './routes/audit.js';
+import { auditMiddleware } from './middleware/audit.js';
 
 const app = express();
 const PORT = Number(process.env.PORT ?? 4000);
@@ -47,6 +49,11 @@ if (!isProduction) app.use(cors({ origin: true, credentials: true }));
 // the JSON body, and base64 inflates a file by a third.
 app.use(express.json({ limit: '12mb' }));
 app.use(cookieParser());
+
+// Above every router, so a route added later is audited the day it is added
+// rather than the day somebody remembers. It reads the row before the handler
+// runs and again after the response, and never touches the request body.
+app.use('/api', auditMiddleware);
 
 app.use('/api/health', healthRouter);
 app.use('/api/auth', authRouter);
@@ -85,6 +92,9 @@ app.use('/api/followups', requireAuth, followupsRouter);
 app.use('/api/payments', requireAuth, paymentsRouter);
 app.use('/api/dashboard', requireAuth, dashboardRouter);
 app.use('/api/pdf', requireAuth, pdfRouter);
+// Guards itself: the whole log is manager-only, one record's history follows
+// the record.
+app.use('/api/audit', requireAuth, auditRouter);
 
 // Anything under /api that reached here is a genuine 404 — answer in JSON so
 // the client never has to parse an HTML error page.

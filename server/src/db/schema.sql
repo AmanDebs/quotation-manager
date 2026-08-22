@@ -893,3 +893,37 @@ CREATE INDEX IF NOT EXISTS idx_despatch_items_despatch ON despatch_items(despatc
 CREATE INDEX IF NOT EXISTS idx_material_moves_material ON material_moves(material_id, location_id);
 CREATE INDEX IF NOT EXISTS idx_material_moves_po ON material_moves(po_id);
 CREATE INDEX IF NOT EXISTS idx_material_moves_wo ON material_moves(work_order_id);
+
+-- Who changed what, and when (2026-08). Append-only: nothing updates or
+-- deletes a row here, which is the whole point of keeping one.
+--
+-- `user_name` is stored beside `user_id` on purpose. A user can be deleted,
+-- and "someone who no longer works here raised this credit note" is exactly
+-- the sentence the log exists to be able to say — the same reason a document
+-- LEFT JOINs its company rather than requiring one.
+--
+-- `changes` is a JSON array of {field, from, to}, holding only the fields that
+-- actually differed. A password hash is never read, and a value too long to be
+-- worth keeping (a base64 logo) is recorded as changed without its content.
+CREATE TABLE IF NOT EXISTS audit_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  at TEXT NOT NULL DEFAULT (datetime('now')),
+  user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  user_name TEXT NOT NULL DEFAULT '',
+  -- The URL segment: 'quotations', 'work-orders', 'payments'. The client's
+  -- vocabulary, so a link back to the record needs no translation table.
+  entity TEXT NOT NULL,
+  entity_id INTEGER,
+  -- create | update | delete | login | login_failed | or the verb of a
+  -- POST /:id/<verb> route: status, submit, approve, reject, revise, entries…
+  action TEXT NOT NULL,
+  -- The document number or name at the time, so the log reads without a join
+  -- to a row that may since have been deleted.
+  label TEXT NOT NULL DEFAULT '',
+  changes TEXT NOT NULL DEFAULT '[]',
+  -- Kept for the rare case where the record was not a table row.
+  note TEXT NOT NULL DEFAULT ''
+);
+
+CREATE INDEX IF NOT EXISTS idx_audit_entity ON audit_log(entity, entity_id, id);
+CREATE INDEX IF NOT EXISTS idx_audit_at ON audit_log(id DESC);

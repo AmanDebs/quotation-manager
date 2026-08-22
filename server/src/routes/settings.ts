@@ -3,6 +3,8 @@ import { db } from '../db/connection.js';
 import { defaultCompany, defaultCompanyId } from '../services/companies.js';
 import { listSeries, setNextNumber } from '../services/numbering.js';
 import { requireManager } from '../middleware/auth.js';
+import { record } from '../services/audit.js';
+import type { AuthedRequest } from '../middleware/auth.js';
 
 export const settingsRouter = Router();
 
@@ -44,7 +46,19 @@ settingsRouter.put('/sequences', (req, res) => {
     return res.status(400).json({ error: 'Unknown numbering series' });
   }
   try {
-    res.json(setNextNumber(companyId, key, Number(body.next_number), { force: body.force === true }));
+    const before = listSeries(companyId).find((sq) => sq.key === key)?.next_number ?? null;
+    const result = setNextNumber(companyId, key, Number(body.next_number), { force: body.force === true });
+    // Recorded here rather than by the audit middleware, which works from a
+    // row's id and `sequences` is keyed on (company, series) instead. Moving a
+    // counter is worth a line in the log: it decides what the next customer
+    // sees on their invoice.
+    record({
+      user: (req as AuthedRequest).user, entity: 'companies', entity_id: companyId,
+      action: 'sequence', label: key,
+      changes: [{ field: 'next_number', from: before, to: Number(body.next_number) }],
+      note: body.force === true ? 'moved backwards (forced)' : '',
+    });
+    res.json(result);
   } catch (err) {
     const status = (err as { status?: number }).status ?? 500;
     if (status === 500) throw err;

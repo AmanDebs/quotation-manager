@@ -14,6 +14,7 @@ import ColumnsControl, { quotationColumns, quotationOmit, newColumnConfig } from
 import NotePresetPicker from '../components/NotePresetPicker';
 import { fmtMoney, fmtQty, fmtDate, today } from '../lib/format';
 import { useDefaultNotes } from '../lib/useDefaultNotes';
+import HistoryCard from '../components/HistoryCard';
 
 interface Draft {
   number?: string;
@@ -393,6 +394,8 @@ export default function QuotationFormPage() {
             </div>
           </div>
         )}
+
+        <HistoryCard entity="quotations" id={id ? Number(id) : undefined} />
       </div>
     </div>
   );

@@ -27,6 +27,7 @@ import StockPage from './pages/Stock';
 import PurchaseOrdersPage from './pages/PurchaseOrders';
 import MastersPage from './pages/Masters';
 import ApprovalsPage from './pages/Approvals';
+import ActivityPage from './pages/Activity';
 import TeamPage from './pages/Team';
 import SettingsPage from './pages/Settings';
 
@@ -118,6 +119,7 @@ export default function App() {
           <Route path="/purchase-orders" element={managerOnly(<PurchaseOrdersPage />)} />
           <Route path="/masters" element={managerOnly(<MastersPage />)} />
           <Route path="/approvals" element={managerOnly(<ApprovalsPage />)} />
+          <Route path="/activity" element={managerOnly(<ActivityPage />)} />
           <Route path="/team" element={managerOnly(<TeamPage />)} />
           <Route path="/settings" element={managerOnly(<SettingsPage />)} />
           <Route path="*" element={<Navigate to="/" replace />} />
