@@ -1,12 +1,13 @@
 import { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import { useIsManager } from '../App';
 import type { Product } from '../types';
-import { Button, Input, Textarea, Select, Field, PageHeader, EmptyState, ErrorText, Modal, Card } from '../components/ui';
+import { Button, Input, Textarea, Select, Field, PageHeader, EmptyState, ErrorText, Modal, Card , Pagination} from '../components/ui';
 import ProductImportModal from '../components/ProductImportModal';
 import RecipeModal from '../components/RecipeModal';
 import QcSpecModal from '../components/QcSpecModal';
+import { usePagedList, PAGE_SIZE } from '../lib/usePagedList';
 
 export const UNITS = ['unit', 'kg', 'tonne', 'per 1000', 'box'];
 
@@ -63,10 +64,8 @@ export default function ProductsPage() {
   // Anyone may add a product mid-quotation, but changing or bulk-replacing the
   // shared catalogue moves everyone's prices — that stays with the manager.
   const isManager = useIsManager();
-  const { data: products = [] } = useQuery({
-    queryKey: ['products', q],
-    queryFn: () => api.get<Product[]>(`/api/products?q=${encodeURIComponent(q)}`),
-  });
+  const list = usePagedList<Product>(['products', q], `/api/products?q=${encodeURIComponent(q)}`);
+  const products = list.rows;
 
   const save = useMutation({
     mutationFn: (p: Product | Omit<Product, 'id'>) =>
@@ -88,7 +87,7 @@ export default function ProductsPage() {
     <div>
       <PageHeader
         title="Products"
-        subtitle={`${products.length} product${products.length === 1 ? '' : 's'} in catalog`}
+        subtitle={`${list.total} product${list.total === 1 ? '' : 's'} in catalog`}
         actions={
           <>
             {isManager && <Button variant="secondary" onClick={() => setImporting(true)}>⬆ Import from Excel</Button>}
@@ -162,6 +161,10 @@ export default function ProductsPage() {
             </tbody>
           </table>
         )}
+        <Pagination
+          page={list.page} pages={list.pages} total={list.total} limit={PAGE_SIZE}
+          onPage={list.setPage} noun="products"
+        />
       </Card>
 
       {editing && (

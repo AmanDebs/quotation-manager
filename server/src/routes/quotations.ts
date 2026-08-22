@@ -7,6 +7,7 @@ import { scopeClause, canAccessCustomer, customerChangeError } from '../middlewa
 import { submit, decide, resetApprovalOnEdit, blockUnapprovedTransition } from '../services/approval.js';
 import { resolveCompanyId } from '../services/companies.js';
 import { enquiryLinkId, syncEnquiryStatus } from '../services/enquiries.js';
+import { listBody } from '../services/pagination.js';
 
 export const quotationsRouter = Router();
 
@@ -70,8 +71,11 @@ quotationsRouter.get('/', (req: AuthedRequest, res) => {
   // Narrow to one selling entity. Ignored when the group has just one.
   if (Number(req.query.company) > 0) { where.push('q.company_id = ?'); params.push(Number(req.query.company)); }
   if (req.query.approval) { where.push('q.approval_status = ?'); params.push(String(req.query.approval)); }
-  const sql = `${listSql}${where.length ? ' WHERE ' + where.join(' AND ') : ''} ORDER BY q.date DESC, q.id DESC`;
-  res.json(db.prepare(sql).all(...(params as never[])));
+  res.json(listBody(req.query, {
+    sql: `${listSql}${where.length ? ' WHERE ' + where.join(' AND ') : ''}`,
+    order: 'ORDER BY q.date DESC, q.id DESC',
+    params,
+  }));
 });
 
 quotationsRouter.get('/:id', (req: AuthedRequest, res) => {

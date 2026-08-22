@@ -9,6 +9,7 @@ import { syncOrderStatus } from '../services/orderStatus.js';
 import type { AuthedRequest } from '../middleware/auth.js';
 import { scopeClause, canAccessCustomer } from '../middleware/scope.js';
 import { resolveCompanyId } from '../services/companies.js';
+import { listBody } from '../services/pagination.js';
 
 export const workOrdersRouter = Router();
 
@@ -101,6 +102,21 @@ function getFull(req: AuthedRequest, id: number) {
   return wo;
 }
 
+/**
+ * Jobs, planned pieces and pieces made across every job matching the filters.
+ * Derived from `production_entries` here exactly as `progressForMany` derives
+ * it per job — nothing about progress is stored, at either scale.
+ */
+function jobSummary(sql: string, params: unknown[]) {
+  return db.prepare(
+    `WITH f AS (${sql})
+     SELECT (SELECT COUNT(*) FROM f) AS jobs,
+            COALESCE((SELECT SUM(qty_planned) FROM f), 0) AS planned,
+            COALESCE((SELECT SUM(e.qty_ok) FROM production_entries e
+                       WHERE e.work_order_id IN (SELECT id FROM f)), 0) AS made`
+  ).get(...(params as never[])) as { jobs: number; planned: number; made: number };
+}
+
 workOrdersRouter.get('/', (req: AuthedRequest, res) => {
   const scope = scopeClause(req, 'o.customer_id');
   const where: string[] = [];
@@ -113,15 +129,20 @@ workOrdersRouter.get('/', (req: AuthedRequest, res) => {
   // "Open" is everything still to finish — the default view of a shop floor.
   if (req.query.open === '1') where.push("w.status NOT IN ('done','cancelled')");
 
-  const rows = db.prepare(
-    `${listSql} ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
-     ORDER BY CASE WHEN w.planned_start = '' THEN 1 ELSE 0 END, w.planned_start, w.id DESC`
-  ).all(...(params as never[])) as Record<string, unknown>[];
-
-  const progress = progressForMany(
-    rows.map((r) => ({ id: Number(r.id), qty_planned: Number(r.qty_planned) || 0 }))
-  );
-  res.json(rows.map((r) => ({ ...r, progress: progress.get(Number(r.id)) })));
+  const sql = `${listSql} ${where.length ? `WHERE ${where.join(' AND ')}` : ''}`;
+  const body = listBody<Record<string, unknown>>(req.query, {
+    sql,
+    order: "ORDER BY CASE WHEN w.planned_start = '' THEN 1 ELSE 0 END, w.planned_start, w.id DESC",
+    params,
+  }, (rows) => {
+    const progress = progressForMany(
+      rows.map((r) => ({ id: Number(r.id), qty_planned: Number(r.qty_planned) || 0 }))
+    );
+    return rows.map((r) => ({ ...r, progress: progress.get(Number(r.id)) }));
+  });
+  // "N jobs, X of Y pcs made" is a statement about the floor, not about the
+  // page, so it is measured over every job matching the filters.
+  res.json(Array.isArray(body) ? body : { ...body, summary: jobSummary(sql, params) });
 });
 
 workOrdersRouter.get('/:id', (req: AuthedRequest, res) => {

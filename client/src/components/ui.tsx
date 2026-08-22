@@ -198,6 +198,90 @@ export function EmptyState({ message }: { message: string }) {
   return <div className="py-10 text-center text-sm text-slate-400">{message}</div>;
 }
 
+/**
+ * The pager under a list.
+ *
+ * Draws nothing at all when there is only one page — most lists in a young
+ * database have one, and a row of dead arrows under four invoices is noise.
+ * It still says how many rows there are, because "1-50 of 412" is the number
+ * people actually want and no other part of the page says it.
+ *
+ * Page numbers are windowed around the current page rather than printed in
+ * full: a list five years into trading has 60 pages and nobody clicks page 37.
+ */
+/**
+ * Which page numbers to draw: the current page and its neighbours, plus the
+ * first and the last, at most seven in all. A list five years into trading has
+ * sixty pages and nobody clicks page 37, but everybody clicks "last".
+ *
+ * Exported for its own sake — it is the one piece of arithmetic in this file,
+ * and the browser is not where arithmetic should be checked.
+ */
+export function pageWindow(page: number, pages: number): number[] {
+  // Short enough to print in full: an ellipsis standing in for a single page
+  // is worse than the page, and at seven the budget is not yet spent.
+  if (pages <= 7) return Array.from({ length: Math.max(0, pages) }, (_, i) => i + 1);
+  const window = new Set<number>([1, pages, page, page - 1, page + 1]);
+  if (page <= 3) [2, 3, 4].forEach((n) => window.add(n));
+  if (page >= pages - 2) [pages - 1, pages - 2, pages - 3].forEach((n) => window.add(n));
+  return [...window].filter((n) => n >= 1 && n <= pages).sort((a, b) => a - b);
+}
+
+export function Pagination({ page, pages, total, limit, onPage, noun = 'rows' }: {
+  page: number;
+  pages: number;
+  total: number;
+  limit: number;
+  onPage: (n: number) => void;
+  /** What the rows are, for the count line: "412 invoices". */
+  noun?: string;
+}) {
+  if (pages <= 1) {
+    return total > 0
+      ? <div className="pt-3 text-xs text-slate-400">{total} {noun}</div>
+      : null;
+  }
+  const first = (page - 1) * limit + 1;
+  const last = Math.min(page * limit, total);
+  const numbers = pageWindow(page, pages);
+
+  const step = (n: number) => 'rounded-md px-2.5 py-1 text-sm ' + (
+    n === page
+      ? 'bg-brand-700 font-semibold text-white'
+      : 'text-slate-600 hover:bg-slate-100'
+  );
+
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-2 pt-3">
+      <div className="text-xs text-slate-400">
+        {first}–{last} of {total} {noun}
+      </div>
+      <div className="flex items-center gap-1">
+        <button
+          className="rounded-md px-2.5 py-1 text-sm text-slate-600 hover:bg-slate-100 disabled:text-slate-300 disabled:hover:bg-transparent"
+          onClick={() => onPage(page - 1)}
+          disabled={page <= 1}
+        >
+          ‹ Prev
+        </button>
+        {numbers.map((n, i) => (
+          <span key={n} className="flex items-center">
+            {i > 0 && numbers[i - 1] !== n - 1 && <span className="px-1 text-slate-300">…</span>}
+            <button className={step(n)} onClick={() => onPage(n)}>{n}</button>
+          </span>
+        ))}
+        <button
+          className="rounded-md px-2.5 py-1 text-sm text-slate-600 hover:bg-slate-100 disabled:text-slate-300 disabled:hover:bg-transparent"
+          onClick={() => onPage(page + 1)}
+          disabled={page >= pages}
+        >
+          Next ›
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function ErrorText({ error }: { error: unknown }) {
   if (!error) return null;
   const msg = error instanceof Error ? error.message : String(error);

@@ -5,8 +5,9 @@ import type {
   PurchaseOrder, PoStatus, PoItem, Supplier, Material, Location, TaxType,
   ShortfallDraft, ShortfallDraftLine,
 } from '../types';
-import { PageHeader, Card, Select, Input, Textarea, Field, Button, EmptyState, ErrorText, Modal } from '../components/ui';
+import { PageHeader, Card, Select, Input, Textarea, Field, Button, EmptyState, ErrorText, Modal , Pagination} from '../components/ui';
 import { fmtMoney, fmtQty, fmtDate, today } from '../lib/format';
+import { usePagedList, PAGE_SIZE } from '../lib/usePagedList';
 
 /**
  * Buying material. Manager-only in full, so there is no read-only mode here.
@@ -37,10 +38,11 @@ export default function PurchaseOrdersPage() {
   const [receiving, setReceiving] = useState<PurchaseOrder | null>(null);
   const [fromShortfall, setFromShortfall] = useState(false);
 
-  const { data: pos = [] } = useQuery({
-    queryKey: ['purchase-orders', openOnly],
-    queryFn: () => api.get<PurchaseOrder[]>(`/api/purchase-orders${openOnly ? '?open=1' : ''}`),
-  });
+  const list = usePagedList<PurchaseOrder>(
+    ['purchase-orders', openOnly],
+    `/api/purchase-orders${openOnly ? '?open=1' : ''}`,
+  );
+  const pos = list.rows;
   const { data: suppliers = [] } = useQuery({ queryKey: ['master', 'suppliers', false], queryFn: () => api.get<Supplier[]>('/api/suppliers') });
   const { data: materials = [] } = useQuery({ queryKey: ['master', 'materials', false], queryFn: () => api.get<Material[]>('/api/materials') });
   const { data: locations = [] } = useQuery({ queryKey: ['master', 'locations', false], queryFn: () => api.get<Location[]>('/api/locations') });
@@ -197,6 +199,10 @@ export default function PurchaseOrdersPage() {
             </tbody>
           </table>
         )}
+        <Pagination
+          page={list.page} pages={list.pages} total={list.total} limit={PAGE_SIZE}
+          onPage={list.setPage} noun="purchase orders"
+        />
       </Card>
 
       {editing && (

@@ -1,13 +1,13 @@
 import { Link, useNavigate } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
-import { api } from '../api/client';
 import type { PackingList } from '../types';
-import { Button, PageHeader, EmptyState, Card } from '../components/ui';
+import { Button, PageHeader, EmptyState, Card, Pagination } from '../components/ui';
 import { fmtDate } from '../lib/format';
+import { usePagedList, PAGE_SIZE } from '../lib/usePagedList';
 
 export default function PackingListsPage() {
   const navigate = useNavigate();
-  const { data: lists = [] } = useQuery({ queryKey: ['packing-lists'], queryFn: () => api.get<PackingList[]>('/api/packing-lists') });
+  const paged = usePagedList<PackingList>(['packing-lists'], '/api/packing-lists');
+  const lists = paged.rows;
 
   return (
     <div>
@@ -41,6 +41,10 @@ export default function PackingListsPage() {
             </tbody>
           </table>
         )}
+        <Pagination
+          page={paged.page} pages={paged.pages} total={paged.total} limit={PAGE_SIZE}
+          onPage={paged.setPage} noun="packing lists"
+        />
       </Card>
     </div>
   );

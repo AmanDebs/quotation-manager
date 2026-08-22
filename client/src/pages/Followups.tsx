@@ -2,8 +2,9 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Followup, Customer } from '../types';
-import { Button, Input, Textarea, Select, Field, PageHeader, EmptyState, ErrorText, Modal, Card } from '../components/ui';
+import { Button, Input, Textarea, Select, Field, PageHeader, EmptyState, ErrorText, Modal, Card, Pagination } from '../components/ui';
 import { fmtDate, today } from '../lib/format';
+import { usePagedList, PAGE_SIZE } from '../lib/usePagedList';
 
 const docTypeLabel: Record<string, string> = {
   enquiry: 'Enquiry', quotation: 'Quotation', proforma: 'Proforma', invoice: 'Invoice', general: 'General',
@@ -17,10 +18,11 @@ export default function FollowupsPage() {
   const [note, setNote] = useState('');
   const [customerId, setCustomerId] = useState<number | ''>('');
 
-  const { data: followups = [] } = useQuery({
-    queryKey: ['followups', showDone],
-    queryFn: () => api.get<Followup[]>(`/api/followups${showDone ? '' : '?pending=1'}`),
-  });
+  const list = usePagedList<Followup>(
+    ['followups', showDone],
+    `/api/followups${showDone ? '' : '?pending=1'}`,
+  );
+  const followups = list.rows;
   const { data: customers = [] } = useQuery({ queryKey: ['customers', ''], queryFn: () => api.get<Customer[]>('/api/customers') });
 
   const invalidate = () => {
@@ -104,6 +106,10 @@ export default function FollowupsPage() {
             </tbody>
           </table>
         )}
+        <Pagination
+          page={list.page} pages={list.pages} total={list.total} limit={PAGE_SIZE}
+          onPage={list.setPage} noun="reminders"
+        />
       </Card>
 
       {creating && (

@@ -6,6 +6,7 @@ import { receivedByPo } from '../services/stock.js';
 import { shortfallDraft } from '../services/purchasing.js';
 import { resolveCompanyId } from '../services/companies.js';
 import type { AuthedRequest } from '../middleware/auth.js';
+import { listBody } from '../services/pagination.js';
 
 export const purchaseOrdersRouter = Router();
 
@@ -110,9 +111,11 @@ purchaseOrdersRouter.get('/', (req, res) => {
   if (req.query.status) { where.push('p.status = ?'); params.push(String(req.query.status)); }
   if (req.query.supplier_id) { where.push('p.supplier_id = ?'); params.push(Number(req.query.supplier_id)); }
   if (req.query.open === '1') where.push("p.status NOT IN ('received','cancelled')");
-  res.json(db.prepare(
-    `${listSql} ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY p.date DESC, p.id DESC`
-  ).all(...(params as never[])));
+  res.json(listBody(req.query, {
+    sql: `${listSql} ${where.length ? `WHERE ${where.join(' AND ')}` : ''}`,
+    order: 'ORDER BY p.date DESC, p.id DESC',
+    params,
+  }));
 });
 
 /**

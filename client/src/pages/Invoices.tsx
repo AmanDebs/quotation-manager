@@ -1,13 +1,14 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Invoice } from '../types';
-import { Button, Select, PageHeader, EmptyState, Card, ExportTabs, ErrorText } from '../components/ui';
+import { Button, Select, PageHeader, EmptyState, Card, ExportTabs, ErrorText, Pagination } from '../components/ui';
 import { useCompanies } from '../components/CompanySelect';
 import NewDocumentDialog from '../components/NewDocumentDialog';
 import { fmtDate, fmtMoney } from '../lib/format';
 import { useUrlFilter } from '../lib/useUrlFilter';
+import { usePagedList, PAGE_SIZE } from '../lib/usePagedList';
 
 const STATUSES = ['draft', 'final', 'dispatched', 'paid'];
 
@@ -34,16 +35,15 @@ export default function InvoicesPage() {
   const [statusFilter, setStatusFilter] = useUrlFilter('status');
   const [exportFilter, setExportFilter] = useUrlFilter('export');
   const [creating, setCreating] = useState(false);
-  const { data: invoices = [] } = useQuery({
-    queryKey: ['invoices', statusFilter, exportFilter, companyFilter],
-    queryFn: () => {
-      const params = new URLSearchParams();
-      if (statusFilter) params.set('status', statusFilter);
-      if (exportFilter) params.set('export', exportFilter);
-      if (companyFilter) params.set('company', companyFilter);
-      return api.get<Invoice[]>(`/api/invoices${params.toString() ? `?${params}` : ''}`);
-    },
-  });
+  const params = new URLSearchParams();
+  if (statusFilter) params.set('status', statusFilter);
+  if (exportFilter) params.set('export', exportFilter);
+  if (companyFilter) params.set('company', companyFilter);
+  const list = usePagedList<Invoice>(
+    ['invoices', statusFilter, exportFilter, companyFilter],
+    `/api/invoices${params.toString() ? `?${params}` : ''}`,
+  );
+  const invoices = list.rows;
 
   // Change status without opening the invoice. The server still owns the
   // approval rule — moving an unapproved invoice to an outgoing status comes
@@ -135,6 +135,10 @@ export default function InvoicesPage() {
             </tbody>
           </table>
         )}
+        <Pagination
+          page={list.page} pages={list.pages} total={list.total} limit={PAGE_SIZE}
+          onPage={list.setPage} noun="invoices"
+        />
       </Card>
     </div>
   );

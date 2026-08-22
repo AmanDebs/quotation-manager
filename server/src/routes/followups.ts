@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { db } from '../db/connection.js';
 import type { AuthedRequest } from '../middleware/auth.js';
 import { scopeClause, canAccessCustomer } from '../middleware/scope.js';
+import { listBody } from '../services/pagination.js';
 
 export const followupsRouter = Router();
 
@@ -22,8 +23,11 @@ followupsRouter.get('/', (req: AuthedRequest, res) => {
   const scope = scopeClause(req, 'f.customer_id');
   if (scope.sql) { where.push(`(${scope.sql})`); params.push(...scope.params); }
   if (req.query.pending === '1') where.push('f.done = 0');
-  const sql = `${listSql}${where.length ? ' WHERE ' + where.join(' AND ') : ''} ORDER BY f.done, f.due_date`;
-  res.json(db.prepare(sql).all(...(params as never[])));
+  res.json(listBody(req.query, {
+    sql: `${listSql}${where.length ? ' WHERE ' + where.join(' AND ') : ''}`,
+    order: 'ORDER BY f.done, f.due_date, f.id',
+    params,
+  }));
 });
 
 followupsRouter.post('/', (req: AuthedRequest, res) => {

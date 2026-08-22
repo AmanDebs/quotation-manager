@@ -5,6 +5,7 @@ import { round2 } from '../services/totals.js';
 import type { AuthedRequest } from '../middleware/auth.js';
 import { scopeClause, canAccessCustomer } from '../middleware/scope.js';
 import { resolveCompanyId } from '../services/companies.js';
+import { listBody } from '../services/pagination.js';
 
 export const packingListsRouter = Router();
 
@@ -93,8 +94,11 @@ function saveStandaloneItems(plId: number, items: PlItemInput[]) {
 
 packingListsRouter.get('/', (req: AuthedRequest, res) => {
   const scope = scopeClause(req, 'pl.customer_id');
-  const sql = `${listSql}${scope.sql ? ' WHERE ' + scope.sql : ''} ORDER BY pl.date DESC, pl.id DESC`;
-  res.json(db.prepare(sql).all(...(scope.params as never[])));
+  res.json(listBody(req.query, {
+    sql: `${listSql}${scope.sql ? ' WHERE ' + scope.sql : ''}`,
+    order: 'ORDER BY pl.date DESC, pl.id DESC',
+    params: scope.params,
+  }));
 });
 
 packingListsRouter.get('/:id', (req: AuthedRequest, res) => {

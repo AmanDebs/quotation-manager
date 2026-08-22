@@ -9,6 +9,7 @@ import { syncOrderStatus } from '../services/orderStatus.js';
 import { submit, decide, resetApprovalOnEdit, blockUnapprovedTransition } from '../services/approval.js';
 import { invoiceReceivable } from '../services/receivables.js';
 import { syncInvoiceStatus, syncInvoicesForProforma } from '../services/invoiceStatus.js';
+import { listBody } from '../services/pagination.js';
 
 /**
  * Bring the paid/unpaid status back into line after anything that moves money.
@@ -286,8 +287,11 @@ invoicesRouter.get('/', (req: AuthedRequest, res) => {
   // Narrow to one selling entity. Ignored when the group has just one.
   if (Number(req.query.company) > 0) { where.push('i.company_id = ?'); params.push(Number(req.query.company)); }
   if (req.query.approval) { where.push('i.approval_status = ?'); params.push(String(req.query.approval)); }
-  const sql = `${listSql}${where.length ? ' WHERE ' + where.join(' AND ') : ''} ORDER BY i.date DESC, i.id DESC`;
-  res.json(db.prepare(sql).all(...(params as never[])));
+  res.json(listBody(req.query, {
+    sql: `${listSql}${where.length ? ' WHERE ' + where.join(' AND ') : ''}`,
+    order: 'ORDER BY i.date DESC, i.id DESC',
+    params,
+  }));
 });
 
 invoicesRouter.get('/:id', (req: AuthedRequest, res) => {

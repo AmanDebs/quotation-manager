@@ -1,14 +1,15 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Quotation } from '../types';
-import { Button, Select, PageHeader, EmptyState, Card, ExportTabs, ErrorText } from '../components/ui';
+import { Button, Select, PageHeader, EmptyState, Card, ExportTabs, ErrorText, Pagination } from '../components/ui';
 import NewDocumentDialog from '../components/NewDocumentDialog';
 import InternalNotes from '../components/InternalNotes';
 import { useCompanies } from '../components/CompanySelect';
 import { fmtDate, fmtMoney } from '../lib/format';
 import { useUrlFilter } from '../lib/useUrlFilter';
+import { usePagedList, PAGE_SIZE } from '../lib/usePagedList';
 
 const approvalBadge: Record<string, { cls: string; label: string }> = {
   pending: { cls: 'bg-amber-100 text-amber-700', label: 'Awaiting approval' },
@@ -50,16 +51,15 @@ export default function QuotationsPage() {
       if (next.has(id)) next.delete(id); else next.add(id);
       return next;
     });
-  const { data: quotations = [] } = useQuery({
-    queryKey: ['quotations', statusFilter, exportFilter, companyFilter],
-    queryFn: () => {
-      const params = new URLSearchParams();
-      if (statusFilter) params.set('status', statusFilter);
-      if (exportFilter) params.set('export', exportFilter);
-      if (companyFilter) params.set('company', companyFilter);
-      return api.get<Quotation[]>(`/api/quotations${params.toString() ? `?${params}` : ''}`);
-    },
-  });
+  const params = new URLSearchParams();
+  if (statusFilter) params.set('status', statusFilter);
+  if (exportFilter) params.set('export', exportFilter);
+  if (companyFilter) params.set('company', companyFilter);
+  const list = usePagedList<Quotation>(
+    ['quotations', statusFilter, exportFilter, companyFilter],
+    `/api/quotations${params.toString() ? `?${params}` : ''}`,
+  );
+  const quotations = list.rows;
 
   // Change status without leaving the list. The server still enforces the
   // approval rule, so a blocked change surfaces as an error here.
@@ -190,6 +190,10 @@ export default function QuotationsPage() {
             })}
           </table>
         )}
+        <Pagination
+          page={list.page} pages={list.pages} total={list.total} limit={PAGE_SIZE}
+          onPage={list.setPage} noun="quotations"
+        />
       </Card>
     </div>
   );

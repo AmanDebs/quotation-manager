@@ -4,6 +4,7 @@ import { requireManager } from '../middleware/auth.js';
 import { paramsFor } from '../services/qc.js';
 import { IMPORT_FIELDS, buildImport, decodeUpload, identityKey, type BuildOptions } from '../services/productImport.js';
 import { recipeFor } from '../services/recipe.js';
+import { listBody } from '../services/pagination.js';
 
 export const productsRouter = Router();
 
@@ -206,10 +207,11 @@ productsRouter.put('/:id/materials', requireManager, (req, res) => {
 
 productsRouter.get('/', (req, res) => {
   const q = String(req.query.q ?? '').trim();
-  const rows = q
-    ? db.prepare('SELECT * FROM products WHERE name LIKE ? OR hsn_code LIKE ? ORDER BY name').all(`%${q}%`, `%${q}%`)
-    : db.prepare('SELECT * FROM products ORDER BY name').all();
-  res.json(rows);
+  res.json(listBody(req.query, {
+    sql: `SELECT * FROM products${q ? ' WHERE name LIKE ? OR hsn_code LIKE ?' : ''}`,
+    order: 'ORDER BY name, id',
+    params: q ? [`%${q}%`, `%${q}%`] : [],
+  }));
 });
 
 productsRouter.post('/', (req, res) => {

@@ -6,6 +6,7 @@ import type { AuthedRequest } from '../middleware/auth.js';
 import { scopeClause, canAccessCustomer, linkError, customerChangeError } from '../middleware/scope.js';
 import { resolveCompanyId } from '../services/companies.js';
 import { submit, decide, resetApprovalOnEdit, blockUnapprovedTransition } from '../services/approval.js';
+import { listBody } from '../services/pagination.js';
 
 export const proformasRouter = Router();
 
@@ -107,8 +108,11 @@ proformasRouter.get('/', (req: AuthedRequest, res) => {
   // Narrow to one selling entity. Ignored when the group has just one.
   if (Number(req.query.company) > 0) { where.push('p.company_id = ?'); params.push(Number(req.query.company)); }
   if (req.query.approval) { where.push('p.approval_status = ?'); params.push(String(req.query.approval)); }
-  const sql = `${listSql}${where.length ? ' WHERE ' + where.join(' AND ') : ''} ORDER BY p.date DESC, p.id DESC`;
-  res.json(db.prepare(sql).all(...(params as never[])));
+  res.json(listBody(req.query, {
+    sql: `${listSql}${where.length ? ' WHERE ' + where.join(' AND ') : ''}`,
+    order: 'ORDER BY p.date DESC, p.id DESC',
+    params,
+  }));
 });
 
 proformasRouter.get('/:id', (req: AuthedRequest, res) => {

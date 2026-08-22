@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { PendingApproval } from '../types';
-import { Button, Select, Textarea, Field, PageHeader, EmptyState, ErrorText, Card, Modal } from '../components/ui';
+import { Button, Select, Textarea, Field, PageHeader, EmptyState, ErrorText, Card, Modal , Pagination} from '../components/ui';
 import { fmtDate, fmtMoney } from '../lib/format';
+import { usePagedList, PAGE_SIZE } from '../lib/usePagedList';
 
 const routeFor: Record<PendingApproval['type'], string> = {
   quotation: '/quotations',
@@ -28,10 +29,8 @@ export default function ApprovalsPage() {
   const [rejecting, setRejecting] = useState<PendingApproval | null>(null);
   const [note, setNote] = useState('');
 
-  const { data: rows = [] } = useQuery({
-    queryKey: ['approvals', status],
-    queryFn: () => api.get<PendingApproval[]>(`/api/approvals?status=${status}`),
-  });
+  const list = usePagedList<PendingApproval>(['approvals', status], `/api/approvals?status=${status}`);
+  const rows = list.rows;
 
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ['approvals'] });
@@ -117,6 +116,10 @@ export default function ApprovalsPage() {
             </tbody>
           </table>
         )}
+        <Pagination
+          page={list.page} pages={list.pages} total={list.total} limit={PAGE_SIZE}
+          onPage={list.setPage} noun="documents"
+        />
       </Card>
 
       {rejecting && (

@@ -5,11 +5,12 @@ import { computeTotals, round2, type LineItemInput } from '../services/totals.js
 import { productionByOrder } from '../services/production.js';
 import { despatchedByOrder } from './despatches.js';
 import { orderMaterialCost } from '../services/costing.js';
-import { orderLines, productDemand, type Filters } from '../services/orderLines.js';
+import { orderLines, productDemand, countOrderLines, type Filters } from '../services/orderLines.js';
 import type { AuthedRequest } from '../middleware/auth.js';
 import { scopeClause, canAccessCustomer, linkError, customerChangeError } from '../middleware/scope.js';
 import { syncOrderStatus } from '../services/orderStatus.js';
 import { resolveCompanyId } from '../services/companies.js';
+import { listBody, pageRequest } from '../services/pagination.js';
 
 export const ordersRouter = Router();
 
@@ -192,15 +193,18 @@ ordersRouter.get('/', (req: AuthedRequest, res) => {
   if (Number(req.query.company) > 0) { where.push('o.company_id = ?'); params.push(Number(req.query.company)); }
   // ?open=1 → the order book: everything not yet completed or cancelled.
   if (req.query.open === '1') where.push("o.status NOT IN ('completed','cancelled')");
-  const sql = `${listSql}${where.length ? ' WHERE ' + where.join(' AND ') : ''} ORDER BY o.date DESC, o.id DESC`;
-  const rows = db.prepare(sql).all(...(params as never[])) as Record<string, unknown>[];
-  // Lists show progress too, so the order book reads at a glance.
-  res.json(rows.map((o) => {
+  res.json(listBody<Record<string, unknown>>(req.query, {
+    sql: `${listSql}${where.length ? ' WHERE ' + where.join(' AND ') : ''}`,
+    order: 'ORDER BY o.date DESC, o.id DESC',
+    params,
+  // Lists show progress too, so the order book reads at a glance. Two queries
+  // per row, which is why it runs after the page has been cut and not before.
+  }, (rows) => rows.map((o) => {
     const items = db.prepare('SELECT qty, unit_price FROM order_items WHERE order_id = ? ORDER BY sort_order, id')
       .all(Number(o.id)) as { qty: number | null; unit_price: number }[];
     const p = dispatchProgress(Number(o.id), items);
     return { ...o, dispatched_value: p.dispatched_value, pending_value: p.pending_value, any_dispatched: p.any_dispatched };
-  }));
+  })));
 });
 
 /**
@@ -224,9 +228,24 @@ function lineFilters(req: AuthedRequest): Filters {
 }
 
 ordersRouter.get('/lines', (req: AuthedRequest, res) => {
-  res.json(orderLines(lineFilters(req)));
+  const f = lineFilters(req);
+  const p = pageRequest(req.query);
+  if (!p) return res.json(orderLines(f));
+  const total = countOrderLines(f);
+  const pages = Math.max(1, Math.ceil(total / p.limit));
+  const page = Math.min(p.page, pages);
+  res.json({
+    rows: orderLines(f, { limit: p.limit, offset: (page - 1) * p.limit }),
+    total, page, pages, limit: p.limit,
+  });
 });
 
+/**
+ * Never paged, on purpose: this folds every matching line into one row per
+ * product, and a total taken over one page of lines is not the total. It is
+ * bounded by the catalogue rather than by trading volume, which is what makes
+ * that affordable.
+ */
 ordersRouter.get('/by-product', (req: AuthedRequest, res) => {
   res.json(productDemand(lineFilters(req)));
 });

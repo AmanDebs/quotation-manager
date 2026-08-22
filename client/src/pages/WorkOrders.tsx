@@ -3,9 +3,10 @@ import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { WorkOrder, WorkOrderStatus, Location, Machine } from '../types';
-import { PageHeader, Card, Select, EmptyState } from '../components/ui';
+import { PageHeader, Card, Select, EmptyState , Pagination} from '../components/ui';
 import { fmtQty, fmtDate } from '../lib/format';
 import { useUrlFilter } from '../lib/useUrlFilter';
+import { usePagedList, PAGE_SIZE } from '../lib/usePagedList';
 
 /**
  * Every job across every order — the shop floor's own view.
@@ -40,15 +41,15 @@ export default function WorkOrdersPage() {
   if (location) query.set('location_id', location);
   if (openOnly && !status) query.set('open', '1');
 
-  const { data: jobs = [] } = useQuery({
-    queryKey: ['work-orders', 'all', query.toString()],
-    queryFn: () => api.get<WorkOrder[]>(`/api/work-orders?${query.toString()}`),
-  });
+  const list = usePagedList<WorkOrder, { jobs: number; planned: number; made: number }>(['work-orders', 'all', query.toString()], `/api/work-orders?${query.toString()}`);
+  const jobs = list.rows;
   const { data: locations = [] } = useQuery({ queryKey: ['master', 'locations', false], queryFn: () => api.get<Location[]>('/api/locations') });
   const { data: machines = [] } = useQuery({ queryKey: ['master', 'machines', false], queryFn: () => api.get<Machine[]>('/api/machines') });
 
-  const planned = jobs.reduce((s, w) => s + (w.qty_planned || 0), 0);
-  const made = jobs.reduce((s, w) => s + (w.progress?.produced ?? 0), 0);
+  // Over every matching job, not the page on screen — see `summary` in
+  // routes/workOrders.ts. Adding up the rows to hand would answer a different
+  // question in exactly the same words.
+  const summary = list.summary ?? { jobs: jobs.length, planned: 0, made: 0 };
 
   return (
     <div>
@@ -80,7 +81,7 @@ export default function WorkOrdersPage() {
           Open jobs only
         </label>
         <span className="ml-auto text-sm text-slate-500">
-          {jobs.length} job{jobs.length === 1 ? '' : 's'} · {fmtQty(made)} of {fmtQty(planned)} pcs made
+          {summary.jobs} job{summary.jobs === 1 ? '' : 's'} · {fmtQty(summary.made)} of {fmtQty(summary.planned)} pcs made
         </span>
       </div>
 
@@ -145,6 +146,10 @@ export default function WorkOrdersPage() {
             </tbody>
           </table>
         )}
+        <Pagination
+          page={list.page} pages={list.pages} total={list.total} limit={PAGE_SIZE}
+          onPage={list.setPage} noun="jobs"
+        />
       </Card>
     </div>
   );

@@ -3,9 +3,10 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Order, OrderStatus, OrderLine, ProductDemand, LineState } from '../types';
-import { Button, Select, Input, PageHeader, EmptyState, Card, ExportTabs, ErrorText } from '../components/ui';
+import { Button, Select, Input, PageHeader, EmptyState, Card, ExportTabs, ErrorText , Pagination} from '../components/ui';
 import { useCompanies } from '../components/CompanySelect';
 import { fmtDate, fmtMoney, fmtQty, today } from '../lib/format';
+import { usePagedList, PAGE_SIZE, type PagedList } from '../lib/usePagedList';
 
 export const ORDER_STATUSES: OrderStatus[] = [
   'pending', 'confirmed', 'scheduled', 'in_production', 'ready', 'partially_dispatched', 'completed', 'cancelled',
@@ -89,16 +90,19 @@ export default function OrdersPage() {
   if (q) params.set('q', q);
   const query = params.toString();
 
-  const { data: orders = [] } = useQuery({
-    queryKey: ['orders', query],
-    queryFn: () => api.get<Order[]>(`/api/orders${query ? `?${query}` : ''}`),
-    enabled: view === 'orders',
-  });
-  const { data: lines = [] } = useQuery({
-    queryKey: ['order-lines', query],
-    queryFn: () => api.get<OrderLine[]>(`/api/orders/lines${query ? `?${query}` : ''}`),
-    enabled: view === 'lines',
-  });
+  // `view` rides in each key so that switching views starts at page 1 — page 3
+  // of the orders is not page 3 of the lines, and the two share one URL key.
+  const orderList = usePagedList<Order>(
+    ['orders', view, query], `/api/orders${query ? `?${query}` : ''}`, { enabled: view === 'orders' },
+  );
+  const lineList = usePagedList<OrderLine>(
+    ['order-lines', view, query], `/api/orders/lines${query ? `?${query}` : ''}`, { enabled: view === 'lines' },
+  );
+  const orders = orderList.rows;
+  const lines = lineList.rows;
+  // The per-product view is deliberately not paged: it folds every matching
+  // line into one row per product, and a total over one page of lines is not
+  // the total. It is bounded by the catalogue rather than by trading volume.
   const { data: demand = [] } = useQuery({
     queryKey: ['order-demand', query],
     queryFn: () => api.get<ProductDemand[]>(`/api/orders/by-product${query ? `?${query}` : ''}`),
@@ -169,7 +173,9 @@ export default function OrdersPage() {
 
       <ErrorText error={setStatus.error} />
 
-      {view === 'lines' && <LinesTable lines={lines} showCompany={showCompany} />}
+      {view === 'lines' && (
+        <LinesTable lines={lines} showCompany={showCompany} pager={lineList} />
+      )}
       {view === 'products' && (
         <DemandTable
           rows={demand}
@@ -239,6 +245,10 @@ export default function OrdersPage() {
               </tbody>
             </table>
           )}
+          <Pagination
+            page={orderList.page} pages={orderList.pages} total={orderList.total} limit={PAGE_SIZE}
+            onPage={orderList.setPage} noun="orders"
+          />
         </Card>
       )}
     </div>
@@ -246,7 +256,11 @@ export default function OrdersPage() {
 }
 
 /** One row per item, the way the desk's own sheet reads. */
-function LinesTable({ lines, showCompany }: { lines: OrderLine[]; showCompany: boolean }) {
+function LinesTable({ lines, showCompany, pager }: {
+  lines: OrderLine[];
+  showCompany: boolean;
+  pager: PagedList<OrderLine>;
+}) {
   const navigate = useNavigate();
   const t = today();
 
@@ -329,10 +343,14 @@ function LinesTable({ lines, showCompany }: { lines: OrderLine[]; showCompany: b
             </tbody>
           </table>
           <p className="mt-2 text-xs text-slate-400">
-            {lines.length} line{lines.length === 1 ? '' : 's'}. Made, sent and state are worked out from the
+            {pager.total} line{pager.total === 1 ? '' : 's'}. Made, sent and state are worked out from the
             work orders, despatches and invoices recorded against each line — there is nothing here to keep
             up to date by hand.
           </p>
+          <Pagination
+            page={pager.page} pages={pager.pages} total={pager.total} limit={PAGE_SIZE}
+            onPage={pager.setPage} noun="lines"
+          />
         </>
       )}
     </Card>

@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { db } from '../db/connection.js';
 import type { AuthedRequest } from '../middleware/auth.js';
 import { scopeClause, canAccessCustomer } from '../middleware/scope.js';
+import { listBody } from '../services/pagination.js';
 
 export const customersRouter = Router();
 
@@ -27,8 +28,11 @@ customersRouter.get('/', (req: AuthedRequest, res) => {
     where.push('c.is_export = ?');
     params.push(Number(exportFilter));
   }
-  const sql = `${listSql}${where.length ? ' WHERE ' + where.join(' AND ') : ''} ORDER BY c.name`;
-  res.json(db.prepare(sql).all(...(params as never[])));
+  res.json(listBody(req.query, {
+    sql: `${listSql}${where.length ? ' WHERE ' + where.join(' AND ') : ''}`,
+    order: 'ORDER BY c.name, c.id',
+    params,
+  }));
 });
 
 customersRouter.get('/:id', (req: AuthedRequest, res) => {

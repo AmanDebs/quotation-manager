@@ -1,13 +1,14 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Proforma } from '../types';
-import { Button, Select, PageHeader, EmptyState, Card, ExportTabs, ErrorText } from '../components/ui';
+import { Button, Select, PageHeader, EmptyState, Card, ExportTabs, ErrorText, Pagination } from '../components/ui';
 import { useCompanies } from '../components/CompanySelect';
 import NewDocumentDialog from '../components/NewDocumentDialog';
 import { fmtDate, fmtMoney } from '../lib/format';
 import { useUrlFilter } from '../lib/useUrlFilter';
+import { usePagedList, PAGE_SIZE } from '../lib/usePagedList';
 
 const STATUSES = ['draft', 'sent', 'order_confirmed', 'advance_received', 'in_production', 'cancelled'];
 
@@ -37,16 +38,15 @@ export default function ProformasPage() {
   const [statusFilter, setStatusFilter] = useUrlFilter('status');
   const [exportFilter, setExportFilter] = useUrlFilter('export');
   const [creating, setCreating] = useState(false);
-  const { data: proformas = [] } = useQuery({
-    queryKey: ['proformas', statusFilter, exportFilter, companyFilter],
-    queryFn: () => {
-      const params = new URLSearchParams();
-      if (statusFilter) params.set('status', statusFilter);
-      if (exportFilter) params.set('export', exportFilter);
-      if (companyFilter) params.set('company', companyFilter);
-      return api.get<Proforma[]>(`/api/proformas${params.toString() ? `?${params}` : ''}`);
-    },
-  });
+  const params = new URLSearchParams();
+  if (statusFilter) params.set('status', statusFilter);
+  if (exportFilter) params.set('export', exportFilter);
+  if (companyFilter) params.set('company', companyFilter);
+  const list = usePagedList<Proforma>(
+    ['proformas', statusFilter, exportFilter, companyFilter],
+    `/api/proformas${params.toString() ? `?${params}` : ''}`,
+  );
+  const proformas = list.rows;
 
   // Change status without opening the document. The server still owns the
   // approval rule — moving an unapproved proforma to an outgoing status comes
@@ -140,6 +140,10 @@ export default function ProformasPage() {
             </tbody>
           </table>
         )}
+        <Pagination
+          page={list.page} pages={list.pages} total={list.total} limit={PAGE_SIZE}
+          onPage={list.setPage} noun="proforma invoices"
+        />
       </Card>
     </div>
   );

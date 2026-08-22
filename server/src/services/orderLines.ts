@@ -1,4 +1,5 @@
 import { db } from '../db/connection.js';
+import { countOf } from './pagination.js';
 import { round2 } from './totals.js';
 
 /**
@@ -126,7 +127,11 @@ function stateOf(ordered: number, made: number, sent: number, billed: number): L
   return 'not_started';
 }
 
-export function orderLines(f: Filters = {}): OrderLine[] {
+/**
+ * The filters as SQL, kept apart from the query so the paged list and its
+ * count are built from one description of "which lines".
+ */
+function lineWhere(f: Filters): { sql: string; params: unknown[] } {
   const where: string[] = [];
   const params: unknown[] = [];
   if (f.scopeSql) { where.push(`o.${f.scopeSql}`); params.push(...(f.scopeParams ?? [])); }
@@ -139,11 +144,25 @@ export function orderLines(f: Filters = {}): OrderLine[] {
     const like = `%${f.q.toLowerCase()}%`;
     params.push(like, like, like);
   }
+  // The base query already carries a WHERE (charge lines are excluded there).
+  return { sql: `${SQL}${where.length ? ` AND ${where.join(' AND ')}` : ''}`, params };
+}
 
+const LINE_ORDER = 'ORDER BY o.date DESC, o.id DESC, l.pos';
+
+/**
+ * Every order line matching the filters.
+ *
+ * `page` cuts it to one page and is what the HTTP list passes on; the
+ * per-product view deliberately does not, because folding lines up needs all
+ * of them — a page of a total is not a total.
+ */
+export function orderLines(f: Filters = {}, page?: { limit: number; offset: number }): OrderLine[] {
+  const { sql, params } = lineWhere(f);
+  const args = page ? [...params, page.limit, page.offset] : params;
   const rows = db.prepare(
-    `${SQL}${where.length ? ` AND ${where.join(' AND ')}` : ''}
-     ORDER BY o.date DESC, o.id DESC, l.pos`
-  ).all(...(params as never[])) as unknown as (OrderLine & { billing_qty: number | null })[];
+    `${sql} ${LINE_ORDER}${page ? ' LIMIT ? OFFSET ?' : ''}`
+  ).all(...(args as never[])) as unknown as (OrderLine & { billing_qty: number | null })[];
 
   return rows.map((r) => ({
     ...r,
@@ -153,6 +172,12 @@ export function orderLines(f: Filters = {}): OrderLine[] {
     billed: round2(r.billed),
     state: stateOf(r.ordered, r.made, Number(r.sent), Number(r.billed)),
   }));
+}
+
+/** How many lines match, for the pager. Counts the same query it pages. */
+export function countOrderLines(f: Filters = {}): number {
+  const { sql, params } = lineWhere(f);
+  return countOf(sql, params);
 }
 
 export interface ProductDemand {

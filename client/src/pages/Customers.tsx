@@ -3,9 +3,10 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Customer, User } from '../types';
 import { useIsManager } from '../App';
-import { Button, Input, Textarea, Select, Field, PageHeader, EmptyState, ErrorText, Modal, Card, ExportTabs } from '../components/ui';
+import { Button, Input, Textarea, Select, Field, PageHeader, EmptyState, ErrorText, Modal, Card, ExportTabs, Pagination } from '../components/ui';
 import CompanySelect, { useCompanies } from '../components/CompanySelect';
 import { useUrlFilter } from '../lib/useUrlFilter';
+import { usePagedList, PAGE_SIZE } from '../lib/usePagedList';
 
 const empty: Omit<Customer, 'id'> = {
   name: '', contact_person: '', email: '', phone: '', address: '', city: '', country: 'India',
@@ -21,10 +22,11 @@ export default function CustomersPage() {
   const [q, setQ] = useUrlFilter('q');
   const [exportFilter, setExportFilter] = useUrlFilter('export');
   const [editing, setEditing] = useState<Customer | Omit<Customer, 'id'> | null>(null);
-  const { data: customers = [] } = useQuery({
-    queryKey: ['customers', q, exportFilter],
-    queryFn: () => api.get<Customer[]>(`/api/customers?q=${encodeURIComponent(q)}${exportFilter ? `&export=${exportFilter}` : ''}`),
-  });
+  const list = usePagedList<Customer>(
+    ['customers', q, exportFilter],
+    `/api/customers?q=${encodeURIComponent(q)}${exportFilter ? `&export=${exportFilter}` : ''}`,
+  );
+  const customers = list.rows;
   const { data: users = [] } = useQuery({
     queryKey: ['users'],
     queryFn: () => api.get<User[]>('/api/users'),
@@ -51,7 +53,7 @@ export default function CustomersPage() {
     <div>
       <PageHeader
         title="Customers"
-        subtitle={`${customers.length} customer${customers.length === 1 ? '' : 's'}`}
+        subtitle={`${list.total} customer${list.total === 1 ? '' : 's'}`}
         actions={<Button onClick={() => { save.reset(); setEditing({ ...empty }); }}>+ New Customer</Button>}
       />
       <div className="mb-3 flex flex-wrap items-center gap-3">
@@ -99,6 +101,10 @@ export default function CustomersPage() {
             </tbody>
           </table>
         )}
+        <Pagination
+          page={list.page} pages={list.pages} total={list.total} limit={PAGE_SIZE}
+          onPage={list.setPage} noun="customers"
+        />
       </Card>
 
       {editing && (

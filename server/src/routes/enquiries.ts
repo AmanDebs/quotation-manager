@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { db } from '../db/connection.js';
 import type { AuthedRequest } from '../middleware/auth.js';
 import { scopeClause, canAccessCustomer } from '../middleware/scope.js';
+import { listBody } from '../services/pagination.js';
 
 /**
  * Enquiries — a customer asking before there is anything to quote.
@@ -36,9 +37,11 @@ enquiriesRouter.get('/', (req: AuthedRequest, res) => {
   const scope = scopeClause(req, 'e.customer_id');
   if (scope.sql) { where.push(scope.sql); params.push(...scope.params); }
   if (req.query.status) { where.push('e.status = ?'); params.push(String(req.query.status)); }
-  res.json(db.prepare(
-    `${withCustomer}${where.length ? ` WHERE ${where.join(' AND ')}` : ''} ORDER BY e.date DESC, e.id DESC`
-  ).all(...(params as never[])));
+  res.json(listBody(req.query, {
+    sql: `${withCustomer}${where.length ? ` WHERE ${where.join(' AND ')}` : ''}`,
+    order: 'ORDER BY e.date DESC, e.id DESC',
+    params,
+  }));
 });
 
 enquiriesRouter.get('/:id', (req: AuthedRequest, res) => {

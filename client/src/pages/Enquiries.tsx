@@ -4,10 +4,11 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Enquiry, EnquiryStatus, Customer } from '../types';
 import {
-  PageHeader, Card, Select, Input, Textarea, Field, Button, EmptyState, ErrorText, Modal, StatusBadge,
+  PageHeader, Card, Select, Input, Textarea, Field, Button, EmptyState, ErrorText, Modal, StatusBadge, Pagination,
 } from '../components/ui';
 import { fmtDate, today } from '../lib/format';
 import { useUrlFilter } from '../lib/useUrlFilter';
+import { usePagedList, PAGE_SIZE } from '../lib/usePagedList';
 
 /**
  * The front of the funnel: somebody asked before there was anything to quote.
@@ -32,10 +33,11 @@ export default function EnquiriesPage() {
   const [statusFilter, setStatusFilter] = useUrlFilter('status');
   const [editing, setEditing] = useState<Draft | null>(null);
 
-  const { data: enquiries = [] } = useQuery({
-    queryKey: ['enquiries', statusFilter],
-    queryFn: () => api.get<Enquiry[]>(`/api/enquiries${statusFilter ? `?status=${statusFilter}` : ''}`),
-  });
+  const list = usePagedList<Enquiry>(
+    ['enquiries', statusFilter],
+    `/api/enquiries${statusFilter ? `?status=${statusFilter}` : ''}`,
+  );
+  const enquiries = list.rows;
   const { data: customers = [] } = useQuery({
     queryKey: ['customers', ''],
     queryFn: () => api.get<Customer[]>('/api/customers'),
@@ -61,7 +63,8 @@ export default function EnquiriesPage() {
     setEditing({ customer_id: customers[0]?.id, date: today(), notes: '', status: 'open' });
   };
 
-  const openCount = enquiries.filter((e) => e.status === 'open').length;
+  // Over the whole list, not the page: the server's total for ?status=open.
+  const openTotal = usePagedList<Enquiry>(['enquiries', 'open-count'], '/api/enquiries?status=open', { limit: 1 }).total;
 
   return (
     <div>
@@ -84,9 +87,9 @@ export default function EnquiriesPage() {
             {STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
           </Select>
         </div>
-        {openCount > 0 && !statusFilter && (
+        {openTotal > 0 && !statusFilter && (
           <span className="text-sm text-slate-500">
-            {openCount} still open
+            {openTotal} still open
           </span>
         )}
       </div>
@@ -142,6 +145,10 @@ export default function EnquiriesPage() {
             </tbody>
           </table>
         )}
+        <Pagination
+          page={list.page} pages={list.pages} total={list.total} limit={PAGE_SIZE}
+          onPage={list.setPage} noun="enquiries"
+        />
         <ErrorText error={remove.error} />
         <p className="mt-2 text-xs text-slate-400">
           An enquiry moves to <b>quoted</b> on its own when a quotation is raised against it. Marking one

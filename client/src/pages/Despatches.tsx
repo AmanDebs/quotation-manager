@@ -3,8 +3,9 @@ import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Despatch, Location } from '../types';
-import { PageHeader, Card, Select, Input, EmptyState } from '../components/ui';
+import { PageHeader, Card, Select, Input, EmptyState , Pagination} from '../components/ui';
 import { fmtQty, fmtDate } from '../lib/format';
+import { usePagedList, PAGE_SIZE } from '../lib/usePagedList';
 
 /**
  * The despatch register — the order desk's own sheet, roughly 465 lines a
@@ -23,20 +24,13 @@ export default function DespatchesPage() {
   if (to) query.set('to', to);
   if (uninvoiced) query.set('uninvoiced', '1');
 
-  const { data: trips = [] } = useQuery({
-    queryKey: ['despatches', 'all', query.toString()],
-    queryFn: () => api.get<Despatch[]>(`/api/despatches?${query.toString()}`),
-  });
+  const list = usePagedList<Despatch, { trips: number; pieces: number; boxes: number; unbilled: number }>(['despatches', 'all', query.toString()], `/api/despatches?${query.toString()}`);
+  const trips = list.rows;
   const { data: locations = [] } = useQuery({ queryKey: ['master', 'locations', false], queryFn: () => api.get<Location[]>('/api/locations') });
 
-  const totals = trips.reduce(
-    (acc, d) => {
-      for (const it of d.items ?? []) { acc.pieces += it.qty ?? 0; acc.boxes += it.packs ?? 0; }
-      if (!d.invoice_id) acc.unbilled += 1;
-      return acc;
-    },
-    { pieces: 0, boxes: 0, unbilled: 0 }
-  );
+  // Over every matching despatch, not the page on screen — see `summary` in
+  // routes/despatches.ts.
+  const totals = list.summary ?? { trips: trips.length, pieces: 0, boxes: 0, unbilled: 0 };
 
   return (
     <div>
@@ -55,7 +49,7 @@ export default function DespatchesPage() {
           Not billed yet
         </label>
         <span className="ml-auto text-sm text-slate-500">
-          {trips.length} despatch{trips.length === 1 ? '' : 'es'} · {fmtQty(totals.pieces)} pcs · {fmtQty(totals.boxes)} boxes
+          {totals.trips} despatch{totals.trips === 1 ? '' : 'es'} · {fmtQty(totals.pieces)} pcs · {fmtQty(totals.boxes)} boxes
           {totals.unbilled > 0 && <span className="ml-2 text-amber-700">{totals.unbilled} unbilled</span>}
         </span>
       </div>
@@ -109,6 +103,10 @@ export default function DespatchesPage() {
             </tbody>
           </table>
         )}
+        <Pagination
+          page={list.page} pages={list.pages} total={list.total} limit={PAGE_SIZE}
+          onPage={list.setPage} noun="despatches"
+        />
       </Card>
     </div>
   );

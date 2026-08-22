@@ -4,6 +4,7 @@ import { round2 } from '../services/totals.js';
 import type { AuthedRequest } from '../middleware/auth.js';
 import { scopeClause, canAccessCustomer } from '../middleware/scope.js';
 import { syncOrderStatus } from '../services/orderStatus.js';
+import { listBody } from '../services/pagination.js';
 
 export const despatchesRouter = Router();
 
@@ -93,6 +94,23 @@ export function despatchedByOrder(orderId: number): Map<number, { qty: number; p
   }]));
 }
 
+/**
+ * Pieces, boxes and unbilled trips over every despatch matching the filters —
+ * not just the page on screen. Built from the list's own query so the two can
+ * never disagree about which despatches they are describing.
+ */
+function despatchSummary(sql: string, params: unknown[]) {
+  return db.prepare(
+    `WITH f AS (${sql})
+     SELECT (SELECT COUNT(*) FROM f) AS trips,
+            (SELECT COUNT(*) FROM f WHERE invoice_id IS NULL) AS unbilled,
+            COALESCE((SELECT SUM(di.qty) FROM despatch_items di
+                       WHERE di.despatch_id IN (SELECT id FROM f)), 0) AS pieces,
+            COALESCE((SELECT SUM(di.packs) FROM despatch_items di
+                       WHERE di.despatch_id IN (SELECT id FROM f)), 0) AS boxes`
+  ).get(...(params as never[])) as { trips: number; unbilled: number; pieces: number; boxes: number };
+}
+
 despatchesRouter.get('/', (req: AuthedRequest, res) => {
   const scope = scopeClause(req, 'o.customer_id');
   const where: string[] = [];
@@ -105,11 +123,17 @@ despatchesRouter.get('/', (req: AuthedRequest, res) => {
   // Gone but not billed — the reason these rows exist at all.
   if (req.query.uninvoiced === '1') where.push('d.invoice_id IS NULL');
 
-  const rows = db.prepare(
-    `${listSql} ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
-     ORDER BY d.date DESC, d.id DESC LIMIT ?`
-  ).all(...(params as never[]), Math.min(Number(req.query.limit) || 300, 1000)) as Record<string, unknown>[];
-  res.json(rows.map(withItems));
+  // This list has always been capped — at 300 rows, silently, with no way to
+  // reach the 301st. Paging replaces the cap outright: `?limit=` now means a
+  // page size rather than a ceiling, and the rows beyond it are reachable.
+  const sql = `${listSql} ${where.length ? `WHERE ${where.join(' AND ')}` : ''}`;
+  const body = listBody<Record<string, unknown>>(req.query, {
+    sql, order: 'ORDER BY d.date DESC, d.id DESC', params,
+  }, (rows) => rows.map(withItems));
+  // The strip above the table adds up pieces, boxes and what is still
+  // unbilled. Adding up one page of rows would answer a different question in
+  // the same words, so the figures come from the whole filtered set.
+  res.json(Array.isArray(body) ? body : { ...body, summary: despatchSummary(sql, params) });
 });
 
 despatchesRouter.get('/:id', (req: AuthedRequest, res) => {

@@ -16,6 +16,12 @@ import { useSearchParams } from 'react-router-dom';
  *
  * Blank deletes the key, so an unfiltered list has a clean URL and `?status=`
  * never appears empty.
+ *
+ * **Changing a filter drops the page number.** Narrowing a list to four rows
+ * while sitting on page seven shows an empty table, which reads as a fault
+ * rather than as a filter. Handling it here means no list page has to remember
+ * to — the page number is itself stored through this hook, and skips the reset
+ * so that turning to page 3 does not immediately undo itself.
  */
 export function useUrlFilter(key: string, fallback = ''): [string, (value: string) => void] {
   const [search, setSearch] = useSearchParams();
@@ -23,6 +29,7 @@ export function useUrlFilter(key: string, fallback = ''): [string, (value: strin
   const set = (next: string) => {
     const params = new URLSearchParams(search);
     if (next) params.set(key, next); else params.delete(key);
+    if (key !== 'page') params.delete('page');
     setSearch(params, { replace: true });
   };
   return [value, set];
