@@ -612,7 +612,16 @@ export interface Invoice {
   subtotal: number; tax_total: number; grand_total: number;
   customer_name?: string; pi_number?: string; company_name?: string;
   items?: LineItem[];
-  variance?: { description: string; pi_qty: number; invoice_qty: number; variance_pct: number }[];
+  /**
+   * Quantity variance against the source proforma, matched **by line position**
+   * like everything else in the chain. `pi_description` is the proforma's
+   * wording at that same position — when it differs from `description`, the
+   * two lines may not be the same thing and the pairing is worth a look.
+   */
+  variance?: {
+    description: string; pi_description?: string;
+    pi_qty: number; invoice_qty: number; variance_pct: number;
+  }[];
   payments?: Payment[];
   amount_received?: number;
   balance_due?: number;

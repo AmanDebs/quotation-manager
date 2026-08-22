@@ -68,18 +68,48 @@ function getFull(id: number) {
   if (!inv) return undefined;
   inv.items = db.prepare('SELECT * FROM invoice_items WHERE invoice_id = ? ORDER BY sort_order, id').all(id);
   inv.column_config = JSON.parse(String(inv.column_config || '{}'));
-  // Qty variance vs source PI (10% clause) computed for the client to display.
+  /**
+   * Quantity variance against the source proforma — the 10% clause — computed
+   * here for the client to show.
+   *
+   * **Matched by position**, the index-matching rule the whole chain uses:
+   * `syncPackingList()` rewrites packing rows by index, `dispatchProgress()`
+   * sums invoice lines by index, and `orderLines.ts` reproduces the same rule
+   * in SQL. This used to match on `description` instead, which meant editing
+   * the wording on an invoice line silently emptied its variance row — the
+   * report came back clean because nothing matched, which is the worst way for
+   * a check to fail.
+   *
+   * Positions are **not** compacted before matching. A charge line keeps its
+   * slot so the goods after it still line up, exactly as the packing list
+   * keeps a charge row it never prints; charges are skipped when reporting
+   * instead, since a percentage variance on freight means nothing.
+   *
+   * `pi_description` rides along so the screen can say when the two lines at
+   * one position are not describing the same thing — index matching is an
+   * assumption, and this is where it would show.
+   */
   if (inv.pi_id) {
-    const piItems = db.prepare('SELECT description, qty FROM pi_items WHERE pi_id = ? ORDER BY sort_order, id').all(Number(inv.pi_id)) as {
-      description: string; qty: number | null;
-    }[];
-    const piQty = new Map(piItems.map((p) => [p.description, p.qty]));
-    inv.variance = (inv.items as { description: string; qty: number | null }[])
-      .filter((it) => it.qty != null && piQty.get(it.description) != null && piQty.get(it.description) !== 0)
-      .map((it) => {
-        const original = piQty.get(it.description)!;
-        const pct = ((it.qty! - original) / original) * 100;
-        return { description: it.description, pi_qty: original, invoice_qty: it.qty, variance_pct: Math.round(pct * 100) / 100 };
+    const piItems = db.prepare(
+      'SELECT description, qty, is_charge FROM pi_items WHERE pi_id = ? ORDER BY sort_order, id'
+    ).all(Number(inv.pi_id)) as { description: string; qty: number | null; is_charge: number }[];
+
+    inv.variance = (inv.items as { description: string; qty: number | null; is_charge: number }[])
+      .map((it, i) => ({ it, pi: piItems[i] }))
+      .filter(({ it, pi }) =>
+        // An invoice line past the end of the proforma has nothing to compare
+        // against; so does one where either side is a charge.
+        !!pi && !it.is_charge && !pi.is_charge
+        && it.qty != null && pi.qty != null && pi.qty !== 0)
+      .map(({ it, pi }) => {
+        const pct = ((it.qty! - pi.qty!) / pi.qty!) * 100;
+        return {
+          description: it.description,
+          pi_description: pi.description,
+          pi_qty: pi.qty,
+          invoice_qty: it.qty,
+          variance_pct: Math.round(pct * 100) / 100,
+        };
       })
       .filter((v) => v.variance_pct !== 0);
   }

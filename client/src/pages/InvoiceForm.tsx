@@ -219,6 +219,11 @@ export default function InvoiceFormPage() {
   const totalNet = draft.packing.items.reduce((s, it) => s + (it.net_weight || 0), 0);
   const totalGross = draft.packing.items.reduce((s, it) => s + (it.gross_weight || 0), 0);
   const highVariance = existing?.variance?.filter((v) => Math.abs(v.variance_pct) > 10) ?? [];
+  // Paired by position, so a differing description is the signal that the
+  // pairing itself might be wrong.
+  const renamed = existing?.variance?.filter(
+    (v) => v.pi_description && v.pi_description !== v.description
+  ) ?? [];
 
   return (
     <div className="mx-auto max-w-7xl">
@@ -277,6 +282,17 @@ export default function InvoiceFormPage() {
           <span className="font-medium">Quantity variance vs {existing.pi_number}:</span>{' '}
           {existing.variance.map((v) => `${v.description}: ${v.pi_qty} → ${v.invoice_qty} (${v.variance_pct > 0 ? '+' : ''}${v.variance_pct}%)`).join(' · ')}
           {highVariance.length > 0 && <div className="mt-1 font-medium">⚠ Exceeds the usual 10% variance clause — please review.</div>}
+          {/* Lines are paired by position, not by wording. Where the two
+              descriptions at one position disagree, say so rather than
+              reporting a variance between things that may not correspond. */}
+          {renamed.length > 0 && (
+            <div className="mt-1">
+              Compared by line position, and {renamed.length === 1 ? 'one line reads' : `${renamed.length} lines read`}{' '}
+              differently on the proforma —{' '}
+              {renamed.map((v) => `"${v.pi_description}" → "${v.description}"`).join(' · ')}. Check they are the
+              same goods.
+            </div>
+          )}
         </div>
       )}
 
