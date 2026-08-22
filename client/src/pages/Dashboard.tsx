@@ -6,7 +6,7 @@ import {
 } from 'recharts';
 import { api } from '../api/client';
 import type { Followup, DashboardLayout, WorkOrderStatus } from '../types';
-import { useIsManager, useUser } from '../App';
+import { useIsManager, useUser, usePatchUser } from '../App';
 import { Button, Card, Input, Select, PageHeader, Modal } from '../components/ui';
 import { useCompanies } from '../components/CompanySelect';
 import { ORDER_STATUSES, orderStatusLabel } from './Orders';
@@ -195,8 +195,16 @@ export default function DashboardPage() {
     () => user.dashboard_layout ?? { hidden: [], order: [] }
   );
   const [customising, setCustomising] = useState(false);
+  const patchUser = usePatchUser();
   const saveLayout = useMutation({
     mutationFn: (next: DashboardLayout) => api.put<DashboardLayout>('/api/auth/dashboard-layout', next),
+    // The signed-in user is read once on mount and held in state, so the
+    // change has to be written back into it as well. Without this the card
+    // came back the moment you left the dashboard and returned: this
+    // component's own state was right, and the state it re-initialises from
+    // was not. The server's reply is used rather than what was sent, since it
+    // normalises the ids before storing them.
+    onSuccess: (saved) => patchUser({ dashboard_layout: saved }),
   });
   const applyLayout = (next: DashboardLayout) => { setLayout(next); saveLayout.mutate(next); };
 

@@ -89,10 +89,16 @@ const FIELD_LABEL: Record<string, string> = {
 };
 
 export const fieldLabel = (field: string) =>
-  FIELD_LABEL[field] ?? field.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
+  FIELD_LABEL[field]
+  // "Supplier id" reads like a typo. A column ending in _id names the thing,
+  // not the number, and the number is shown as an id by `show` below.
+  ?? field.replace(/_id$/, '').replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
 
-const show = (v: unknown): string => {
+const show = (v: unknown, field = ''): string => {
   if (v === null || v === undefined || v === '') return 'blank';
+  // A foreign key is a reference, not a quantity. "Customer: 1" reads as one
+  // customer; "Customer #1" reads as which one.
+  if (/_id$/.test(field) && typeof v === 'number') return `#${v}`;
   if (typeof v === 'number') return new Intl.NumberFormat('en-IN', { maximumFractionDigits: 2 }).format(v);
   const s = String(v);
   return s.length > 60 ? `${s.slice(0, 60)}…` : s;
@@ -108,7 +114,22 @@ const show = (v: unknown): string => {
 export function describeChange(c: AuditChange): string {
   const name = fieldLabel(c.field);
   if (c.truncated) return `${name} changed`;
-  if (c.from === null || c.from === undefined) return `${name}: ${show(c.to)}`;
-  if (c.to === null || c.to === undefined) return `${name} was ${show(c.from)}`;
-  return `${name}: ${show(c.from)} → ${show(c.to)}`;
+  if (c.from === null || c.from === undefined) return `${name}: ${show(c.to, c.field)}`;
+  if (c.to === null || c.to === undefined) return `${name} was ${show(c.from, c.field)}`;
+  return `${name}: ${show(c.from, c.field)} → ${show(c.to, c.field)}`;
+}
+
+/**
+ * How many changes to print before folding the rest away.
+ *
+ * A create and a delete carry the whole row — twenty-odd fields on an invoice
+ * — and printing all of them buries the two that a reader came for. An edit
+ * is naturally short and is never folded.
+ */
+export const CHANGES_SHOWN = 6;
+
+export function splitChanges(changes: AuditChange[]): { shown: AuditChange[]; hidden: number } {
+  return changes.length > CHANGES_SHOWN + 1
+    ? { shown: changes.slice(0, CHANGES_SHOWN), hidden: changes.length - CHANGES_SHOWN }
+    : { shown: changes, hidden: 0 };
 }

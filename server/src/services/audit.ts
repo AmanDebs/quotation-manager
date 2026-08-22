@@ -73,10 +73,25 @@ const BULKY_FIELDS = new Set([
 /** Beyond this a value is noted as changed rather than quoted. */
 const MAX_VALUE_CHARS = 300;
 
+/**
+ * Two values that mean the same thing.
+ *
+ * **Empty counts as empty however it is spelled.** Most text columns here
+ * default to `''`, so a create compared against nothing recorded every one of
+ * them as `null → blank`: an invoice arrived in the log as thirty-seven
+ * changes, thirty of them saying a field was empty and still is. The event is
+ * that a document was created; "Consignee: blank" is not part of it. An edit
+ * that genuinely clears a field still reads as a change, because the value it
+ * had was not empty.
+ *
+ * SQLite also hands back a number where the caller wrote a numeric string, so
+ * those are compared as numbers.
+ */
+const blank = (v: unknown) => v === null || v === undefined || v === '';
+
 const same = (a: unknown, b: unknown) => {
   if (a === b) return true;
-  // SQLite hands back 0 where the row holds 0 and the caller wrote '0'.
-  if (a === null || a === undefined) return b === null || b === undefined;
+  if (blank(a) || blank(b)) return blank(a) && blank(b);
   if (typeof a === 'number' || typeof b === 'number') return Number(a) === Number(b);
   return String(a) === String(b);
 };

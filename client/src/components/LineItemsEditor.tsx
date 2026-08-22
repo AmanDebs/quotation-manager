@@ -512,9 +512,20 @@ export default function LineItemsEditor({
         >
           + Add Line
         </Button>
+        {/*
+          "Lines", not "Subtotal" and "Tax".
+
+          These two figures are this table's own arithmetic and cover nothing
+          else. Header freight and insurance are added on top and — since Aglo
+          charges GST on both — carry tax of their own, so a document with them
+          shows a Document Total that these two do not sum to. Called Subtotal
+          and Tax they invited exactly that subtraction and looked like a
+          rounding error; called Lines they describe what they are, and the
+          Document Total beside them stays the one authoritative figure.
+        */}
         <div className="text-sm text-slate-600">
-          Subtotal: <span className="font-semibold tabular-nums">{fmtMoney(subtotal, currency)}</span>
-          {taxVisible && <> · Tax: <span className="font-semibold tabular-nums">{fmtMoney(tax, currency)}</span></>}
+          Lines: <span className="font-semibold tabular-nums">{fmtMoney(subtotal, currency)}</span>
+          {taxVisible && <> · Tax on lines: <span className="font-semibold tabular-nums">{fmtMoney(tax, currency)}</span></>}
         </div>
       </div>
       <p className="mt-2 text-xs text-slate-400">

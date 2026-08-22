@@ -36,6 +36,19 @@ const UserContext = createContext<User | null>(null);
 export const useUser = () => useContext(UserContext)!;
 export const useIsManager = () => useContext(UserContext)?.role === 'manager';
 
+/**
+ * Update the signed-in user in place.
+ *
+ * The user is fetched once, on mount, and then held in state — so anything
+ * that changes a property of it has to say so here too, or the change is
+ * correct on the server and stale on the screen. The dashboard layout is the
+ * case that found this: hiding a card worked, and then the card came back the
+ * moment you left the page and returned, because remounting re-read the
+ * layout from a user object nobody had told.
+ */
+const PatchUserContext = createContext<(patch: Partial<User>) => void>(() => {});
+export const usePatchUser = () => useContext(PatchUserContext);
+
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
@@ -90,6 +103,7 @@ export default function App() {
 
   return (
     <UserContext.Provider value={user}>
+      <PatchUserContext.Provider value={(patch) => setUser((u) => (u ? { ...u, ...patch } : u))}>
       <Layout user={user} onLogout={() => setUser(null)}>
         <Routes>
           <Route path="/" element={<DashboardPage />} />
@@ -125,6 +139,7 @@ export default function App() {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Layout>
+      </PatchUserContext.Provider>
     </UserContext.Provider>
   );
 }

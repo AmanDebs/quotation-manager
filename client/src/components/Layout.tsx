@@ -185,7 +185,16 @@ export default function Layout({ user, onLogout, children }: { user: User; onLog
           <button onClick={logout} className="text-xs text-white/50 hover:text-white">Sign out</button>
         </div>
       </aside>
-      <main className="ml-56 flex-1 p-6">{children}</main>
+      {/*
+        `min-w-0` matters here. A flex item defaults to `min-width: auto`,
+        which means it will not shrink below its own content — so on any window
+        narrower than the widest table, main stayed wide, pushed the document
+        out past the viewport and gave the whole app a horizontal scrollbar.
+        Measured at 768px: the document was 815px wide with `auto` and exactly
+        753px with `0`. The tables still scroll inside their own cards, which
+        is where the scrolling belongs.
+      */}
+      <main className="ml-56 min-w-0 flex-1 p-6">{children}</main>
     </div>
   );
 }

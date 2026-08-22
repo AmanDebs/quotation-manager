@@ -343,9 +343,8 @@ function LinesTable({ lines, showCompany, pager }: {
             </tbody>
           </table>
           <p className="mt-2 text-xs text-slate-400">
-            {pager.total} line{pager.total === 1 ? '' : 's'}. Made, sent and state are worked out from the
-            work orders, despatches and invoices recorded against each line — there is nothing here to keep
-            up to date by hand.
+            Made, sent and state are worked out from the work orders, despatches and invoices
+            recorded against each line — there is nothing here to keep up to date by hand.
           </p>
           <Pagination
             page={pager.page} pages={pager.pages} total={pager.total} limit={PAGE_SIZE}

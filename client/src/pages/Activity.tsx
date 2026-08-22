@@ -5,7 +5,7 @@ import { PageHeader, Card, Select, Input, EmptyState, Pagination } from '../comp
 import { fmtDateTime } from '../lib/format';
 import { useUrlFilter } from '../lib/useUrlFilter';
 import { usePagedList, PAGE_SIZE } from '../lib/usePagedList';
-import { describeChange, ACTION_LABEL, type AuditEntry } from '../lib/audit';
+import { describeChange, splitChanges, ACTION_LABEL, type AuditEntry } from '../lib/audit';
 
 /**
  * The whole audit trail. Manager-only, by the route as well as by this page.
@@ -17,6 +17,17 @@ import { describeChange, ACTION_LABEL, type AuditEntry } from '../lib/audit';
  * from a hardcoded list, so an action added later appears without this file
  * being touched.
  */
+
+/** The slug is the API's word for a thing; this is a person's. */
+const ENTITY_LABEL: Record<string, string> = {
+  quotations: 'Quotation', proformas: 'Proforma', invoices: 'Invoice', orders: 'Order',
+  'packing-lists': 'Packing list', customers: 'Customer', products: 'Product',
+  enquiries: 'Enquiry', despatches: 'Despatch', 'work-orders': 'Work order',
+  'purchase-orders': 'Purchase order', followups: 'Follow-up', payments: 'Payment',
+  users: 'User', companies: 'Company', auth: 'Sign-in',
+  locations: 'Location', suppliers: 'Supplier', transporters: 'Transporter',
+  materials: 'Material', machines: 'Machine', moulds: 'Mould',
+};
 
 /** The entities with a page to link back to. The rest are records without one. */
 const LINK: Record<string, (id: number) => string> = {
@@ -85,7 +96,9 @@ export default function ActivityPage() {
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <Select className="w-44" value={entity} onChange={(e) => setEntity(e.target.value)}>
           <option value="">Everything</option>
-          {(facets?.entities ?? []).map((e) => <option key={e} value={e}>{e}</option>)}
+          {(facets?.entities ?? []).map((e) => (
+            <option key={e} value={e}>{ENTITY_LABEL[e] ?? e}</option>
+          ))}
         </Select>
         <Select className="w-56" value={action} onChange={(e) => setAction(e.target.value)}>
           <option value="">Any action</option>
@@ -125,6 +138,7 @@ export default function ActivityPage() {
             <tbody>
               {list.rows.map((e) => {
                 const href = e.entity_id ? LINK[e.entity]?.(e.entity_id) : undefined;
+                const { shown, hidden } = splitChanges(e.changes);
                 return (
                   <tr key={e.id} className="border-b border-slate-100 align-top last:border-0">
                     <td className="whitespace-nowrap py-2 pr-3 text-slate-500">{fmtDateTime(e.at)}</td>
@@ -137,7 +151,7 @@ export default function ActivityPage() {
                       {ACTION_LABEL[e.action] ?? e.action}
                     </td>
                     <td className="py-2 pr-3">
-                      <span className="text-xs uppercase text-slate-400">{e.entity}</span>{' '}
+                      <span className="text-xs text-slate-400">{ENTITY_LABEL[e.entity] ?? e.entity}</span>{' '}
                       {href
                         ? <Link className="text-brand-700 hover:underline" to={href}>{e.label || `#${e.entity_id}`}</Link>
                         : <span>{e.label || (e.entity_id ? `#${e.entity_id}` : '')}</span>}
@@ -148,7 +162,8 @@ export default function ActivityPage() {
                         ? <span className="text-slate-300">—</span>
                         : (
                           <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-slate-500">
-                            {e.changes.map((c, i) => <span key={i}>{describeChange(c)}</span>)}
+                            {shown.map((c, i) => <span key={i}>{describeChange(c)}</span>)}
+                            {hidden > 0 && <span className="text-slate-400">and {hidden} more</span>}
                           </div>
                         )}
                     </td>

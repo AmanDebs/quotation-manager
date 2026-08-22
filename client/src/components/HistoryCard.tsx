@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
 import { Card } from './ui';
 import { fmtDateTime } from '../lib/format';
-import { describeChange, ACTION_LABEL, type AuditEntry } from '../lib/audit';
+import { describeChange, splitChanges, ACTION_LABEL, type AuditEntry } from '../lib/audit';
 
 /**
  * What has happened to this record, on the record itself.
@@ -50,7 +50,9 @@ export default function HistoryCard({ entity, id }: { entity: string; id: number
             </p>
           )}
           <ol className="space-y-2.5">
-            {entries.map((e) => (
+            {entries.map((e) => {
+              const { shown, hidden } = splitChanges(e.changes);
+              return (
               <li key={e.id} className="border-l-2 border-slate-200 pl-3">
                 <div className="flex flex-wrap items-baseline gap-x-2 text-sm">
                   <span className="font-medium text-slate-700">{ACTION_LABEL[e.action] ?? e.action}</span>
@@ -59,12 +61,16 @@ export default function HistoryCard({ entity, id }: { entity: string; id: number
                 </div>
                 {e.note && <div className="text-xs text-amber-700">{e.note}</div>}
                 <ul className="mt-0.5 space-y-0.5">
-                  {e.changes.map((c, i) => (
+                  {shown.map((c, i) => (
                     <li key={i} className="text-xs text-slate-500">{describeChange(c)}</li>
                   ))}
+                  {hidden > 0 && (
+                    <li className="text-xs text-slate-400">and {hidden} more field{hidden === 1 ? '' : 's'}</li>
+                  )}
                 </ul>
               </li>
-            ))}
+              );
+            })}
           </ol>
         </div>
       )}
