@@ -241,7 +241,22 @@ export default function DashboardPage() {
     return [...set].sort();
   }, [data]);
 
-  const activeCurrency = currency || currencies[0] || 'INR';
+  /**
+   * INR unless the group does no rupee business at all.
+   *
+   * This used to be `currencies[0]`, and that list is sorted alphabetically —
+   * so the front page opened on EUR, ahead of INR, ahead of USD, whatever the
+   * relative size of the three. Every money tile then read in a currency
+   * picked by the alphabet rather than by the business, which for a Kolkata
+   * company with a handful of euro invoices is a headline figure about the
+   * smallest part of the trade.
+   *
+   * INR is the home currency: it is what the schema defaults to, what a new
+   * document starts in, and what the domestic book is kept in. Falling back to
+   * the first available keeps a purely-export group working, and an explicit
+   * choice from the selector always wins.
+   */
+  const activeCurrency = currency || (currencies.includes('INR') ? 'INR' : currencies[0]) || 'INR';
 
   const monthlyRows = useMemo(() => {
     if (!data) return [];
