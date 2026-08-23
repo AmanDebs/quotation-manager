@@ -184,6 +184,11 @@ CREATE TABLE IF NOT EXISTS quotations (
   prepared_by TEXT NOT NULL DEFAULT '',
   tax_type TEXT NOT NULL DEFAULT 'none' CHECK (tax_type IN ('none','cgst_sgst','igst')),
   status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','sent','negotiating','accepted','rejected','expired')),
+  -- Where to put a quotation back if its validity is extended. Filled only
+  -- when services/quotationExpiry.ts expires it, so one marked expired by hand
+  -- has nothing remembered and stays expired. Same mechanism, same reasoning,
+  -- as status_before_paid on an invoice and status_before_completed on an order.
+  status_before_expired TEXT NOT NULL DEFAULT '',
   is_export INTEGER NOT NULL DEFAULT 0,
   created_by INTEGER REFERENCES users(id),
   approval_status TEXT NOT NULL DEFAULT 'not_submitted' CHECK (approval_status IN ('not_submitted','pending','approved','rejected')),

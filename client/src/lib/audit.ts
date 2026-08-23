@@ -48,6 +48,16 @@ export const ACTION_LABEL: Record<string, string> = {
   'qc-params': 'Quality specification changed',
   sequence: 'Numbering counter moved',
   import: 'Catalogue imported',
+  'import/preview': 'Catalogue import previewed',
+  // The stock ledger. These were showing as "issue", "moves" and "moves
+  // delete" — the URL's words, not a person's — and only turned up because a
+  // regression run happened to have material movements in it. The list below
+  // is now the complete set of sub-paths the routers define, checked against
+  // them rather than added one at a time as somebody notices.
+  issue: 'Material issued to a job',
+  moves: 'Stock movement recorded',
+  'moves delete': 'Stock movement removed',
+  'internal-notes': 'Internal note changed',
   login: 'Signed in',
   login_failed: 'Sign-in refused — wrong password',
   login_refused: 'Sign-in refused — account deactivated',

@@ -24,7 +24,7 @@ const ENTITY_LABEL: Record<string, string> = {
   'packing-lists': 'Packing list', customers: 'Customer', products: 'Product',
   enquiries: 'Enquiry', despatches: 'Despatch', 'work-orders': 'Work order',
   'purchase-orders': 'Purchase order', followups: 'Follow-up', payments: 'Payment',
-  users: 'User', companies: 'Company', auth: 'Sign-in',
+  users: 'User', companies: 'Company', auth: 'Sign-in', stock: 'Stock',
   locations: 'Location', suppliers: 'Supplier', transporters: 'Transporter',
   materials: 'Material', machines: 'Machine', moulds: 'Mould',
 };

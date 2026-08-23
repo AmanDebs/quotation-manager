@@ -9,6 +9,7 @@ import { isDuplicateNumberError } from './db/connection.js';
 import { healthRouter } from './routes/health.js';
 import { backupRouter } from './routes/backup.js';
 import { startBackupSchedule } from './services/backup.js';
+import { startExpirySchedule } from './services/quotationExpiry.js';
 import { authRouter } from './routes/auth.js';
 import { usersRouter } from './routes/users.js';
 import { approvalsRouter } from './routes/approvals.js';
@@ -137,4 +138,8 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
 app.listen(PORT, () => {
   console.log(`Quotation server running on http://localhost:${PORT}${isProduction ? ' (production)' : ''}`);
   startBackupSchedule();
+  // A quotation's validity lapses on a date, and a date passes whether or not
+  // anybody is logged in — so this runs on boot as well as daily, since the
+  // app may have been down over the day that mattered.
+  startExpirySchedule();
 });

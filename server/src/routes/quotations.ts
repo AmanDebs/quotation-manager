@@ -7,6 +7,7 @@ import { scopeClause, canAccessCustomer, customerChangeError } from '../middlewa
 import { submit, decide, resetApprovalOnEdit, blockUnapprovedTransition } from '../services/approval.js';
 import { resolveCompanyId } from '../services/companies.js';
 import { enquiryLinkId, syncEnquiryStatus } from '../services/enquiries.js';
+import { syncQuotationExpiry } from '../services/quotationExpiry.js';
 import { listBody } from '../services/pagination.js';
 
 export const quotationsRouter = Router();
@@ -176,6 +177,11 @@ quotationsRouter.put('/:id', (req: AuthedRequest, res) => {
     );
     if (Array.isArray(body.items)) saveItems(id, body.items as LineItemInput[], taxType, freight, insurance, currency);
     resetApprovalOnEdit('quotations', id);
+    // The validity date may have moved in either direction. Inside the same
+    // transaction, and after resetApprovalOnEdit, so an extension that also
+    // reset the approval revives the quotation as a draft rather than putting
+    // it straight back to an outgoing status.
+    syncQuotationExpiry(id);
   });
   res.json(getFull(id));
 });
@@ -224,7 +230,13 @@ quotationsRouter.post('/:id/status', (req: AuthedRequest, res) => {
   if (!existing || !canAccessCustomer(req, existing.customer_id)) return res.status(404).json({ error: 'Quotation not found' });
   const blocked = blockUnapprovedTransition('quotations', id, String(status), req);
   if (blocked) return res.status(409).json({ error: blocked });
-  db.prepare('UPDATE quotations SET status = ? WHERE id = ?').run(String(status), id);
+  // Clearing the remembered status by hand: whatever somebody sets now is
+  // theirs, so a later extension does not resurrect a status they replaced.
+  db.prepare("UPDATE quotations SET status = ?, status_before_expired = '' WHERE id = ?").run(String(status), id);
+  // Sending a quotation whose validity has already passed lapses it straight
+  // away rather than waiting for tonight's sweep — better than a document that
+  // reads Sent this afternoon and Expired tomorrow with nobody having touched it.
+  if (status !== 'expired') syncQuotationExpiry(id);
   res.json(getFull(id));
 });
 

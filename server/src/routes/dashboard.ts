@@ -302,11 +302,21 @@ dashboardRouter.get('/', (req: AuthedRequest, res) => {
     overdueOrders,
     overdueInvoices,
     pendingApprovals: counts.pendingApprovals,
+    /**
+     * Quotations whose validity runs out **within the next week**, not ones
+     * that already have.
+     *
+     * It counted the lapsed ones until `services/quotationExpiry.ts` started
+     * setting the status itself — at which point a lapsed quotation is no
+     * longer `sent` or `negotiating`, so this would have counted zero for ever
+     * and quietly stopped being a warning. A week's notice is the actionable
+     * version: it is still possible to ring the customer or extend the date.
+     */
     expiringQuotations: one(
       `SELECT COUNT(*) AS c FROM quotations
        WHERE superseded_by IS NULL AND status IN ('sent','negotiating')
-         AND validity_date <> '' AND validity_date < ?${and}`,
-      today, ...p
+         AND validity_date <> '' AND validity_date >= ? AND validity_date <= date(?, '+7 days')${and}`,
+      today, today, ...p
     ),
     // Jobs past their planned finish with work still to do. Scoped through the
     // order like everything else on the floor; the company filter applies via

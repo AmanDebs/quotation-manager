@@ -60,6 +60,10 @@ addColumnIfMissing('commercial_invoices', 'status_before_paid', "TEXT NOT NULL D
 // so that re-opening one puts back what was there. Empty means a human closed
 // it, which is deliberately never undone.
 addColumnIfMissing('orders', 'status_before_completed', "TEXT NOT NULL DEFAULT ''");
+// Where to put a lapsed quotation back if its validity is extended (2026-08).
+// Only an automatic expiry is automatically undone, so an empty value means
+// "somebody set this by hand" and the row stays where they put it.
+addColumnIfMissing('quotations', 'status_before_expired', "TEXT NOT NULL DEFAULT ''");
 
 // Work orders (2026-08). Their own series per company, like every other
 // numbered document; `settings` gets it too so the old single-company row

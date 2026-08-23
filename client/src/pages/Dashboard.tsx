@@ -357,7 +357,7 @@ export default function DashboardPage() {
               <AttentionChip to={listUrl('/orders', { open: '1' })} count={a.overdueOrders} label="orders past promised date" tone="red" />
               <AttentionChip to={listUrl('/invoices')} count={a.overdueInvoices} label="invoices unpaid over 60 days" tone="red" />
               <AttentionChip to="/followups" count={a.followupsToday} label="follow-ups due today" tone="amber" />
-              <AttentionChip to={listUrl('/quotations', { status: 'sent' })} count={a.expiringQuotations} label="quotations past validity" tone="amber" />
+              <AttentionChip to={listUrl('/quotations', { status: 'sent' })} count={a.expiringQuotations} label="quotations expiring this week" tone="amber" />
               {isManager && <AttentionChip to="/approvals" count={a.pendingApprovals} label="awaiting your approval" tone="amber" />}
               {/* The floor. Short material is red because it stops production;
                   a reorder level is a warning, not a stoppage. */}
