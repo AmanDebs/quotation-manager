@@ -51,10 +51,29 @@ const currencyNames: Record<string, { major: string; minor: string; indian: bool
 
 export function amountInWords(amount: number, currency: string): string {
   const cfg = currencyNames[currency] ?? { major: currency, minor: 'Cents', indian: false };
-  const whole = Math.floor(amount);
-  const frac = Math.round((amount - whole) * 100);
   const toWords = cfg.indian ? indianWords : westernWords;
-  let out = `${cfg.major} ${toWords(whole)}`;
+
+  /**
+   * The sign is taken off before any of the arithmetic below.
+   *
+   * `Math.floor` rounds *down*, so on a negative amount it hands back -1 crore
+   * for -500, and the recursion in `indianWords` never reaches zero: any
+   * negative figure at all brought the whole PDF down with a stack overflow.
+   * The client's number inputs carry min={0}, but that is a hint to a browser
+   * and not a rule the API enforces, and a credit note is a real document
+   * somebody may one day want.
+   */
+  const negative = amount < 0;
+  const abs = Math.abs(amount);
+
+  let whole = Math.floor(abs);
+  let frac = Math.round((abs - whole) * 100);
+  // Rounding up from .995 lands on a hundred, and the lookup table stops at
+  // ninety-nine — which printed "and undefined Paise" on the document rather
+  // than failing. A hundred of the minor unit is one of the major one.
+  if (frac >= 100) { whole += Math.floor(frac / 100); frac %= 100; }
+
+  let out = `${negative ? 'Minus ' : ''}${cfg.major} ${toWords(whole)}`;
   if (frac > 0) out += ` and ${twoDigits(frac)} ${cfg.minor}`;
   return out + ' Only';
 }

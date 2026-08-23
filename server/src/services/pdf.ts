@@ -292,7 +292,22 @@ function taxRows(doc: Row, currency: string): [string, string][] {
 }
 
 /** Right-aligned totals band: light rows + theme-filled emphasis bars (Sanya style). */
-export interface MoneyRow { label: string; value: string; band?: boolean }
+export interface MoneyRow {
+  label: string;
+  value: string;
+  band?: boolean;
+  /**
+   * Carry the columns' totals on this row rather than on the last one.
+   *
+   * The additive columns have to be totalled somewhere, and the natural place
+   * is the row that closes the table. "Last row" was fine while the grand
+   * total *was* the last row, but an invoice adds Amount Received and Balance
+   * Due after it — and the boxes and pieces shipped have nothing to do with
+   * the balance outstanding. Saying which row owns the sums is one word here
+   * and removes the positional assumption.
+   */
+  sums?: boolean;
+}
 
 /**
  * The money lines that close a document: subtotal, freight and insurance, tax,
@@ -505,7 +520,10 @@ function itemsTable(s: Row, items: Row[], specs: ColumnSpec[], cfg: ColumnConfig
    */
   const firstSum = columns.findIndex((c) => c.sum);
   const canSum = firstSum > 0 && items.length > 0;
-  const closing = footer.length ? footer[footer.length - 1] : null;
+  const closingIndex = footer.length
+    ? (footer.findIndex((r) => r.sums) >= 0 ? footer.findIndex((r) => r.sums) : footer.length - 1)
+    : -1;
+  const closing = closingIndex >= 0 ? footer[closingIndex] : null;
 
   const summedClosing = (r: MoneyRow): Cell[] => {
     const style = {
@@ -524,8 +542,13 @@ function itemsTable(s: Row, items: Row[], specs: ColumnSpec[], cfg: ColumnConfig
 
   const closingRows: Cell[][] = canSum
     ? (closing
-      // Sums ride on the grand total; anything before it stays a plain span.
-      ? [...footer.slice(0, -1).map(money), summedClosing(closing)]
+      // Sums ride on the closing row; everything either side of it, including
+      // anything after the total, stays a plain span.
+      ? [
+        ...footer.slice(0, closingIndex).map(money),
+        summedClosing(closing),
+        ...footer.slice(closingIndex + 1).map(money),
+      ]
       // No money rows on this document, so the sums get a row of their own.
       : [summedClosing({ label: 'TOTAL', value: '' })])
     : footer.map(money);
@@ -1180,30 +1203,36 @@ export function buildInvoicePdf(id: number): TDocumentDefinitions {
     { key: 'amount', label: `Amount ${cur}${inv.inco_terms ? ` (${String(inv.inco_terms).split(' ')[0]})` : ''}`, width: 62, align: 'right', always: true, value: (it) => fmtMoney(it.amount, cur) },
   ];
 
-  // Payment status rows appended to the band via a second small table
-  const paymentBand: Content[] = received > 0
-    ? [{
-        columns: [
-          { text: '', width: '*' },
-          {
-            table: {
-              widths: ['*', 95],
-              body: [
-                [{ text: 'Amount Received', fontSize: 8, fillColor: '#f4f2f0' }, { text: fmtMoney(received, cur), fontSize: 8, alignment: 'right', fillColor: '#f4f2f0' }],
-                [{ text: 'Balance Due', fontSize: 8, bold: true, fillColor: '#f4f2f0' }, { text: fmtMoney(Math.max(0, round2(inv.grand_total - received)), cur), fontSize: 8, bold: true, alignment: 'right', fillColor: '#f4f2f0' }],
-              ],
-            },
-            layout: { hLineColor: '#ffffff', vLineColor: '#ffffff', hLineWidth: () => 1.5, vLineWidth: () => 0, paddingTop: () => 4, paddingBottom: () => 4, paddingLeft: () => 6, paddingRight: () => 6 },
-            width: 300,
-          },
-        ],
-        margin: [0, 2, 0, 0] as any,
-      }]
-    : [];
-
   const grandLabel = inv.inco_terms && inv.port_of_discharge
     ? `AMOUNT IN ${inv.inco_terms} ${inv.port_of_discharge.split(',')[0].toUpperCase()}`
     : 'GRAND TOTAL';
+
+  /**
+   * The money rides inside the items table, as it does on the proforma.
+   *
+   * It used to sit below as two floating right-hand blocks — the totals band,
+   * then a second one for the payment lines. Those bars are taller than a
+   * table row (four points of padding top and bottom, plus a rule between
+   * each) and the two blocks carried their own top margins, so five lines of
+   * figures cost about half an inch more than the same five rows in the table.
+   * On an invoice that already runs to two pages that is worth having.
+   *
+   * The subtotal is kept, unlike on the proforma, because a domestic invoice
+   * shows CGST and SGST beneath it and the taxable value they are charged on
+   * has to be legible. The sums stay on the grand total: what is still owed is
+   * not a property of the boxes that went out.
+   */
+  const money: MoneyRow[] = totalsRows(inv, cur, grandLabel).map((r) => (
+    r.label === grandLabel ? { ...r, sums: true } : r
+  ));
+  if (received > 0) {
+    money.push({ label: 'Amount Received', value: fmtMoney(received, cur) });
+    money.push({
+      label: 'Balance Due',
+      value: fmtMoney(Math.max(0, round2(inv.grand_total - received)), cur),
+      band: true,
+    });
+  }
 
   const certFooter: Content = {
     table: {
@@ -1239,9 +1268,7 @@ export function buildInvoicePdf(id: number): TDocumentDefinitions {
     ...companyHeader(s),
     docTitle(s, 'COMMERCIAL INVOICE'),
     grid,
-    itemsTable(s, items, specs, cfg),
-    totalsBand(s, inv, cur, grandLabel),
-    ...paymentBand,
+    itemsTable(s, items, specs, cfg, money),
     amountWords(inv, cur),
     // One block of prose, as on the proforma: the invoice's own remarks lead
     // the list and the company's default terms follow. The AP/EX-101 sample

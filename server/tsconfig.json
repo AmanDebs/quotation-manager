@@ -11,5 +11,6 @@
     "resolveJsonModule": true,
     "noEmit": true
   },
-  "include": ["src"]
+  // The tests too, or a type error in them passes tsc unnoticed.
+  "include": ["src", "test"]
 }
