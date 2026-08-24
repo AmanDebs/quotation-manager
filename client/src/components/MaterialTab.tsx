@@ -214,7 +214,7 @@ function IssueModal({ job, onClose, onSaved }: { job: WorkOrder; onClose: () => 
 
   return (
     <Modal title={`Issue to ${job.number}`} onClose={onClose}>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <Field label="Material *" className="col-span-2">
           <Select value={form.material_id} onChange={(e) => setForm({ ...form, material_id: e.target.value })}>
             <option value="">— choose —</option>

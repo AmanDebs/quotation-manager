@@ -299,7 +299,7 @@ export default function InvoiceFormPage() {
 
       <div className="space-y-4">
         <Card title="Details">
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             {!isNew && (
               <Field label="Invoice Number">
                 <DocNumber
@@ -366,7 +366,7 @@ export default function InvoiceFormPage() {
         </Card>
 
         <Card title="Consignee & Notify Parties">
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <Field label="Consignee">
               <Textarea rows={3} value={draft.consignee} onChange={(e) => set({ consignee: e.target.value })} />
             </Field>
@@ -392,7 +392,7 @@ export default function InvoiceFormPage() {
             This is an export shipment
           </label>
           {!!draft.is_export && (
-            <div className="grid grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
               <Field label="Country of Origin"><Input value={draft.country_of_origin} onChange={(e) => set({ country_of_origin: e.target.value })} /></Field>
               <Field label="Port of Loading"><Input value={draft.port_of_loading} onChange={(e) => set({ port_of_loading: e.target.value })} /></Field>
               <Field label="Port of Discharge"><Input value={draft.port_of_discharge} onChange={(e) => set({ port_of_discharge: e.target.value })} /></Field>
@@ -406,7 +406,7 @@ export default function InvoiceFormPage() {
           actions={<ColumnsControl config={draft.column_config} onChange={(c) => set({ column_config: c })} />}
         >
           <LineItemsEditor items={draft.items} onChange={(items) => set({ items })} currency={draft.currency} taxType={draft.tax_type} config={draft.column_config} />
-          <div className="mt-3 grid grid-cols-2 gap-3 border-t border-slate-100 pt-3 md:max-w-md">
+          <div className="mt-3 grid grid-cols-1 gap-3 border-t border-slate-100 pt-3 sm:grid-cols-2 md:max-w-md">
             <Field label={`Freight (${draft.currency})`}>
               <Input type="number" min={0} step="any" value={draft.freight || ''} onChange={(e) => set({ freight: Number(e.target.value) })} />
             </Field>
@@ -429,7 +429,7 @@ export default function InvoiceFormPage() {
           <p className="mb-3 text-sm text-slate-500">
             The packing list is created and kept in sync with this invoice — same items, same shipment. Fill in how the goods are packed.
           </p>
-          <div className="mb-3 grid grid-cols-3 gap-3">
+          <div className="mb-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
             {!isNew && (
               <Field label="Packing List Number">
                 <DocNumber

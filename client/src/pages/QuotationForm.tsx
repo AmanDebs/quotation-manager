@@ -271,7 +271,7 @@ export default function QuotationFormPage() {
             </div>
           }
         >
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             {!isNew && (
               <Field label="Quotation Number">
                 <DocNumber
@@ -340,7 +340,7 @@ export default function QuotationFormPage() {
           ) : (
             <>
               <LineItemsEditor items={draft.items} onChange={(items) => set({ items })} currency={draft.currency} taxType={draft.tax_type} config={draft.column_config} omit={quotationOmit(!!draft.is_export)} />
-              <div className="mt-3 grid grid-cols-2 gap-3 border-t border-slate-100 pt-3 md:max-w-md">
+              <div className="mt-3 grid grid-cols-1 gap-3 border-t border-slate-100 pt-3 sm:grid-cols-2 md:max-w-md">
                 <Field label={`Indicative Freight (${draft.currency})`}>
                   <Input type="number" min={0} step="any" value={draft.freight || ''} onChange={(e) => set({ freight: Number(e.target.value) })} />
                 </Field>

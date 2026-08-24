@@ -323,7 +323,7 @@ export default function SettingsPage() {
 
       <div className="space-y-4">
         <Card title="Company Details">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <Field label="Company Name" className="col-span-2">
               <Input value={form.company_name} onChange={(e) => set({ company_name: e.target.value })} />
             </Field>
@@ -340,7 +340,7 @@ export default function SettingsPage() {
           </div>
         </Card>
         <Card title="Tax & Trade Registration">
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <Field label="GSTIN"><Input value={form.gstin} onChange={(e) => set({ gstin: e.target.value })} /></Field>
             <Field label="PAN"><Input value={form.pan} onChange={(e) => set({ pan: e.target.value })} /></Field>
             <Field label="IEC (Import-Export Code)"><Input value={form.iec} onChange={(e) => set({ iec: e.target.value })} /></Field>
@@ -350,7 +350,7 @@ export default function SettingsPage() {
           </div>
         </Card>
         <Card title="Branding">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <ImageUpload label="Company Logo" value={form.logo} onChange={(v) => set({ logo: v })} />
             <ImageUpload label="Signature / Stamp" value={form.signature} onChange={(v) => set({ signature: v })} />
             <Field label="Document Theme Colour (headers & bands on PDFs)">
@@ -384,7 +384,7 @@ export default function SettingsPage() {
           </div>
         </Card>
         <Card title="Document Numbering Patterns">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <Field label="Quotation"><Input value={form.quote_pattern} onChange={(e) => set({ quote_pattern: e.target.value })} /></Field>
             <Field label="Packing List"><Input value={form.pl_pattern} onChange={(e) => set({ pl_pattern: e.target.value })} /></Field>
             <Field label="Order (domestic)"><Input value={form.order_pattern} onChange={(e) => set({ order_pattern: e.target.value })} /></Field>

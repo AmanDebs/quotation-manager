@@ -107,6 +107,17 @@ export default function Layout({ user, onLogout, children }: { user: User; onLog
     g.items.some((i) => pathname === i.to || pathname.startsWith(`${i.to}/`))
   )?.heading;
 
+  /**
+   * The sidebar is a drawer below `md` and a fixed column above it.
+   *
+   * One piece of state, not two layouts: the same markup slides in and out on
+   * a phone and sits still on a laptop. Closing on every navigation is the
+   * part that is easy to forget — tapping a link and being left staring at the
+   * menu you tapped it in is the classic version of this bug.
+   */
+  const [drawer, setDrawer] = useState(false);
+  useEffect(() => { setDrawer(false); }, [pathname]);
+
   const [open, setOpen] = useState<string[]>(() => readOpen() ?? [NAV[0].heading]);
   useEffect(() => {
     try { localStorage.setItem(OPEN_KEY, JSON.stringify(open)); } catch { /* not worth failing over */ }
@@ -147,7 +158,57 @@ export default function Layout({ user, onLogout, children }: { user: User; onLog
 
   return (
     <div className="flex min-h-screen">
-      <aside className="fixed inset-y-0 left-0 flex w-56 flex-col bg-brand-800 text-white">
+      {/*
+        The bar that only exists on a phone. It carries the menu button and the
+        app's name, and it is `sticky` rather than `fixed` so it scrolls out of
+        the way on a long list instead of eating 44px of a 660px screen for
+        ever.
+      */}
+      <header className="fixed inset-x-0 top-0 z-30 flex h-12 items-center gap-3 bg-brand-800 px-3 text-white md:hidden">
+        <button
+          type="button"
+          onClick={() => setDrawer(true)}
+          aria-label="Open the menu"
+          aria-expanded={drawer}
+          className="rounded p-1.5 text-xl leading-none hover:bg-white/10"
+        >
+          ☰
+        </button>
+        <span className="font-semibold">Quotation Manager</span>
+        {isManager && !!approvals?.pending && (
+          <span className="ml-auto rounded-full bg-amber-400 px-1.5 text-xs font-bold text-slate-900">
+            {approvals.pending}
+          </span>
+        )}
+      </header>
+
+      {/*
+        Tapping beside the drawer closes it. Only rendered while it is open, so
+        it cannot swallow a click on the page the rest of the time.
+      */}
+      {drawer && (
+        <div
+          className="fixed inset-0 z-30 bg-black/40 md:hidden"
+          onClick={() => setDrawer(false)}
+          aria-hidden="true"
+        />
+      )}
+
+      {/*
+        Shown or hidden, not slid.
+        `-translate-x-full` / `translate-x-0` was the first attempt and it did
+        not work: Tailwind v4 routes those through `--tw-translate-x` and the
+        `translate` property, and with a `md:` variant of the same utility on
+        the element the custom property resolved to `0px` while the computed
+        `translate` stayed `-100%`. The panel never moved. Toggling `flex`
+        against `hidden` has no such indirection — the cost is the slide
+        animation, which is not worth an hour of cascade archaeology.
+      */}
+      <aside
+        className={`fixed inset-y-0 left-0 z-40 w-56 flex-col bg-brand-800 text-white md:flex ${
+          drawer ? 'flex' : 'hidden'
+        }`}
+      >
         <div className="border-b border-white/10 px-4 py-4">
           <div className="text-lg font-bold">Quotation Manager</div>
           <div className="text-xs text-white/50">Order-to-Dispatch</div>
@@ -186,15 +247,17 @@ export default function Layout({ user, onLogout, children }: { user: User; onLog
         </div>
       </aside>
       {/*
-        `min-w-0` matters here. A flex item defaults to `min-width: auto`,
-        which means it will not shrink below its own content — so on any window
-        narrower than the widest table, main stayed wide, pushed the document
-        out past the viewport and gave the whole app a horizontal scrollbar.
-        Measured at 768px: the document was 815px wide with `auto` and exactly
-        753px with `0`. The tables still scroll inside their own cards, which
-        is where the scrolling belongs.
+        `min-w-0` matters on every width. A flex item defaults to
+        `min-width: auto`, so it will not shrink below its own content — main
+        stayed wider than the window and the whole app scrolled sideways.
+        Measured at 768px: 815px wide with `auto`, exactly 753 with `0`. Tables
+        still scroll inside their own cards, which is where it belongs.
+
+        The left margin is for the fixed sidebar and so only applies once the
+        sidebar is fixed; the top padding is for the phone header, which does
+        not exist above `md`.
       */}
-      <main className="ml-56 min-w-0 flex-1 p-6">{children}</main>
+      <main className="min-w-0 flex-1 p-4 pt-16 md:ml-56 md:p-6 md:pt-6">{children}</main>
     </div>
   );
 }

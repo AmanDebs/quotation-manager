@@ -123,7 +123,7 @@ export default function PaymentsCard({
 
       {adding && (
         <div className="mb-2 rounded-md border border-slate-200 bg-slate-50 p-3">
-          <div className="grid grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <Field label="Date"><Input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field>
             <Field label={`Amount (${currency})`}>
               <Input type="number" min={0} step="any" value={amount} onChange={(e) => setAmount(e.target.value)} autoFocus />

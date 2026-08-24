@@ -169,7 +169,7 @@ export default function ProductsPage() {
 
       {editing && (
         <Modal title={'id' in editing ? `Edit ${editing.name}` : 'New Product'} onClose={() => setEditing(null)}>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <Field label="Product Name *" className="col-span-2">
               <Input value={editing.name} onChange={(e) => set({ name: e.target.value })} />
             </Field>
@@ -193,7 +193,7 @@ export default function ProductsPage() {
               <div className="mb-2 text-xs font-medium text-slate-600">
                 Packing & loadability — used by the container planner
               </div>
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                 <Field label="Pcs / Box">
                   <Input type="number" min={0} step="any" value={editing.pcs_per_pack ?? ''} onChange={(e) => set({ pcs_per_pack: numOrNull(e.target.value) })} />
                 </Field>

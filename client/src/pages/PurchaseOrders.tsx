@@ -207,7 +207,7 @@ export default function PurchaseOrdersPage() {
 
       {editing && (
         <Modal title={editing.id ? `Edit ${editing.number}` : 'New purchase order'} onClose={() => setEditing(null)} wide>
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <Field label="Supplier *">
               <Select value={editing.supplier_id ?? ''} onChange={(e) => set({ supplier_id: Number(e.target.value) })}>
                 {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
@@ -330,7 +330,7 @@ function ReceiveModal({ po, onClose, onSaved }: { po: PurchaseOrder; onClose: ()
 
   return (
     <Modal title={`Receive against ${po.number}`} onClose={onClose} wide>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <Field label="Received on"><Input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field>
         <Field label="Into which plant *">
           <Select value={locationId} onChange={(e) => setLocationId(e.target.value)}>

@@ -122,7 +122,7 @@ export default function PackingListFormPage() {
 
       <div className="space-y-4">
         <Card title="Details">
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             {!isNew && (
               <Field label="Packing List Number (editable)">
                 <Input value={draft.number ?? ''} onChange={(e) => set({ number: e.target.value })} />

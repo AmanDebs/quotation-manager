@@ -109,7 +109,7 @@ export default function CustomersPage() {
 
       {editing && (
         <Modal title={'id' in editing ? `Edit ${editing.name}` : 'New Customer'} onClose={() => setEditing(null)} wide>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <Field label="Company / Customer Name *" className="col-span-2">
               <Input value={editing.name} onChange={(e) => set({ name: e.target.value })} />
             </Field>

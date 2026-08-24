@@ -143,7 +143,7 @@ export default function MasterList<T extends Row>({ spec, canEdit }: { spec: Mas
           title={editing.id ? `Edit ${editing.name}` : `New ${spec.singular}`}
           onClose={() => setEditing(null)}
         >
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             {spec.fields.map((f) => (
               <Field key={f.key} label={f.label} className={f.wide ? 'col-span-2' : ''}>
                 {f.type === 'textarea' ? (

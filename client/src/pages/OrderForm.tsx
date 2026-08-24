@@ -263,7 +263,7 @@ export default function OrderFormPage() {
             </Select>
           }
         >
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             {!isNew && (
               <Field label="Order Number">
                 <DocNumber
@@ -318,7 +318,7 @@ export default function OrderFormPage() {
 
           {/* The advance is part of the payment terms, not a subject of its own —
               three fields did not earn a card between the order and its dates. */}
-          <div className="mt-3 grid grid-cols-3 gap-3 border-t border-slate-100 pt-3">
+          <div className="mt-3 grid grid-cols-1 gap-3 border-t border-slate-100 pt-3 sm:grid-cols-3">
             <Field label={`Advance Due (${draft.currency})`}>
               <Input type="number" min={0} step="any" value={draft.advance_due || ''} onChange={(e) => set({ advance_due: Number(e.target.value) })} />
             </Field>
@@ -332,7 +332,7 @@ export default function OrderFormPage() {
         </Card>
 
         <Card title="Production Plan & Delivery">
-          <div className="grid grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <Field label="Promised Despatch"><Input type="date" value={draft.promised_date} onChange={(e) => set({ promised_date: e.target.value })} /></Field>
             <Field label="Originally Scheduled"><Input type="date" value={draft.scheduled_date} onChange={(e) => set({ scheduled_date: e.target.value })} /></Field>
             <Field label="Revised Date"><Input type="date" value={draft.revised_date} onChange={(e) => set({ revised_date: e.target.value })} /></Field>
@@ -356,7 +356,7 @@ export default function OrderFormPage() {
           actions={<ColumnsControl config={draft.column_config} onChange={(c) => set({ column_config: c })} />}
         >
           <LineItemsEditor items={draft.items} onChange={(items) => set({ items })} currency={draft.currency} taxType={draft.tax_type} config={draft.column_config} />
-          <div className="mt-3 grid grid-cols-2 gap-3 border-t border-slate-100 pt-3 md:max-w-md">
+          <div className="mt-3 grid grid-cols-1 gap-3 border-t border-slate-100 pt-3 sm:grid-cols-2 md:max-w-md">
             <Field label={`Freight (${draft.currency})`}>
               <Input type="number" min={0} step="any" value={draft.freight || ''} onChange={(e) => set({ freight: Number(e.target.value) })} />
             </Field>
@@ -371,7 +371,7 @@ export default function OrderFormPage() {
             billed — and keeping a second copy invited the two to disagree. */}
 
         <Card title="Remarks & Notes" actions={<NotePresetPicker value={draft.notes} onChange={(v) => set({ notes: v })} />}>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <Field label="Remarks (internal)">
               <Textarea rows={3} value={draft.remarks} onChange={(e) => set({ remarks: e.target.value })} />
             </Field>

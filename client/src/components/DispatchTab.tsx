@@ -250,7 +250,7 @@ function DespatchModal({
 
   return (
     <Modal title={draft.id ? 'Edit despatch' : 'Record a despatch'} onClose={onClose} wide>
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <Field label="Date *"><Input type="date" value={draft.date ?? ''} onChange={(e) => set({ date: e.target.value })} /></Field>
         <Field label="Out of which plant">
           <Select value={draft.location_id ?? ''} onChange={(e) => set({ location_id: e.target.value ? Number(e.target.value) : null })}>

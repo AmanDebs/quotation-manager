@@ -36,7 +36,7 @@ export default function NewDocumentDialog({
       {!type ? (
         <div className="space-y-3">
           <p className="text-sm text-slate-600">Is this an export order or a domestic (India) sale?</p>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <button
               onClick={() => setType('export')}
               className="rounded-lg border border-slate-300 p-4 text-left transition-colors hover:border-brand-600 hover:bg-brand-50"

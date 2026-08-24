@@ -232,7 +232,7 @@ export default function ProductionTab({ order }: { order: Order }) {
 
       {editing && (
         <Modal title={editing.id ? `Edit ${editing.number}` : 'New work order'} onClose={() => setEditing(null)} wide>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <Field label="Against line" className="col-span-2">
               <Select
                 value={editing.order_line ?? 0}
@@ -332,7 +332,7 @@ function LogOutput({ job, onClose, onSaved }: { job: WorkOrder; onClose: () => v
         {full?.progress?.reject_pct != null && <span className="text-amber-700">Rejects {full.progress.reject_pct}%</span>}
       </div>
 
-      <div className="grid grid-cols-6 gap-2 rounded-md border border-slate-200 bg-slate-50/70 p-3">
+      <div className="grid grid-cols-2 gap-2 rounded-md border border-slate-200 bg-slate-50/70 p-3 sm:grid-cols-3 lg:grid-cols-6">
         <Field label="Date"><Input type="date" value={entry.date} onChange={(e) => setEntry({ ...entry, date: e.target.value })} /></Field>
         <Field label="Shift"><Input value={entry.shift} onChange={(e) => setEntry({ ...entry, shift: e.target.value })} placeholder="A / B" /></Field>
         <Field label="Good pcs"><Input type="number" min={0} step="any" value={entry.qty_ok || ''} onChange={(e) => setEntry({ ...entry, qty_ok: Number(e.target.value) })} /></Field>

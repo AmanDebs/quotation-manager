@@ -268,7 +268,7 @@ function AdjustModal({ onClose }: { onClose: () => void }) {
 
   return (
     <Modal title="Record a movement" onClose={onClose}>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <Field label="What is this?" className="col-span-2">
           <Select value={form.source} onChange={(e) => setForm({ ...form, source: e.target.value })}>
             <option value="opening">Opening balance</option>
