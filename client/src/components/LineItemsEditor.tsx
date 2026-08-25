@@ -261,14 +261,21 @@ export default function LineItemsEditor({
   return (
     <div>
       <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+        {/* Twelve columns do not fit a narrow window. Without a floor the
+            table squeezed every column to make itself fit — Description worst,
+            since it is the only one with no width of its own — so below this
+            it scrolls in the wrapper instead, as the other tables do. */}
+        <table className="w-full min-w-[1100px] text-sm">
           <thead>
             <tr className="border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-500">
               <th className="w-8 pb-2 pr-2 font-medium">#</th>
               {/* w-52 fits ~75% of the catalogue's names; longer ones clip, but
                   the full name sits in Description and in the select's title. */}
               <th className="w-52 pb-2 pr-2 font-medium">Product</th>
-              <th className="pb-2 pr-2 font-medium">Description</th>
+              {/* The widest column on purpose: it is the line's own text and
+                  it is what prints. It needs a width of its own — with none it
+                  measured 85px, narrower than Tax %. */}
+              <th className="w-64 min-w-[13rem] pb-2 pr-2 font-medium">Description</th>
               {show('image') && <th className="w-14 pb-2 pr-2 font-medium">Photo</th>}
               {show('hsn') && <th className="w-28 pb-2 pr-2 font-medium">HSN</th>}
               {show('pcs_per_pack') && <th className="w-24 pb-2 pr-2 text-right font-medium">Pcs/Box</th>}
@@ -279,9 +286,9 @@ export default function LineItemsEditor({
               {show('qty') && <th className="w-24 pb-2 pr-2 text-right font-medium">Qty</th>}
               {show('color') && <th className="w-24 pb-2 pr-2 font-medium">Colour</th>}
               {show('unit_price') && <th className="w-28 pb-2 pr-2 text-right font-medium">Unit Price</th>}
-              <th className="w-32 pb-2 pr-2 font-medium">Unit</th>
-              {taxVisible && <th className="w-20 pb-2 pr-2 text-right font-medium">Tax %</th>}
-              <th className="w-36 pb-2 pr-2 text-right font-medium">Amount</th>
+              <th className="w-28 pb-2 pr-2 font-medium">Unit</th>
+              {taxVisible && <th className="w-16 pb-2 pr-2 text-right font-medium">Tax %</th>}
+              <th className="w-32 pb-2 pr-2 text-right font-medium">Amount</th>
               <th className="w-8 pb-2" />
             </tr>
           </thead>
