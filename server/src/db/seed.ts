@@ -248,7 +248,12 @@ insertEnquiry.run(customers.titan, daysFromNow(-12), 'Email asking whether we ca
 const quotedEnquiry = Number(insertEnquiry.run(
   customers.acme, daysFromNow(-92), 'Introduced by the Dubai agent; asked for forging pricing', 'quoted'
 ).lastInsertRowid);
-db.prepare('UPDATE quotations SET enquiry_id = ? WHERE id = ?').run(quotedEnquiry, qAcme.id);
+// Both the original and the revision that superseded it: `POST /:id/revise`
+// carries enquiry_id forward, and linking only the original left the enquiry
+// reading "quoted" with no quotation against it — quotation_count counts live
+// revisions only, and the live one is the revision.
+db.prepare('UPDATE quotations SET enquiry_id = ? WHERE id IN (?, ?)')
+  .run(quotedEnquiry, qAcme.id, qAcmeR1.id);
 insertEnquiry.run(customers.bharat, daysFromNow(-40), 'Wanted seal caps in a colour we do not run', 'lost');
 
 // Follow-ups: one overdue, one today, one upcoming

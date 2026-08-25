@@ -22,14 +22,28 @@ import { listBody } from '../services/pagination.js';
  * `quotation_count` is derived, never stored: how many live quotations answer
  * this enquiry is a question about the quotations, and superseded revisions are
  * excluded so a renegotiated quote does not read as two answers.
+ *
+ * The contact block the list shows — city, country, contact person, phone,
+ * email and the team member responsible — is **joined from the customer, not
+ * copied onto the enquiry**. Somebody chasing an open enquiry needs the number
+ * to ring without opening another page, but a phone number copied at the
+ * moment the enquiry was logged is a phone number that goes stale, and an
+ * enquiry is not the place a contact detail is corrected. The team member is
+ * `customers.owner_id`, which is already how the app models who is
+ * responsible for a customer, so the column agrees with what scoping enforces
+ * rather than being a second opinion about it.
  */
 export const enquiriesRouter = Router();
 
 const withCustomer = `
-  SELECT e.*, c.name AS customer_name, c.country AS customer_country,
+  SELECT e.*, c.name AS customer_name, c.city AS customer_city, c.country AS customer_country,
+         c.contact_person AS customer_contact, c.phone AS customer_phone,
+         c.email AS customer_email, u.name AS owner_name,
          (SELECT COUNT(*) FROM quotations q
            WHERE q.enquiry_id = e.id AND q.superseded_by IS NULL) AS quotation_count
-  FROM enquiries e JOIN customers c ON c.id = e.customer_id`;
+  FROM enquiries e
+  JOIN customers c ON c.id = e.customer_id
+  LEFT JOIN users u ON u.id = c.owner_id`;
 
 enquiriesRouter.get('/', (req: AuthedRequest, res) => {
   const where: string[] = [];

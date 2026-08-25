@@ -281,9 +281,18 @@ export interface Enquiry {
   notes: string;
   status: EnquiryStatus;
   created_at?: string;
-  customer_name?: string;
-  customer_country?: string;
   quotation_count?: number;
+  /** Joined from the customer, never stored on the enquiry — a contact detail
+   *  is corrected on the customer, and a copy taken when the enquiry was
+   *  logged would quietly go stale. `owner_name` is the team member the
+   *  customer is assigned to, the same field scoping already works from. */
+  customer_name?: string;
+  customer_city?: string;
+  customer_country?: string;
+  customer_contact?: string;
+  customer_phone?: string;
+  customer_email?: string;
+  owner_name?: string | null;
 }
 
 export type QcKind = 'numeric' | 'boolean';
@@ -478,12 +487,6 @@ export interface ImportPreview {
   mapping: Record<string, number>;
   rows: ImportPreviewRow[];
   summary: { create: number; update: number; skip: number; total: number };
-}
-
-export interface Enquiry {
-  id: number; customer_id: number; date: string; notes: string;
-  status: 'open' | 'quoted' | 'lost';
-  customer_name?: string; customer_country?: string;
 }
 
 export interface LineItem {

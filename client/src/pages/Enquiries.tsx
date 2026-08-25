@@ -25,6 +25,15 @@ import { usePagedList, PAGE_SIZE } from '../lib/usePagedList';
 
 const STATUSES: EnquiryStatus[] = ['open', 'quoted', 'lost'];
 
+const Dash = () => <span className="text-slate-300">—</span>;
+
+/** "Kolkata, India" — either half may be missing, and neither leaves a stray comma. */
+const place = (city?: string, country?: string) =>
+  [city, country].map((v) => (v ?? '').trim()).filter(Boolean).join(', ');
+
+/** A number is only dialable without its spaces; what is shown stays as typed. */
+const telHref = (phone: string) => `tel:${phone.replace(/[^\d+]/g, '')}`;
+
 type Draft = Partial<Enquiry>;
 
 export default function EnquiriesPage() {
@@ -63,6 +72,12 @@ export default function EnquiriesPage() {
     setEditing({ customer_id: customers[0]?.id, date: today(), notes: '', status: 'open' });
   };
 
+  // Shown under the customer picker while logging one, so a missing phone
+  // number is noticed at the moment somebody would want to ring it.
+  const editingCustomer = editing
+    ? customers.find((c) => c.id === editing.customer_id)
+    : undefined;
+
   // Over the whole list, not the page: the server's total for ?status=open.
   const openTotal = usePagedList<Enquiry>(['enquiries', 'open-count'], '/api/enquiries?status=open', { limit: 1 }).total;
 
@@ -94,7 +109,7 @@ export default function EnquiriesPage() {
         )}
       </div>
 
-      <Card>
+      <Card className="overflow-x-auto">
         {enquiries.length === 0 ? (
           <EmptyState message="No enquiries. Log one when a customer asks about something you have not quoted yet." />
         ) : (
@@ -103,7 +118,9 @@ export default function EnquiriesPage() {
               <tr className="border-b border-slate-200 text-left text-xs uppercase text-slate-500">
                 <th className="pb-2 pr-3">Date</th>
                 <th className="pb-2 pr-3">Customer</th>
+                <th className="pb-2 pr-3">Contact</th>
                 <th className="pb-2 pr-3">What they asked</th>
+                <th className="pb-2 pr-3">Team member</th>
                 <th className="pb-2 pr-3">Status</th>
                 <th className="pb-2 pr-3 text-right">Quotations</th>
                 <th className="pb-2 text-right">Actions</th>
@@ -113,14 +130,38 @@ export default function EnquiriesPage() {
               {enquiries.map((e) => (
                 <tr key={e.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50">
                   <td className="whitespace-nowrap py-2 pr-3">{fmtDate(e.date)}</td>
-                  <td className="py-2 pr-3 font-medium">{e.customer_name}</td>
-                  <td className="max-w-md py-2 pr-3 text-slate-600">{e.notes || <span className="text-slate-300">—</span>}</td>
+                  <td className="py-2 pr-3">
+                    <div className="font-medium">{e.customer_name}</div>
+                    {place(e.customer_city, e.customer_country) && (
+                      <div className="text-xs text-slate-500">{place(e.customer_city, e.customer_country)}</div>
+                    )}
+                  </td>
+                  {/* Everything here is the customer's, joined rather than
+                      copied — it is what somebody chasing the enquiry needs to
+                      hand, and it stays right when the customer is corrected. */}
+                  <td className="py-2 pr-3">
+                    {e.customer_contact || e.customer_phone || e.customer_email ? (
+                      <>
+                        {e.customer_contact && <div>{e.customer_contact}</div>}
+                        {e.customer_phone && (
+                          <a className="block whitespace-nowrap text-xs text-brand-700 hover:underline"
+                             href={telHref(e.customer_phone)}>{e.customer_phone}</a>
+                        )}
+                        {e.customer_email && (
+                          <a className="block text-xs text-brand-700 hover:underline"
+                             href={`mailto:${e.customer_email}`}>{e.customer_email}</a>
+                        )}
+                      </>
+                    ) : <Dash />}
+                  </td>
+                  <td className="max-w-md py-2 pr-3 text-slate-600">{e.notes || <Dash />}</td>
+                  <td className="whitespace-nowrap py-2 pr-3 text-slate-600">{e.owner_name || <Dash />}</td>
                   <td className="py-2 pr-3"><StatusBadge status={e.status} /></td>
                   {/* A count, not a link: the quotations list filters by status
                       and export, not by customer or enquiry, so anything here
                       would land on the unfiltered list and look broken. */}
                   <td className="py-2 pr-3 text-right tabular-nums">
-                    {e.quotation_count || <span className="text-slate-300">—</span>}
+                    {e.quotation_count || <Dash />}
                   </td>
                   <td className="whitespace-nowrap py-2 text-right">
                     {e.status !== 'lost' && (
@@ -170,6 +211,22 @@ export default function EnquiriesPage() {
                 {customers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
               </Select>
             </Field>
+            {editingCustomer && (
+              <div className="-mt-1 rounded-md bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                <div className="flex flex-wrap gap-x-4 gap-y-1">
+                  <span>{place(editingCustomer.city, editingCustomer.country) || <Dash />}</span>
+                  <span>{editingCustomer.contact_person || <Dash />}</span>
+                  <span>{editingCustomer.phone || <Dash />}</span>
+                  <span>{editingCustomer.email || <Dash />}</span>
+                </div>
+                <div className="mt-1 text-slate-400">
+                  {editingCustomer.owner_name
+                    ? `Assigned to ${editingCustomer.owner_name}`
+                    : 'Not assigned to anyone yet'}
+                  {' · '}edit these on the customer
+                </div>
+              </div>
+            )}
             <Field label="Date">
               <Input
                 type="date"
