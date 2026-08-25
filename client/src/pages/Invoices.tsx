@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Invoice } from '../types';
-import { Button, Select, PageHeader, EmptyState, Card, ExportTabs, ErrorText, Pagination } from '../components/ui';
+import { Button, Select, Input, PageHeader, EmptyState, Card, ExportTabs, ErrorText, Pagination } from '../components/ui';
 import { useCompanies } from '../components/CompanySelect';
 import NewDocumentDialog from '../components/NewDocumentDialog';
 import { fmtDate, fmtMoney } from '../lib/format';
@@ -34,13 +34,19 @@ export default function InvoicesPage() {
   // back button undoes a filter instead of leaving the page.
   const [statusFilter, setStatusFilter] = useUrlFilter('status');
   const [exportFilter, setExportFilter] = useUrlFilter('export');
+  // Server-side, not a filter over the rows on screen: the list is paged,
+  // so searching what has been fetched would only search the current page.
+  const [search, setSearch] = useUrlFilter('q');
   const [creating, setCreating] = useState(false);
   const params = new URLSearchParams();
   if (statusFilter) params.set('status', statusFilter);
   if (exportFilter) params.set('export', exportFilter);
   if (companyFilter) params.set('company', companyFilter);
+  if (search) params.set('q', search);
   const list = usePagedList<Invoice>(
-    ['invoices', statusFilter, exportFilter, companyFilter],
+    // search rides in the key, so typing returns to page 1 rather than
+    // leaving somebody on page 7 of a three-row result.
+    ['invoices', statusFilter, exportFilter, companyFilter, search],
     `/api/invoices${params.toString() ? `?${params}` : ''}`,
   );
   const invoices = list.rows;
@@ -81,11 +87,23 @@ export default function InvoicesPage() {
           <option value="">All statuses</option>
           {STATUSES.map((s) => <option key={s} value={s}>{label(s)}</option>)}
         </Select>
+        <Input
+          className="max-w-64"
+          placeholder="Search number or customer…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
       </div>
       <ErrorText error={setStatus.error} />
       <Card className="overflow-x-auto">
         {invoices.length === 0 ? (
-          <EmptyState message="No commercial invoices yet. Create one from a confirmed proforma invoice at dispatch time." />
+          <EmptyState
+            message={
+              search || statusFilter || exportFilter || companyFilter
+                ? 'Nothing matches those filters.'
+                : 'No commercial invoices yet. Create one from a confirmed proforma invoice at dispatch time.'
+            }
+          />
         ) : (
           <table className="w-full text-sm">
             <thead>

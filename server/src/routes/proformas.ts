@@ -7,6 +7,7 @@ import { scopeClause, canAccessCustomer, linkError, customerChangeError } from '
 import { resolveCompanyId } from '../services/companies.js';
 import { submit, decide, resetApprovalOnEdit, blockUnapprovedTransition } from '../services/approval.js';
 import { listBody } from '../services/pagination.js';
+import { searchClause } from '../services/search.js';
 
 export const proformasRouter = Router();
 
@@ -99,10 +100,16 @@ function headerValues(body: Record<string, unknown>, existing?: Record<string, u
 }
 
 proformasRouter.get('/', (req: AuthedRequest, res) => {
+  // Not named `q`: the alias below is a table, and on invoices `i` is too.
+  const search = String(req.query.q ?? '').trim();
   const where: string[] = [];
   const params: unknown[] = [];
   const scope = scopeClause(req, 'p.customer_id');
   if (scope.sql) { where.push(scope.sql); params.push(...scope.params); }
+  // Number or customer, as on the quotations list: the two things
+  // somebody has in hand when they come looking for a proforma.
+  const text = searchClause(['p.number', 'c.name'], search);
+  if (text.sql) { where.push(text.sql); params.push(...text.params); }
   if (req.query.status) { where.push('p.status = ?'); params.push(String(req.query.status)); }
   if (req.query.export === '1' || req.query.export === '0') { where.push('p.is_export = ?'); params.push(Number(req.query.export)); }
   // Narrow to one selling entity. Ignored when the group has just one.

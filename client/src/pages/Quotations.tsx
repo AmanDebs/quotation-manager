@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Quotation } from '../types';
-import { Button, Select, PageHeader, EmptyState, Card, ExportTabs, ErrorText, Pagination } from '../components/ui';
+import { Button, Select, Input, PageHeader, EmptyState, Card, ExportTabs, ErrorText, Pagination } from '../components/ui';
 import NewDocumentDialog from '../components/NewDocumentDialog';
 import InternalNotes from '../components/InternalNotes';
 import { useCompanies } from '../components/CompanySelect';
@@ -36,6 +36,9 @@ export default function QuotationsPage() {
   // back button undoes a filter instead of leaving the page.
   const [statusFilter, setStatusFilter] = useUrlFilter('status');
   const [exportFilter, setExportFilter] = useUrlFilter('export');
+  // Server-side, not a filter over the rows on screen: the list is paged, so
+  // searching what has been fetched would only ever search the current page.
+  const [search, setSearch] = useUrlFilter('q');
   const [creating, setCreating] = useState(false);
   // Only worth a column once the group actually has more than one entity.
   const companies = useCompanies();
@@ -55,8 +58,11 @@ export default function QuotationsPage() {
   if (statusFilter) params.set('status', statusFilter);
   if (exportFilter) params.set('export', exportFilter);
   if (companyFilter) params.set('company', companyFilter);
+  if (search) params.set('q', search);
   const list = usePagedList<Quotation>(
-    ['quotations', statusFilter, exportFilter, companyFilter],
+    // search rides in the key, so typing returns to page 1 rather than
+    // leaving somebody on page 7 of a four-row result.
+    ['quotations', statusFilter, exportFilter, companyFilter, search],
     `/api/quotations${params.toString() ? `?${params}` : ''}`,
   );
   const quotations = list.rows;
@@ -98,11 +104,23 @@ export default function QuotationsPage() {
             <option key={s} value={s}>{s[0].toUpperCase() + s.slice(1)}</option>
           ))}
         </Select>
+        <Input
+          className="max-w-64"
+          placeholder="Search number or customer…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
       </div>
       <ErrorText error={setStatus.error} />
       <Card className="overflow-x-auto">
         {quotations.length === 0 ? (
-          <EmptyState message="No quotations yet. Create one from an enquiry or directly." />
+          <EmptyState
+            message={
+              search || statusFilter || exportFilter || companyFilter
+                ? 'Nothing matches those filters.'
+                : 'No quotations yet. Create one from an enquiry or directly.'
+            }
+          />
         ) : (
           <table className="w-full text-sm">
             <thead>

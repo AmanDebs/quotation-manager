@@ -9,6 +9,7 @@ import { resolveCompanyId } from '../services/companies.js';
 import { enquiryLinkId, syncEnquiryStatus } from '../services/enquiries.js';
 import { syncQuotationExpiry } from '../services/quotationExpiry.js';
 import { listBody } from '../services/pagination.js';
+import { searchClause } from '../services/search.js';
 
 export const quotationsRouter = Router();
 
@@ -58,6 +59,8 @@ function saveItems(
 
 quotationsRouter.get('/', (req: AuthedRequest, res) => {
   const status = String(req.query.status ?? '');
+  // Not named `q`: that is the quotations alias in every clause below.
+  const search = String(req.query.q ?? '').trim();
   const includeSuperseded = req.query.all === '1';
   const where: string[] = [];
   const params: unknown[] = [];
@@ -65,6 +68,11 @@ quotationsRouter.get('/', (req: AuthedRequest, res) => {
   if (scope.sql) { where.push(scope.sql); params.push(...scope.params); }
   if (!includeSuperseded) where.push('q.superseded_by IS NULL');
   if (status) { where.push('q.status = ?'); params.push(status); }
+  // Number or customer — the two things somebody has in hand when they come
+  // looking for a quotation. Matched anywhere in the string, so "003" finds
+  // QT/26-27/003 without anybody typing the series out.
+  const text = searchClause(['q.number', 'c.name'], search);
+  if (text.sql) { where.push(text.sql); params.push(...text.params); }
   if (req.query.export === '1' || req.query.export === '0') {
     where.push('q.is_export = ?');
     params.push(Number(req.query.export));

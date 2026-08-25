@@ -10,6 +10,7 @@ import { submit, decide, resetApprovalOnEdit, blockUnapprovedTransition } from '
 import { invoiceReceivable } from '../services/receivables.js';
 import { syncInvoiceStatus, syncInvoicesForProforma } from '../services/invoiceStatus.js';
 import { listBody } from '../services/pagination.js';
+import { searchClause } from '../services/search.js';
 
 /**
  * Bring the paid/unpaid status back into line after anything that moves money.
@@ -278,10 +279,16 @@ function headerValues(body: Record<string, unknown>, existing?: Record<string, u
 }
 
 invoicesRouter.get('/', (req: AuthedRequest, res) => {
+  // Not named `q`: the alias below is a table, and on invoices `i` is too.
+  const search = String(req.query.q ?? '').trim();
   const where: string[] = [];
   const params: unknown[] = [];
   const scope = scopeClause(req, 'i.customer_id');
   if (scope.sql) { where.push(scope.sql); params.push(...scope.params); }
+  // Number or customer, as on the quotations list: the two things
+  // somebody has in hand when they come looking for a invoice.
+  const text = searchClause(['i.number', 'c.name'], search);
+  if (text.sql) { where.push(text.sql); params.push(...text.params); }
   if (req.query.status) { where.push('i.status = ?'); params.push(String(req.query.status)); }
   if (req.query.export === '1' || req.query.export === '0') { where.push('i.is_export = ?'); params.push(Number(req.query.export)); }
   // Narrow to one selling entity. Ignored when the group has just one.
