@@ -104,6 +104,33 @@ export function DownloadButton({ href, label = 'Download Excel', title }: { href
   );
 }
 
+/**
+ * Export or domestic on a document that already carries a number — shown, not
+ * editable.
+ *
+ * The number was drawn from one series or the other when the document was
+ * created and is never reissued, so changing the type afterwards could only
+ * ever leave the two disagreeing: a domestic proforma numbered AGLO/EX/…,
+ * charging GST. The server refuses it (`exportChangeError` in
+ * services/numbering.ts); this is the matching affordance, so the refusal is
+ * never a surprise. Quotations have one series either way and keep an
+ * editable control.
+ */
+export function SettledDocumentType({ isExport, number }: { isExport: boolean; number?: string }) {
+  const kind = isExport ? 'export' : 'domestic';
+  return (
+    <div className="flex flex-wrap items-center gap-2 text-sm">
+      <span className="rounded-md bg-slate-100 px-2 py-0.5 font-medium text-slate-700">
+        {isExport ? '🌍 Export' : '🇮🇳 Domestic'}
+      </span>
+      <span className="text-xs text-slate-500">
+        Set when this was created{number ? ` — ${number} came from the ${kind} numbering series` : ''}, so it cannot be
+        changed here. Raise a new document if the type is wrong.
+      </span>
+    </div>
+  );
+}
+
 export function Card({ title, children, actions, className = '' }: { title?: string; children: ReactNode; actions?: ReactNode; className?: string }) {
   return (
     <div className={`rounded-lg border border-slate-200 bg-white shadow-sm ${className}`}>

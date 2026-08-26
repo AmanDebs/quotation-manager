@@ -117,6 +117,37 @@ function applyPattern(pattern: string, seq: number, fyLabel = fiscalYear()): str
  * The series a document type counts on. Export documents count separately,
  * because a separate pattern with a shared counter would leave gaps in both.
  */
+/**
+ * Refuse a change to `is_export` on a document that already carries a number.
+ *
+ * The number is drawn at creation from the export or the domestic series and
+ * is never reissued — that is deliberate, since a number may already be on
+ * paper with a customer. So flipping the flag afterwards cannot move the
+ * number with it, and the document ends up a domestic proforma numbered
+ * `AGLO/EX/26-27/001`, charging GST, holding a number no export document will
+ * ever use. The form used to allow exactly that, silently.
+ *
+ * Only the doc types with a **separate export series** are guarded. A
+ * quotation has one series whatever it is, so its type stays editable — a
+ * guard there would take away something safe.
+ *
+ * Same shape as `customerChangeError` in middleware/scope.ts, and there for
+ * the same reason: the PUT routes wrote whatever the body carried.
+ */
+export function exportChangeError(
+  docType: DocType,
+  existing: { is_export?: unknown; number?: unknown },
+  bodyIsExport: unknown
+): string | null {
+  if (bodyIsExport === undefined || bodyIsExport === null) return null;
+  if (!patternColumn[docType].export) return null;
+  const before = Number(existing.is_export) ? 1 : 0;
+  const after = Number(bodyIsExport) ? 1 : 0;
+  if (before === after) return null;
+  const was = before ? 'export' : 'domestic';
+  return `This document was numbered ${String(existing.number ?? '')} from the ${was} series, so it cannot be switched to ${before ? 'domestic' : 'export'}. Raise a new document of the right type, or change the Number by hand if the series itself is wrong.`;
+}
+
 export const seriesKey = (docType: DocType, isExport: boolean): string =>
   isExport && patternColumn[docType].export ? `${docType}_export` : docType;
 

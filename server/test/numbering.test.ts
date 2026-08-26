@@ -1,7 +1,7 @@
 import './helpers/scratch.js';
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { fiscalYearOf, nextNumber, seriesKey, setNextNumber, listSeries } from '../src/services/numbering.js';
+import { fiscalYearOf, nextNumber, seriesKey, setNextNumber, listSeries, exportChangeError } from '../src/services/numbering.js';
 import { db } from '../src/db/connection.js';
 
 /**
@@ -109,5 +109,61 @@ describe('setting the counter by hand', () => {
   test('and allowed with it, because sometimes that is genuinely what you mean', () => {
     setNextNumber(1, 'packing_list', 100, { force: true });
     assert.equal(listSeries(1).find((s) => s.key === 'packing_list')?.next_number, 100);
+  });
+});
+
+/**
+ * A document's number is drawn from the export or the domestic series at
+ * creation and never reissued. So the flag that chose the series cannot move
+ * afterwards: the form used to allow it, leaving a domestic proforma numbered
+ * AGLO/EX/26-27/001 and charging GST.
+ */
+describe('switching a document between export and domestic', () => {
+  const exportDoc = { is_export: 1, number: 'AGLO/EX/26-27/001' };
+  const domesticDoc = { is_export: 0, number: 'AGLO/PI/26-27/007' };
+
+  test('is refused once the number came from a series', () => {
+    assert.ok(exportChangeError('proforma', exportDoc, 0));
+    assert.ok(exportChangeError('proforma', domesticDoc, 1));
+    assert.ok(exportChangeError('invoice', exportDoc, 0));
+    assert.ok(exportChangeError('order', exportDoc, 0));
+  });
+
+  test('and the message names the number, so it can be acted on', () => {
+    const msg = exportChangeError('proforma', exportDoc, 0) ?? '';
+    assert.match(msg, /AGLO\/EX\/26-27\/001/);
+    assert.match(msg, /domestic/);
+  });
+
+  test('a save that does not touch the flag passes straight through', () => {
+    assert.equal(exportChangeError('proforma', exportDoc, 1), null);
+    assert.equal(exportChangeError('proforma', domesticDoc, 0), null);
+  });
+
+  test('and so does a body that never mentions it', () => {
+    assert.equal(exportChangeError('proforma', exportDoc, undefined), null);
+    assert.equal(exportChangeError('proforma', exportDoc, null), null);
+  });
+
+  test('truthiness is read the way the column stores it', () => {
+    // The form sends 1/0, the body may carry true/false or "1".
+    assert.equal(exportChangeError('proforma', exportDoc, true), null);
+    assert.equal(exportChangeError('proforma', exportDoc, '1'), null);
+    assert.ok(exportChangeError('proforma', exportDoc, false));
+  });
+
+  /**
+   * The exception that keeps the guard honest: a quotation has one series
+   * whatever its type, so nothing can disagree and the type stays editable.
+   * Guarding it would remove something safe.
+   */
+  test('a quotation is never guarded, having only one series', () => {
+    assert.equal(exportChangeError('quotation', { is_export: 1, number: 'QT/26-27/008' }, 0), null);
+    assert.equal(exportChangeError('quotation', { is_export: 0, number: 'QT/26-27/008' }, 1), null);
+  });
+
+  test('nor is a packing list or a work order', () => {
+    assert.equal(exportChangeError('packing_list', exportDoc, 0), null);
+    assert.equal(exportChangeError('work_order', exportDoc, 0), null);
   });
 });

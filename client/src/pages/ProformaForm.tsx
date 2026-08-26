@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Proforma, Customer, LineItem, TaxType, Settings, ColumnConfig } from '../types';
-import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, StatusBadge } from '../components/ui';
+import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, StatusBadge, SettledDocumentType } from '../components/ui';
 import CompanySelect from '../components/CompanySelect';
 import { DocNumber, IncoTermsInput } from '../components/DocFields';
 import LineItemsEditor from '../components/LineItemsEditor';
@@ -360,17 +360,26 @@ export default function ProformaFormPage() {
         </Card>
 
         <Card title="Export Details">
-          <label className="mb-3 flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={!!draft.is_export}
-              onChange={(e) => {
-                const isExport = e.target.checked;
-                set({ is_export: isExport ? 1 : 0, tax_type: isExport ? 'none' : draft.tax_type === 'none' ? 'igst' : draft.tax_type });
-              }}
-            />
-            This is an export order
-          </label>
+          {/* Editable only before the first save. After that the number has
+              been issued from one series or the other and the flag can no
+              longer move to match it — the server refuses the change too. */}
+          <div className="mb-3">
+            {isNew ? (
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={!!draft.is_export}
+                  onChange={(e) => {
+                    const isExport = e.target.checked;
+                    set({ is_export: isExport ? 1 : 0, tax_type: isExport ? 'none' : draft.tax_type === 'none' ? 'igst' : draft.tax_type });
+                  }}
+                />
+                This is an export order
+              </label>
+            ) : (
+              <SettledDocumentType isExport={!!draft.is_export} number={draft.number} />
+            )}
+          </div>
           {!!draft.is_export && (
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
               <Field label="Country of Origin"><Input value={draft.country_of_origin} onChange={(e) => set({ country_of_origin: e.target.value })} /></Field>

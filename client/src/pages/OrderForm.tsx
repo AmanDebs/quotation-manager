@@ -3,7 +3,7 @@ import { useNavigate, useParams, useSearchParams, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Order, OrderItem, Customer, TaxType, ColumnConfig, WorkOrder } from '../types';
-import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, Tabs } from '../components/ui';
+import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, Tabs, SettledDocumentType } from '../components/ui';
 import CompanySelect from '../components/CompanySelect';
 import { DocNumber, IncoTermsInput } from '../components/DocFields';
 import ProductionTab from '../components/ProductionTab';
@@ -250,17 +250,21 @@ export default function OrderFormPage() {
         <Card
           title="Order Details"
           actions={
-            <Select
-              value={draft.is_export ? 'export' : 'domestic'}
-              onChange={(e) => {
-                const isExport = e.target.value === 'export';
-                set({ is_export: isExport ? 1 : 0, tax_type: isExport ? 'none' : draft.tax_type === 'none' ? 'igst' : draft.tax_type });
-              }}
-              className="w-32"
-            >
-              <option value="export">🌍 Export</option>
-              <option value="domestic">🇮🇳 Domestic</option>
-            </Select>
+            isNew ? (
+              <Select
+                value={draft.is_export ? 'export' : 'domestic'}
+                onChange={(e) => {
+                  const isExport = e.target.value === 'export';
+                  set({ is_export: isExport ? 1 : 0, tax_type: isExport ? 'none' : draft.tax_type === 'none' ? 'igst' : draft.tax_type });
+                }}
+                className="w-32"
+              >
+                <option value="export">🌍 Export</option>
+                <option value="domestic">🇮🇳 Domestic</option>
+              </Select>
+            ) : (
+              <SettledDocumentType isExport={!!draft.is_export} number={draft.number} />
+            )
           }
         >
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">

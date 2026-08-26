@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { db, transaction } from '../db/connection.js';
-import { nextNumber } from '../services/numbering.js';
+import { nextNumber, exportChangeError } from '../services/numbering.js';
 import { computeTotals, round2, type LineItemInput } from '../services/totals.js';
 import { productionByOrder } from '../services/production.js';
 import { despatchedByOrder } from './despatches.js';
@@ -492,6 +492,11 @@ ordersRouter.put('/:id', (req: AuthedRequest, res) => {
   const h = headerValues(body, existing);
   const moved = customerChangeError(req, existing.customer_id as number, h.customer_id);
   if (moved) return res.status(403).json({ error: moved });
+  // The number was drawn from the export or the domestic series and is never
+  // reissued, so the flag cannot move after the fact without leaving the two
+  // disagreeing. 409, not 403: it is a conflict with what is already on file.
+  const retyped = exportChangeError('order', existing, (req.body ?? {}).is_export);
+  if (retyped) return res.status(409).json({ error: retyped });
   const link = linkError(req, 'quotations', h.quotation_id, h.customer_id, 'Quotation');
   if (link) return res.status(404).json({ error: link });
   transaction(() => {
