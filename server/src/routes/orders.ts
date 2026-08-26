@@ -5,7 +5,9 @@ import { computeTotals, round2, type LineItemInput } from '../services/totals.js
 import { productionByOrder } from '../services/production.js';
 import { despatchedByOrder } from './despatches.js';
 import { orderMaterialCost } from '../services/costing.js';
-import { orderLines, productDemand, countOrderLines, type Filters } from '../services/orderLines.js';
+import { orderLines, productDemand, countOrderLines,
+  type Filters, type OrderLine, type ProductDemand } from '../services/orderLines.js';
+import { buildXlsx, attachmentName, type Column } from '../services/xlsx.js';
 import type { AuthedRequest } from '../middleware/auth.js';
 import { scopeClause, canAccessCustomer, linkError, customerChangeError } from '../middleware/scope.js';
 import { syncOrderStatus } from '../services/orderStatus.js';
@@ -182,7 +184,12 @@ function saveItems(orderId: number, items: OrderItemInput[], taxType: 'none' | '
   );
 }
 
-ordersRouter.get('/', (req: AuthedRequest, res) => {
+/**
+ * The per-order list's filters, built once so the list and its export cannot
+ * drift apart — an export that quietly disagreed with the table it sits under
+ * is worse than no export.
+ */
+function orderListWhere(req: AuthedRequest): { where: string[]; params: unknown[] } {
   const where: string[] = [];
   const params: unknown[] = [];
   const scope = scopeClause(req, 'o.customer_id');
@@ -193,6 +200,11 @@ ordersRouter.get('/', (req: AuthedRequest, res) => {
   if (Number(req.query.company) > 0) { where.push('o.company_id = ?'); params.push(Number(req.query.company)); }
   // ?open=1 → the order book: everything not yet completed or cancelled.
   if (req.query.open === '1') where.push("o.status NOT IN ('completed','cancelled')");
+  return { where, params };
+}
+
+ordersRouter.get('/', (req: AuthedRequest, res) => {
+  const { where, params } = orderListWhere(req);
   res.json(listBody<Record<string, unknown>>(req.query, {
     sql: `${listSql}${where.length ? ' WHERE ' + where.join(' AND ') : ''}`,
     order: 'ORDER BY o.date DESC, o.id DESC',
@@ -248,6 +260,111 @@ ordersRouter.get('/lines', (req: AuthedRequest, res) => {
  */
 ordersRouter.get('/by-product', (req: AuthedRequest, res) => {
   res.json(productDemand(lineFilters(req)));
+});
+
+/**
+ * The order book as a spreadsheet — whichever of the three views is on screen.
+ *
+ * Declared above `/:id` for the same reason `/lines` is: Express would read
+ * "export" as an order id.
+ *
+ * Three rules it follows. It exports the **whole filtered set, never a page**,
+ * because a download that silently stopped at fifty rows is the kind of wrong
+ * that is only discovered in a meeting. It goes through the **same filters as
+ * the view it came from**, so what downloads is what was on screen. And it is
+ * **scoped like every other read** — `lineFilters`/`orderListWhere` both apply
+ * `scopeClause`, so an employee's export contains their customers and no more.
+ */
+const STATE_LABEL: Record<string, string> = {
+  not_started: 'Not started', in_production: 'In production', made: 'Made',
+  part_shipped: 'Part shipped', shipped: 'Shipped',
+};
+
+const lineColumns: Column<OrderLine>[] = [
+  { header: 'Order', value: (r) => r.order_number },
+  { header: 'Date', value: (r) => r.date, type: 'date' },
+  { header: 'Customer', value: (r) => r.customer_name },
+  { header: 'Issued by', value: (r) => r.company_name },
+  { header: 'Item', value: (r) => r.description },
+  { header: 'Code', value: (r) => r.code },
+  { header: 'Colour', value: (r) => r.color },
+  { header: 'Unit', value: (r) => r.unit },
+  { header: 'Qty', value: (r) => r.ordered, type: 'number' },
+  { header: 'Made', value: (r) => r.made, type: 'number' },
+  { header: 'Sent', value: (r) => r.sent, type: 'number' },
+  { header: 'Billed', value: (r) => r.billed, type: 'number' },
+  { header: 'Promised', value: (r) => r.promised_date, type: 'date' },
+  { header: 'State', value: (r) => STATE_LABEL[r.state] ?? r.state },
+  { header: 'Amount', value: (r) => r.amount, type: 'money' },
+  { header: 'Currency', value: (r) => r.currency },
+  { header: 'Type', value: (r) => (r.is_export ? 'Export' : 'Domestic') },
+  { header: 'Order status', value: (r) => r.order_status },
+  { header: 'Added by', value: (r) => r.created_by_name },
+];
+
+const productColumns: Column<ProductDemand>[] = [
+  { header: 'Product', value: (r) => r.description },
+  { header: 'Code', value: (r) => r.code },
+  { header: 'Colour', value: (r) => r.color },
+  { header: 'Unit', value: (r) => r.unit },
+  { header: 'On order', value: (r) => r.ordered, type: 'number' },
+  { header: 'Made', value: (r) => r.made, type: 'number' },
+  { header: 'Shipped', value: (r) => r.shipped, type: 'number' },
+  { header: 'To ship', value: (r) => r.to_ship, type: 'number' },
+  { header: 'Orders', value: (r) => r.orders, type: 'number' },
+  { header: 'Next due', value: (r) => r.next_due, type: 'date' },
+];
+
+type OrderRow = Record<string, unknown>;
+const orderColumns: Column<OrderRow>[] = [
+  { header: 'Order', value: (r) => String(r.number ?? '') },
+  { header: 'Date', value: (r) => String(r.date ?? ''), type: 'date' },
+  { header: 'Customer', value: (r) => String(r.customer_name ?? '') },
+  { header: 'Issued by', value: (r) => (r.company_name == null ? '' : String(r.company_name)) },
+  { header: 'PO number', value: (r) => String(r.po_number ?? '') },
+  { header: 'PO date', value: (r) => String(r.po_date ?? ''), type: 'date' },
+  { header: 'Promised', value: (r) => String(r.promised_date ?? ''), type: 'date' },
+  { header: 'Status', value: (r) => String(r.status ?? '') },
+  { header: 'Type', value: (r) => (Number(r.is_export) ? 'Export' : 'Domestic') },
+  { header: 'Currency', value: (r) => String(r.currency ?? '') },
+  { header: 'Total', value: (r) => Number(r.grand_total ?? 0), type: 'money' },
+  { header: 'Dispatched value', value: (r) => Number(r.dispatched_value ?? 0), type: 'money' },
+  { header: 'Pending value', value: (r) => Number(r.pending_value ?? 0), type: 'money' },
+];
+
+ordersRouter.get('/export', (req: AuthedRequest, res) => {
+  const view = String(req.query.view ?? 'lines');
+
+  let sheet: string;
+  let book: Buffer;
+  if (view === 'by-product') {
+    sheet = 'By product';
+    book = buildXlsx(sheet, productColumns, productDemand(lineFilters(req)));
+  } else if (view === 'orders') {
+    sheet = 'Orders';
+    const { where, params } = orderListWhere(req);
+    const rows = db
+      .prepare(`${listSql}${where.length ? ' WHERE ' + where.join(' AND ') : ''} ORDER BY o.date DESC, o.id DESC`)
+      .all(...(params as never[])) as OrderRow[];
+    // The same per-row decoration the list does, so the two columns that are
+    // derived rather than stored are in the download as well.
+    for (const o of rows) {
+      const items = db.prepare('SELECT qty, unit_price FROM order_items WHERE order_id = ? ORDER BY sort_order, id')
+        .all(Number(o.id)) as { qty: number | null; unit_price: number }[];
+      const p = dispatchProgress(Number(o.id), items);
+      o.dispatched_value = p.dispatched_value;
+      o.pending_value = p.pending_value;
+    }
+    book = buildXlsx(sheet, orderColumns, rows);
+  } else {
+    sheet = 'Order lines';
+    // No page argument: the whole filtered set.
+    book = buildXlsx(sheet, lineColumns, orderLines(lineFilters(req)));
+  }
+
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', `attachment; filename="${attachmentName(sheet)}"`);
+  res.send(book);
 });
 
 ordersRouter.get('/:id', (req: AuthedRequest, res) => {

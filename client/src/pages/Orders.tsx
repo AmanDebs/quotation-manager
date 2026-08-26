@@ -127,7 +127,24 @@ export default function OrdersPage() {
       <PageHeader
         title="Orders"
         subtitle="The order book — what's sold, what's in production, what's still to ship"
-        actions={<Button onClick={() => navigate('/orders/new')}>+ New Order</Button>}
+        actions={
+          <div className="flex items-center gap-2">
+            {/* A plain link, not a fetch: the session is a cookie on this
+                origin, so the browser downloads it directly and no blob has to
+                be built in memory. The URL carries the view and every filter,
+                so what downloads is what is on screen — and the server ignores
+                page/limit, so it is the whole filtered set rather than the
+                page being looked at. */}
+            <a
+              href={`/api/orders/export?view=${view}${query ? `&${query}` : ''}`}
+              className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50"
+              title="Download every row these filters match — not just this page"
+            >
+              Download Excel
+            </a>
+            <Button onClick={() => navigate('/orders/new')}>+ New Order</Button>
+          </div>
+        }
       />
 
       <div className="mb-3 flex flex-wrap items-center gap-3">
