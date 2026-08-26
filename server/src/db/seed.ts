@@ -151,7 +151,9 @@ createQuotation({ customer: customers.titan, date: daysFromNow(-58), currency: '
 // Proforma from the accepted Acme revision — export order with PO and advance
 const piTotals = computeTotals([{ ...forgingEUR, unit_price: 2.45 }, flangeEUR], 'none', 1800, 420);
 const piId = transaction(() => {
-  const number = nextNumber('proforma', { companyId: seedCompanyId });
+  // isExport, or the demo raises an export proforma numbered from the
+  // domestic series — the very mismatch `npm run check-series` reports.
+  const number = nextNumber('proforma', { companyId: seedCompanyId, isExport: true });
   const info = db.prepare(
     `INSERT INTO proforma_invoices (number, date, quotation_id, customer_id, consignee, notify_party, currency, freight, insurance,
        lead_time, bank_account, inco_terms, payment_terms, delivery_terms, validity_date, is_export,
@@ -188,7 +190,7 @@ db.prepare('INSERT INTO payments (pi_id, customer_id, date, amount, currency, me
 const invItems: Item[] = [{ ...forgingEUR, qty: 8670, unit_price: 2.45 }, flangeEUR];
 const invTotals = computeTotals(invItems, 'none', 1800, 420);
 const invId = transaction(() => {
-  const number = nextNumber('invoice', { companyId: seedCompanyId });
+  const number = nextNumber('invoice', { companyId: seedCompanyId, isExport: true });
   const info = db.prepare(
     `INSERT INTO commercial_invoices (number, date, pi_id, customer_id, consignee, notify_party, currency, freight, insurance,
        shipping_details, bank_account, inco_terms, payment_terms, is_export, country_of_origin, port_of_loading,

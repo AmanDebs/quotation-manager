@@ -9,7 +9,8 @@
     "seed": "tsx src/db/seed.ts",
     "reseed": "tsx src/db/reseed.ts",
     "reset-password": "tsx src/db/resetPassword.ts",
-    "test": "tsx --test test/**/*.test.ts"
+    "test": "tsx --test test/**/*.test.ts",
+    "check-series": "tsx src/db/checkSeries.ts"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
