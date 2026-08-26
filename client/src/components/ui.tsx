@@ -83,6 +83,27 @@ export function Field({ label, children, className = '' }: { label: string; chil
   );
 }
 
+/**
+ * A download link, styled as a secondary Button.
+ *
+ * An anchor rather than a fetch: the session is an httpOnly cookie on this
+ * origin, so the browser fetches the file itself and nothing has to be held in
+ * memory as a blob. The caller passes the list's own filters in the href, so
+ * what downloads is what is on screen — the server ignores page and limit, so
+ * it is the whole filtered set rather than the page being looked at.
+ */
+export function DownloadButton({ href, label = 'Download Excel', title }: { href: string; label?: string; title?: string }) {
+  return (
+    <a
+      href={href}
+      title={title ?? 'Download every row these filters match — not just this page'}
+      className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50"
+    >
+      {label}
+    </a>
+  );
+}
+
 export function Card({ title, children, actions, className = '' }: { title?: string; children: ReactNode; actions?: ReactNode; className?: string }) {
   return (
     <div className={`rounded-lg border border-slate-200 bg-white shadow-sm ${className}`}>

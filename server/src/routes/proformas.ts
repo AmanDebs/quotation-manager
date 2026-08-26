@@ -8,6 +8,7 @@ import { resolveCompanyId } from '../services/companies.js';
 import { submit, decide, resetApprovalOnEdit, blockUnapprovedTransition } from '../services/approval.js';
 import { listBody } from '../services/pagination.js';
 import { searchClause } from '../services/search.js';
+import { buildXlsx, attachmentName, type Column } from '../services/xlsx.js';
 
 export const proformasRouter = Router();
 
@@ -99,7 +100,8 @@ function headerValues(body: Record<string, unknown>, existing?: Record<string, u
   };
 }
 
-proformasRouter.get('/', (req: AuthedRequest, res) => {
+/** The list's filters, built once so the list and its export cannot drift. */
+function proformaListWhere(req: AuthedRequest): { where: string[]; params: unknown[] } {
   // Not named `q`: the alias below is a table, and on invoices `i` is too.
   const search = String(req.query.q ?? '').trim();
   const where: string[] = [];
@@ -115,11 +117,59 @@ proformasRouter.get('/', (req: AuthedRequest, res) => {
   // Narrow to one selling entity. Ignored when the group has just one.
   if (Number(req.query.company) > 0) { where.push('p.company_id = ?'); params.push(Number(req.query.company)); }
   if (req.query.approval) { where.push('p.approval_status = ?'); params.push(String(req.query.approval)); }
+  return { where, params };
+}
+
+proformasRouter.get('/', (req: AuthedRequest, res) => {
+  const { where, params } = proformaListWhere(req);
   res.json(listBody(req.query, {
     sql: `${listSql}${where.length ? ' WHERE ' + where.join(' AND ') : ''}`,
     order: 'ORDER BY p.date DESC, p.id DESC',
     params,
   }));
+});
+
+/**
+ * The list as a spreadsheet. Declared **above** `/:id`, or Express reads
+ * "export" as a document id. Whole filtered set, never a page — `page`/`limit`
+ * are ignored — through the same filters as the list, scoping included.
+ */
+type Row = Record<string, unknown>;
+const str = (v: unknown) => (v == null ? '' : String(v));
+const num = (v: unknown) => Number(v ?? 0);
+
+const proformaColumns: Column<Row>[] = [
+  { header: 'Number', value: (r) => str(r.number) },
+  { header: 'Date', value: (r) => str(r.date), type: 'date' },
+  { header: 'Customer', value: (r) => str(r.customer_name) },
+  { header: 'Country', value: (r) => str(r.customer_country) },
+  { header: 'Issued by', value: (r) => str(r.company_name) },
+  { header: 'From quotation', value: (r) => str(r.quotation_number) },
+  { header: 'Order', value: (r) => str(r.order_number) },
+  { header: 'PO number', value: (r) => str(r.po_number) },
+  { header: 'PO date', value: (r) => str(r.po_date), type: 'date' },
+  { header: 'Type', value: (r) => (num(r.is_export) ? 'Export' : 'Domestic') },
+  { header: 'INCO', value: (r) => str(r.inco_terms) },
+  { header: 'Discharge port', value: (r) => str(r.port_of_discharge) },
+  { header: 'Currency', value: (r) => str(r.currency) },
+  { header: 'Subtotal', value: (r) => num(r.subtotal), type: 'money' },
+  { header: 'Freight', value: (r) => num(r.freight), type: 'money' },
+  { header: 'Insurance', value: (r) => num(r.insurance), type: 'money' },
+  { header: 'Tax', value: (r) => num(r.tax_total), type: 'money' },
+  { header: 'Total', value: (r) => num(r.grand_total), type: 'money' },
+  { header: 'Status', value: (r) => str(r.status) },
+  { header: 'Approval', value: (r) => str(r.approval_status) },
+  { header: 'Created by', value: (r) => str(r.created_by_name) },
+];
+
+proformasRouter.get('/export', (req: AuthedRequest, res) => {
+  const { where, params } = proformaListWhere(req);
+  const rows = db
+    .prepare(`${listSql}${where.length ? ' WHERE ' + where.join(' AND ') : ''} ORDER BY p.date DESC, p.id DESC`)
+    .all(...(params as never[])) as Row[];
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', `attachment; filename="${attachmentName('Proforma invoices')}"`);
+  res.send(buildXlsx('Proforma invoices', proformaColumns, rows));
 });
 
 proformasRouter.get('/:id', (req: AuthedRequest, res) => {

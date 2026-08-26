@@ -3,7 +3,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Order, OrderStatus, OrderLine, ProductDemand, LineState } from '../types';
-import { Button, Select, Input, PageHeader, EmptyState, Card, ExportTabs, ErrorText , Pagination} from '../components/ui';
+import { Button, Select, Input, PageHeader, EmptyState, Card, ExportTabs, ErrorText, Pagination, DownloadButton } from '../components/ui';
 import { useCompanies } from '../components/CompanySelect';
 import { fmtDate, fmtMoney, fmtQty, today } from '../lib/format';
 import { usePagedList, PAGE_SIZE, type PagedList } from '../lib/usePagedList';
@@ -129,19 +129,7 @@ export default function OrdersPage() {
         subtitle="The order book — what's sold, what's in production, what's still to ship"
         actions={
           <div className="flex items-center gap-2">
-            {/* A plain link, not a fetch: the session is a cookie on this
-                origin, so the browser downloads it directly and no blob has to
-                be built in memory. The URL carries the view and every filter,
-                so what downloads is what is on screen — and the server ignores
-                page/limit, so it is the whole filtered set rather than the
-                page being looked at. */}
-            <a
-              href={`/api/orders/export?view=${view}${query ? `&${query}` : ''}`}
-              className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50"
-              title="Download every row these filters match — not just this page"
-            >
-              Download Excel
-            </a>
+            <DownloadButton href={`/api/orders/export?view=${view}${query ? `&${query}` : ''}`} />
             <Button onClick={() => navigate('/orders/new')}>+ New Order</Button>
           </div>
         }

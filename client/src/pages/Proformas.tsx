@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Proforma } from '../types';
-import { Button, Select, Input, PageHeader, EmptyState, Card, ExportTabs, ErrorText, Pagination } from '../components/ui';
+import { Button, Select, Input, PageHeader, EmptyState, Card, ExportTabs, ErrorText, Pagination, DownloadButton } from '../components/ui';
 import { useCompanies } from '../components/CompanySelect';
 import NewDocumentDialog from '../components/NewDocumentDialog';
 import { fmtDate, fmtMoney } from '../lib/format';
@@ -73,7 +73,12 @@ export default function ProformasPage() {
       <PageHeader
         title="Proforma Invoices"
         subtitle="“This is what the final invoice will look like.”"
-        actions={<Button onClick={() => setCreating(true)}>+ New Proforma Invoice</Button>}
+        actions={
+          <div className="flex items-center gap-2">
+            <DownloadButton href={`/api/proformas/export${params.toString() ? `?${params}` : ''}`} />
+            <Button onClick={() => setCreating(true)}>+ New Proforma Invoice</Button>
+          </div>
+        }
       />
       {creating && <NewDocumentDialog basePath="/proformas" title="New Proforma Invoice" onClose={() => setCreating(false)} />}
       <div className="mb-3 flex flex-wrap items-center gap-3">

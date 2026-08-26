@@ -10,6 +10,7 @@ import { enquiryLinkId, syncEnquiryStatus } from '../services/enquiries.js';
 import { syncQuotationExpiry } from '../services/quotationExpiry.js';
 import { listBody } from '../services/pagination.js';
 import { searchClause } from '../services/search.js';
+import { buildXlsx, attachmentName, type Column } from '../services/xlsx.js';
 
 export const quotationsRouter = Router();
 
@@ -57,7 +58,12 @@ function saveItems(
   );
 }
 
-quotationsRouter.get('/', (req: AuthedRequest, res) => {
+/**
+ * The list's filters, built once so the list and its export cannot drift —
+ * an export that quietly disagreed with the table above it is worse than
+ * no export.
+ */
+function quotationListWhere(req: AuthedRequest): { where: string[]; params: unknown[] } {
   const status = String(req.query.status ?? '');
   // Not named `q`: that is the quotations alias in every clause below.
   const search = String(req.query.q ?? '').trim();
@@ -80,11 +86,62 @@ quotationsRouter.get('/', (req: AuthedRequest, res) => {
   // Narrow to one selling entity. Ignored when the group has just one.
   if (Number(req.query.company) > 0) { where.push('q.company_id = ?'); params.push(Number(req.query.company)); }
   if (req.query.approval) { where.push('q.approval_status = ?'); params.push(String(req.query.approval)); }
+  return { where, params };
+}
+
+quotationsRouter.get('/', (req: AuthedRequest, res) => {
+  const { where, params } = quotationListWhere(req);
   res.json(listBody(req.query, {
     sql: `${listSql}${where.length ? ' WHERE ' + where.join(' AND ') : ''}`,
     order: 'ORDER BY q.date DESC, q.id DESC',
     params,
   }));
+});
+
+/**
+ * The list as a spreadsheet.
+ *
+ * Declared **above** `/:id`, or Express reads "export" as a document id. It
+ * exports the **whole filtered set, never a page** — `page`/`limit` are
+ * ignored, because a download that silently stopped at fifty rows is the kind
+ * of wrong only discovered in a meeting — and runs through the same filters as
+ * the list, so what downloads is what was on screen. Scoping comes with those
+ * filters, exactly as it does for the list itself.
+ */
+type Row = Record<string, unknown>;
+const str = (v: unknown) => (v == null ? '' : String(v));
+const num = (v: unknown) => Number(v ?? 0);
+
+const quotationColumns: Column<Row>[] = [
+  { header: 'Number', value: (r) => str(r.number) },
+  { header: 'Rev', value: (r) => num(r.revision), type: 'number' },
+  { header: 'Date', value: (r) => str(r.date), type: 'date' },
+  { header: 'Valid until', value: (r) => str(r.validity_date), type: 'date' },
+  { header: 'Customer', value: (r) => str(r.customer_name) },
+  { header: 'Country', value: (r) => str(r.customer_country) },
+  { header: 'Issued by', value: (r) => str(r.company_name) },
+  { header: 'Type', value: (r) => (num(r.is_export) ? 'Export' : 'Domestic') },
+  { header: 'Currency', value: (r) => str(r.currency) },
+  { header: 'Subtotal', value: (r) => num(r.subtotal), type: 'money' },
+  { header: 'Freight', value: (r) => num(r.freight), type: 'money' },
+  { header: 'Insurance', value: (r) => num(r.insurance), type: 'money' },
+  { header: 'Tax', value: (r) => num(r.tax_total), type: 'money' },
+  { header: 'Total', value: (r) => num(r.grand_total), type: 'money' },
+  { header: 'Status', value: (r) => str(r.status) },
+  { header: 'Approval', value: (r) => str(r.approval_status) },
+  { header: 'Prepared by', value: (r) => str(r.prepared_by) },
+  { header: 'Created by', value: (r) => str(r.created_by_name) },
+  { header: 'Approved by', value: (r) => str(r.approved_by_name) },
+];
+
+quotationsRouter.get('/export', (req: AuthedRequest, res) => {
+  const { where, params } = quotationListWhere(req);
+  const rows = db
+    .prepare(`${listSql}${where.length ? ' WHERE ' + where.join(' AND ') : ''} ORDER BY q.date DESC, q.id DESC`)
+    .all(...(params as never[])) as Row[];
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', `attachment; filename="${attachmentName('Quotations')}"`);
+  res.send(buildXlsx('Quotations', quotationColumns, rows));
 });
 
 quotationsRouter.get('/:id', (req: AuthedRequest, res) => {

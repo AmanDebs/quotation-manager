@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Quotation } from '../types';
-import { Button, Select, Input, PageHeader, EmptyState, Card, ExportTabs, ErrorText, Pagination } from '../components/ui';
+import { Button, Select, Input, PageHeader, EmptyState, Card, ExportTabs, ErrorText, Pagination, DownloadButton } from '../components/ui';
 import NewDocumentDialog from '../components/NewDocumentDialog';
 import InternalNotes from '../components/InternalNotes';
 import { useCompanies } from '../components/CompanySelect';
@@ -85,7 +85,12 @@ export default function QuotationsPage() {
       <PageHeader
         title="Quotations"
         subtitle="“This is our price.”"
-        actions={<Button onClick={() => setCreating(true)}>+ New Quotation</Button>}
+        actions={
+          <div className="flex items-center gap-2">
+            <DownloadButton href={`/api/quotations/export${params.toString() ? `?${params}` : ''}`} />
+            <Button onClick={() => setCreating(true)}>+ New Quotation</Button>
+          </div>
+        }
       />
       {creating && <NewDocumentDialog basePath="/quotations" title="New Quotation" onClose={() => setCreating(false)} />}
       <div className="mb-3 flex flex-wrap items-center gap-3">

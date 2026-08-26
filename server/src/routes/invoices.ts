@@ -11,6 +11,7 @@ import { invoiceReceivable } from '../services/receivables.js';
 import { syncInvoiceStatus, syncInvoicesForProforma } from '../services/invoiceStatus.js';
 import { listBody } from '../services/pagination.js';
 import { searchClause } from '../services/search.js';
+import { buildXlsx, attachmentName, type Column } from '../services/xlsx.js';
 
 /**
  * Bring the paid/unpaid status back into line after anything that moves money.
@@ -278,7 +279,8 @@ function headerValues(body: Record<string, unknown>, existing?: Record<string, u
   };
 }
 
-invoicesRouter.get('/', (req: AuthedRequest, res) => {
+/** The list's filters, built once so the list and its export cannot drift. */
+function invoiceListWhere(req: AuthedRequest): { where: string[]; params: unknown[] } {
   // Not named `q`: the alias below is a table, and on invoices `i` is too.
   const search = String(req.query.q ?? '').trim();
   const where: string[] = [];
@@ -294,11 +296,78 @@ invoicesRouter.get('/', (req: AuthedRequest, res) => {
   // Narrow to one selling entity. Ignored when the group has just one.
   if (Number(req.query.company) > 0) { where.push('i.company_id = ?'); params.push(Number(req.query.company)); }
   if (req.query.approval) { where.push('i.approval_status = ?'); params.push(String(req.query.approval)); }
+  return { where, params };
+}
+
+invoicesRouter.get('/', (req: AuthedRequest, res) => {
+  const { where, params } = invoiceListWhere(req);
   res.json(listBody(req.query, {
     sql: `${listSql}${where.length ? ' WHERE ' + where.join(' AND ') : ''}`,
     order: 'ORDER BY i.date DESC, i.id DESC',
     params,
   }));
+});
+
+/**
+ * The list as a spreadsheet. Declared **above** `/:id`, or Express reads
+ * "export" as a document id. Whole filtered set, never a page — `page`/`limit`
+ * are ignored — through the same filters as the list, scoping included.
+ *
+ * Unlike the list, this decorates each row with what has been received.
+ * "How much has this invoice been credited" is `receivables.ts`'s question and
+ * it is **asked**, never recomputed here — advances on the source proforma are
+ * allocated across the invoices raised from it, and money in a currency the
+ * invoice does not share is credited to nothing. That last figure rides along
+ * in its own column rather than being dropped, because an advance that is
+ * silently uncounted is exactly what somebody would come to a spreadsheet to
+ * find.
+ */
+type Row = Record<string, unknown>;
+const str = (v: unknown) => (v == null ? '' : String(v));
+const num = (v: unknown) => Number(v ?? 0);
+
+const invoiceColumns: Column<Row>[] = [
+  { header: 'Number', value: (r) => str(r.number) },
+  { header: 'Date', value: (r) => str(r.date), type: 'date' },
+  { header: 'Customer', value: (r) => str(r.customer_name) },
+  { header: 'Country', value: (r) => str(r.customer_country) },
+  { header: 'Issued by', value: (r) => str(r.company_name) },
+  { header: 'From proforma', value: (r) => str(r.pi_number) },
+  { header: 'Type', value: (r) => (num(r.is_export) ? 'Export' : 'Domestic') },
+  { header: 'INCO', value: (r) => str(r.inco_terms) },
+  { header: 'Discharge port', value: (r) => str(r.port_of_discharge) },
+  { header: 'Currency', value: (r) => str(r.currency) },
+  { header: 'Subtotal', value: (r) => num(r.subtotal), type: 'money' },
+  { header: 'Freight', value: (r) => num(r.freight), type: 'money' },
+  { header: 'Insurance', value: (r) => num(r.insurance), type: 'money' },
+  { header: 'Tax', value: (r) => num(r.tax_total), type: 'money' },
+  { header: 'Total', value: (r) => num(r.grand_total), type: 'money' },
+  { header: 'Received', value: (r) => num(r.amount_received), type: 'money' },
+  { header: 'Of which advance', value: (r) => num(r.advance_applied), type: 'money' },
+  { header: 'Balance due', value: (r) => num(r.balance_due), type: 'money' },
+  { header: 'Unapplied (currency)', value: (r) => str(r.currency_mismatch) },
+  { header: 'Status', value: (r) => str(r.status) },
+  { header: 'Approval', value: (r) => str(r.approval_status) },
+  { header: 'Created by', value: (r) => str(r.created_by_name) },
+];
+
+invoicesRouter.get('/export', (req: AuthedRequest, res) => {
+  const { where, params } = invoiceListWhere(req);
+  const rows = db
+    .prepare(`${listSql}${where.length ? ' WHERE ' + where.join(' AND ') : ''} ORDER BY i.date DESC, i.id DESC`)
+    .all(...(params as never[])) as Row[];
+  for (const inv of rows) {
+    const money = invoiceReceivable(Number(inv.id));
+    inv.amount_received = money.amount_received;
+    inv.advance_applied = money.advance_applied;
+    inv.balance_due = money.balance_due;
+    inv.currency_mismatch = money.currency_mismatch
+      .map((m) => `${m.currency} ${m.amount}`)
+      .join(', ');
+  }
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', `attachment; filename="${attachmentName('Commercial invoices')}"`);
+  res.send(buildXlsx('Commercial invoices', invoiceColumns, rows));
 });
 
 invoicesRouter.get('/:id', (req: AuthedRequest, res) => {

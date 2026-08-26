@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Invoice } from '../types';
-import { Button, Select, Input, PageHeader, EmptyState, Card, ExportTabs, ErrorText, Pagination } from '../components/ui';
+import { Button, Select, Input, PageHeader, EmptyState, Card, ExportTabs, ErrorText, Pagination, DownloadButton } from '../components/ui';
 import { useCompanies } from '../components/CompanySelect';
 import NewDocumentDialog from '../components/NewDocumentDialog';
 import { fmtDate, fmtMoney } from '../lib/format';
@@ -70,7 +70,12 @@ export default function InvoicesPage() {
       <PageHeader
         title="Commercial Invoices"
         subtitle="“This is the final bill.”"
-        actions={<Button onClick={() => setCreating(true)}>+ New Invoice</Button>}
+        actions={
+          <div className="flex items-center gap-2">
+            <DownloadButton href={`/api/invoices/export${params.toString() ? `?${params}` : ''}`} />
+            <Button onClick={() => setCreating(true)}>+ New Invoice</Button>
+          </div>
+        }
       />
       {creating && <NewDocumentDialog basePath="/invoices" title="New Commercial Invoice" onClose={() => setCreating(false)} />}
       <div className="mb-3 flex flex-wrap items-center gap-3">
