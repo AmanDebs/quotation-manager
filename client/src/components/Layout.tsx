@@ -174,7 +174,7 @@ export default function Layout({ user, onLogout, children }: { user: User; onLog
         >
           ☰
         </button>
-        <span className="font-semibold">Quotation Manager</span>
+        <span className="font-semibold">ERP Tool</span>
         {isManager && !!approvals?.pending && (
           <span className="ml-auto rounded-full bg-amber-400 px-1.5 text-xs font-bold text-slate-900">
             {approvals.pending}
@@ -210,7 +210,7 @@ export default function Layout({ user, onLogout, children }: { user: User; onLog
         }`}
       >
         <div className="border-b border-white/10 px-4 py-4">
-          <div className="text-lg font-bold">Quotation Manager</div>
+          <div className="text-lg font-bold">ERP Tool</div>
           <div className="text-xs text-white/50">Order-to-Dispatch</div>
         </div>
         <nav className="flex-1 overflow-y-auto py-2">

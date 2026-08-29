@@ -82,7 +82,7 @@ function listUsers(users: UserRow[]) {
 }
 
 async function main() {
-  console.log(`\nQuotation Manager — password reset`);
+  console.log(`\nERP Tool — password reset`);
   // Said out loud every time. The commonest way to get this wrong is to run it
   // against the wrong database and wonder why the new password does not work.
   console.log(`Database: ${dataDir}`);

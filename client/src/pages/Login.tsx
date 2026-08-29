@@ -39,7 +39,7 @@ export default function LoginPage({ onLogin, expired = false }: {
     <div className="flex min-h-screen items-center justify-center bg-brand-800 p-4">
       <form onSubmit={submit} className="w-full max-w-sm space-y-4 rounded-xl bg-white p-6 shadow-2xl">
         <div className="text-center">
-          <h1 className="text-xl font-bold text-brand-700">Quotation Manager</h1>
+          <h1 className="text-xl font-bold text-brand-700">ERP Tool</h1>
           <p className="mt-1 text-sm text-slate-500">
             {needsSetup ? 'Welcome! Create the first user account to get started.' : 'Sign in to your account'}
           </p>
