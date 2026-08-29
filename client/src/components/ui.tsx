@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react';
 import type { ReactNode, ButtonHTMLAttributes, InputHTMLAttributes, SelectHTMLAttributes, TextareaHTMLAttributes } from 'react';
 
 export function Button({ variant = 'primary', className = '', ...props }: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'secondary' | 'danger' | 'ghost' }) {
@@ -185,6 +186,104 @@ export function StatusBadge({ status }: { status: string }) {
 }
 
 /** All | Export | Domestic filter used on every document list. */
+/**
+ * Several values out of a short list, held in the URL as one comma-separated
+ * string.
+ *
+ * A plain `<select>` cannot say "sent or negotiating", and the statuses
+ * somebody wants on screen are a set rather than one value. Three things worth
+ * knowing about the shape.
+ *
+ * **Empty is not "nothing selected"** — it means "whatever this list shows by
+ * default", which for quotations is everything except rejected. So the closed
+ * summary states that default rather than sitting blank, or the list would
+ * appear to be hiding rows for no stated reason.
+ *
+ * **Every option ticked is written as `all`**, not as the full list. It is the
+ * same request, it keeps the URL short, and it is what the server reads to
+ * mean "including the ones hidden by default".
+ *
+ * **The outside-click listener is attached only while the panel is open**, so
+ * it cannot intercept clicks the rest of the time — the same rule the mobile
+ * drawer follows in Layout.tsx.
+ */
+export function MultiSelectFilter({
+  options,
+  value,
+  onChange,
+  defaultLabel,
+  allLabel = 'All',
+  className = 'min-w-45',
+}: {
+  options: { key: string; label: string }[];
+  value: string;
+  onChange: (v: string) => void;
+  defaultLabel: string;
+  allLabel?: string;
+  className?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const box = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (box.current && !box.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [open]);
+
+  const selected = value === 'all'
+    ? options.map((o) => o.key)
+    : value.split(',').map((s) => s.trim()).filter(Boolean);
+
+  const toggle = (key: string) => {
+    const next = selected.includes(key) ? selected.filter((k) => k !== key) : [...selected, key];
+    onChange(next.length === options.length ? 'all' : next.join(','));
+  };
+
+  const summary =
+    value === 'all' ? allLabel
+      : selected.length === 0 ? defaultLabel
+        : selected.length === 1 ? (options.find((o) => o.key === selected[0])?.label ?? selected[0])
+          : `${selected.length} selected`;
+
+  return (
+    <div className={`relative ${className}`} ref={box}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full items-center justify-between gap-2 rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-sm text-slate-700 hover:bg-slate-50"
+      >
+        <span className="truncate">{summary}</span>
+        <span className="text-slate-400">▾</span>
+      </button>
+      {open && (
+        <div className="absolute z-20 mt-1 w-56 rounded-md border border-slate-200 bg-white p-1 shadow-lg">
+          {options.map((o) => (
+            <label
+              key={o.key}
+              className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm text-slate-700 hover:bg-slate-50"
+            >
+              <input type="checkbox" checked={selected.includes(o.key)} onChange={() => toggle(o.key)} />
+              <span>{o.label}</span>
+            </label>
+          ))}
+          <div className="mt-1 flex items-center justify-between border-t border-slate-100 px-2 pt-1.5 text-xs">
+            <button type="button" className="text-brand-700 hover:underline" onClick={() => onChange('all')}>
+              {allLabel}
+            </button>
+            <button type="button" className="text-slate-500 hover:underline" onClick={() => onChange('')}>
+              Reset
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function ExportTabs({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   const tabs = [
     { key: '', label: 'All' },

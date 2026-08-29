@@ -63,8 +63,19 @@ function saveItems(
  * an export that quietly disagreed with the table above it is worse than
  * no export.
  */
+/**
+ * Statuses kept off the list unless somebody asks for them.
+ *
+ * `expired` is deliberately not one of them: a lapsed offer is revived by
+ * extending its validity date, which is a job still to do, and
+ * quotationExpiry.ts exists precisely to hand it back. There is no `lost`
+ * status to hide either — the CHECK constraint has six values and rejected is
+ * what "lost" means here.
+ */
+const HIDDEN_BY_DEFAULT = ['rejected'];
+
 function quotationListWhere(req: AuthedRequest): { where: string[]; params: unknown[] } {
-  const status = String(req.query.status ?? '');
+  const status = String(req.query.status ?? '').trim();
   // Not named `q`: that is the quotations alias in every clause below.
   const search = String(req.query.q ?? '').trim();
   const includeSuperseded = req.query.all === '1';
@@ -73,7 +84,27 @@ function quotationListWhere(req: AuthedRequest): { where: string[]; params: unkn
   const scope = scopeClause(req, 'q.customer_id');
   if (scope.sql) { where.push(scope.sql); params.push(...scope.params); }
   if (!includeSuperseded) where.push('q.superseded_by IS NULL');
-  if (status) { where.push('q.status = ?'); params.push(status); }
+  // Status is a list, not one value, and rejected is off the screen by default.
+  //
+  // Two rules keep the default from hiding work. It applies only when nothing
+  // was asked for — naming any status shows exactly what was named, and `all`
+  // shows everything — and what it hides is a decision somebody made, never a
+  // date that passed.
+  //
+  // It has to be server-side. The list is paged, so dropping rows on screen
+  // would only ever drop them from the page in hand, and the export runs
+  // through this same function, so a download cannot quietly hold rows the
+  // table above it did not.
+  const wanted = status === 'all' ? [] : status.split(',').map((s) => s.trim()).filter(Boolean);
+  if (status !== 'all') {
+    if (wanted.length > 0) {
+      where.push(`q.status IN (${wanted.map(() => '?').join(', ')})`);
+      params.push(...wanted);
+    } else {
+      where.push(`q.status NOT IN (${HIDDEN_BY_DEFAULT.map(() => '?').join(', ')})`);
+      params.push(...HIDDEN_BY_DEFAULT);
+    }
+  }
   // Number or customer — the two things somebody has in hand when they come
   // looking for a quotation. Matched anywhere in the string, so "003" finds
   // QT/26-27/003 without anybody typing the series out.
@@ -330,6 +361,67 @@ quotationsRouter.post('/:id/revise', (req: AuthedRequest, res) => {
        SELECT ?, product_id, description, hsn_code, qty, unit, unit_price, tax_pct, amount, color, packs, pcs_per_pack, total_pcs, qty_20ft, qty_40ft, is_charge, custom1, custom2, custom3, image, sort_order FROM quotation_items WHERE quotation_id = ?`
     ).run(newId, id);
     db.prepare('UPDATE quotations SET superseded_by = ? WHERE id = ?').run(newId, id);
+    return newId;
+  });
+  res.status(201).json(getFull(newId));
+});
+
+/**
+ * Duplicate: the same basket as a fresh offer, under a **new** number.
+ *
+ * Not a revision, and the number is the difference. A revision is the next
+ * round of one negotiation — same number, revision+1, the old row superseded
+ * and read-only. A duplicate is a *different* offer that happens to start from
+ * this one, with its own number and nothing superseded. Re-quoting last
+ * season's prices, and quoting a second customer the same basket, are both
+ * this; neither is a revision.
+ *
+ * Four things deliberately do not carry across.
+ *
+ * **The enquiry link.** `quotation_count` counts unsuperseded quotations
+ * against an enquiry, so carrying `enquiry_id` would report two answers to one
+ * question — the exact thing that count exists not to say. A revision carries
+ * it for the opposite reason: it is the same answer, said again.
+ *
+ * **The approval.** The copy starts `draft` and `not_submitted`. Approval
+ * attaches to a document somebody actually read, so copying it would be an
+ * automatic path from nothing to approved — the one thing approval.ts exists
+ * to prevent.
+ *
+ * **Internal notes.** They are the running commentary on the negotiation being
+ * copied *from*. The usual reason to duplicate is to quote somebody else, and
+ * the customer is editable afterwards, so carrying them is how one customer's
+ * private notes end up on another customer's file.
+ *
+ * **A validity date already past.** Copied as-is it yields an offer that
+ * lapses the moment it is sent. It survives as a draft — only sent and
+ * negotiating lapse — which makes it worse rather than better, because the
+ * trap springs later. Blank means "no expiry", the honest default here.
+ */
+quotationsRouter.post('/:id/duplicate', (req: AuthedRequest, res) => {
+  const id = Number(req.params.id);
+  const existing = db.prepare('SELECT * FROM quotations WHERE id = ?').get(id) as Record<string, unknown> | undefined;
+  if (!existing || !canAccessCustomer(req, Number(existing.customer_id))) return res.status(404).json({ error: 'Quotation not found' });
+  const today = new Date().toISOString().slice(0, 10);
+  // YYYY-MM-DD compares correctly as a string, and '' is never >= a real date,
+  // so a quotation raised without a validity date stays without one.
+  const validity = String(existing.validity_date ?? '');
+  const newId = transaction(() => {
+    // Inside the transaction, like every other number this app issues.
+    const number = nextNumber('quotation', { companyId: Number(existing.company_id), date: today });
+    const info = db.prepare(
+      `INSERT INTO quotations (number, revision, date, customer_id, company_id, currency, validity_date, payment_terms, delivery_terms, notes, freight, insurance, inco_terms, container_count, prepared_by, tax_type, is_export, column_config, created_by, status, subtotal, tax_total, grand_total)
+       SELECT ?, 0, ?, customer_id, company_id, currency, ?, payment_terms, delivery_terms, notes, freight, insurance, inco_terms, container_count, prepared_by, tax_type, is_export, column_config, ?, 'draft', subtotal, tax_total, grand_total
+       FROM quotations WHERE id = ?`
+    ).run(number, today, validity >= today ? validity : '', req.user!.id, id);
+    const newId = Number(info.lastInsertRowid);
+    // The lines are copied verbatim, totals included: they are the source's
+    // own server-computed figures and nothing about them has changed, so
+    // recomputing could only ever produce the same numbers.
+    db.prepare(
+      `INSERT INTO quotation_items (quotation_id, product_id, description, hsn_code, qty, unit, unit_price, tax_pct, amount, color, packs, pcs_per_pack, total_pcs, qty_20ft, qty_40ft, is_charge, custom1, custom2, custom3, image, sort_order)
+       SELECT ?, product_id, description, hsn_code, qty, unit, unit_price, tax_pct, amount, color, packs, pcs_per_pack, total_pcs, qty_20ft, qty_40ft, is_charge, custom1, custom2, custom3, image, sort_order FROM quotation_items WHERE quotation_id = ?`
+    ).run(newId, id);
     return newId;
   });
   res.status(201).json(getFull(newId));

@@ -163,6 +163,18 @@ export default function QuotationFormPage() {
     },
   });
 
+  // A separate offer that starts from this one, under its own number — unlike
+  // Revise, which keeps the number and supersedes what is on screen. Offered
+  // on a superseded revision too: copying a dead round is a normal way to
+  // start a fresh quote, and nothing about the old row changes.
+  const duplicate = useMutation({
+    mutationFn: () => api.post<Quotation>(`/api/quotations/${id}/duplicate`),
+    onSuccess: (q) => {
+      queryClient.invalidateQueries({ queryKey: ['quotations'] });
+      navigate(`/quotations/${q.id}`);
+    },
+  });
+
   const remove = useMutation({
     mutationFn: () => api.del(`/api/quotations/${id}`),
     onSuccess: () => {
@@ -202,6 +214,14 @@ export default function QuotationFormPage() {
                     ↻ Revise
                   </Button>
                 )}
+                <Button
+                  variant="secondary"
+                  onClick={() => duplicate.mutate()}
+                  disabled={duplicate.isPending}
+                  title="Copy these lines into a new quotation with its own number. The original is left alone."
+                >
+                  ⧉ Duplicate
+                </Button>
                 {existing!.status === 'accepted' && (
                   <>
                     <Button onClick={() => navigate(`/orders/new?from_quotation=${id}`)}>→ Book Order</Button>
@@ -377,7 +397,7 @@ export default function QuotationFormPage() {
           </Card>
         )}
 
-        <ErrorText error={save.error ?? setStatus.error ?? revise.error ?? remove.error} />
+        <ErrorText error={save.error ?? setStatus.error ?? revise.error ?? duplicate.error ?? remove.error} />
 
         {!readOnly && (
           <div className="flex items-center justify-between">

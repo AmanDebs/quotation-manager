@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Quotation } from '../types';
-import { Button, Select, Input, PageHeader, EmptyState, Card, ExportTabs, ErrorText, Pagination, DownloadButton } from '../components/ui';
+import { Button, Select, Input, PageHeader, EmptyState, Card, ExportTabs, ErrorText, Pagination, DownloadButton, MultiSelectFilter } from '../components/ui';
 import NewDocumentDialog from '../components/NewDocumentDialog';
 import InternalNotes from '../components/InternalNotes';
 import { useCompanies } from '../components/CompanySelect';
@@ -103,12 +103,16 @@ export default function QuotationsPage() {
             ))}
           </Select>
         )}
-        <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="max-w-45">
-          <option value="">All statuses</option>
-          {['draft', 'sent', 'negotiating', 'accepted', 'rejected', 'expired'].map((s) => (
-            <option key={s} value={s}>{s[0].toUpperCase() + s.slice(1)}</option>
-          ))}
-        </Select>
+        <MultiSelectFilter
+          options={STATUSES.map((s) => ({ key: s, label: s[0].toUpperCase() + s.slice(1) }))}
+          value={statusFilter}
+          onChange={setStatusFilter}
+          // Names the default rather than sitting blank: the list drops
+          // rejected quotations unless asked, and a box saying "All statuses"
+          // over a list that is hiding some would be a small lie.
+          defaultLabel="Open (rejected hidden)"
+          allLabel="All statuses"
+        />
         <Input
           className="max-w-64"
           placeholder="Search number or customer…"
@@ -123,7 +127,9 @@ export default function QuotationsPage() {
             message={
               search || statusFilter || exportFilter || companyFilter
                 ? 'Nothing matches those filters.'
-                : 'No quotations yet. Create one from an enquiry or directly.'
+                // Rejected rows are dropped even with no filter set, so an
+                // empty table here is not proof the book is empty.
+                : 'No open quotations. Rejected ones are hidden — pick “All statuses” to include them.'
             }
           />
         ) : (
