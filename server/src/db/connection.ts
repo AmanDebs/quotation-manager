@@ -78,6 +78,10 @@ addColumnIfMissing('quotations', 'insurance', 'REAL NOT NULL DEFAULT 0');
 addColumnIfMissing('quotations', 'inco_terms', "TEXT NOT NULL DEFAULT ''");
 addColumnIfMissing('quotations', 'container_count', "TEXT NOT NULL DEFAULT ''");
 addColumnIfMissing('quotations', 'prepared_by', "TEXT NOT NULL DEFAULT ''");
+// The team's own commentary on a proforma. Quotations have had this since the
+// beginning; proformas never did, so the notes about a negotiation stopped at
+// the point it turned into a document.
+addColumnIfMissing('proforma_invoices', 'internal_notes', "TEXT NOT NULL DEFAULT ''");
 addColumnIfMissing('proforma_invoices', 'notify_party_2', "TEXT NOT NULL DEFAULT ''");
 addColumnIfMissing('proforma_invoices', 'method_of_despatch', "TEXT NOT NULL DEFAULT ''");
 addColumnIfMissing('proforma_invoices', 'quantity_tolerance', "TEXT NOT NULL DEFAULT ''");

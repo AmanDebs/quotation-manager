@@ -209,7 +209,7 @@ export default function QuotationsPage() {
                   <tr onClick={(e) => e.stopPropagation()}>
                     <td colSpan={showCompany ? 9 : 8} className="cursor-default px-1 pb-3">
                       <div className="rounded-md border border-slate-200 bg-slate-50/70 p-3">
-                        <InternalNotes quotationId={q.id} value={q.internal_notes ?? ''} autoFocus />
+                        <InternalNotes docType="quotation" docId={q.id} value={q.internal_notes ?? ""} autoFocus />
                       </div>
                     </td>
                   </tr>

@@ -9,6 +9,7 @@ import { DocNumber, IncoTermsInput } from '../components/DocFields';
 import LineItemsEditor from '../components/LineItemsEditor';
 import ContainerFitment from '../components/ContainerFitment';
 import FollowupButton from '../components/FollowupButton';
+import InternalNotes from '../components/InternalNotes';
 import PaymentsCard from '../components/PaymentsCard';
 import ApprovalStrip from '../components/ApprovalStrip';
 import ColumnsControl, { proformaColumns, proformaOmit, newColumnConfig, hasColumnPrefs } from '../components/ColumnsControl';
@@ -160,6 +161,16 @@ export default function ProformaFormPage() {
     },
   });
 
+  // A fresh proforma that starts from this one, under its own number. The
+  // order link is deliberately not carried — see the endpoint's own note.
+  const duplicate = useMutation({
+    mutationFn: () => api.post<Proforma>(`/api/proformas/${id}/duplicate`),
+    onSuccess: (p) => {
+      queryClient.invalidateQueries({ queryKey: ['proformas'] });
+      navigate(`/proformas/${p.id}`);
+    },
+  });
+
   const remove = useMutation({
     mutationFn: () => api.del(`/api/proformas/${id}`),
     onSuccess: () => {
@@ -206,6 +217,14 @@ export default function ProformaFormPage() {
               <>
                 <a href={`/api/pdf/proforma/${id}`} target="_blank" rel="noreferrer"><Button variant="secondary">📄 PDF</Button></a>
                 <FollowupButton docType="proforma" docId={Number(id)} customerId={existing!.customer_id} />
+                <Button
+                  variant="secondary"
+                  onClick={() => duplicate.mutate()}
+                  disabled={duplicate.isPending}
+                  title="Copy these lines into a new proforma with its own number. The original, its order link and its payments are left alone."
+                >
+                  ⧉ Duplicate
+                </Button>
                 {/* Book the order the buyer has confirmed against this
                     proforma. Hidden once one exists — the proforma carries the
                     link, and re-pointing it would orphan the first order's
@@ -416,6 +435,14 @@ export default function ProformaFormPage() {
             "does the Container field above say the right thing?" */}
         <ContainerFitment items={draft.items} containerCount={draft.container_count} />
 
+        {/* Saved through its own endpoint, so it needs an id — and so saving a
+            note cannot reset an approved proforma the way the form's Save does. */}
+        {!isNew && (
+          <Card title="Notes for us">
+            <InternalNotes docType="proforma" docId={Number(id)} value={existing!.internal_notes ?? ''} rows={4} />
+          </Card>
+        )}
+
         <Card title="Remarks" actions={<NotePresetPicker value={draft.remarks} onChange={(v) => set({ remarks: v })} />}>
           <Textarea rows={3} value={draft.remarks} onChange={(e) => set({ remarks: e.target.value })} placeholder="Any other conditions specific to this customer…" />
         </Card>
@@ -431,7 +458,7 @@ export default function ProformaFormPage() {
           />
         )}
 
-        <ErrorText error={save.error ?? setStatus.error ?? remove.error} />
+        <ErrorText error={save.error ?? setStatus.error ?? duplicate.error ?? remove.error} />
 
         <div className="flex items-center justify-between">
           <div>

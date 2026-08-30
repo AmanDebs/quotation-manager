@@ -598,6 +598,8 @@ export interface Proforma {
   items?: LineItem[];
   payments?: Payment[];
   amount_received?: number;
+  /** Never printed — the team's own record. Quotations have had one all along. */
+  internal_notes?: string;
   // Both come off the list query. Optional so a server that has not been
   // redeployed yet yields "—" rather than NaN, the way the dashboard's
   // factory counts are typed.

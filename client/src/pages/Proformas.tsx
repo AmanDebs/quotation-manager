@@ -7,6 +7,7 @@ import { Button, Select, Input, PageHeader, EmptyState, Card, ExportTabs, ErrorT
 import { useCompanies } from '../components/CompanySelect';
 import NewDocumentDialog from '../components/NewDocumentDialog';
 import { fmtDate, fmtMoney } from '../lib/format';
+import InternalNotes from '../components/InternalNotes';
 import { useUrlFilter } from '../lib/useUrlFilter';
 import { usePagedList, PAGE_SIZE } from '../lib/usePagedList';
 
@@ -40,6 +41,16 @@ export default function ProformasPage() {
   // Server-side, not a filter over the rows on screen: the list is paged,
   // so searching what has been fetched would only search the current page.
   const [search, setSearch] = useUrlFilter('q');
+  // Which rows have their note panel open. Keyed by proforma id rather than
+  // index, so filtering the list cannot open the wrong one.
+  const [openNotes, setOpenNotes] = useState<Set<number>>(new Set());
+
+  const toggleNote = (id: number) =>
+    setOpenNotes((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
   const [creating, setCreating] = useState(false);
   const params = new URLSearchParams();
   if (statusFilter) params.set('status', statusFilter);
@@ -127,11 +138,15 @@ export default function ProformasPage() {
                 <th className="pb-2 pr-3">Payment Terms</th>
                 <th className="pb-2 pr-3">Issued By</th>
                 <th className="pb-2 pr-3">Status</th>
+                <th className="w-8 pb-2" />
               </tr>
             </thead>
-            <tbody>
-              {proformas.map((p) => (
-                <tr key={p.id} className="cursor-pointer border-b border-slate-100 last:border-0 hover:bg-slate-50" onClick={() => navigate(`/proformas/${p.id}`)}>
+            {proformas.map((p) => {
+              const noteOpen = openNotes.has(p.id);
+              const hasNote = !!p.internal_notes?.trim();
+              return (
+              <tbody key={p.id} className="border-b border-slate-100 last:border-0">
+                <tr className="cursor-pointer hover:bg-slate-50" onClick={() => navigate(`/proformas/${p.id}`)}>
                   <td className="py-2 pr-3 font-medium text-brand-600"><Link to={`/proformas/${p.id}`}>{p.number}</Link></td>
                   <td className="py-2 pr-3 whitespace-nowrap">{fmtDate(p.date)}</td>
                   <td className="py-2 pr-3">{p.customer_name}</td>
@@ -175,9 +190,32 @@ export default function ProformasPage() {
                       <span className="ml-1 text-xs text-amber-700" title="Awaiting manager approval">⏳</span>
                     )}
                   </td>
+                  {/* Opens the note in place — the click must not open the proforma. */}
+                  <td className="py-2 text-right" onClick={(e) => e.stopPropagation()}>
+                    <button
+                      onClick={() => toggleNote(p.id)}
+                      aria-expanded={noteOpen}
+                      className={`rounded px-1 focus:outline-none focus:ring-1 focus:ring-brand-600 ${
+                        hasNote ? 'text-brand-600' : 'text-slate-300 hover:text-slate-500'
+                      }`}
+                      title={hasNote ? 'Internal note' : 'Add an internal note'}
+                      aria-label={hasNote ? `Internal note on ${p.number}` : `Add an internal note to ${p.number}`}
+                    >🗒</button>
+                  </td>
                 </tr>
-              ))}
-            </tbody>
+
+                {noteOpen && (
+                  <tr onClick={(e) => e.stopPropagation()}>
+                    <td colSpan={10} className="cursor-default px-1 pb-3">
+                      <div className="rounded-md border border-slate-200 bg-slate-50/70 p-3">
+                        <InternalNotes docType="proforma" docId={p.id} value={p.internal_notes ?? ''} autoFocus />
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+              );
+            })}
           </table>
         )}
         <Pagination

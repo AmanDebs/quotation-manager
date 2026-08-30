@@ -376,7 +376,7 @@ export default function QuotationFormPage() {
             editable on a superseded revision, unlike everything above. */}
         {!isNew && (
           <Card title="Notes for us">
-            <InternalNotes quotationId={Number(id)} value={existing!.internal_notes ?? ''} rows={4} />
+            <InternalNotes docType="quotation" docId={Number(id)} value={existing!.internal_notes ?? ""} rows={4} />
           </Card>
         )}
 

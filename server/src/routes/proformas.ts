@@ -94,7 +94,7 @@ const headerFields = [
   'is_export', 'country_of_origin', 'port_of_loading', 'port_of_discharge', 'final_destination',
   'container_count', 'partial_shipment', 'po_number', 'po_date',
   'notify_party_2', 'method_of_despatch', 'quantity_tolerance', 'hs_code', 'prepared_by',
-  'remarks', 'tax_type',
+  'remarks', 'internal_notes', 'tax_type',
 ] as const;
 
 function headerValues(body: Record<string, unknown>, existing?: Record<string, unknown>) {
@@ -378,6 +378,77 @@ proformasRouter.post('/:id/status', (req: AuthedRequest, res) => {
   if (blocked) return res.status(409).json({ error: blocked });
   db.prepare('UPDATE proforma_invoices SET status = ? WHERE id = ?').run(String(status), id);
   res.json(getFull(id));
+});
+
+/**
+ * The team's private note, saved on its own rather than through the form.
+ *
+ * Same endpoint shape as the quotation's, and for the same reason: going
+ * through the document's PUT would reset an approved proforma to
+ * `not_submitted` (that is what `resetApprovalOnEdit` is for) and rewrite
+ * every line item, when all that changed was a sentence nobody outside the
+ * office will ever read.
+ */
+proformasRouter.patch('/:id/internal-notes', (req: AuthedRequest, res) => {
+  const id = Number(req.params.id);
+  const existing = db.prepare('SELECT customer_id FROM proforma_invoices WHERE id = ?').get(id) as { customer_id: number } | undefined;
+  if (!existing || !canAccessCustomer(req, existing.customer_id)) return res.status(404).json({ error: 'Proforma not found' });
+  db.prepare('UPDATE proforma_invoices SET internal_notes = ? WHERE id = ?').run(String(req.body?.internal_notes ?? ''), id);
+  res.json(getFull(id));
+});
+
+/**
+ * Duplicate: the same proforma as a fresh document, under a **new** number.
+ *
+ * Same shape as the quotation's duplicate, and the same reasoning, with one
+ * hazard of its own.
+ *
+ * **`order_id` must not carry across.** A proforma has no `pi_id` on the
+ * order, so the link between the two lives on this column, and
+ * `dispatchProgress()` walks it to decide how much of an order has been
+ * billed. Copying it would point a second proforma at an order that already
+ * has one — which is exactly what `POST /orders` refuses to do from the other
+ * direction, because it orphans the first order's dispatch figures.
+ *
+ * **`quotation_id` does not either.** A duplicate is a separate offer, and two
+ * proformas both claiming to be the one raised from a quotation makes "which
+ * document came from this quote" unanswerable. The carry-forward endpoint
+ * (`prefill/from-quotation/:id`) is how a proforma is properly attached to a
+ * quotation, and it still is.
+ *
+ * Payments are not copied — they are money received against *that* document —
+ * and, as on a quotation, the approval resets, internal notes stay behind, and
+ * a validity date already past is dropped rather than carried into an offer
+ * that lapses the moment it is sent.
+ *
+ * The number comes from the same series the source used: `is_export` is
+ * copied, so an export proforma duplicates into the export series.
+ */
+proformasRouter.post('/:id/duplicate', (req: AuthedRequest, res) => {
+  const id = Number(req.params.id);
+  const existing = db.prepare('SELECT * FROM proforma_invoices WHERE id = ?').get(id) as Record<string, unknown> | undefined;
+  if (!existing || !canAccessCustomer(req, Number(existing.customer_id))) return res.status(404).json({ error: 'Proforma not found' });
+  const today = new Date().toISOString().slice(0, 10);
+  const validity = String(existing.validity_date ?? '');
+  const newId = transaction(() => {
+    const number = nextNumber('proforma', {
+      isExport: Number(existing.is_export) === 1,
+      companyId: Number(existing.company_id),
+      date: today,
+    });
+    const info = db.prepare(
+      `INSERT INTO proforma_invoices (number, date, customer_id, company_id, consignee, notify_party, currency, freight, insurance, lead_time, bank_account, inco_terms, payment_terms, delivery_terms, validity_date, is_export, country_of_origin, port_of_loading, port_of_discharge, final_destination, container_count, partial_shipment, po_number, po_date, notify_party_2, method_of_despatch, quantity_tolerance, hs_code, prepared_by, remarks, tax_type, column_config, created_by, status, subtotal, tax_total, grand_total)
+       SELECT ?, ?, customer_id, company_id, consignee, notify_party, currency, freight, insurance, lead_time, bank_account, inco_terms, payment_terms, delivery_terms, ?, is_export, country_of_origin, port_of_loading, port_of_discharge, final_destination, container_count, partial_shipment, po_number, po_date, notify_party_2, method_of_despatch, quantity_tolerance, hs_code, prepared_by, remarks, tax_type, column_config, ?, 'draft', subtotal, tax_total, grand_total
+       FROM proforma_invoices WHERE id = ?`
+    ).run(number, today, validity >= today ? validity : '', req.user!.id, id);
+    const newId = Number(info.lastInsertRowid);
+    db.prepare(
+      `INSERT INTO pi_items (pi_id, product_id, description, hsn_code, qty, unit, unit_price, tax_pct, amount, color, packs, pcs_per_pack, total_pcs, qty_20ft, qty_40ft, is_charge, custom1, custom2, custom3, image, sort_order)
+       SELECT ?, product_id, description, hsn_code, qty, unit, unit_price, tax_pct, amount, color, packs, pcs_per_pack, total_pcs, qty_20ft, qty_40ft, is_charge, custom1, custom2, custom3, image, sort_order FROM pi_items WHERE pi_id = ?`
+    ).run(newId, id);
+    return newId;
+  });
+  res.status(201).json(getFull(newId));
 });
 
 proformasRouter.delete('/:id', (req: AuthedRequest, res) => {

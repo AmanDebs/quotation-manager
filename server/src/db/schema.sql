@@ -349,7 +349,11 @@ CREATE TABLE IF NOT EXISTS proforma_invoices (
   quantity_tolerance TEXT NOT NULL DEFAULT '',
   hs_code TEXT NOT NULL DEFAULT '',
   prepared_by TEXT NOT NULL DEFAULT '',
+  -- Printed, as the remarks on the proforma itself.
   remarks TEXT NOT NULL DEFAULT '',
+  -- Never printed. The team's own record, the same field quotations have had
+  -- from the beginning and proformas never did.
+  internal_notes TEXT NOT NULL DEFAULT '',
   tax_type TEXT NOT NULL DEFAULT 'none' CHECK (tax_type IN ('none','cgst_sgst','igst')),
   status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','sent','order_confirmed','advance_received','in_production','cancelled')),
   created_by INTEGER REFERENCES users(id),

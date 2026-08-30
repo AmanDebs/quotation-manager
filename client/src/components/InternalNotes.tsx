@@ -1,28 +1,38 @@
 import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
-import type { Quotation } from '../types';
 import { Textarea, ErrorText } from './ui';
 
 /**
- * The team's private note on a quotation.
+ * The team's private note on a document.
  *
- * A quotation already has `notes`, but those are printed — they become the
- * NOTES & TERMS bullets the customer reads. This is the other kind: what was
- * asked for, what was conceded, when to call back. The label says so plainly,
- * because the only real hazard here is typing one into the other.
+ * The document already has printed remarks — the NOTES & TERMS bullets, or the
+ * proforma's Remarks — which the customer reads. This is the other kind: what
+ * was asked for, what was conceded, when to call back. The label says so
+ * plainly, because the only real hazard here is typing one into the other.
  *
- * It saves on blur through its own endpoint rather than the form's Save, so
- * that an approved quotation stays approved and no line item is touched.
+ * It saves on blur through its own endpoint rather than the form's Save, so an
+ * approved document stays approved and no line item is touched.
+ *
+ * Written against a doc type rather than a quotation id: proformas gained the
+ * same field, and a second near-identical copy of this is how the two would
+ * drift apart.
  */
+const ENDPOINT = {
+  quotation: { path: 'quotations', list: 'quotations', detail: 'quotation' },
+  proforma: { path: 'proformas', list: 'proformas', detail: 'proforma' },
+} as const;
+
 export default function InternalNotes({
-  quotationId, value, rows = 3, autoFocus,
+  docType, docId, value, rows = 3, autoFocus,
 }: {
-  quotationId: number;
+  docType: keyof typeof ENDPOINT;
+  docId: number;
   value: string;
   rows?: number;
   autoFocus?: boolean;
 }) {
+  const target = ENDPOINT[docType];
   const queryClient = useQueryClient();
   const [text, setText] = useState(value);
   const [saved, setSaved] = useState(false);
@@ -39,10 +49,10 @@ export default function InternalNotes({
 
   const save = useMutation({
     mutationFn: (internal_notes: string) =>
-      api.patch<Quotation>(`/api/quotations/${quotationId}/internal-notes`, { internal_notes }),
-    onSuccess: (q) => {
-      queryClient.invalidateQueries({ queryKey: ['quotations'] });
-      queryClient.setQueryData(['quotation', String(q.id)], q);
+      api.patch<{ id: number }>(`/api/${target.path}/${docId}/internal-notes`, { internal_notes }),
+    onSuccess: (doc) => {
+      queryClient.invalidateQueries({ queryKey: [target.list] });
+      queryClient.setQueryData([target.detail, String(doc.id)], doc);
       setSaved(true);
       savedTimer.current = setTimeout(() => setSaved(false), 2000);
     },
