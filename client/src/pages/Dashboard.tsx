@@ -36,6 +36,12 @@ interface DashboardData {
   counts: { quotations: number; orders: number; invoices: number; pendingApprovals: number };
   quotationsByStatus: { status: string; count: number }[];
   ordersByStatus: { status: string; count: number; total: number; currency: string }[];
+  /**
+   * The document counts of the tiles above, per currency. Optional so a server
+   * that has not been redeployed yet reads as zero rather than NaN, the way the
+   * factory counts are typed.
+   */
+  countsByCurrency?: { currency: string; quotations: number; orders: number; invoices: number }[];
   businessSplit: { is_export: number; currency: string; count: number; total: number }[];
   quotedByMonth: { month: string; currency: string; total: number }[];
   invoicedByMonth: { month: string; currency: string; total: number }[];
@@ -46,7 +52,7 @@ interface DashboardData {
   currencyTotals: { currency: string; accepted_value: number; quoted_value: number }[];
   followups: { overdue: Followup[]; today: Followup[]; upcoming: Followup[] };
   funnel: { quoted: number; accepted: number; orders: number; invoiced: number };
-  receivables: { currency: string; invoiced: number; received: number; outstanding: number }[];
+  receivables: { currency: string; invoiced: number; received: number; outstanding: number; overdue?: number }[];
   receivablesAgeing: { currency: string; bucket: string; outstanding: number; count: number }[];
   orderBook: { currency: string; open_value: number; pending_value: number; count: number }[];
   overdueOrders: number;
@@ -334,6 +340,10 @@ export default function DashboardPage() {
   const cur = activeCurrency;
   const book = data.orderBook.find((r) => r.currency === cur);
   const recv = data.receivables.find((r) => r.currency === cur);
+  // A tile states one currency's money, so it must count in that currency
+  // too. Pairing an INR figure with a count of every document in the book
+  // made a true zero read as a fault.
+  const cc = data.countsByCurrency?.find((r) => r.currency === cur);
   const quotedPeriod = monthlyRows.reduce((s, r) => s + r.quoted, 0);
   const invoicedPeriod = monthlyRows.reduce((s, r) => s + r.invoiced, 0);
   const receivedPeriod = monthlyRows.reduce((s, r) => s + r.received, 0);
@@ -404,7 +414,7 @@ export default function DashboardPage() {
             value={recv?.outstanding ?? 0}
             currency={cur}
             tone={(recv?.outstanding ?? 0) > 0 ? 'warn' : 'good'}
-            note={a.overdueInvoices ? `${a.overdueInvoices} invoice${a.overdueInvoices === 1 ? '' : 's'} over 60 days old` : 'nothing older than 60 days'}
+            note={(recv?.overdue ?? 0) ? `${recv!.overdue} invoice${recv!.overdue === 1 ? '' : 's'} over 60 days old` : 'nothing older than 60 days'}
           />
           <MoneyTile
             to={listUrl('/invoices')}
@@ -412,14 +422,14 @@ export default function DashboardPage() {
             value={invoicedPeriod}
             currency={cur}
             tone="good"
-            note={`${data.counts.invoices} invoice${data.counts.invoices === 1 ? '' : 's'} raised · ${fmtMoney(receivedPeriod, cur)} collected`}
+            note={`${cc?.invoices ?? 0} invoice${(cc?.invoices ?? 0) === 1 ? '' : 's'} raised · ${fmtMoney(receivedPeriod, cur)} collected`}
           />
           <MoneyTile
             to={listUrl('/quotations')}
             label={`Quoted · ${range.label.toLowerCase()}`}
             value={quotedPeriod}
             currency={cur}
-            note={`${data.counts.quotations} quotation${data.counts.quotations === 1 ? '' : 's'} · ${data.counts.orders} order${data.counts.orders === 1 ? '' : 's'}`}
+            note={`${cc?.quotations ?? 0} quotation${(cc?.quotations ?? 0) === 1 ? '' : 's'} · ${cc?.orders ?? 0} order${(cc?.orders ?? 0) === 1 ? '' : 's'}`}
           />
         </div>
       ),

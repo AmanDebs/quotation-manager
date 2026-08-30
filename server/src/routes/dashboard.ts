@@ -54,6 +54,30 @@ dashboardRouter.get('/', (req: AuthedRequest, res) => {
     ),
   };
 
+  /**
+   * The same three counts as `counts` above, but grouped by currency.
+   *
+   * The money tiles show one currency at a time and each pairs a figure with a
+   * count. Pairing a currency-filtered amount with a count of every document in
+   * the book is how "INR 0.00 — 3 invoices raised" happened: both figures were
+   * true, and together they read as a fault. The WHERE clauses are copied from
+   * `counts` verbatim, so the two can only ever differ by the grouping.
+   *
+   * `counts` itself stays whole-book: it feeds the funnel, which is about deal
+   * flow and carries no currency of its own.
+   */
+  const countsMap = new Map<string, { currency: string; quotations: number; orders: number; invoices: number }>();
+  const bump = (currency: string, key: 'quotations' | 'orders' | 'invoices', n: number) => {
+    const row = countsMap.get(currency) ?? { currency, quotations: 0, orders: 0, invoices: 0 };
+    row[key] = n;
+    countsMap.set(currency, row);
+  };
+  type CurCount = { currency: string; c: number };
+  for (const r of q<CurCount>(`SELECT currency, COUNT(*) AS c FROM quotations WHERE superseded_by IS NULL AND date BETWEEN ? AND ?${and} GROUP BY currency`, from, to, ...p)) bump(r.currency, 'quotations', r.c);
+  for (const r of q<CurCount>(`SELECT currency, COUNT(*) AS c FROM orders WHERE status NOT IN ('cancelled') AND date BETWEEN ? AND ?${and} GROUP BY currency`, from, to, ...p)) bump(r.currency, 'orders', r.c);
+  for (const r of q<CurCount>(`SELECT currency, COUNT(*) AS c FROM commercial_invoices WHERE date BETWEEN ? AND ?${and} GROUP BY currency`, from, to, ...p)) bump(r.currency, 'invoices', r.c);
+  const countsByCurrency = [...countsMap.values()];
+
   const quotationsByStatus = q(
     `SELECT status, COUNT(*) AS count FROM quotations WHERE superseded_by IS NULL AND date BETWEEN ? AND ?${and} GROUP BY status`,
     from, to, ...p
@@ -206,7 +230,11 @@ dashboardRouter.get('/', (req: AuthedRequest, res) => {
   // invoices raised from its proforma whether or not they are all on screen.
   // Filtering here would silently over-credit whichever ones remain.
   const receivedPerInvoice = receivedByInvoice();
-  const receivablesMap = new Map<string, { currency: string; invoiced: number; received: number; outstanding: number }>();
+  // `overdue` is the count of this currency's invoices unpaid past 60 days.
+  // The attention strip keeps its own whole-book figure — the store is not
+  // any one currency's — but the Outstanding tile states a currency amount
+  // and must count in the same currency it is showing.
+  const receivablesMap = new Map<string, { currency: string; invoiced: number; received: number; outstanding: number; overdue: number }>();
 
   // Ageing: how long the unpaid money has been outstanding, bucketed by the
   // age of the invoice. This is what tells you which customer to chase first.
@@ -218,7 +246,7 @@ dashboardRouter.get('/', (req: AuthedRequest, res) => {
 
   for (const inv of invoicesAll) {
     const received = receivedPerInvoice.get(inv.id) ?? 0;
-    const row = receivablesMap.get(inv.currency) ?? { currency: inv.currency, invoiced: 0, received: 0, outstanding: 0 };
+    const row = receivablesMap.get(inv.currency) ?? { currency: inv.currency, invoiced: 0, received: 0, outstanding: 0, overdue: 0 };
     row.invoiced += inv.grand_total;
     row.received += Math.min(received, inv.grand_total);
     const outstanding = Math.max(0, inv.grand_total - received);
@@ -228,7 +256,7 @@ dashboardRouter.get('/', (req: AuthedRequest, res) => {
     if (outstanding > 0.005) {
       const days = Math.max(0, Math.floor((todayMs - Date.parse(inv.date)) / 86_400_000));
       const bucket = bucketFor(days);
-      if (days > 60) overdueInvoices += 1;
+      if (days > 60) { overdueInvoices += 1; row.overdue += 1; }
       const key = `${inv.currency}|${bucket}`;
       const ageRow = ageingMap.get(key) ?? { currency: inv.currency, bucket, outstanding: 0, count: 0 };
       ageRow.outstanding += outstanding;
@@ -408,7 +436,7 @@ dashboardRouter.get('/', (req: AuthedRequest, res) => {
   };
 
   res.json({
-    counts, quotationsByStatus, ordersByStatus, businessSplit, quotedByMonth, invoicedByMonth,
+    counts, countsByCurrency, quotationsByStatus, ordersByStatus, businessSplit, quotedByMonth, invoicedByMonth,
     receivedByMonth,
     topCustomers, topCustomersInvoiced, topProducts, currencyTotals, followups, funnel,
     receivables, receivablesAgeing, orderBook, overdueOrders, attention, production,
