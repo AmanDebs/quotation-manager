@@ -630,6 +630,21 @@ export function buildQuotationPdf(id: number): TDocumentDefinitions {
   const showTax = q.tax_type !== 'none';
   const hasQty = items.some((it) => it.qty != null);
   const cfg: ColumnConfig = JSON.parse(String(q.column_config || '{}'));
+  /**
+   * A quotation may be sent as a rate-and-packing price list.
+   *
+   * Hiding the Amount column takes the money band with it — the grand total,
+   * the subtotal, the tax rows and the indicative freight and insurance all
+   * come out of `totalsRows`, and printing a total under a table with no line
+   * amounts in it would be the one figure nobody could check. The items table
+   * needs no help: `itemsTable` tests `hidden` before `always`.
+   *
+   * This is presentation only. `computeTotals` still runs on save and the
+   * document still carries its subtotal, tax and grand total; the list, the
+   * dashboard and the Excel export all still show them, and ticking the column
+   * back on prints the same figure it always would have.
+   */
+  const showMoney = hasQty && !(cfg.hidden ?? []).includes('amount');
 
   const meta: Content = {
     columns: [
@@ -714,9 +729,15 @@ export function buildQuotationPdf(id: number): TDocumentDefinitions {
     docTitle(s, 'QUOTATION'),
     meta,
     itemsTable(s, items, specs, cfg),
-    ...(hasQty
+    // Nothing at all when the amounts are deliberately off — the page ends with
+    // the items table and runs straight on to the notes. The note below stays
+    // for the different case it was written for: a quotation carrying no
+    // quantities at all, where saying so is the point.
+    ...(showMoney
       ? [totalsBand(s, q, cur, grandLabel), amountWords(q, cur)]
-      : [{ text: 'Note: Quantities to be confirmed by the customer. Prices are as stated above.', fontSize: 8, italics: true, margin: [0, 6, 0, 0] as any }]),
+      : hasQty
+        ? []
+        : [{ text: 'Note: Quantities to be confirmed by the customer. Prices are as stated above.', fontSize: 8, italics: true, margin: [0, 6, 0, 0] as any }]),
     ...notesAndTerms(s, q.notes),
     // No signature block: a quotation is an offer, not a document anyone
     // countersigns. The order confirmation and proforma still carry one. The

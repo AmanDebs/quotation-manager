@@ -25,6 +25,7 @@ export const ITEM_COLUMNS: ToggleableColumn[] = [
   { key: 'tax', label: 'Tax %' },
   { key: 'code', label: 'Code (size/spec)' },
   { key: 'supplier', label: 'Supplier' },
+  { key: 'amount', label: 'Amount / line total' },
 ];
 
 /**
@@ -56,7 +57,7 @@ export const QUOTATION_OMIT = ['hsn', 'qty'];
  * server/src/services/totals.ts, which falls back to Total Qty for exactly
  * this reason.
  */
-export const PROFORMA_OMIT = ['hsn', 'qty'];
+export const PROFORMA_OMIT = ['hsn', 'qty', 'amount'];
 
 /** Container loadability is meaningless to a domestic GST buyer. */
 export const LOADABILITY_COLUMNS = ['qty_20ft', 'qty_40ft'];
@@ -197,4 +198,25 @@ export default function ColumnsControl({
       )}
     </div>
   );
+}
+
+/**
+ * Columns the commercial invoice and the order confirmation do not offer.
+ *
+ * `amount`: a quotation may be sent as a rate-and-packing price list, with the
+ * line totals and the grand total deliberately left off. An invoice may not —
+ * an invoice with no amounts is not a document that can be presented for GST
+ * or customs — and an order confirmation states what was agreed, money
+ * included. Both forms render the whole of ITEM_COLUMNS unless given a list,
+ * so the exclusion has to be written down here rather than assumed.
+ */
+export const INVOICE_OMIT = ['amount'];
+export const ORDER_OMIT = ['amount'];
+
+export function invoiceColumns(): ToggleableColumn[] {
+  return columnsFor(INVOICE_OMIT);
+}
+
+export function orderColumns(): ToggleableColumn[] {
+  return columnsFor(ORDER_OMIT);
 }

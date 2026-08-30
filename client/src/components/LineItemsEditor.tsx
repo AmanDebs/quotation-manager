@@ -216,6 +216,11 @@ export default function LineItemsEditor({
   };
 
   const taxVisible = (showTax ?? taxType !== 'none') && show('tax');
+  // Turned off for a rate-and-packing price list: the lines still have
+  // amounts and the document still has a grand total — the server computes
+  // both on save either way — they are simply not shown or printed. Only the
+  // quotation offers the toggle; see ColumnsControl.
+  const amountVisible = show('amount');
   const lineAmount = (it: LineItem): number | null => {
     const q = billedQty(it);
     return q != null ? q * it.unit_price : null;
@@ -288,7 +293,7 @@ export default function LineItemsEditor({
               {show('unit_price') && <th className="w-28 pb-2 pr-2 text-right font-medium">Unit Price</th>}
               <th className="w-28 pb-2 pr-2 font-medium">Unit</th>
               {taxVisible && <th className="w-16 pb-2 pr-2 text-right font-medium">Tax %</th>}
-              <th className="w-32 pb-2 pr-2 text-right font-medium">Amount</th>
+              {amountVisible && <th className="w-32 pb-2 pr-2 text-right font-medium">Amount</th>}
               <th className="w-8 pb-2" />
             </tr>
           </thead>
@@ -439,9 +444,11 @@ export default function LineItemsEditor({
                       <Input type="number" min={0} max={100} step="any" value={it.tax_pct ?? ''} onChange={(e) => set(i, { tax_pct: e.target.value === '' ? 0 : Number(e.target.value) })} />
                     </td>
                   )}
-                  <td className="py-2 pr-2 pt-4 text-right font-semibold tabular-nums text-slate-800">
-                    {amount != null ? fmtMoney(amount, currency) : <span className="font-normal text-slate-400">price only</span>}
-                  </td>
+                  {amountVisible && (
+                    <td className="py-2 pr-2 pt-4 text-right font-semibold tabular-nums text-slate-800">
+                      {amount != null ? fmtMoney(amount, currency) : <span className="font-normal text-slate-400">price only</span>}
+                    </td>
+                  )}
                   <td className="py-2 pt-4 text-right">
                     <button
                       className="text-slate-300 opacity-0 transition-opacity hover:text-red-500 focus:opacity-100 focus:outline-none group-hover:opacity-100"
@@ -484,7 +491,7 @@ export default function LineItemsEditor({
                 {extrasVisible && isOpen && (
                   <tr id={`extras-${i}`}>
                     <td />
-                    <td colSpan={spanCols + 2} className="pb-3">
+                    <td colSpan={spanCols + (amountVisible ? 2 : 1)} className="pb-3">
                       <div className="grid grid-cols-2 gap-3 rounded-md border border-slate-200 bg-slate-50/70 p-3 sm:grid-cols-3 lg:grid-cols-6">
                         {show('code') && packField('Code', (
                           <Input value={(it as { code?: string }).code ?? ''} onChange={(e) => set(i, { code: e.target.value } as Partial<LineItem>)} placeholder="48mm" />
@@ -530,10 +537,12 @@ export default function LineItemsEditor({
           rounding error; called Lines they describe what they are, and the
           Document Total beside them stays the one authoritative figure.
         */}
-        <div className="text-sm text-slate-600">
-          Lines: <span className="font-semibold tabular-nums">{fmtMoney(subtotal, currency)}</span>
-          {taxVisible && <> · Tax on lines: <span className="font-semibold tabular-nums">{fmtMoney(tax, currency)}</span></>}
-        </div>
+        {amountVisible && (
+          <div className="text-sm text-slate-600">
+            Lines: <span className="font-semibold tabular-nums">{fmtMoney(subtotal, currency)}</span>
+            {taxVisible && <> · Tax on lines: <span className="font-semibold tabular-nums">{fmtMoney(tax, currency)}</span></>}
+          </div>
+        )}
       </div>
       <p className="mt-2 text-xs text-slate-400">
         {show('qty')

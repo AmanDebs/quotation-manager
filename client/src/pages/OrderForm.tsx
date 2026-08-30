@@ -10,7 +10,7 @@ import ProductionTab from '../components/ProductionTab';
 import MaterialTab from '../components/MaterialTab';
 import DispatchTab from '../components/DispatchTab';
 import LineItemsEditor from '../components/LineItemsEditor';
-import ColumnsControl, { newColumnConfig, hasColumnPrefs } from '../components/ColumnsControl';
+import ColumnsControl, { newColumnConfig, hasColumnPrefs, orderColumns } from '../components/ColumnsControl';
 import NotePresetPicker from '../components/NotePresetPicker';
 import FollowupButton from '../components/FollowupButton';
 import { ORDER_STATUSES, orderStatusLabel } from './Orders';
@@ -357,7 +357,7 @@ export default function OrderFormPage() {
 
         <Card
           title="Order Items"
-          actions={<ColumnsControl config={draft.column_config} onChange={(c) => set({ column_config: c })} />}
+          actions={<ColumnsControl config={draft.column_config} onChange={(c) => set({ column_config: c })} columns={orderColumns()} />}
         >
           <LineItemsEditor items={draft.items} onChange={(items) => set({ items })} currency={draft.currency} taxType={draft.tax_type} config={draft.column_config} />
           <HeaderCharges
