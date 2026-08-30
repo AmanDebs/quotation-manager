@@ -94,7 +94,7 @@ const headerFields = [
   'is_export', 'country_of_origin', 'port_of_loading', 'port_of_discharge', 'final_destination',
   'container_count', 'partial_shipment', 'po_number', 'po_date',
   'notify_party_2', 'method_of_despatch', 'quantity_tolerance', 'hs_code', 'prepared_by',
-  'remarks', 'internal_notes', 'tax_type',
+  'remarks', 'tax_type',
 ] as const;
 
 function headerValues(body: Record<string, unknown>, existing?: Record<string, unknown>) {
@@ -389,6 +389,10 @@ proformasRouter.post('/:id/status', (req: AuthedRequest, res) => {
  * every line item, when all that changed was a sentence nobody outside the
  * office will ever read.
  */
+// Deliberately absent from `headerFields` above, exactly as on a quotation:
+// only this endpoint writes the column. Letting the document's PUT carry it
+// would mean a form saved from a stale draft could overwrite a note somebody
+// typed in the panel a moment earlier.
 proformasRouter.patch('/:id/internal-notes', (req: AuthedRequest, res) => {
   const id = Number(req.params.id);
   const existing = db.prepare('SELECT customer_id FROM proforma_invoices WHERE id = ?').get(id) as { customer_id: number } | undefined;

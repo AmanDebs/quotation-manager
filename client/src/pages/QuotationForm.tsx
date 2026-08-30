@@ -5,7 +5,7 @@ import { api } from '../api/client';
 import type { Quotation, Customer, LineItem, TaxType, ColumnConfig } from '../types';
 import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, StatusBadge } from '../components/ui';
 import CompanySelect from '../components/CompanySelect';
-import { DocNumber, IncoTermsInput } from '../components/DocFields';
+import { DocNumber, IncoTermsInput, HeaderCharges } from '../components/DocFields';
 import LineItemsEditor from '../components/LineItemsEditor';
 import FollowupButton from '../components/FollowupButton';
 import ApprovalStrip from '../components/ApprovalStrip';
@@ -360,14 +360,13 @@ export default function QuotationFormPage() {
           ) : (
             <>
               <LineItemsEditor items={draft.items} onChange={(items) => set({ items })} currency={draft.currency} taxType={draft.tax_type} config={draft.column_config} omit={quotationOmit(!!draft.is_export)} />
-              <div className="mt-3 grid grid-cols-1 gap-3 border-t border-slate-100 pt-3 sm:grid-cols-2 md:max-w-md">
-                <Field label={`Indicative Freight (${draft.currency})`}>
-                  <Input type="number" min={0} step="any" value={draft.freight || ''} onChange={(e) => set({ freight: Number(e.target.value) })} />
-                </Field>
-                <Field label={`Insurance (${draft.currency})`}>
-                  <Input type="number" min={0} step="any" value={draft.insurance || ''} onChange={(e) => set({ insurance: Number(e.target.value) })} />
-                </Field>
-              </div>
+              <HeaderCharges
+                freight={draft.freight}
+                insurance={draft.insurance}
+                currency={draft.currency}
+                items={draft.items}
+                onChange={(patch) => set(patch)}
+              />
             </>
           )}
         </Card>
