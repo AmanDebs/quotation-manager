@@ -121,9 +121,11 @@ export default function ProformasPage() {
                 <th className="pb-2 pr-3">Number</th>
                 <th className="pb-2 pr-3">Date</th>
                 <th className="pb-2 pr-3">Customer</th>
-                {showCompany && <th className="pb-2 pr-3">Issued By</th>}
-                <th className="pb-2 pr-3">Ref. Quotation</th>
                 <th className="pb-2 pr-3 text-right">Total</th>
+                <th className="pb-2 pr-3 text-right">Advance</th>
+                <th className="pb-2 pr-3 text-right">Balance</th>
+                <th className="pb-2 pr-3">Payment Terms</th>
+                <th className="pb-2 pr-3">Issued By</th>
                 <th className="pb-2 pr-3">Status</th>
               </tr>
             </thead>
@@ -133,11 +135,26 @@ export default function ProformasPage() {
                   <td className="py-2 pr-3 font-medium text-brand-600"><Link to={`/proformas/${p.id}`}>{p.number}</Link></td>
                   <td className="py-2 pr-3 whitespace-nowrap">{fmtDate(p.date)}</td>
                   <td className="py-2 pr-3">{p.customer_name}</td>
-                  {showCompany && (
-                    <td className="py-2 pr-3 text-xs text-slate-500">{p.company_name ?? "—"}</td>
-                  )}
-                  <td className="py-2 pr-3">{p.quotation_number || '—'}</td>
                   <td className="py-2 pr-3 text-right tabular-nums">{fmtMoney(p.grand_total, p.currency)}</td>
+                  <td className="py-2 pr-3 text-right tabular-nums">
+                    {fmtMoney(p.advance_received ?? 0, p.currency)}
+                    {/* Money the advance deliberately excludes, because it was
+                        paid in another currency and there is no rate to convert
+                        it by. Said out loud rather than quietly left out. */}
+                    {(p.currency_mismatch_count ?? 0) > 0 && (
+                      <span
+                        className="ml-1 text-amber-600"
+                        title={`${p.currency_mismatch_count} payment(s) in another currency are not counted here`}
+                      >
+                        ⚠
+                      </span>
+                    )}
+                  </td>
+                  <td className="py-2 pr-3 text-right tabular-nums">
+                    {fmtMoney(p.grand_total - (p.advance_received ?? 0), p.currency)}
+                  </td>
+                  <td className="py-2 pr-3 text-xs text-slate-600">{p.payment_terms || '—'}</td>
+                  <td className="py-2 pr-3 text-xs text-slate-500">{p.created_by_name ?? '—'}</td>
                   {/* Editable in place — the click must not open the proforma. */}
                   <td className="py-2 pr-3" onClick={(e) => e.stopPropagation()}>
                     <select

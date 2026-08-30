@@ -598,6 +598,11 @@ export interface Proforma {
   items?: LineItem[];
   payments?: Payment[];
   amount_received?: number;
+  // Both come off the list query. Optional so a server that has not been
+  // redeployed yet yields "—" rather than NaN, the way the dashboard's
+  // factory counts are typed.
+  advance_received?: number;
+  currency_mismatch_count?: number;
   approval_status: ApprovalStatus;
   approved_at?: string; approval_note?: string;
   approved_by_name?: string | null; created_by_name?: string | null;

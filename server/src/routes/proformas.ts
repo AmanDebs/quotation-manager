@@ -15,7 +15,28 @@ export const proformasRouter = Router();
 const listSql = `
   SELECT p.*, c.name AS customer_name, c.country AS customer_country, q.number AS quotation_number,
          co.company_name AS company_name,
-         o.number AS order_number, u.name AS created_by_name, a.name AS approved_by_name
+         o.number AS order_number, u.name AS created_by_name, a.name AS approved_by_name,
+         -- What has actually been banked against this proforma. Derived on
+         -- read like every other money figure, and counted only where the
+         -- payment's currency agrees with the document's — the rule
+         -- services/receivables.ts applies to invoices, applied here so the
+         -- list and the proforma page cannot report different advances. A
+         -- blank currency counts as matching: payments inherit theirs from the
+         -- document, so an empty one can only be a legacy row, and dropping it
+         -- would quietly reduce a balance that has been right for months.
+         --
+         -- A correlated subquery rather than a per-row call: the list is
+         -- paged, and asking once per row is the N+1 this codebase keeps
+         -- bounding.
+         (SELECT COALESCE(SUM(pm.amount), 0) FROM payments pm
+           WHERE pm.pi_id = p.id
+             AND (pm.currency IS NULL OR pm.currency = '' OR pm.currency = p.currency)) AS advance_received,
+         -- Money the line above deliberately did not count. Surfaced rather
+         -- than dropped: silently under-reporting what a customer has paid is
+         -- the one outcome worse than an awkward figure on screen.
+         (SELECT COUNT(*) FROM payments pm
+           WHERE pm.pi_id = p.id
+             AND pm.currency IS NOT NULL AND pm.currency <> '' AND pm.currency <> p.currency) AS currency_mismatch_count
   FROM proforma_invoices p
   JOIN customers c ON c.id = p.customer_id
   -- LEFT, not JOIN: a document must still list if its company row is gone.
@@ -30,9 +51,22 @@ function getFull(id: number) {
   if (!pi) return undefined;
   pi.items = db.prepare('SELECT * FROM pi_items WHERE pi_id = ? ORDER BY sort_order, id').all(id);
   pi.column_config = JSON.parse(String(pi.column_config || '{}'));
-  const payments = db.prepare('SELECT * FROM payments WHERE pi_id = ? ORDER BY date, id').all(id) as { amount: number }[];
+  const payments = db.prepare('SELECT * FROM payments WHERE pi_id = ? ORDER BY date, id').all(id) as { amount: number; currency?: string | null }[];
   pi.payments = payments;
-  pi.amount_received = round2(payments.reduce((s, p) => s + p.amount, 0));
+  // Money only adds up within one currency — the same rule the list's
+  // `advance_received` applies above, and the one receivables.ts has always
+  // applied to invoices. This used to sum every payment whatever its currency,
+  // so a €10,000 advance and ₹10,000 added to 20,000 of nothing, and the
+  // figure here could disagree with the one on the list. A blank currency
+  // counts as matching, for the reason given above the query.
+  const docCurrency = String(pi.currency ?? '');
+  const matches = (c: unknown) => !c || String(c) === docCurrency;
+  pi.amount_received = round2(payments.filter((p) => matches(p.currency)).reduce((s, p) => s + p.amount, 0));
+  // Not converted and not allocated — there is no rate stored anywhere and
+  // inventing one would put a fiction on a ledger. Reported instead.
+  pi.currency_mismatch = payments
+    .filter((p) => !matches(p.currency))
+    .map((p) => ({ currency: String(p.currency), amount: p.amount }));
   return pi;
 }
 
@@ -157,9 +191,18 @@ const proformaColumns: Column<Row>[] = [
   { header: 'Insurance', value: (r) => num(r.insurance), type: 'money' },
   { header: 'Tax', value: (r) => num(r.tax_total), type: 'money' },
   { header: 'Total', value: (r) => num(r.grand_total), type: 'money' },
+  // The advance and what is still to come. The subtraction is display
+  // arithmetic over two figures the server already computed, not a second
+  // opinion about either — `advance_received` remains the single source.
+  { header: 'Advance received', value: (r) => num(r.advance_received), type: 'money' },
+  { header: 'Balance', value: (r) => round2(num(r.grand_total) - num(r.advance_received)), type: 'money' },
+  // Rides along for the same reason it does on the invoice export: an advance
+  // that went uncounted is exactly what somebody opens a spreadsheet to find.
+  { header: 'Uncounted payments', value: (r) => num(r.currency_mismatch_count), type: 'number' },
+  { header: 'Payment terms', value: (r) => str(r.payment_terms) },
   { header: 'Status', value: (r) => str(r.status) },
   { header: 'Approval', value: (r) => str(r.approval_status) },
-  { header: 'Created by', value: (r) => str(r.created_by_name) },
+  { header: 'Issued by (user)', value: (r) => str(r.created_by_name) },
 ];
 
 proformasRouter.get('/export', (req: AuthedRequest, res) => {
