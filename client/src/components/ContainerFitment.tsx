@@ -114,6 +114,11 @@ export default function ContainerFitment({
               <tr className="border-b border-slate-200 text-left text-xs uppercase text-slate-500">
                 <th className="pb-1 pr-3">Item</th>
                 <th className="pb-1 pr-3 text-right">Boxes</th>
+                {/* Next to Boxes on purpose: the three read left to right as
+                    boxes × pcs/box = total pieces, which is the sum somebody
+                    will check by eye. */}
+                <th className="pb-1 pr-3 text-right">Pcs / Box</th>
+                <th className="pb-1 pr-3 text-right">Total Pieces</th>
                 <th className="pb-1 pr-3 text-right">Boxes / {size}</th>
                 <th className="pb-1 pr-3 text-right">Space</th>
                 <th className="pb-1 text-right">Share</th>
@@ -131,6 +136,15 @@ export default function ContainerFitment({
                     )}
                   </td>
                   <td className="py-1.5 pr-3 text-right tabular-nums">{fmt(r.boxes)}</td>
+                  {/* A line with no pcs/box recorded has no piece count either —
+                      shown as "—" rather than 0, which would read as "empty
+                      boxes" instead of "nobody has said". */}
+                  <td className="py-1.5 pr-3 text-right tabular-nums text-slate-500">
+                    {r.pcsPerBox ? fmt(r.pcsPerBox) : '—'}
+                  </td>
+                  <td className="py-1.5 pr-3 text-right tabular-nums">
+                    {r.pieces != null ? fmt(r.pieces) : '—'}
+                  </td>
                   <td className="py-1.5 pr-3 text-right tabular-nums text-slate-500">
                     {r.boxesPerContainer ? fmt(r.boxesPerContainer) : '—'}
                   </td>
