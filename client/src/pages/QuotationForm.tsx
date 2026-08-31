@@ -222,11 +222,14 @@ export default function QuotationFormPage() {
                 >
                   ⧉ Duplicate
                 </Button>
+                {/* An accepted quotation becomes a proforma, and the order is
+                    booked from that. Booking one straight from here was the
+                    other way round and is gone; the Orders page still has
+                    "+ New Order" for an order that never had a quotation.
+                    "Proforma directly" lost its contrast when the order button
+                    went, so it says what it does. */}
                 {existing!.status === 'accepted' && (
-                  <>
-                    <Button onClick={() => navigate(`/orders/new?from_quotation=${id}`)}>→ Book Order</Button>
-                    <Button variant="secondary" onClick={() => navigate(`/proformas/new?from_quotation=${id}`)}>→ Proforma directly</Button>
-                  </>
+                  <Button onClick={() => navigate(`/proformas/new?from_quotation=${id}`)}>→ Create Proforma</Button>
                 )}
               </>
             )}

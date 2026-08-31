@@ -761,6 +761,12 @@ export function buildOrderPdf(id: number): TDocumentDefinitions {
   const quotation = o.quotation_id
     ? (db.prepare('SELECT number FROM quotations WHERE id = ?').get(o.quotation_id) as Row | undefined)
     : undefined;
+  // The proforma this order was booked from, resolved backwards: the link
+  // lives on proforma_invoices.order_id, since an order has no pi_id of its
+  // own. Earliest match, because two proformas can each claim one order.
+  const proforma = db
+    .prepare('SELECT number FROM proforma_invoices WHERE order_id = ? ORDER BY id LIMIT 1')
+    .get(id) as Row | undefined;
 
   const cur = o.currency;
   const showTax = o.tax_type !== 'none';
@@ -797,6 +803,7 @@ export function buildOrderPdf(id: number): TDocumentDefinitions {
     ['Order Number', o.number],
     ['Order Date', fmtDate(o.date)],
     ...(quotation ? [['Ref. Quotation', quotation.number] as [string, string]] : []),
+    ...(proforma ? [['Ref. Proforma', proforma.number] as [string, string]] : []),
     ...(o.po_number ? [['Your PO No. & Date', `${o.po_number}${o.po_date ? ` dt. ${fmtDate(o.po_date)}` : ''}`] as [string, string]] : []),
     ...(o.order_through ? [['Order Received Via', o.order_through] as [string, string]] : []),
     ...(o.spoc ? [['Handled By', o.spoc] as [string, string]] : []),

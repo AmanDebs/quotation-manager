@@ -276,6 +276,24 @@ export default function OrderFormPage() {
                 />
               </Field>
             )}
+            {/* The proforma this order was booked from.
+                Read-only, and resolved rather than stored: the link lives on
+                proforma_invoices.order_id, not on the order, which is what lets
+                dispatchProgress() walk from an order to the invoices raised
+                through its proforma. Attaching one is done by booking the order
+                from the proforma, so there is nothing to edit here. */}
+            {!isNew && (existing?.proformas?.length ?? 0) > 0 && (
+              <Field label={existing!.proformas!.length === 1 ? 'Ref. Proforma' : 'Ref. Proformas'}>
+                <div className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-sm">
+                  {existing!.proformas!.map((pi, i) => (
+                    <span key={pi.id}>
+                      {i > 0 && ', '}
+                      <Link to={`/proformas/${pi.id}`} className="text-brand-600 hover:underline">{pi.number}</Link>
+                    </span>
+                  ))}
+                </div>
+              </Field>
+            )}
             <Field label="Customer *">
               <Select value={draft.customer_id} onChange={(e) => onCustomerChange(e.target.value ? Number(e.target.value) : '')}>
                 <option value="">Select customer…</option>
