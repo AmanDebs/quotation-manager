@@ -200,8 +200,12 @@ export default function OrderFormPage() {
               <>
                 <a href={`/api/pdf/order/${id}`} target="_blank" rel="noreferrer"><Button variant="secondary">📄 Order PDF</Button></a>
                 <FollowupButton docType="general" docId={Number(id)} customerId={existing!.customer_id} />
-                <Button onClick={() => navigate(`/proformas/new?from_order=${id}`)}>→ Proforma Invoice</Button>
-                <Button variant="secondary" onClick={() => navigate(`/invoices/new?from_order=${id}`)}>→ Invoice directly</Button>
+                {/* The invoice is what follows an order now. Raising a proforma
+                    from here ran the chain backwards — the proforma comes
+                    first and the order is booked from it — and would have made
+                    a second proforma for an order that already has one. The
+                    prefill endpoint stays: the invoice form borrows it. */}
+                <Button onClick={() => navigate(`/invoices/new?from_order=${id}`)}>→ Create Commercial Invoice</Button>
               </>
             )}
           </div>

@@ -260,8 +260,27 @@ proformasRouter.get('/prefill/from-order/:orderId', (req: AuthedRequest, res) =>
   const customer = db.prepare('SELECT * FROM customers WHERE id = ?').get(Number(o.customer_id)) as Record<string, unknown>;
   const items = db.prepare('SELECT * FROM order_items WHERE order_id = ? ORDER BY sort_order, id').all(oid);
   const isExport = Number(o.is_export) === 1;
+  /**
+   * The proforma this order was booked from, if there is one.
+   *
+   * Meaningless to a proforma — it has no pi_id column, so headerValues drops
+   * it — but this endpoint also feeds the invoice form, and there it matters a
+   * great deal. An invoice with a null pi_id is not allocated any of the
+   * advance taken against that proforma (services/receivables.ts credits an
+   * advance across the invoices raised from that PI) and skips the 10%
+   * quantity-variance check, which is gated on the same column. With the
+   * process running proforma to order to invoice, raising the invoice from the
+   * order is the normal path, so the link has to survive it.
+   *
+   * Resolved backwards, earliest first, because the link lives on
+   * proforma_invoices.order_id and two proformas can each claim one order.
+   */
+  const linkedPi = db
+    .prepare('SELECT id FROM proforma_invoices WHERE order_id = ? ORDER BY id LIMIT 1')
+    .get(oid) as { id: number } | undefined;
   res.json({
     order_id: oid,
+    pi_id: linkedPi?.id ?? null,
     quotation_id: o.quotation_id,
     customer_id: o.customer_id,
     company_id: o.company_id,
