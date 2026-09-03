@@ -8,6 +8,7 @@ import { submit, decide, resetApprovalOnEdit, blockUnapprovedTransition } from '
 import { resolveCompanyId } from '../services/companies.js';
 import { enquiryLinkId, syncEnquiryStatus } from '../services/enquiries.js';
 import { syncQuotationExpiry } from '../services/quotationExpiry.js';
+import { lockError } from '../services/documentChain.js';
 import { listBody } from '../services/pagination.js';
 import { searchClause } from '../services/search.js';
 import { buildXlsx, attachmentName, type Column } from '../services/xlsx.js';
@@ -17,7 +18,12 @@ export const quotationsRouter = Router();
 const listSql = `
   SELECT q.*, c.name AS customer_name, c.country AS customer_country,
          co.company_name AS company_name,
-         u.name AS created_by_name, a.name AS approved_by_name
+         u.name AS created_by_name, a.name AS approved_by_name,
+         -- The proforma raised from this quotation, if any. Its presence is
+         -- what locks the quotation, so the form can say so and link to it --
+         -- and deleting that proforma is what unlocks this one again.
+         (SELECT pi.id FROM proforma_invoices pi WHERE pi.quotation_id = q.id ORDER BY pi.id LIMIT 1) AS converted_pi_id,
+         (SELECT pi.number FROM proforma_invoices pi WHERE pi.quotation_id = q.id ORDER BY pi.id LIMIT 1) AS converted_pi_number
   FROM quotations q
   JOIN customers c ON c.id = q.customer_id
   -- LEFT, not JOIN: a document must still list if its company row is gone.
@@ -245,6 +251,10 @@ quotationsRouter.put('/:id', (req: AuthedRequest, res) => {
   if (!existing || !canAccessCustomer(req, Number(existing.customer_id))) return res.status(404).json({ error: 'Quotation not found' });
   const moved = customerChangeError(req, existing.customer_id as number, Number(body.customer_id ?? existing.customer_id));
   if (moved) return res.status(403).json({ error: moved });
+  // Converted into a proforma, so its figures are what that document was built
+  // from. 409, not 403: a conflict with what already exists downstream.
+  const locked = lockError('quotations', id);
+  if (locked) return res.status(409).json({ error: locked });
   const taxType = (body.tax_type ?? existing.tax_type ?? 'none') as 'none' | 'cgst_sgst' | 'igst';
   const currency = String(body.currency ?? existing.currency);
   const freight = Number(body.freight ?? existing.freight ?? 0);
@@ -305,6 +315,8 @@ quotationsRouter.post('/:id/submit', (req: AuthedRequest, res) => {
   const id = Number(req.params.id);
   const existing = db.prepare('SELECT customer_id FROM quotations WHERE id = ?').get(id) as { customer_id: number } | undefined;
   if (!existing || !canAccessCustomer(req, existing.customer_id)) return res.status(404).json({ error: 'Quotation not found' });
+  const lockedSubmit = lockError('quotations', id, 'submitted for approval');
+  if (lockedSubmit) return res.status(409).json({ error: lockedSubmit });
   submit('quotations', id, req.user!);
   res.json(getFull(id));
 });
@@ -313,6 +325,9 @@ quotationsRouter.post('/:id/approve', (req: AuthedRequest, res) => {
   if (req.user!.role !== 'manager') return res.status(403).json({ error: 'Only a manager can approve documents' });
   const id = Number(req.params.id);
   if (!db.prepare('SELECT id FROM quotations WHERE id = ?').get(id)) return res.status(404).json({ error: 'Quotation not found' });
+  // A converted quotation is approved by rule — the conversion gate saw to it.
+  const lockedDecide = lockError('quotations', id, 'approved or rejected');
+  if (lockedDecide) return res.status(409).json({ error: lockedDecide });
   decide('quotations', id, req.user!, req.body?.approve !== false, String(req.body?.note ?? ''));
   res.json(getFull(id));
 });
@@ -324,6 +339,10 @@ quotationsRouter.post('/:id/status', (req: AuthedRequest, res) => {
   if (!allowed.includes(status)) return res.status(400).json({ error: 'Invalid status' });
   const existing = db.prepare('SELECT customer_id FROM quotations WHERE id = ?').get(id) as { customer_id: number } | undefined;
   if (!existing || !canAccessCustomer(req, existing.customer_id)) return res.status(404).json({ error: 'Quotation not found' });
+  // A converted quotation reads `accepted` because a proforma answered it.
+  // Marking it Rejected now would contradict a document already raised.
+  const lockedStatus = lockError('quotations', id, 'given a new status');
+  if (lockedStatus) return res.status(409).json({ error: lockedStatus });
   const blocked = blockUnapprovedTransition('quotations', id, String(status), req);
   if (blocked) return res.status(409).json({ error: blocked });
   // Clearing the remembered status by hand: whatever somebody sets now is
@@ -342,6 +361,10 @@ quotationsRouter.post('/:id/revise', (req: AuthedRequest, res) => {
   const existing = db.prepare('SELECT * FROM quotations WHERE id = ?').get(id) as Record<string, unknown> | undefined;
   if (!existing || !canAccessCustomer(req, Number(existing.customer_id))) return res.status(404).json({ error: 'Quotation not found' });
   if (existing.superseded_by) return res.status(409).json({ error: 'This revision was already superseded' });
+  // A revision supersedes this row, and the proforma points at it by id.
+  // Duplicate is the way to start a fresh negotiation from a converted quote.
+  const lockedRevise = lockError('quotations', id, 'revised');
+  if (lockedRevise) return res.status(409).json({ error: lockedRevise });
   const newId = transaction(() => {
     const maxRev = db.prepare('SELECT MAX(revision) AS r FROM quotations WHERE number = ?').get(String(existing.number)) as { r: number };
     const info = db.prepare(

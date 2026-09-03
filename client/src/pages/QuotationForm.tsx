@@ -12,9 +12,10 @@ import ApprovalStrip from '../components/ApprovalStrip';
 import InternalNotes from '../components/InternalNotes';
 import ColumnsControl, { quotationColumns, quotationOmit, newColumnConfig } from '../components/ColumnsControl';
 import NotePresetPicker from '../components/NotePresetPicker';
-import { fmtMoney, fmtQty, fmtDate, today } from '../lib/format';
+import { fmtMoney, fmtDate, today } from '../lib/format';
 import { useDefaultNotes } from '../lib/useDefaultNotes';
 import HistoryCard from '../components/HistoryCard';
+import ReadOnlyItems from '../components/ReadOnlyItems';
 
 interface Draft {
   number?: string;
@@ -193,7 +194,11 @@ export default function QuotationFormPage() {
 
   const set = (patch: Partial<Draft>) => setDraft((d) => ({ ...d, ...patch }));
   const isSuperseded = !!existing?.superseded_by;
-  const readOnly = isSuperseded;
+  // Converted into a proforma. The chain runs one way, so what that proforma
+  // was built from cannot move underneath it. Derived on the server from the
+  // proforma's own quotation_id, so deleting that proforma unlocks this again.
+  const lockedBy = existing?.converted_pi_number ? existing : null;
+  const readOnly = isSuperseded || !!lockedBy;
 
   return (
     <div className="mx-auto max-w-7xl">
@@ -237,13 +242,24 @@ export default function QuotationFormPage() {
         }
       />
 
+      {lockedBy && (
+        <div className="mb-4 rounded-md bg-slate-100 px-3 py-2 text-sm text-slate-700">
+          Converted into proforma{' '}
+          <Link to={`/proformas/${lockedBy.converted_pi_id}`} className="font-medium text-brand-600 hover:underline">
+            {lockedBy.converted_pi_number}
+          </Link>
+          , so it is read-only. Delete that proforma if this really has to change,
+          or use <strong>Duplicate</strong> to start a fresh quotation from it.
+        </div>
+      )}
+
       {isSuperseded && (
         <div className="mb-4 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800">
           This revision has been superseded by a newer one — it is read-only.
         </div>
       )}
 
-      {!isNew && !isSuperseded && (
+      {!isNew && !readOnly && (
         <ApprovalStrip
           docType="quotations"
           docId={Number(id)}
@@ -255,7 +271,7 @@ export default function QuotationFormPage() {
         />
       )}
 
-      {!isNew && (
+      {!isNew && !readOnly && (
         <div className="mb-4 flex flex-wrap items-center gap-2 text-sm">
           <span className="text-slate-500">Set status:</span>
           {['draft', 'sent', 'negotiating', 'accepted', 'rejected', 'expired'].map((s) => (
@@ -424,36 +440,3 @@ export default function QuotationFormPage() {
 }
 
 /** A superseded revision, laid out in the same sequence as the PDF. */
-function ReadOnlyItems({ items, currency }: { items: LineItem[]; currency: string }) {
-  const hasPacking = items.some((it) => it.pcs_per_pack != null || it.packs != null || it.total_pcs != null);
-  return (
-    <table className="w-full text-sm">
-      <thead>
-        <tr className="border-b border-slate-200 text-left text-xs uppercase text-slate-500">
-          <th className="pb-1 pr-3">Description</th>
-          {hasPacking && <th className="pb-1 pr-3 text-right">Pcs/Box</th>}
-          {hasPacking && <th className="pb-1 pr-3 text-right">Boxes</th>}
-          {hasPacking && <th className="pb-1 pr-3 text-right">Total Qty</th>}
-          <th className="pb-1 pr-3 text-right">Qty</th>
-          <th className="pb-1 pr-3 text-right">Unit Price</th>
-          <th className="pb-1 pr-3">Unit</th>
-          <th className="pb-1 text-right">Amount</th>
-        </tr>
-      </thead>
-      <tbody>
-        {items.map((it, i) => (
-          <tr key={i} className="border-b border-slate-100 last:border-0">
-            <td className="py-1.5 pr-3">{it.description}</td>
-            {hasPacking && <td className="py-1.5 pr-3 text-right tabular-nums">{it.pcs_per_pack != null ? fmtQty(it.pcs_per_pack) : '—'}</td>}
-            {hasPacking && <td className="py-1.5 pr-3 text-right tabular-nums">{it.packs != null ? fmtQty(it.packs) : '—'}</td>}
-            {hasPacking && <td className="py-1.5 pr-3 text-right tabular-nums">{it.total_pcs != null ? fmtQty(it.total_pcs) : '—'}</td>}
-            <td className="py-1.5 pr-3 text-right tabular-nums">{it.qty != null ? fmtQty(it.qty) : '—'}</td>
-            <td className="py-1.5 pr-3 text-right tabular-nums">{fmtMoney(it.unit_price, currency)}</td>
-            <td className="py-1.5 pr-3">{it.unit}</td>
-            <td className="py-1.5 text-right tabular-nums">{it.qty != null ? fmtMoney((it.amount ?? it.qty * it.unit_price), currency) : '—'}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  );
-}

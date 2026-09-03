@@ -529,6 +529,12 @@ export interface Quotation {
   approval_status: ApprovalStatus;
   approved_at?: string; approval_note?: string;
   approved_by_name?: string | null; created_by_name?: string | null;
+  /**
+   * The proforma raised from this quotation, when there is one. Its presence
+   * is what makes the quotation read-only — delete that proforma to unlock it.
+   */
+  converted_pi_id?: number | null;
+  converted_pi_number?: string | null;
   column_config?: ColumnConfig;
 }
 

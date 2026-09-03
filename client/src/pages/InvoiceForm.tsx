@@ -78,7 +78,8 @@ export default function InvoiceFormPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const isNew = !id;
-  const fromProforma = search.get('from_proforma');
+  // There is no from_proforma any more: the chain runs proforma → order →
+  // invoice, and the order is what an invoice is raised from.
   const fromOrder = search.get('from_order');
 
   const { data: customers = [] } = useQuery({ queryKey: ['customers', ''], queryFn: () => api.get<Customer[]>('/api/customers') });
@@ -117,25 +118,10 @@ export default function InvoiceFormPage() {
     }
   }, [existing]);
 
+  // The one way in: everything the invoice needs comes off the order, including
+  // the pi_id that receivables.ts allocates the proforma's advance across.
   useEffect(() => {
-    if (isNew && fromProforma && !prefilled) {
-      api.get<Partial<Draft>>(`/api/invoices/prefill/from-proforma/${fromProforma}`).then((p) => {
-        setDraft((d) => ({
-          ...d, ...p,
-          customer_id: (p.customer_id as number) ?? d.customer_id,
-          // Carry the source's columns forward only when it actually has some. A
-          // document saved before these defaults existed carries a blank config,
-          // and spreading that over the draft would quietly undo them.
-          column_config: hasColumnPrefs(p.column_config) ? p.column_config : d.column_config,
-        }));
-        setPrefilled(true);
-      });
-    }
-  }, [isNew, fromProforma, prefilled]);
-
-  // Domestic sales sometimes invoice straight off the order, with no proforma.
-  useEffect(() => {
-    if (!isNew || fromProforma || !fromOrder || prefilled) return;
+    if (!isNew || !fromOrder || prefilled) return;
     api.get<Partial<Draft> & { items?: LineItem[] }>(`/api/proformas/prefill/from-order/${fromOrder}`).then((p) => {
       const { column_config, ...rest } = p as Record<string, unknown>;
       setDraft((d) => ({
@@ -147,11 +133,11 @@ export default function InvoiceFormPage() {
       }));
       setPrefilled(true);
     });
-  }, [isNew, fromProforma, fromOrder, prefilled]);
+  }, [isNew, fromOrder, prefilled]);
 
   // Arriving from the export/domestic dialog.
   useEffect(() => {
-    if (!isNew || fromProforma || fromOrder) return;
+    if (!isNew || fromOrder) return;
     const type = search.get('type');
     const customer = search.get('customer');
     if (!type && !customer) return;
@@ -163,7 +149,7 @@ export default function InvoiceFormPage() {
       country_of_origin: isExport ? 'India' : d.country_of_origin,
       customer_id: customer ? Number(customer) : d.customer_id,
     }));
-  }, [isNew, fromProforma, fromOrder, search]);
+  }, [isNew, fromOrder, search]);
 
   useEffect(() => {
     if (!isNew || !draft.customer_id || customers.length === 0 || prefilled) return;
@@ -230,7 +216,7 @@ export default function InvoiceFormPage() {
     <div className="mx-auto max-w-7xl">
       <PageHeader
         title={isNew ? 'New Commercial Invoice' : existing!.number}
-        subtitle={isNew ? (fromProforma ? 'Pre-filled from proforma invoice — adjust final quantities and save' : undefined) : existing!.customer_name}
+        subtitle={isNew ? (fromOrder ? 'Pre-filled from the order — adjust final quantities and save' : undefined) : existing!.customer_name}
         actions={
           <div className="flex flex-wrap items-center gap-2">
             {!isNew && <StatusBadge status={existing!.status} />}

@@ -7,6 +7,7 @@ import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, St
 import CompanySelect from '../components/CompanySelect';
 import { DocNumber, IncoTermsInput, HeaderCharges } from '../components/DocFields';
 import LineItemsEditor from '../components/LineItemsEditor';
+import ReadOnlyItems from '../components/ReadOnlyItems';
 import ContainerFitment from '../components/ContainerFitment';
 import FollowupButton from '../components/FollowupButton';
 import InternalNotes from '../components/InternalNotes';
@@ -189,6 +190,15 @@ export default function ProformaFormPage() {
 
   const set = (patch: Partial<Draft>) => setDraft((d) => ({ ...d, ...patch }));
 
+  // An order has been booked from this proforma, so its figures are what that
+  // order was built from and the chain runs one way. Derived from order_id --
+  // the same column dispatchProgress() walks -- so deleting the order unlocks
+  // this again. Payments and internal notes deliberately stay editable: an
+  // advance is banked against the proforma *after* the order exists, which is
+  // the normal case and the whole point of an advance.
+  const lockedByOrder = !!existing?.order_id;
+  const readOnly = lockedByOrder;
+
   const onCustomerChange = (cid: number | '') => {
     const c = customers.find((x) => x.id === cid);
     if (c) {
@@ -236,16 +246,32 @@ export default function ProformaFormPage() {
                 ) : ['sent', 'order_confirmed', 'advance_received', 'in_production'].includes(existing!.status) && (
                   <Button variant="secondary" onClick={() => navigate(`/orders/new?from_proforma=${id}`)}>→ Book Order</Button>
                 )}
-                {['order_confirmed', 'advance_received', 'in_production'].includes(existing!.status) && (
-                  <Button onClick={() => navigate(`/invoices/new?from_proforma=${id}`)}>→ Create Commercial Invoice</Button>
-                )}
+                {/* No route to a commercial invoice from here. The chain runs
+                    proforma → order → invoice, and the order is the document
+                    that knows what was actually made and shipped; billing
+                    straight from the proforma skipped it and let one shipment
+                    be billed twice. Book the order above, then raise the
+                    invoice from it. */}
               </>
             )}
           </div>
         }
       />
 
-      {!isNew && (
+      {lockedByOrder && (
+        <div className="mb-4 rounded-md bg-slate-100 px-3 py-2 text-sm text-slate-700">
+          Order{' '}
+          <Link to={`/orders/${existing!.order_id}`} className="font-medium text-brand-600 hover:underline">
+            {existing!.order_number ?? existing!.order_id}
+          </Link>{' '}
+          was booked from this proforma, so its figures are read-only. Delete that
+          order if this really has to change, or use <strong>Duplicate</strong> to
+          start a fresh proforma from it. Payments and internal notes stay open —
+          an advance is banked against this document after the order exists.
+        </div>
+      )}
+
+      {!isNew && !lockedByOrder && (
         <ApprovalStrip
           docType="proformas"
           docId={Number(id)}
@@ -287,7 +313,7 @@ export default function ProformaFormPage() {
               </Field>
             )}
             <Field label="Buyer (Customer) *">
-              <Select value={draft.customer_id} onChange={(e) => onCustomerChange(e.target.value ? Number(e.target.value) : '')}>
+              <Select disabled={readOnly} value={draft.customer_id} onChange={(e) => onCustomerChange(e.target.value ? Number(e.target.value) : '')}>
                 <option value="">Select customer…</option>
                 {customers.map((c) => <option key={c.id} value={c.id}>{c.name} ({c.country})</option>)}
               </Select>
@@ -299,28 +325,28 @@ export default function ProformaFormPage() {
                 onChange={(id) => set({ company_id: id ?? undefined })}
               />
             </Field>
-            <Field label="Date"><Input type="date" value={draft.date} onChange={(e) => set({ date: e.target.value })} /></Field>
-            <Field label="Valid Until"><Input type="date" value={draft.validity_date} onChange={(e) => set({ validity_date: e.target.value })} /></Field>
+            <Field label="Date"><Input disabled={readOnly} type="date" value={draft.date} onChange={(e) => set({ date: e.target.value })} /></Field>
+            <Field label="Valid Until"><Input disabled={readOnly} type="date" value={draft.validity_date} onChange={(e) => set({ validity_date: e.target.value })} /></Field>
             <Field label="Currency (at customer's option)">
-              <Select value={draft.currency} onChange={(e) => set({ currency: e.target.value })}>
+              <Select disabled={readOnly} value={draft.currency} onChange={(e) => set({ currency: e.target.value })}>
                 <option value="INR">INR</option><option value="USD">USD</option><option value="EUR">EUR</option>
               </Select>
             </Field>
             <Field label="Tax">
-              <Select value={draft.tax_type} onChange={(e) => set({ tax_type: e.target.value as TaxType })}>
+              <Select disabled={readOnly} value={draft.tax_type} onChange={(e) => set({ tax_type: e.target.value as TaxType })}>
                 <option value="none">No tax (export)</option>
                 <option value="cgst_sgst">CGST + SGST (intra-state)</option>
                 <option value="igst">IGST (inter-state)</option>
               </Select>
             </Field>
-            <Field label="Production Lead Time"><Input value={draft.lead_time} onChange={(e) => set({ lead_time: e.target.value })} placeholder="e.g. 4 weeks from advance" /></Field>
-            <Field label="Payment Terms"><Input value={draft.payment_terms} onChange={(e) => set({ payment_terms: e.target.value })} /></Field>
-            <Field label="Delivery Terms"><Input value={draft.delivery_terms} onChange={(e) => set({ delivery_terms: e.target.value })} /></Field>
+            <Field label="Production Lead Time"><Input disabled={readOnly} value={draft.lead_time} onChange={(e) => set({ lead_time: e.target.value })} placeholder="e.g. 4 weeks from advance" /></Field>
+            <Field label="Payment Terms"><Input disabled={readOnly} value={draft.payment_terms} onChange={(e) => set({ payment_terms: e.target.value })} /></Field>
+            <Field label="Delivery Terms"><Input disabled={readOnly} value={draft.delivery_terms} onChange={(e) => set({ delivery_terms: e.target.value })} /></Field>
             <Field label="INCO Terms">
-              <IncoTermsInput value={draft.inco_terms} onChange={(v) => set({ inco_terms: v })} />
+              <IncoTermsInput disabled={readOnly} value={draft.inco_terms} onChange={(v) => set({ inco_terms: v })} />
             </Field>
             <Field label="Method of Despatch">
-              <Select value={draft.method_of_despatch} onChange={(e) => set({ method_of_despatch: e.target.value })}>
+              <Select disabled={readOnly} value={draft.method_of_despatch} onChange={(e) => set({ method_of_despatch: e.target.value })}>
                 <option value="">— select —</option>
                 <option>By Sea</option>
                 <option>By Air</option>
@@ -328,16 +354,16 @@ export default function ProformaFormPage() {
               </Select>
             </Field>
             <Field label="Quantity Tolerance">
-              <Input value={draft.quantity_tolerance} onChange={(e) => set({ quantity_tolerance: e.target.value })} placeholder="e.g. (±) 10% in value and quantity" />
+              <Input disabled={readOnly} value={draft.quantity_tolerance} onChange={(e) => set({ quantity_tolerance: e.target.value })} placeholder="e.g. (±) 10% in value and quantity" />
             </Field>
             <Field label="HS Code (header)">
-              <Input value={draft.hs_code} onChange={(e) => set({ hs_code: e.target.value })} placeholder="e.g. 3923" />
+              <Input disabled={readOnly} value={draft.hs_code} onChange={(e) => set({ hs_code: e.target.value })} placeholder="e.g. 3923" />
             </Field>
             <Field label="Prepared By">
-              <Input value={draft.prepared_by} onChange={(e) => set({ prepared_by: e.target.value })} />
+              <Input disabled={readOnly} value={draft.prepared_by} onChange={(e) => set({ prepared_by: e.target.value })} />
             </Field>
             <Field label="Bank Account (printed on PI)" className="col-span-3">
-              <Select
+              <Select disabled={readOnly}
                 value={draft.bank_account}
                 onChange={(e) => set({ bank_account: e.target.value })}
               >
@@ -358,8 +384,8 @@ export default function ProformaFormPage() {
 
         <Card title="Buyer's Purchase Order">
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <Field label="PO Number"><Input value={draft.po_number} onChange={(e) => set({ po_number: e.target.value })} placeholder="Customer's PO reference" /></Field>
-            <Field label="PO Date"><Input type="date" value={draft.po_date} onChange={(e) => set({ po_date: e.target.value })} /></Field>
+            <Field label="PO Number"><Input disabled={readOnly} value={draft.po_number} onChange={(e) => set({ po_number: e.target.value })} placeholder="Customer's PO reference" /></Field>
+            <Field label="PO Date"><Input disabled={readOnly} type="date" value={draft.po_date} onChange={(e) => set({ po_date: e.target.value })} /></Field>
           </div>
           <p className="mt-2 text-xs text-slate-400">Printed on the PI as “Buyer PO”. Set status to “order confirmed” once the PO is received.</p>
         </Card>
@@ -367,13 +393,13 @@ export default function ProformaFormPage() {
         <Card title="Consignee & Notify Parties">
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <Field label="Consignee (if different from buyer)">
-              <Textarea rows={3} value={draft.consignee} onChange={(e) => set({ consignee: e.target.value })} />
+              <Textarea disabled={readOnly} rows={3} value={draft.consignee} onChange={(e) => set({ consignee: e.target.value })} />
             </Field>
             <Field label="Notify Party 1">
-              <Textarea rows={3} value={draft.notify_party} onChange={(e) => set({ notify_party: e.target.value })} />
+              <Textarea disabled={readOnly} rows={3} value={draft.notify_party} onChange={(e) => set({ notify_party: e.target.value })} />
             </Field>
             <Field label="Notify Party 2">
-              <Textarea rows={3} value={draft.notify_party_2} onChange={(e) => set({ notify_party_2: e.target.value })} />
+              <Textarea disabled={readOnly} rows={3} value={draft.notify_party_2} onChange={(e) => set({ notify_party_2: e.target.value })} />
             </Field>
           </div>
         </Card>
@@ -401,13 +427,13 @@ export default function ProformaFormPage() {
           </div>
           {!!draft.is_export && (
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-              <Field label="Country of Origin"><Input value={draft.country_of_origin} onChange={(e) => set({ country_of_origin: e.target.value })} /></Field>
-              <Field label="Port of Loading"><Input value={draft.port_of_loading} onChange={(e) => set({ port_of_loading: e.target.value })} placeholder="e.g. Nhava Sheva" /></Field>
-              <Field label="Port of Discharge"><Input value={draft.port_of_discharge} onChange={(e) => set({ port_of_discharge: e.target.value })} /></Field>
-              <Field label="Final Destination"><Input value={draft.final_destination} onChange={(e) => set({ final_destination: e.target.value })} /></Field>
-              <Field label="Number of Containers"><Input value={draft.container_count} onChange={(e) => set({ container_count: e.target.value })} placeholder="e.g. 2 x 40ft HC" /></Field>
+              <Field label="Country of Origin"><Input disabled={readOnly} value={draft.country_of_origin} onChange={(e) => set({ country_of_origin: e.target.value })} /></Field>
+              <Field label="Port of Loading"><Input disabled={readOnly} value={draft.port_of_loading} onChange={(e) => set({ port_of_loading: e.target.value })} placeholder="e.g. Nhava Sheva" /></Field>
+              <Field label="Port of Discharge"><Input disabled={readOnly} value={draft.port_of_discharge} onChange={(e) => set({ port_of_discharge: e.target.value })} /></Field>
+              <Field label="Final Destination"><Input disabled={readOnly} value={draft.final_destination} onChange={(e) => set({ final_destination: e.target.value })} /></Field>
+              <Field label="Number of Containers"><Input disabled={readOnly} value={draft.container_count} onChange={(e) => set({ container_count: e.target.value })} placeholder="e.g. 2 x 40ft HC" /></Field>
               <Field label="Partial Shipment">
-                <Select value={draft.partial_shipment} onChange={(e) => set({ partial_shipment: e.target.value })}>
+                <Select disabled={readOnly} value={draft.partial_shipment} onChange={(e) => set({ partial_shipment: e.target.value })}>
                   <option>Allowed</option>
                   <option>Not Allowed</option>
                 </Select>
@@ -420,7 +446,11 @@ export default function ProformaFormPage() {
           title="Line Items"
           actions={<ColumnsControl config={draft.column_config} onChange={(c) => set({ column_config: c })} columns={proformaColumns(!!draft.is_export)} />}
         >
-          <LineItemsEditor items={draft.items} onChange={(items) => set({ items })} currency={draft.currency} taxType={draft.tax_type} config={draft.column_config} omit={proformaOmit(!!draft.is_export)} />
+          {readOnly ? (
+            <ReadOnlyItems items={draft.items} currency={draft.currency} />
+          ) : (
+            <LineItemsEditor items={draft.items} onChange={(items) => set({ items })} currency={draft.currency} taxType={draft.tax_type} config={draft.column_config} omit={proformaOmit(!!draft.is_export)} />
+          )}
           <HeaderCharges
             freight={draft.freight}
             insurance={draft.insurance}
@@ -443,7 +473,7 @@ export default function ProformaFormPage() {
         )}
 
         <Card title="Remarks" actions={<NotePresetPicker value={draft.remarks} onChange={(v) => set({ remarks: v })} />}>
-          <Textarea rows={3} value={draft.remarks} onChange={(e) => set({ remarks: e.target.value })} placeholder="Any other conditions specific to this customer…" />
+          <Textarea disabled={readOnly} rows={3} value={draft.remarks} onChange={(e) => set({ remarks: e.target.value })} placeholder="Any other conditions specific to this customer…" />
         </Card>
 
         {!isNew && (
@@ -465,9 +495,11 @@ export default function ProformaFormPage() {
           </div>
           <div className="flex gap-2">
             <Button variant="secondary" onClick={() => navigate('/proformas')}>Back</Button>
-            <Button onClick={() => save.mutate(draft)} disabled={save.isPending || !draft.customer_id || draft.items.length === 0}>
-              {save.isPending ? 'Saving…' : isNew ? 'Create Proforma Invoice' : 'Save Changes'}
-            </Button>
+            {!readOnly && (
+              <Button onClick={() => save.mutate(draft)} disabled={save.isPending || !draft.customer_id || draft.items.length === 0}>
+                {save.isPending ? 'Saving…' : isNew ? 'Create Proforma Invoice' : 'Save Changes'}
+              </Button>
+            )}
           </div>
         </div>
 

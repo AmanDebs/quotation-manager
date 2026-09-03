@@ -13,6 +13,8 @@ import { scopeClause, canAccessCustomer, linkError, customerChangeError } from '
 import { syncOrderStatus } from '../services/orderStatus.js';
 import { resolveCompanyId } from '../services/companies.js';
 import { listBody, pageRequest } from '../services/pagination.js';
+import { syncProformaOrdered } from '../services/documentChain.js';
+import { blockUnapprovedConversion } from '../services/approval.js';
 
 export const ordersRouter = Router();
 
@@ -409,6 +411,10 @@ ordersRouter.get('/prefill/from-proforma/:piId', (req: AuthedRequest, res) => {
   const piId = Number(req.params.piId);
   const pi = db.prepare('SELECT * FROM proforma_invoices WHERE id = ?').get(piId) as Record<string, unknown> | undefined;
   if (!pi || !canAccessCustomer(req, Number(pi.customer_id))) return res.status(404).json({ error: 'Proforma invoice not found' });
+  // Said now rather than after the form is filled in. commit: false — a GET
+  // must not approve anything just by being asked.
+  const unapproved = blockUnapprovedConversion('proforma_invoices', piId, req, false);
+  if (unapproved) return res.status(409).json({ error: unapproved });
   const items = db.prepare('SELECT * FROM pi_items WHERE pi_id = ? ORDER BY sort_order, id').all(piId);
   res.json({
     // Echoed back on save so the proforma can be pointed at the new order.
@@ -440,6 +446,12 @@ ordersRouter.post('/', (req: AuthedRequest, res) => {
   const h = headerValues(body);
   const link = linkError(req, 'quotations', h.quotation_id, h.customer_id, 'Quotation');
   if (link) return res.status(404).json({ error: link });
+  // Booking the order locks the proforma, so an unapproved one would be frozen
+  // unapproved. A manager booking it approves it in the same action.
+  if (body.pi_id) {
+    const unapproved = blockUnapprovedConversion('proforma_invoices', Number(body.pi_id), req);
+    if (unapproved) return res.status(409).json({ error: unapproved });
+  }
   // Fixed at creation: the number below comes from this company's series.
   const companyId = resolveCompanyId(body.company_id, Number(body.customer_id));
   const id = transaction(() => {
@@ -477,6 +489,8 @@ ordersRouter.post('/', (req: AuthedRequest, res) => {
       if (pi && pi.order_id == null && canAccessCustomer(req, pi.customer_id)
         && Number(pi.customer_id) === Number(h.customer_id)) {
         db.prepare('UPDATE proforma_invoices SET order_id = ? WHERE id = ?').run(id, Number(body.pi_id));
+        // Booking the order confirms the proforma and freezes its content.
+        syncProformaOrdered(Number(body.pi_id));
       }
     }
     return id;
@@ -534,11 +548,20 @@ ordersRouter.delete('/:id', (req: AuthedRequest, res) => {
   const id = Number(req.params.id);
   const existing = db.prepare('SELECT customer_id FROM orders WHERE id = ?').get(id) as { customer_id: number } | undefined;
   if (!existing || !canAccessCustomer(req, existing.customer_id)) return res.status(404).json({ error: 'Order not found' });
-  const used = db.prepare(
-    `SELECT (SELECT COUNT(*) FROM proforma_invoices WHERE order_id = ?) +
-            (SELECT COUNT(*) FROM commercial_invoices WHERE order_id = ?) AS c`
-  ).get(id, id) as { c: number };
-  if (used.c > 0) return res.status(409).json({ error: 'This order has documents raised against it and cannot be deleted' });
+  /**
+   * A commercial invoice is genuinely downstream of the order and blocks the
+   * delete. **A proforma is not**, and used to be counted here.
+   *
+   * That count was written when the chain ran order → proforma, where such a
+   * proforma really had been raised *from* the order. The chain now runs
+   * proforma → order, so `proforma_invoices.order_id` is a back-pointer from
+   * the document that came first — and counting it made deleting the order
+   * impossible, which in turn made the proforma's lock permanent, since
+   * deleting the order is the only way to lift it. The two guards deadlocked
+   * each other.
+   */
+  const invoiced = db.prepare('SELECT COUNT(*) AS c FROM commercial_invoices WHERE order_id = ?').get(id) as { c: number };
+  if (invoiced.c > 0) return res.status(409).json({ error: 'This order has a commercial invoice raised against it and cannot be deleted' });
   // work_orders cascades on order_id, so without this the delete would take a
   // job and its shift entries with it — a day's production, gone quietly.
   const jobs = db.prepare('SELECT COUNT(*) AS c FROM work_orders WHERE order_id = ?').get(id) as { c: number };
@@ -552,6 +575,10 @@ ordersRouter.delete('/:id', (req: AuthedRequest, res) => {
     return res.status(409).json({ error: `This order has ${trips.c} despatch${trips.c === 1 ? '' : 'es'} recorded against it and cannot be deleted` });
   }
   transaction(() => {
+    // Release the proforma that pointed at this order, the way deleting a
+    // quotation clears `superseded_by` on the revision that named it. This is
+    // what unlocks that proforma for editing again.
+    db.prepare('UPDATE proforma_invoices SET order_id = NULL WHERE order_id = ?').run(id);
     db.prepare('DELETE FROM order_items WHERE order_id = ?').run(id);
     db.prepare('DELETE FROM orders WHERE id = ?').run(id);
   });

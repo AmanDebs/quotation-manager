@@ -377,36 +377,20 @@ invoicesRouter.get('/:id', (req: AuthedRequest, res) => {
 });
 
 // Prefill payload for creating a commercial invoice from a PI.
-invoicesRouter.get('/prefill/from-proforma/:piId', (req: AuthedRequest, res) => {
-  const piId = Number(req.params.piId);
-  const pi = db.prepare('SELECT * FROM proforma_invoices WHERE id = ?').get(piId) as Record<string, unknown> | undefined;
-  if (!pi || !canAccessCustomer(req, Number(pi.customer_id))) return res.status(404).json({ error: 'Proforma invoice not found' });
-  const items = db.prepare('SELECT * FROM pi_items WHERE pi_id = ? ORDER BY sort_order, id').all(piId);
-  res.json({
-    pi_id: piId,
-    order_id: pi.order_id,
-    customer_id: pi.customer_id,
-    company_id: pi.company_id,
-    consignee: pi.consignee,
-    notify_party: pi.notify_party,
-    notify_party_2: pi.notify_party_2,
-    method_of_despatch: pi.method_of_despatch,
-    currency: pi.currency,
-    freight: pi.freight,
-    insurance: pi.insurance,
-    bank_account: pi.bank_account,
-    inco_terms: pi.inco_terms,
-    payment_terms: pi.payment_terms,
-    is_export: pi.is_export,
-    country_of_origin: pi.country_of_origin,
-    port_of_loading: pi.port_of_loading,
-    port_of_discharge: pi.port_of_discharge,
-    final_destination: pi.final_destination,
-    tax_type: pi.tax_type,
-    column_config: JSON.parse(String(pi.column_config || '{}')),
-    items,
-  });
-});
+/**
+ * There is no prefill from a proforma any more.
+ *
+ * The chain runs quotation -> proforma -> order -> commercial invoice, and an
+ * invoice is raised from the **order**, which is the document that knows what
+ * was actually made and shipped. Billing straight from the proforma skipped
+ * that step and let one shipment be billed by two routes.
+ *
+ * The order route is `proformas/prefill/from-order/:orderId`, shared with the
+ * proforma form. It resolves the proforma backwards through
+ * `proforma_invoices.order_id` and returns its `pi_id`, so an invoice raised
+ * this way still carries the link that `services/receivables.ts` allocates the
+ * advance across and that gates the 10% quantity-variance check.
+ */
 
 invoicesRouter.post('/', (req: AuthedRequest, res) => {
   const body = req.body ?? {};

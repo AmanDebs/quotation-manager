@@ -5,9 +5,10 @@ import { computeTotals, round2, type LineItemInput } from '../services/totals.js
 import type { AuthedRequest } from '../middleware/auth.js';
 import { scopeClause, canAccessCustomer, linkError, customerChangeError } from '../middleware/scope.js';
 import { resolveCompanyId } from '../services/companies.js';
-import { submit, decide, resetApprovalOnEdit, blockUnapprovedTransition } from '../services/approval.js';
+import { submit, decide, resetApprovalOnEdit, blockUnapprovedTransition, blockUnapprovedConversion } from '../services/approval.js';
 import { listBody } from '../services/pagination.js';
 import { searchClause } from '../services/search.js';
+import { lockError, syncQuotationConverted } from '../services/documentChain.js';
 import { buildXlsx, attachmentName, type Column } from '../services/xlsx.js';
 
 export const proformasRouter = Router();
@@ -226,6 +227,10 @@ proformasRouter.get('/prefill/from-quotation/:quotationId', (req: AuthedRequest,
   const qid = Number(req.params.quotationId);
   const q = db.prepare('SELECT * FROM quotations WHERE id = ?').get(qid) as Record<string, unknown> | undefined;
   if (!q || !canAccessCustomer(req, Number(q.customer_id))) return res.status(404).json({ error: 'Quotation not found' });
+  // Said now rather than after the form is filled in. commit: false — a GET
+  // must not approve anything just by being asked.
+  const unapproved = blockUnapprovedConversion('quotations', qid, req, false);
+  if (unapproved) return res.status(409).json({ error: unapproved });
   const customer = db.prepare('SELECT * FROM customers WHERE id = ?').get(Number(q.customer_id)) as Record<string, unknown>;
   const items = db.prepare('SELECT * FROM quotation_items WHERE quotation_id = ? ORDER BY sort_order, id').all(qid);
   const isExport = String(customer.country ?? 'India').trim().toLowerCase() !== 'india';
@@ -318,6 +323,13 @@ proformasRouter.post('/', (req: AuthedRequest, res) => {
   const link = linkError(req, 'quotations', h.quotation_id, h.customer_id, 'Quotation')
     ?? linkError(req, 'orders', h.order_id, h.customer_id, 'Order');
   if (link) return res.status(404).json({ error: link });
+  // Raising a proforma locks the quotation, so a draft would be frozen as a
+  // draft. A manager converting an unapproved one approves it in the same
+  // action, exactly as blockUnapprovedTransition already does for a status move.
+  if (h.quotation_id) {
+    const unapproved = blockUnapprovedConversion('quotations', Number(h.quotation_id), req);
+    if (unapproved) return res.status(409).json({ error: unapproved });
+  }
   // Fixed at creation: the number below comes from this company's series.
   const companyId = resolveCompanyId(body.company_id, Number(body.customer_id));
   const id = transaction(() => {
@@ -334,6 +346,10 @@ proformasRouter.post('/', (req: AuthedRequest, res) => {
     );
     const id = Number(info.lastInsertRowid);
     saveItems(id, (body.items ?? []) as LineItemInput[], h.tax_type, h.freight, h.insurance, h.currency);
+    // Inside the transaction, like syncEnquiryStatus: a quotation reading
+    // Accepted with no proforma to show for it would be exactly the drift
+    // status syncing exists to prevent.
+    syncQuotationConverted(h.quotation_id);
     return id;
   });
   res.status(201).json(getFull(id));
@@ -347,6 +363,12 @@ proformasRouter.put('/:id', (req: AuthedRequest, res) => {
   const h = headerValues(body, existing);
   const moved = customerChangeError(req, existing.customer_id as number, h.customer_id);
   if (moved) return res.status(403).json({ error: moved });
+  // An order was booked from this proforma, so its figures are what that order
+  // was built from. Note this guards the document's *content* only: the status
+  // pipeline deliberately carries on past order_confirmed to advance_received
+  // and in_production, which happen after the order exists.
+  const locked = lockError('proforma_invoices', id);
+  if (locked) return res.status(409).json({ error: locked });
   // The number was drawn from the export or the domestic series and is never
   // reissued, so the flag cannot move after the fact without leaving the two
   // disagreeing. 409, not 403: it is a conflict with what is already on file.
@@ -374,6 +396,8 @@ proformasRouter.post('/:id/submit', (req: AuthedRequest, res) => {
   const id = Number(req.params.id);
   const existing = db.prepare('SELECT customer_id FROM proforma_invoices WHERE id = ?').get(id) as { customer_id: number } | undefined;
   if (!existing || !canAccessCustomer(req, existing.customer_id)) return res.status(404).json({ error: 'Proforma invoice not found' });
+  const lockedSubmit = lockError('proforma_invoices', id, 'submitted for approval');
+  if (lockedSubmit) return res.status(409).json({ error: lockedSubmit });
   submit('proforma_invoices', id, req.user!);
   res.json(getFull(id));
 });
@@ -382,6 +406,9 @@ proformasRouter.post('/:id/approve', (req: AuthedRequest, res) => {
   if (req.user!.role !== 'manager') return res.status(403).json({ error: 'Only a manager can approve documents' });
   const id = Number(req.params.id);
   if (!db.prepare('SELECT id FROM proforma_invoices WHERE id = ?').get(id)) return res.status(404).json({ error: 'Proforma invoice not found' });
+  // Approved by rule before the order could be booked from it.
+  const lockedDecide = lockError('proforma_invoices', id, 'approved or rejected');
+  if (lockedDecide) return res.status(409).json({ error: lockedDecide });
   decide('proforma_invoices', id, req.user!, req.body?.approve !== false, String(req.body?.note ?? ''));
   res.json(getFull(id));
 });

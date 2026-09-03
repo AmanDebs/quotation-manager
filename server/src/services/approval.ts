@@ -44,6 +44,44 @@ export function resetApprovalOnEdit(table: DocTable | 'packing_lists', id: numbe
 }
 
 /**
+ * Guard for a conversion: a document may only be converted once approved.
+ *
+ * The same rule as `blockUnapprovedTransition`, and deliberately the same
+ * behaviour on the manager path — **a manager converting an unapproved
+ * document approves it in the same action** rather than being turned away.
+ * Without that this gate would obstruct the one person allowed to clear it.
+ *
+ * It exists because conversion locks the source document. Converting a draft
+ * would freeze it as a draft, watermarked PENDING APPROVAL, with no way left
+ * to fix it.
+ */
+export function blockUnapprovedConversion(
+  table: DocTable,
+  id: number,
+  req: AuthedRequest,
+  /**
+   * Whether a manager's pass-through actually approves the document.
+   *
+   * The prefill endpoints are GETs and ask with `commit: false`: previewing a
+   * conversion must not approve anything as a side effect. They only want the
+   * answer a manager would get, which is "allowed".
+   */
+  commit = true
+): string | null {
+  const row = db.prepare(`SELECT approval_status FROM ${table} WHERE id = ?`).get(id) as { approval_status: string } | undefined;
+  if (!row) return 'Document not found';
+  if (row.approval_status === 'approved') return null;
+  if (req.user?.role === 'manager') {
+    if (commit) decide(table, id, req.user, true, '');
+    return null;
+  }
+  const self = table === 'quotations' ? 'quotation' : 'proforma';
+  return row.approval_status === 'pending'
+    ? `This ${self} is awaiting manager approval and cannot be converted yet`
+    : `Submit this ${self} for manager approval before converting it`;
+}
+
+/**
  * Guard for status transitions: a document may only move to an outgoing status
  * once approved. Returns an error message, or null when the move is allowed.
  */
