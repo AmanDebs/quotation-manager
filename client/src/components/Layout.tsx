@@ -282,7 +282,7 @@ export default function Layout({ user, onLogout, children }: { user: User; onLog
             <Icon name={rail ? 'chevron-right' : 'chevron-left'} />
           </button>
         </div>
-        <nav className="flex-1 overflow-y-auto py-2">
+        <nav className="nav-scroll flex-1 overflow-y-auto py-2">
           {link(DASHBOARD)}
           {NAV.map((group) => {
             const items = group.items.filter((item) => !item.managerOnly || isManager);
@@ -308,9 +308,14 @@ export default function Layout({ user, onLogout, children }: { user: User; onLog
                 </button>
                 {expanded
                   ? items.map((item) => link(item))
-                  // Folded, so hidden on the drawer — but the rail has no
-                  // heading to unfold, so they still appear there.
-                  : items.map((item) => link(item, 'hidden md:flex'))}
+                  // Folded. The rail is the one place a folded item still has
+                  // to show: there is no heading left to unfold there, so
+                  // hiding it would put the page out of reach. Everywhere else
+                  // — the drawer and the full-width sidebar — folded means
+                  // gone. Every folded item carried the rail's rule at every
+                  // desktop width, so collapsing a group on a laptop moved the
+                  // chevron and left the list exactly where it was.
+                  : items.map((item) => link(item, rail ? 'hidden md:flex' : 'hidden'))}
               </div>
             );
           })}
