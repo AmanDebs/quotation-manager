@@ -64,6 +64,11 @@ addColumnIfMissing('orders', 'status_before_completed', "TEXT NOT NULL DEFAULT '
 // Only an automatic expiry is automatically undone, so an empty value means
 // "somebody set this by hand" and the row stays where they put it.
 addColumnIfMissing('quotations', 'status_before_expired', "TEXT NOT NULL DEFAULT ''");
+// And where to put a proforma back when the order booked from it is deleted
+// (2026-09). Same rule as the three above: filled only when the code moved it,
+// so a row that reached 'in_production' by hand — every one of them, before
+// booking started setting it — has nothing remembered and is left alone.
+addColumnIfMissing('proforma_invoices', 'status_before_ordered', "TEXT NOT NULL DEFAULT ''");
 
 // Work orders (2026-08). Their own series per company, like every other
 // numbered document; `settings` gets it too so the old single-company row

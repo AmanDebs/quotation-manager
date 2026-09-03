@@ -58,9 +58,39 @@ export function syncQuotationConverted(quotationId: number | null | undefined): 
 export function syncProformaOrdered(piId: number | null | undefined): void {
   if (!piId) return;
   db.prepare(
-    `UPDATE proforma_invoices SET status = 'in_production'
+    `UPDATE proforma_invoices
+       SET status_before_ordered = status, status = 'in_production'
      WHERE id = ? AND status IN ('draft', 'sent', 'order_confirmed', 'advance_received')`
   ).run(piId);
+}
+
+/**
+ * The order booked from a proforma was deleted, so it is not ordered any more.
+ *
+ * The one place this vocabulary could state something untrue: *Sales Order
+ * Generated* naming a document that no longer exists. Same shape and same
+ * reasoning as `status_before_paid` on an invoice and `status_before_completed`
+ * on an order — everything below this is an observation that only accumulates,
+ * but an order can be deleted, and a status left claiming one is worse for
+ * looking automatic.
+ *
+ * **Only what this code moved is moved back.** `status_before_ordered` is
+ * filled by the function above and by nothing else, so a proforma that reached
+ * `in_production` by hand — every one of them on file, since booking only
+ * started setting it in 2026-09 — has nothing remembered and stays where
+ * somebody put it. Setting the status by hand clears the memory too (see
+ * `POST /proformas/:id/status`), or deleting the order later would overwrite a
+ * choice made after it was booked.
+ *
+ * Keyed on the order rather than the proforma because that is what the delete
+ * knows, and it releases the back-pointer by the same column.
+ */
+export function syncProformaUnordered(orderId: number): void {
+  db.prepare(
+    `UPDATE proforma_invoices
+       SET status = status_before_ordered, status_before_ordered = ''
+     WHERE order_id = ? AND status = 'in_production' AND status_before_ordered <> ''`
+  ).run(orderId);
 }
 
 /* ------------------------------------------------------------------ */

@@ -356,6 +356,10 @@ CREATE TABLE IF NOT EXISTS proforma_invoices (
   internal_notes TEXT NOT NULL DEFAULT '',
   tax_type TEXT NOT NULL DEFAULT 'none' CHECK (tax_type IN ('none','cgst_sgst','igst')),
   status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','sent','order_confirmed','advance_received','in_production','cancelled')),
+  -- Where to put the proforma back if the order booked from it is deleted.
+  -- Filled only when syncProformaOrdered sets 'in_production', so an empty
+  -- value means somebody put it there themselves and it stays.
+  status_before_ordered TEXT NOT NULL DEFAULT '',
   created_by INTEGER REFERENCES users(id),
   approval_status TEXT NOT NULL DEFAULT 'not_submitted' CHECK (approval_status IN ('not_submitted','pending','approved','rejected')),
   approved_by INTEGER REFERENCES users(id),

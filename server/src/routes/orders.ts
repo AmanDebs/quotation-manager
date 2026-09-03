@@ -13,7 +13,7 @@ import { scopeClause, canAccessCustomer, linkError, customerChangeError } from '
 import { syncOrderStatus } from '../services/orderStatus.js';
 import { resolveCompanyId } from '../services/companies.js';
 import { listBody, pageRequest } from '../services/pagination.js';
-import { syncProformaOrdered, alreadyOrderedError } from '../services/documentChain.js';
+import { syncProformaOrdered, syncProformaUnordered, alreadyOrderedError } from '../services/documentChain.js';
 import { blockUnapprovedConversion } from '../services/approval.js';
 
 export const ordersRouter = Router();
@@ -586,6 +586,10 @@ ordersRouter.delete('/:id', (req: AuthedRequest, res) => {
     // Release the proforma that pointed at this order, the way deleting a
     // quotation clears `superseded_by` on the revision that named it. This is
     // what unlocks that proforma for editing again.
+    // Before the link goes: put the proforma back where booking found it, so
+    // it stops reading "Sales Order Generated" for an order that is about to
+    // cease to exist. Keyed on order_id, hence first.
+    syncProformaUnordered(id);
     db.prepare('UPDATE proforma_invoices SET order_id = NULL WHERE order_id = ?').run(id);
     db.prepare('DELETE FROM order_items WHERE order_id = ?').run(id);
     db.prepare('DELETE FROM orders WHERE id = ?').run(id);

@@ -484,7 +484,11 @@ proformasRouter.post('/:id/status', (req: AuthedRequest, res) => {
   if (!existing || !canAccessCustomer(req, existing.customer_id)) return res.status(404).json({ error: 'Proforma invoice not found' });
   const blocked = blockUnapprovedTransition('proforma_invoices', id, String(status), req);
   if (blocked) return res.status(409).json({ error: blocked });
-  db.prepare('UPDATE proforma_invoices SET status = ? WHERE id = ?').run(String(status), id);
+  // Clearing the remembered status by hand, as the quotation route does for
+  // `status_before_expired`: whatever somebody sets now is theirs, so deleting
+  // the order later must not overwrite a choice made after it was booked.
+  db.prepare("UPDATE proforma_invoices SET status = ?, status_before_ordered = '' WHERE id = ?")
+    .run(String(status), id);
   res.json(getFull(id));
 });
 
