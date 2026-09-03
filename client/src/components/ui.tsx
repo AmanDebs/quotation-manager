@@ -189,6 +189,24 @@ export const labelClass = (plain: boolean) =>
     ? 'text-[11px] font-semibold uppercase tracking-wide text-slate-500'
     : 'text-xs font-medium text-slate-600';
 
+/**
+ * The shape a document form's field grid takes.
+ *
+ * Three columns on every screen was one answer to four different questions: a
+ * 1900px desktop got three fields half the window across holding a date and a
+ * currency code, and the forms ran long. So it steps — one column, two on a
+ * tablet, three at `lg`, four at `xl` — and the rows sit close, a box being
+ * enough to separate a field from the one under it.
+ *
+ * `PLAIN` is the read-only variant: wider gutters and taller rows, because
+ * there are no boxes there to do that job. See ReadOnlyFields above.
+ *
+ * One string in one place. Four forms use it, and four copies of a layout is
+ * how three of them end up slightly different from the fourth.
+ */
+export const FIELD_GRID = 'grid grid-cols-1 gap-x-4 gap-y-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4';
+export const FIELD_GRID_PLAIN = 'grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4';
+
 export function Field({ label, children, className = '' }: { label: string; children: ReactNode; className?: string }) {
   /**
    * A blank field on a read-only document is a label and a dash, and five of

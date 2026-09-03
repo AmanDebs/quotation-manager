@@ -3,7 +3,7 @@ import { useNavigate, useParams, useSearchParams, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Quotation, Customer, LineItem, TaxType, ColumnConfig } from '../types';
-import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, StatusBadge, ReadOnlyFields, labelClass } from '../components/ui';
+import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, StatusBadge, ReadOnlyFields, labelClass, FIELD_GRID, FIELD_GRID_PLAIN } from '../components/ui';
 import CompanySelect from '../components/CompanySelect';
 import { DocNumber, IncoTermsInput, HeaderCharges } from '../components/DocFields';
 import LineItemsEditor from '../components/LineItemsEditor';
@@ -206,17 +206,7 @@ export default function QuotationFormPage() {
   // proforma's own quotation_id, so deleting that proforma unlocks this again.
   const lockedBy = existing?.converted_pi_number ? existing : null;
   const readOnly = isSuperseded || !!lockedBy;
-  /**
-   * The proforma's grid, for the same reason: three columns was one shape for
-   * every screen, so a wide desktop got three fields half the window across
-   * holding a date and a currency code. It steps — two up on a tablet, three at
-   * `lg`, four at `xl` — and the rows sit closer, a box being enough to
-   * separate a field from the one under it. Read-only keeps the wider gutters
-   * and taller rows: there are no boxes there to do that job.
-   */
-  const gridClass = readOnly
-    ? 'grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4'
-    : 'grid grid-cols-1 gap-x-4 gap-y-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4';
+  const gridClass = readOnly ? FIELD_GRID_PLAIN : FIELD_GRID;
 
   return (
     <div className="mx-auto max-w-7xl">

@@ -3,7 +3,7 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Invoice, Customer, LineItem, TaxType, Settings, ColumnConfig, PackingListItem } from '../types';
-import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, StatusBadge, SettledDocumentType } from '../components/ui';
+import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, StatusBadge, SettledDocumentType, FIELD_GRID } from '../components/ui';
 import CompanySelect from '../components/CompanySelect';
 import { DocNumber, IncoTermsInput, HeaderCharges } from '../components/DocFields';
 import LineItemsEditor from '../components/LineItemsEditor';
@@ -293,7 +293,7 @@ export default function InvoiceFormPage() {
 
       <div className="space-y-4">
         <Card title="Details">
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div className={FIELD_GRID}>
             {!isNew && (
               <Field label="Invoice Number">
                 <DocNumber
@@ -354,10 +354,10 @@ export default function InvoiceFormPage() {
               </Field>
             )}
             <Field label="Prepared By"><Input value={draft.prepared_by} onChange={(e) => set({ prepared_by: e.target.value })} /></Field>
-            <Field label="Shipping Details" className="col-span-2">
+            <Field label="Shipping Details" className="sm:col-span-2">
               <Input value={draft.shipping_details} onChange={(e) => set({ shipping_details: e.target.value })} placeholder="Vessel/flight, BL number, shipping line…" />
             </Field>
-            <Field label="Bank Account" className="col-span-3">
+            <Field label="Bank Account" className="col-span-full">
               <Select value={draft.bank_account} onChange={(e) => set({ bank_account: e.target.value })}>
                 <option value="">— select bank account —</option>
                 {(settings?.bank_accounts ?? []).map((b, i) => (
@@ -371,21 +371,9 @@ export default function InvoiceFormPage() {
           </div>
         </Card>
 
-        <Card title="Consignee & Notify Parties">
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <Field label="Consignee">
-              <Textarea rows={3} value={draft.consignee} onChange={(e) => set({ consignee: e.target.value })} />
-            </Field>
-            <Field label="Notify Party 1">
-              <Textarea rows={3} value={draft.notify_party} onChange={(e) => set({ notify_party: e.target.value })} />
-            </Field>
-            <Field label="Notify Party 2">
-              <Textarea rows={3} value={draft.notify_party_2} onChange={(e) => set({ notify_party_2: e.target.value })} />
-            </Field>
-          </div>
-        </Card>
-
-        <Card title="Export Details">
+        {/* Where the goods go and who is told about it — one question, and
+            it was two cards, as it was on the proforma. */}
+        <Card title="Shipment & Parties">
           {/* Editable only before the first save. After that the number has
               been issued from one series or the other and the flag can no
               longer move to match it — the server refuses the change too. */}
@@ -407,13 +395,27 @@ export default function InvoiceFormPage() {
             )}
           </div>
           {!!draft.is_export && (
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <div className={`${FIELD_GRID} mb-3`}>
               <Field label="Country of Origin"><Input value={draft.country_of_origin} onChange={(e) => set({ country_of_origin: e.target.value })} /></Field>
               <Field label="Port of Loading"><Input value={draft.port_of_loading} onChange={(e) => set({ port_of_loading: e.target.value })} /></Field>
               <Field label="Port of Discharge"><Input value={draft.port_of_discharge} onChange={(e) => set({ port_of_discharge: e.target.value })} /></Field>
               <Field label="Final Destination"><Input value={draft.final_destination} onChange={(e) => set({ final_destination: e.target.value })} /></Field>
             </div>
           )}
+
+          {/* Two rows deep rather than three: these hold an address, and the
+              box scrolls for the rare one that runs longer. */}
+          <div className={FIELD_GRID}>
+            <Field label="Consignee">
+              <Textarea rows={2} value={draft.consignee} onChange={(e) => set({ consignee: e.target.value })} />
+            </Field>
+            <Field label="Notify Party 1">
+              <Textarea rows={2} value={draft.notify_party} onChange={(e) => set({ notify_party: e.target.value })} />
+            </Field>
+            <Field label="Notify Party 2">
+              <Textarea rows={2} value={draft.notify_party_2} onChange={(e) => set({ notify_party_2: e.target.value })} />
+            </Field>
+          </div>
         </Card>
 
         <Card
@@ -443,7 +445,7 @@ export default function InvoiceFormPage() {
           <p className="mb-3 text-sm text-slate-500">
             The packing list is created and kept in sync with this invoice — same items, same shipment. Fill in how the goods are packed.
           </p>
-          <div className="mb-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div className={`${FIELD_GRID} mb-3`}>
             {!isNew && (
               <Field label="Packing List Number">
                 <DocNumber
@@ -455,7 +457,7 @@ export default function InvoiceFormPage() {
             <Field label="Packing List Date">
               <Input type="date" value={draft.packing.date} onChange={(e) => setPacking({ date: e.target.value })} />
             </Field>
-            <Field label="Shipping Marks" className={isNew ? 'col-span-2' : ''}>
+            <Field label="Shipping Marks" className="sm:col-span-2">
               <Input value={draft.packing.shipping_marks} onChange={(e) => setPacking({ shipping_marks: e.target.value })} placeholder="e.g. 1-590/AGLO POLY/NACALA" />
             </Field>
           </div>

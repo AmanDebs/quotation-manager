@@ -3,7 +3,7 @@ import { useNavigate, useParams, useSearchParams, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Order, OrderItem, Customer, TaxType, ColumnConfig, WorkOrder } from '../types';
-import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, Tabs, SettledDocumentType } from '../components/ui';
+import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, Tabs, SettledDocumentType, FIELD_GRID } from '../components/ui';
 import CompanySelect from '../components/CompanySelect';
 import { DocNumber, IncoTermsInput, HeaderCharges } from '../components/DocFields';
 import ProductionTab from '../components/ProductionTab';
@@ -277,7 +277,7 @@ export default function OrderFormPage() {
             )
           }
         >
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div className={FIELD_GRID}>
             {!isNew && (
               <Field label="Order Number">
                 <DocNumber
@@ -338,7 +338,7 @@ export default function OrderFormPage() {
                 <option value="igst">IGST</option>
               </Select>
             </Field>
-            <Field label="Payment Terms" className="col-span-2">
+            <Field label="Payment Terms" className="sm:col-span-2">
               <Input value={draft.payment_terms} onChange={(e) => set({ payment_terms: e.target.value })} placeholder="e.g. 30-70, After payment, 100% CAD" />
             </Field>
             {!isNew && existing!.quotation_number && (

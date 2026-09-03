@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Proforma, Customer, LineItem, TaxType, Settings, ColumnConfig } from '../types';
-import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, StatusBadge, SettledDocumentType, ReadOnlyFields } from '../components/ui';
+import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, StatusBadge, SettledDocumentType, ReadOnlyFields, FIELD_GRID, FIELD_GRID_PLAIN } from '../components/ui';
 import CompanySelect from '../components/CompanySelect';
 import { DocNumber, IncoTermsInput, HeaderCharges } from '../components/DocFields';
 import LineItemsEditor from '../components/LineItemsEditor';
@@ -231,17 +231,7 @@ export default function ProformaFormPage() {
   // the normal case and the whole point of an advance.
   const lockedByOrder = !!existing?.order_id;
   const readOnly = lockedByOrder;
-  /**
-   * Three columns was one shape for every screen: on a 1900px desktop it left
-   * three fields half the width of the window each, holding "USD" and a date,
-   * and pushed the form onto a second page. It steps now — two up on a tablet,
-   * four on a wide desktop — and the rows sit closer, a box being enough to
-   * separate a field from the one under it. Read-only keeps its wider gutters
-   * and taller rows: there are no boxes there to do that job.
-   */
-  const gridClass = readOnly
-    ? 'grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4'
-    : 'grid grid-cols-1 gap-x-4 gap-y-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4';
+  const gridClass = readOnly ? FIELD_GRID_PLAIN : FIELD_GRID;
 
   const onCustomerChange = (cid: number | '') => {
     const c = customers.find((x) => x.id === cid);
