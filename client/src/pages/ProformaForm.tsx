@@ -13,7 +13,7 @@ import FollowupButton from '../components/FollowupButton';
 import InternalNotes from '../components/InternalNotes';
 import PaymentsCard from '../components/PaymentsCard';
 import ApprovalStrip from '../components/ApprovalStrip';
-import ColumnsControl, { proformaColumns, proformaOmit, newColumnConfig, hasColumnPrefs } from '../components/ColumnsControl';
+import ColumnsControl, { proformaColumns, proformaOmit, newColumnConfig, hasColumnPrefs, PROFORMA_FORCED } from '../components/ColumnsControl';
 import NotePresetPicker from '../components/NotePresetPicker';
 import { today } from '../lib/format';
 import { useDefaultNotes } from '../lib/useDefaultNotes';
@@ -455,7 +455,7 @@ export default function ProformaFormPage() {
           {readOnly ? (
             <ReadOnlyItems items={draft.items} currency={draft.currency} />
           ) : (
-            <LineItemsEditor items={draft.items} onChange={(items) => set({ items })} currency={draft.currency} taxType={draft.tax_type} config={draft.column_config} omit={proformaOmit(!!draft.is_export)} />
+            <LineItemsEditor items={draft.items} onChange={(items) => set({ items })} currency={draft.currency} taxType={draft.tax_type} config={draft.column_config} omit={proformaOmit(!!draft.is_export)} forced={PROFORMA_FORCED} />
           )}
           <HeaderCharges
             freight={draft.freight}

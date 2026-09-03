@@ -485,6 +485,36 @@ export interface ColumnConfig {
 }
 
 /**
+ * Columns a document type prints whatever its stored config says — the PDF
+ * half of PROFORMA_FORCED / INVOICE_FORCED / ORDER_FORCED in the client's
+ * `components/ColumnsControl.tsx`, and it has to be the same list on both
+ * sides or the paper and the screen disagree about the same document.
+ *
+ * A config is not written only by the tick-list beside the table it controls:
+ * carry-forward copies the source document's columns onto the new one. A
+ * quotation sent as a rate-and-packing price list carries `amount` hidden, and
+ * that rode onto the proforma raised from it — which is what an advance is
+ * paid against — and onward to the order and the commercial invoice, where an
+ * amount-less document cannot be presented for GST or customs at all.
+ *
+ * Applied on read rather than fixed in the rows, so a document already saved
+ * with such a config prints correctly and nothing needs migrating.
+ */
+function forceColumns(cfg: ColumnConfig, forced: string[]): ColumnConfig {
+  if (!cfg.hidden?.some((k) => forced.includes(k))) return cfg;
+  return { ...cfg, hidden: cfg.hidden.filter((k) => !forced.includes(k)) };
+}
+
+/**
+ * `total_pcs` on the proforma: `qty` is omitted there, which leaves Total Qty
+ * as its only quantity column. Orders and invoices keep Qty and so do not need
+ * it forced.
+ */
+const PROFORMA_FORCED = ['total_pcs', 'amount'];
+const INVOICE_FORCED = ['amount'];
+const ORDER_FORCED = ['amount'];
+
+/**
  * Builds the line-items table honouring the document's column_config:
  * explicitly hidden columns are dropped, columns with no data anywhere are
  * dropped automatically, and up to three named custom columns are appended.
@@ -824,7 +854,7 @@ export function buildOrderPdf(id: number): TDocumentDefinitions {
 
   const cur = o.currency;
   const showTax = o.tax_type !== 'none';
-  const cfg: ColumnConfig = JSON.parse(String(o.column_config || '{}'));
+  const cfg = forceColumns(JSON.parse(String(o.column_config || '{}')) as ColumnConfig, ORDER_FORCED);
 
   const specs: ColumnSpec[] = [
     { key: 'sl', label: 'SL', width: 18, align: 'center', always: true, value: (_it, i) => String(i + 1) },
@@ -921,7 +951,7 @@ export function buildProformaPdf(id: number): TDocumentDefinitions {
 
   const cur = pi.currency;
   const showTax = pi.tax_type !== 'none';
-  const cfg: ColumnConfig = JSON.parse(String(pi.column_config || '{}'));
+  const cfg = forceColumns(JSON.parse(String(pi.column_config || '{}')) as ColumnConfig, PROFORMA_FORCED);
 
   const sectionHead = (t: string): Cell => ({ text: t, bold: true, fontSize: 8, color: '#ffffff', fillColor: s.theme });
 
@@ -1245,7 +1275,7 @@ export function buildInvoicePdf(id: number): TDocumentDefinitions {
 
   const cur = inv.currency;
   const showTax = inv.tax_type !== 'none';
-  const cfg: ColumnConfig = JSON.parse(String(inv.column_config || '{}'));
+  const cfg = forceColumns(JSON.parse(String(inv.column_config || '{}')) as ColumnConfig, INVOICE_FORCED);
 
   // Own payments plus this invoice's share of any advance on the source PI.
   const received = invoiceReceivable(id).amount_received;

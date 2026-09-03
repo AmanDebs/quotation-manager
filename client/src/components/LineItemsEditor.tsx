@@ -123,7 +123,7 @@ function billedQty(it: LineItem): number | null {
  * Amounts shown are a client-side preview; the server recomputes on save.
  */
 export default function LineItemsEditor({
-  items, onChange, currency, taxType, showTax, config = {}, omit,
+  items, onChange, currency, taxType, showTax, config = {}, omit, forced,
 }: {
   items: LineItem[];
   onChange: (items: LineItem[]) => void;
@@ -133,11 +133,19 @@ export default function LineItemsEditor({
   config?: ColumnConfig;
   /** Column keys this document type never carries, e.g. `['hsn']` on a quotation. */
   omit?: string[];
+  /**
+   * Column keys this document type always carries, whatever the config says —
+   * see PROFORMA_FORCED in ColumnsControl. Applied last, so a hidden entry
+   * inherited from a document that *was* allowed to drop the column cannot
+   * take it away here.
+   */
+  forced?: string[];
 }) {
   const { data: products = [] } = useQuery({ queryKey: ['products', ''], queryFn: () => api.get<Product[]>('/api/products') });
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
 
   const hidden = new Set([...(config.hidden ?? []), ...(omit ?? [])]);
+  for (const key of forced ?? []) hidden.delete(key);
   const show = (key: string) => !hidden.has(key);
   const customNames = (config.custom ?? []).filter(Boolean);
 

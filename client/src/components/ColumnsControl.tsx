@@ -215,15 +215,42 @@ export default function ColumnsControl({
  */
 const NOT_TOGGLEABLE_OUTSIDE_QUOTATION = ['amount'];
 
-/** The tick-list for a proforma: its own omissions, plus amount. */
+/**
+ * Columns a document type shows **whatever its stored config says**.
+ *
+ * Taking a column out of the tick-list only stops it being turned off *here*.
+ * A config is not made here alone: carry-forward copies the source document's
+ * columns onto the new one, and a quotation sent as a rate-and-packing price
+ * list carries `amount` in its hidden list. That landed on the proforma raised
+ * from it, where there is no tick to turn it back on — a proforma with no
+ * Amount column and no way to get one, which is what an advance is paid
+ * against. The same config then rides on to the order and the commercial
+ * invoice.
+ *
+ * So the rule is enforced where the columns are drawn rather than only where
+ * they are chosen: `LineItemsEditor` takes these as `forced` and the PDF
+ * builders apply the same list. It is derived on every read, so a document
+ * already saved with the bad config repairs itself and no migration is needed.
+ *
+ * `total_pcs` on the proforma: `qty` is omitted there — one quantity per line,
+ * never two that can disagree — which leaves Total Qty as the proforma's
+ * *only* quantity column. Hidden, the document cannot say how much of what is
+ * being bought, and the amount it inherits is blank because nothing can be
+ * typed to produce one. Orders and invoices keep Qty, so they do not need it.
+ */
+export const PROFORMA_FORCED = ['total_pcs', ...NOT_TOGGLEABLE_OUTSIDE_QUOTATION];
+export const INVOICE_FORCED = NOT_TOGGLEABLE_OUTSIDE_QUOTATION;
+export const ORDER_FORCED = NOT_TOGGLEABLE_OUTSIDE_QUOTATION;
+
+/** The tick-list for a proforma: its own omissions, plus what it always shows. */
 export function proformaColumns(isExport: boolean): ToggleableColumn[] {
-  return columnsFor([...proformaOmit(isExport), ...NOT_TOGGLEABLE_OUTSIDE_QUOTATION]);
+  return columnsFor([...proformaOmit(isExport), ...PROFORMA_FORCED]);
 }
 
 export function invoiceColumns(): ToggleableColumn[] {
-  return columnsFor(NOT_TOGGLEABLE_OUTSIDE_QUOTATION);
+  return columnsFor(INVOICE_FORCED);
 }
 
 export function orderColumns(): ToggleableColumn[] {
-  return columnsFor(NOT_TOGGLEABLE_OUTSIDE_QUOTATION);
+  return columnsFor(ORDER_FORCED);
 }
