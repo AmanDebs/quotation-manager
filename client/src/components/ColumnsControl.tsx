@@ -164,7 +164,7 @@ export default function ColumnsControl({
       {open && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 z-20 mt-1 w-72 rounded-lg border border-slate-200 bg-white p-3 shadow-xl">
+          <div className="absolute right-0 z-20 mt-1 w-72 rounded-xl border border-slate-200 bg-white p-3 shadow-xl">
             <div className="mb-2 text-xs font-semibold uppercase text-slate-500">Show columns</div>
             <div className="space-y-1">
               {columns.map((c) => (

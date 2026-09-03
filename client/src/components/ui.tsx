@@ -4,15 +4,18 @@ import { fmtDate } from '../lib/format';
 
 export function Button({ variant = 'primary', className = '', ...props }: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'secondary' | 'danger' | 'ghost' }) {
   const styles = {
-    primary: 'bg-brand-700 text-white hover:bg-brand-800 disabled:bg-slate-300',
-    secondary: 'bg-white text-slate-700 border border-slate-300 hover:bg-slate-50 disabled:text-slate-400',
-    danger: 'bg-white text-red-600 border border-red-200 hover:bg-red-50',
-    ghost: 'text-brand-600 hover:bg-brand-50',
+    primary: 'bg-brand-700 text-white shadow-sm hover:bg-brand-800 disabled:bg-slate-300 disabled:shadow-none focus-visible:ring-brand-600/40',
+    secondary: 'bg-white text-slate-700 border border-slate-200 shadow-sm hover:border-slate-300 hover:bg-slate-50 disabled:text-slate-400 focus-visible:ring-slate-400/40',
+    danger: 'bg-white text-red-600 border border-red-200 hover:bg-red-50 focus-visible:ring-red-400/40',
+    ghost: 'text-brand-600 hover:bg-brand-50 focus-visible:ring-brand-600/40',
   }[variant];
   return (
     <button
       {...props}
-      className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors disabled:cursor-not-allowed ${styles} ${className}`}
+      // Same padding as before — this is a surface change, not a size one. The
+      // press is a shadow, not a translate: a button that moves inside a table
+      // row nudges everything beside it.
+      className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 active:shadow-none disabled:cursor-not-allowed ${styles} ${className}`}
     />
   );
 }
@@ -39,12 +42,23 @@ export function Button({ variant = 'primary', className = '', ...props }: Button
  */
 const setsWidth = (className: string) => /(?:^|\s)(?:[\w-]+:)*w-\S+/.test(className);
 
-/** The shared field styling, with `w-full` unless the caller chose a width. */
+/**
+ * The shared field styling, with `w-full` unless the caller chose a width.
+ *
+ * `py-1.5` is deliberate and unchanged: a corner radius and a focus ring are a
+ * border-radius and a box-shadow, and neither takes layout space, so this is a
+ * surface change that leaves every row exactly the height it was. The hover
+ * border is there so a control answers the pointer before it is clicked, and
+ * the focus ring is soft and 2px rather than hard and 1px — the old one read as
+ * an error state.
+ */
 const fieldClass = (className: string, extra = '') =>
   [
     setsWidth(className) ? '' : 'w-full',
-    'rounded-md border border-slate-300 bg-white py-1.5 text-sm',
-    'focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600',
+    'rounded-lg border border-slate-200 bg-white py-1.5 text-sm text-slate-900',
+    'placeholder:text-slate-400 transition-colors hover:border-slate-300',
+    'focus:border-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-600/25',
+    'disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-500',
     extra,
     className,
   ].filter(Boolean).join(' ');
@@ -184,10 +198,13 @@ export function Textarea({ className = '', ...props }: TextareaHTMLAttributes<HT
  * while the value darkens. The contrast is what separates them, not a rule
  * between them.
  */
-export const labelClass = (plain: boolean) =>
-  plain
-    ? 'text-[11px] font-semibold uppercase tracking-wide text-slate-500'
-    : 'text-xs font-medium text-slate-600';
+export const labelClass = (_plain: boolean) =>
+  // One treatment now, editable or not. It was written for the read-only view,
+  // where a label and its value are two lines of similar grey and the type has
+  // to tell them apart; it turned out to read better above a box as well. The
+  // parameter stays because `Field` still varies the *spacing* by it, and
+  // because the two could diverge again.
+  'text-[11px] font-semibold uppercase tracking-wide text-slate-500';
 
 /**
  * The shape a document form's field grid takes.
@@ -238,7 +255,7 @@ export function DownloadButton({ href, label = 'Download Excel', title }: { href
     <a
       href={href}
       title={title ?? 'Download every row these filters match — not just this page'}
-      className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50"
+      className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:border-slate-300 hover:bg-slate-50"
     >
       {label}
     </a>
@@ -261,7 +278,7 @@ export function SettledDocumentType({ isExport, number }: { isExport: boolean; n
   const kind = isExport ? 'export' : 'domestic';
   return (
     <div className="flex flex-wrap items-center gap-2 text-sm">
-      <span className="rounded-md bg-slate-100 px-2 py-0.5 font-medium text-slate-700">
+      <span className="rounded-lg bg-slate-100 px-2 py-0.5 font-medium text-slate-700 ring-1 ring-inset ring-slate-200">
         {isExport ? '🌍 Export' : '🇮🇳 Domestic'}
       </span>
       <span className="text-xs text-slate-500">
@@ -274,9 +291,13 @@ export function SettledDocumentType({ isExport, number }: { isExport: boolean; n
 
 export function Card({ title, children, actions, className = '' }: { title?: string; children: ReactNode; actions?: ReactNode; className?: string }) {
   return (
-    <div className={`rounded-lg border border-slate-200 bg-white shadow-sm ${className}`}>
+    // Deliberately no `overflow-hidden` to clip the header tint to the corner:
+    // ColumnsControl opens an absolutely positioned panel inside this header,
+    // and clipping it would break the columns picker on four forms. The radius
+    // goes on the header itself instead.
+    <div className={`rounded-xl border border-slate-200 bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04),0_1px_1px_rgba(15,23,42,0.03)] ${className}`}>
       {(title || actions) && (
-        <div className="flex items-center justify-between border-b border-slate-100 px-4 py-2.5">
+        <div className="flex items-center justify-between gap-2 rounded-t-xl border-b border-slate-100 bg-slate-50/60 px-4 py-2.5">
           <h3 className="text-sm font-semibold text-slate-700">{title}</h3>
           {actions}
         </div>
@@ -290,7 +311,7 @@ export function PageHeader({ title, subtitle, actions }: { title: string; subtit
   return (
     <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
       <div>
-        <h1 className="text-xl font-bold text-slate-800">{title}</h1>
+        <h1 className="text-[1.375rem] font-semibold tracking-tight text-slate-900">{title}</h1>
         {subtitle && <p className="text-sm text-slate-500">{subtitle}</p>}
       </div>
       <div className="flex gap-2">{actions}</div>
@@ -299,22 +320,23 @@ export function PageHeader({ title, subtitle, actions }: { title: string; subtit
 }
 
 const statusColors: Record<string, string> = {
-  draft: 'bg-slate-100 text-slate-600',
-  sent: 'bg-blue-100 text-blue-700',
-  negotiating: 'bg-amber-100 text-amber-700',
-  accepted: 'bg-green-100 text-green-700',
-  rejected: 'bg-red-100 text-red-700',
-  expired: 'bg-slate-200 text-slate-500',
-  open: 'bg-blue-100 text-blue-700',
-  quoted: 'bg-indigo-100 text-indigo-700',
-  lost: 'bg-red-100 text-red-700',
-  order_confirmed: 'bg-green-100 text-green-700',
-  advance_received: 'bg-emerald-100 text-emerald-700',
-  in_production: 'bg-purple-100 text-purple-700',
-  cancelled: 'bg-red-100 text-red-700',
-  final: 'bg-blue-100 text-blue-700',
-  dispatched: 'bg-purple-100 text-purple-700',
-  paid: 'bg-green-100 text-green-700',
+  draft: 'bg-slate-50 text-slate-700 ring-slate-200',
+  sent: 'bg-blue-50 text-blue-700 ring-blue-200',
+  negotiating: 'bg-amber-50 text-amber-700 ring-amber-200',
+  accepted: 'bg-green-50 text-green-700 ring-green-200',
+  rejected: 'bg-red-50 text-red-700 ring-red-200',
+  open: 'bg-blue-50 text-blue-700 ring-blue-200',
+  quoted: 'bg-indigo-50 text-indigo-700 ring-indigo-200',
+  lost: 'bg-red-50 text-red-700 ring-red-200',
+  order_confirmed: 'bg-green-50 text-green-700 ring-green-200',
+  advance_received: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
+  in_production: 'bg-purple-50 text-purple-700 ring-purple-200',
+  cancelled: 'bg-red-50 text-red-700 ring-red-200',
+  final: 'bg-blue-50 text-blue-700 ring-blue-200',
+  dispatched: 'bg-purple-50 text-purple-700 ring-purple-200',
+  paid: 'bg-green-50 text-green-700 ring-green-200',
+  // Not a decision anybody made — a date that passed. It says so by staying grey.
+  expired: 'bg-slate-100 text-slate-500 ring-slate-200',
 };
 
 /**
@@ -339,7 +361,7 @@ const statusLabels: Record<string, string> = {
 
 export function StatusBadge({ status }: { status: string }) {
   return (
-    <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium capitalize ${statusColors[status] ?? 'bg-slate-100 text-slate-600'}`}>
+    <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium capitalize ring-1 ring-inset ${statusColors[status] ?? 'bg-slate-50 text-slate-600 ring-slate-200'}`}>
       {statusLabels[status] ?? status.replace(/_/g, ' ')}
     </span>
   );
@@ -414,13 +436,13 @@ export function MultiSelectFilter({
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-center justify-between gap-2 rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-sm text-slate-700 hover:bg-slate-50"
+        className="flex w-full items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-sm text-slate-700 shadow-sm transition-colors hover:border-slate-300 hover:bg-slate-50"
       >
         <span className="truncate">{summary}</span>
         <span className="text-slate-400">▾</span>
       </button>
       {open && (
-        <div className="absolute z-20 mt-1 w-56 rounded-md border border-slate-200 bg-white p-1 shadow-lg">
+        <div className="absolute z-20 mt-1 w-56 rounded-xl border border-slate-200 bg-white p-1 shadow-lg">
           {options.map((o) => (
             <label
               key={o.key}
@@ -451,7 +473,7 @@ export function ExportTabs({ value, onChange }: { value: string; onChange: (v: s
     { key: '0', label: '🇮🇳 Domestic' },
   ];
   return (
-    <div className="inline-flex rounded-md border border-slate-300 bg-white p-0.5">
+    <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5 shadow-sm">
       {tabs.map((t) => (
         <button
           key={t.key}
@@ -552,7 +574,7 @@ export function Pagination({ page, pages, total, limit, onPage, noun = 'rows' }:
   const last = Math.min(page * limit, total);
   const numbers = pageWindow(page, pages);
 
-  const step = (n: number) => 'rounded-md px-2.5 py-1 text-sm ' + (
+  const step = (n: number) => 'rounded-lg px-2.5 py-1 text-sm ' + (
     n === page
       ? 'bg-brand-700 font-semibold text-white'
       : 'text-slate-600 hover:bg-slate-100'
@@ -565,7 +587,7 @@ export function Pagination({ page, pages, total, limit, onPage, noun = 'rows' }:
       </div>
       <div className="flex items-center gap-1">
         <button
-          className="rounded-md px-2.5 py-1 text-sm text-slate-600 hover:bg-slate-100 disabled:text-slate-300 disabled:hover:bg-transparent"
+          className="rounded-lg px-2.5 py-1 text-sm text-slate-600 hover:bg-slate-100 disabled:text-slate-300 disabled:hover:bg-transparent"
           onClick={() => onPage(page - 1)}
           disabled={page <= 1}
         >
@@ -578,7 +600,7 @@ export function Pagination({ page, pages, total, limit, onPage, noun = 'rows' }:
           </span>
         ))}
         <button
-          className="rounded-md px-2.5 py-1 text-sm text-slate-600 hover:bg-slate-100 disabled:text-slate-300 disabled:hover:bg-transparent"
+          className="rounded-lg px-2.5 py-1 text-sm text-slate-600 hover:bg-slate-100 disabled:text-slate-300 disabled:hover:bg-transparent"
           onClick={() => onPage(page + 1)}
           disabled={page >= pages}
         >
@@ -592,14 +614,14 @@ export function Pagination({ page, pages, total, limit, onPage, noun = 'rows' }:
 export function ErrorText({ error }: { error: unknown }) {
   if (!error) return null;
   const msg = error instanceof Error ? error.message : String(error);
-  return <div className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{msg}</div>;
+  return <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 ring-1 ring-inset ring-red-100">{msg}</div>;
 }
 
 export function Modal({ title, onClose, children, wide }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean }) {
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 p-4 pt-12" onClick={onClose}>
       <div
-        className={`max-h-[85vh] w-full ${wide ? 'max-w-3xl' : 'max-w-lg'} overflow-y-auto rounded-lg bg-white shadow-xl`}
+        className={`max-h-[85vh] w-full ${wide ? 'max-w-3xl' : 'max-w-lg'} overflow-y-auto rounded-xl bg-white shadow-xl`}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">

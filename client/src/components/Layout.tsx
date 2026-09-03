@@ -3,8 +3,9 @@ import { NavLink, useLocation } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { User } from '../types';
+import { Icon, type IconName } from './icons';
 
-interface NavItem { to: string; label: string; icon: string; managerOnly?: boolean }
+interface NavItem { to: string; label: string; icon: IconName; managerOnly?: boolean }
 
 /**
  * The sidebar, in four groups.
@@ -29,35 +30,35 @@ const NAV: { heading: string; items: NavItem[] }[] = [
     items: [
       // Before quotations: an enquiry is what arrives first, and the desk
       // works down this list in the order the work happens.
-      { to: '/enquiries', label: 'Enquiries', icon: '❓' },
-      { to: '/quotations', label: 'Quotations', icon: '📄' },
-      { to: '/proformas', label: 'Proforma Invoices', icon: '🧾' },
-      { to: '/orders', label: 'Orders', icon: '📋' },
+      { to: '/enquiries', label: 'Enquiries', icon: 'enquiry' },
+      { to: '/quotations', label: 'Quotations', icon: 'document' },
+      { to: '/proformas', label: 'Proforma Invoices', icon: 'receipt' },
+      { to: '/orders', label: 'Orders', icon: 'clipboard' },
       // No Packing Lists entry: the commercial invoice owns its packing list,
       // so it is created and edited on the invoice. The pages remain routed for
       // any bookmarked link, but they are no longer a place you navigate to.
-      { to: '/invoices', label: 'Commercial Invoices', icon: '💰' },
-      { to: '/followups', label: 'Follow-ups', icon: '🔔' },
+      { to: '/invoices', label: 'Commercial Invoices', icon: 'invoice' },
+      { to: '/followups', label: 'Follow-ups', icon: 'bell' },
     ],
   },
   {
     heading: 'Factory',
     items: [
-      { to: '/work-orders', label: 'Work Orders', icon: '🔧' },
-      { to: '/despatches', label: 'Despatches', icon: '🚚' },
-      { to: '/stock', label: 'Stock', icon: '📦' },
+      { to: '/work-orders', label: 'Work Orders', icon: 'wrench' },
+      { to: '/despatches', label: 'Despatches', icon: 'truck' },
+      { to: '/stock', label: 'Stock', icon: 'box' },
       // Supplier rates are not everyone's business, and committing a spend is
       // not a shop-floor action — so purchasing is manager-only, front and back.
-      { to: '/purchase-orders', label: 'Purchase Orders', icon: '🛒', managerOnly: true },
+      { to: '/purchase-orders', label: 'Purchase Orders', icon: 'cart', managerOnly: true },
     ],
   },
   {
     // The things documents are built *from*, rather than documents themselves.
     heading: 'Records',
     items: [
-      { to: '/customers', label: 'Customers', icon: '🏢' },
-      { to: '/products', label: 'Products', icon: '🏷️' },
-      { to: '/container-planner', label: 'Container Planner', icon: '🚢' },
+      { to: '/customers', label: 'Customers', icon: 'building' },
+      { to: '/products', label: 'Products', icon: 'tag' },
+      { to: '/container-planner', label: 'Container Planner', icon: 'ship' },
     ],
   },
   {
@@ -65,18 +66,18 @@ const NAV: { heading: string; items: NavItem[] }[] = [
     // because it matters least.
     heading: 'Setup',
     items: [
-      { to: '/masters', label: 'Production Masters', icon: '🏭', managerOnly: true },
-      { to: '/approvals', label: 'Approvals', icon: '✅', managerOnly: true },
+      { to: '/masters', label: 'Production Masters', icon: 'factory', managerOnly: true },
+      { to: '/approvals', label: 'Approvals', icon: 'check', managerOnly: true },
       // The whole trail. A document's own history sits on the document, where
       // whoever owns it can read it without being a manager.
-      { to: '/activity', label: 'Activity', icon: '🕘', managerOnly: true },
-      { to: '/team', label: 'Team', icon: '👥', managerOnly: true },
-      { to: '/settings', label: 'Settings', icon: '⚙️', managerOnly: true },
+      { to: '/activity', label: 'Activity', icon: 'clock', managerOnly: true },
+      { to: '/team', label: 'Team', icon: 'users', managerOnly: true },
+      { to: '/settings', label: 'Settings', icon: 'cog', managerOnly: true },
     ],
   },
 ];
 
-const DASHBOARD: NavItem = { to: '/', label: 'Dashboard', icon: '📊' };
+const DASHBOARD: NavItem = { to: '/', label: 'Dashboard', icon: 'dashboard' };
 
 /**
  * Which groups are open, remembered between visits.
@@ -181,21 +182,28 @@ export default function Layout({ user, onLogout, children }: { user: User; onLog
       // The label is the tooltip on the rail, where it is the only thing left.
       title={item.label}
       className={({ isActive }) =>
-        `flex items-center gap-2.5 px-4 py-1.5 text-sm transition-colors ${extra} ${
-          rail ? 'md:justify-center md:gap-0 md:px-0' : ''
-        } ${isActive ? 'bg-white/15 font-medium text-white' : 'text-white/70 hover:bg-white/5 hover:text-white'}`
+        `relative mx-2 flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-sm transition-colors ${extra} ${
+          rail ? 'md:mx-1.5 md:justify-center md:gap-0 md:px-0' : ''
+        } ${isActive ? 'bg-white/12 font-medium text-white' : 'text-white/70 hover:bg-white/5 hover:text-white'}`
       }
     >
-      <span className="text-base leading-none">{item.icon}</span>
-      <span className={`flex-1 ${rail ? 'md:hidden' : ''}`}>{item.label}</span>
-      {item.to === '/approvals' && !!approvals?.pending && (
+      {({ isActive }) => (
         <>
-          <span className={`rounded-full bg-amber-400 px-1.5 text-xs font-bold text-slate-900 ${rail ? 'md:hidden' : ''}`}>
-            {approvals.pending}
-          </span>
-          {/* The count will not fit on the rail, but "there is something
-              waiting" still has to survive the fold. */}
-          {rail && <span className="ml-0.5 hidden h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400 md:block" aria-hidden="true" />}
+          {/* The accent that says which row you are on, and the only thing
+              that still says it once the pill is dimmed by a hover next door. */}
+          {isActive && <span className="absolute inset-y-1.5 -left-1 w-0.5 rounded-full bg-brand-400" aria-hidden="true" />}
+          <Icon name={item.icon} />
+          <span className={`flex-1 ${rail ? 'md:hidden' : ''}`}>{item.label}</span>
+          {item.to === '/approvals' && !!approvals?.pending && (
+            <>
+              <span className={`rounded-full bg-amber-400 px-1.5 text-xs font-bold text-slate-900 ${rail ? 'md:hidden' : ''}`}>
+                {approvals.pending}
+              </span>
+              {/* The count will not fit on the rail, but "there is something
+                  waiting" still has to survive the fold. */}
+              {rail && <span className="ml-0.5 hidden h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400 md:block" aria-hidden="true" />}
+            </>
+          )}
         </>
       )}
     </NavLink>
@@ -215,9 +223,9 @@ export default function Layout({ user, onLogout, children }: { user: User; onLog
           onClick={() => setDrawer(true)}
           aria-label="Open the menu"
           aria-expanded={drawer}
-          className="rounded p-1.5 text-xl leading-none hover:bg-white/10"
+          className="rounded-lg p-1.5 hover:bg-white/10"
         >
-          ☰
+          <Icon name="menu" size={18} />
         </button>
         <span className="font-semibold">ERP Tool</span>
         {isManager && !!approvals?.pending && (
@@ -271,7 +279,7 @@ export default function Layout({ user, onLogout, children }: { user: User; onLog
               rail ? 'md:mx-auto' : ''
             }`}
           >
-            {rail ? '»' : '«'}
+            <Icon name={rail ? 'chevron-right' : 'chevron-left'} />
           </button>
         </div>
         <nav className="flex-1 overflow-y-auto py-2">
@@ -292,7 +300,7 @@ export default function Layout({ user, onLogout, children }: { user: User; onLog
                     rail ? 'md:hidden' : ''
                   }`}
                 >
-                  <span className={`inline-block text-[0.5625rem] transition-transform ${expanded ? 'rotate-90' : ''}`}>▶</span>
+                  <Icon name="chevron-right" size={12} className={`transition-transform ${expanded ? 'rotate-90' : ''}`} />
                   <span className="flex-1 text-left">{group.heading}</span>
                   {/* Closed groups say how much is inside, so folding one away
                       does not make you forget what it held. */}
@@ -313,10 +321,10 @@ export default function Layout({ user, onLogout, children }: { user: User; onLog
           <button
             onClick={logout}
             title={rail ? `Sign out (${user.name})` : undefined}
-            className="text-xs text-white/50 hover:text-white"
+            className="flex items-center gap-1 text-xs text-white/50 transition-colors hover:text-white"
           >
             <span className={rail ? 'md:hidden' : ''}>Sign out</span>
-            <span className={rail ? 'hidden text-base md:inline' : 'hidden'} aria-hidden="true">⏻</span>
+            <span className={rail ? 'hidden md:inline' : 'hidden'}><Icon name="power" /></span>
           </button>
         </div>
       </aside>
