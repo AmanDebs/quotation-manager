@@ -238,8 +238,20 @@ export default function QuotationFormPage() {
                     other way round and is gone; the Orders page still has
                     "+ New Order" for an order that never had a quotation.
                     "Proforma directly" lost its contrast when the order button
-                    went, so it says what it does. */}
-                {existing!.status === 'accepted' && (
+                    went, so it says what it does.
+
+                    Replaced by a link once a proforma exists, the shape the
+                    proforma's own "Book Order" button already had. Offering it
+                    on a quotation the banner below calls converted and
+                    read-only invited raising a second proforma against the
+                    same quotation, which makes "which document came from this
+                    quote" unanswerable. The server refuses it either way —
+                    alreadyConvertedError in services/documentChain.ts. */}
+                {lockedBy ? (
+                  <Link to={`/proformas/${lockedBy.converted_pi_id}`} className="self-center text-xs text-brand-600 hover:underline">
+                    Proforma {lockedBy.converted_pi_number}
+                  </Link>
+                ) : existing!.status === 'accepted' && (
                   <Button onClick={() => navigate(`/proformas/new?from_quotation=${id}`)}>→ Create Proforma</Button>
                 )}
               </>

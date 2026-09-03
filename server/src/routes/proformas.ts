@@ -8,7 +8,7 @@ import { resolveCompanyId } from '../services/companies.js';
 import { submit, decide, resetApprovalOnEdit, blockUnapprovedTransition, blockUnapprovedConversion } from '../services/approval.js';
 import { listBody } from '../services/pagination.js';
 import { searchClause } from '../services/search.js';
-import { lockError, syncQuotationConverted } from '../services/documentChain.js';
+import { lockError, syncQuotationConverted, alreadyConvertedError } from '../services/documentChain.js';
 import { buildXlsx, attachmentName, type Column } from '../services/xlsx.js';
 
 export const proformasRouter = Router();
@@ -227,8 +227,10 @@ proformasRouter.get('/prefill/from-quotation/:quotationId', (req: AuthedRequest,
   const qid = Number(req.params.quotationId);
   const q = db.prepare('SELECT * FROM quotations WHERE id = ?').get(qid) as Record<string, unknown> | undefined;
   if (!q || !canAccessCustomer(req, Number(q.customer_id))) return res.status(404).json({ error: 'Quotation not found' });
-  // Said now rather than after the form is filled in. commit: false — a GET
-  // must not approve anything just by being asked.
+  // Both said now rather than after the form is filled in. commit: false — a
+  // GET must not approve anything just by being asked.
+  const converted = alreadyConvertedError(qid);
+  if (converted) return res.status(409).json({ error: converted });
   const unapproved = blockUnapprovedConversion('quotations', qid, req, false);
   if (unapproved) return res.status(409).json({ error: unapproved });
   const customer = db.prepare('SELECT * FROM customers WHERE id = ?').get(Number(q.customer_id)) as Record<string, unknown>;
@@ -327,6 +329,10 @@ proformasRouter.post('/', (req: AuthedRequest, res) => {
   // draft. A manager converting an unapproved one approves it in the same
   // action, exactly as blockUnapprovedTransition already does for a status move.
   if (h.quotation_id) {
+    // A quotation answers one negotiation once. Enforced here and not only on
+    // the prefill, since the prefill is a GET the form can be got past.
+    const converted = alreadyConvertedError(Number(h.quotation_id));
+    if (converted) return res.status(409).json({ error: converted });
     const unapproved = blockUnapprovedConversion('quotations', Number(h.quotation_id), req);
     if (unapproved) return res.status(409).json({ error: unapproved });
   }

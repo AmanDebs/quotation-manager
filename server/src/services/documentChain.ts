@@ -96,6 +96,36 @@ export function proformaLockedBy(piId: number): LockedBy | null {
 }
 
 /**
+ * Refuse raising a *second* proforma from a quotation that already has one.
+ *
+ * The other half of locking, and it needs saying separately: `lockError`
+ * guards changes to the quotation, and raising another proforma changes
+ * nothing about it — it just writes a second row naming it. So nothing stopped
+ * it, and the form went on offering **→ Create Proforma** on a quotation
+ * already marked converted and read-only.
+ *
+ * Two proformas both claiming to be the one raised from a quotation makes
+ * "which document came from this quote" unanswerable — the same reason
+ * `POST /proformas/:id/duplicate` refuses to carry `quotation_id` across, and
+ * the reason `quotationLockedBy` can take the first row and be right. It is
+ * also why the proforma → order side has always checked `order_id IS NULL`
+ * before claiming a proforma.
+ *
+ * The answer is a **409 naming the proforma that already exists**, rather than
+ * the order side's quieter "don't claim it": the caller asked to convert *this*
+ * quotation, and an unlinked proforma is a worse outcome than being told why
+ * not. A second offer to the same customer is `Duplicate`, which is what that
+ * button is for.
+ */
+export function alreadyConvertedError(quotationId: number | null | undefined): string | null {
+  if (!quotationId) return null;
+  const by = quotationLockedBy(Number(quotationId));
+  if (!by) return null;
+  return `Proforma ${by.number} has already been raised from this quotation. `
+    + `Open that proforma, or use Duplicate to start a fresh quotation from this one.`;
+}
+
+/**
  * Refuse a change to a document that has already been converted.
  *
  * Returns a message naming what locked it and how to undo that, or null when
