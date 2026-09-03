@@ -57,7 +57,7 @@ export const QUOTATION_OMIT = ['hsn', 'qty'];
  * server/src/services/totals.ts, which falls back to Total Qty for exactly
  * this reason.
  */
-export const PROFORMA_OMIT = ['hsn', 'qty', 'amount'];
+export const PROFORMA_OMIT = ['hsn', 'qty'];
 
 /** Container loadability is meaningless to a domestic GST buyer. */
 export const LOADABILITY_COLUMNS = ['qty_20ft', 'qty_40ft'];
@@ -115,9 +115,6 @@ export function proformaOmit(isExport: boolean): string[] {
   return withLoadability(PROFORMA_OMIT, isExport);
 }
 
-export function proformaColumns(isExport: boolean): ToggleableColumn[] {
-  return columnsFor(proformaOmit(isExport));
-}
 
 export const PACKING_COLUMNS: ToggleableColumn[] = [
   { key: 'hsn', label: 'HSN Code' },
@@ -201,22 +198,32 @@ export default function ColumnsControl({
 }
 
 /**
- * Columns the commercial invoice and the order confirmation do not offer.
+ * Columns every document except the quotation shows but does not let you turn
+ * off.
  *
- * `amount`: a quotation may be sent as a rate-and-packing price list, with the
- * line totals and the grand total deliberately left off. An invoice may not —
- * an invoice with no amounts is not a document that can be presented for GST
- * or customs — and an order confirmation states what was agreed, money
- * included. Both forms render the whole of ITEM_COLUMNS unless given a list,
- * so the exclusion has to be written down here rather than assumed.
+ * `amount`: a quotation may be sent as a rate-and-packing price list with the
+ * line totals and grand total deliberately left off. An invoice may not — one
+ * with no amounts cannot be presented for GST or customs — and a proforma is
+ * what an advance is paid against, so it has to state what is owed.
+ *
+ * This is deliberately **not** part of PROFORMA_OMIT, and there is a bug in the
+ * difference. An `omit` list is read by `LineItemsEditor` as well as by the
+ * tick-list, and there it means "this document never has this column at all"
+ * — so putting `amount` in it did not merely stop the column being toggled, it
+ * removed the Amount column from the proforma editor outright. "Not offered as
+ * a choice" and "never present" are different things and need different lists.
  */
-export const INVOICE_OMIT = ['amount'];
-export const ORDER_OMIT = ['amount'];
+const NOT_TOGGLEABLE_OUTSIDE_QUOTATION = ['amount'];
+
+/** The tick-list for a proforma: its own omissions, plus amount. */
+export function proformaColumns(isExport: boolean): ToggleableColumn[] {
+  return columnsFor([...proformaOmit(isExport), ...NOT_TOGGLEABLE_OUTSIDE_QUOTATION]);
+}
 
 export function invoiceColumns(): ToggleableColumn[] {
-  return columnsFor(INVOICE_OMIT);
+  return columnsFor(NOT_TOGGLEABLE_OUTSIDE_QUOTATION);
 }
 
 export function orderColumns(): ToggleableColumn[] {
-  return columnsFor(ORDER_OMIT);
+  return columnsFor(NOT_TOGGLEABLE_OUTSIDE_QUOTATION);
 }
