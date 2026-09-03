@@ -207,7 +207,7 @@ export default function ProformaFormPage() {
   const readOnly = lockedByOrder;
   // Plain values sit closer together than the controls they replaced.
   const gridClass = readOnly
-    ? 'grid grid-cols-1 gap-x-3 gap-y-1 sm:grid-cols-3'
+    ? 'grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-3'
     : 'grid grid-cols-1 gap-3 sm:grid-cols-3';
 
   const onCustomerChange = (cid: number | '') => {

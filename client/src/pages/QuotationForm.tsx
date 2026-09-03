@@ -3,7 +3,7 @@ import { useNavigate, useParams, useSearchParams, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Quotation, Customer, LineItem, TaxType, ColumnConfig } from '../types';
-import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, StatusBadge, ReadOnlyFields } from '../components/ui';
+import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, StatusBadge, ReadOnlyFields, labelClass } from '../components/ui';
 import CompanySelect from '../components/CompanySelect';
 import { DocNumber, IncoTermsInput, HeaderCharges } from '../components/DocFields';
 import LineItemsEditor from '../components/LineItemsEditor';
@@ -209,7 +209,7 @@ export default function QuotationFormPage() {
   // Plain values sit closer together than the controls they replaced, and the
   // spacers below only exist to keep the boxes in tidy rows.
   const gridClass = readOnly
-    ? 'grid grid-cols-1 gap-x-3 gap-y-1 sm:grid-cols-3'
+    ? 'grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-3'
     : 'grid grid-cols-1 gap-3 sm:grid-cols-3';
 
   return (
@@ -399,7 +399,7 @@ export default function QuotationFormPage() {
             {!readOnly && <div />}
             <div className={`col-span-3 ${readOnly ? 'has-[[data-empty]]:hidden' : ''}`}>
               <div className="mb-1 flex items-center justify-between">
-                <span className="text-xs font-medium text-slate-600">Notes (printed on quotation)</span>
+                <span className={labelClass(readOnly)}>Notes (printed on quotation)</span>
                 {!readOnly && <NotePresetPicker value={draft.notes} onChange={(v) => set({ notes: v })} />}
               </div>
               <Textarea rows={3} disabled={readOnly} value={draft.notes} onChange={(e) => set({ notes: e.target.value })} />
