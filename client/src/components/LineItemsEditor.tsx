@@ -123,7 +123,7 @@ function billedQty(it: LineItem): number | null {
  * Amounts shown are a client-side preview; the server recomputes on save.
  */
 export default function LineItemsEditor({
-  items, onChange, currency, taxType, showTax, config = {}, omit, forced,
+  items, onChange, currency, taxType, showTax, config = {}, omit, forced, share,
 }: {
   items: LineItem[];
   onChange: (items: LineItem[]) => void;
@@ -140,6 +140,20 @@ export default function LineItemsEditor({
    * take it away here.
    */
   forced?: string[];
+  /**
+   * Each line's share of the container space this document's goods take up,
+   * keyed by line index — the one figure the Container Fitment table gave that
+   * this table could not, now that the rest of that table's columns are these
+   * columns. Derived, never stored and never printed, so it is a prop rather
+   * than an entry in ITEM_COLUMNS: nothing can inherit it, nothing can turn it
+   * off by mistake, and `services/pdf.ts` builds from a ColumnSpec list it is
+   * not in. Given only by the proforma, which is the form that plans a load.
+   *
+   * A line absent from the map shows "—": a charge, a line with no boxes yet,
+   * or one whose product has no loadability recorded — "nobody has said",
+   * which is not the same as none.
+   */
+  share?: Map<number, number>;
 }) {
   const { data: products = [] } = useQuery({ queryKey: ['products', ''], queryFn: () => api.get<Product[]>('/api/products') });
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
@@ -239,13 +253,18 @@ export default function LineItemsEditor({
   // What is left once packing has its own columns: the fields a line rarely
   // carries. When none of them apply the second row holds only the /1000 rate.
   const extrasVisible = show('code') || show('supplier') || customNames.length > 0;
+  // Before Amount rather than after it, so it falls inside spanCols below and
+  // the second row's colSpan follows it for free; Amount stays the last figure,
+  // which is what a money document wants.
+  const shareVisible = !!share;
   // Columns between the line number and the amount, for the second row's colSpan.
   // Derived from the same show() calls as the header, so the two cannot drift.
   const spanCols = 3 // Product, Description, Unit — always present
     + (show('image') ? 1 : 0) + (show('hsn') ? 1 : 0) + (show('unit_price') ? 1 : 0)
     + (show('pcs_per_pack') ? 1 : 0) + (show('packs') ? 1 : 0) + (show('total_pcs') ? 1 : 0)
     + (show('qty_20ft') ? 1 : 0) + (show('qty_40ft') ? 1 : 0)
-    + (show('qty') ? 1 : 0) + (show('color') ? 1 : 0) + (taxVisible ? 1 : 0);
+    + (show('qty') ? 1 : 0) + (show('color') ? 1 : 0) + (taxVisible ? 1 : 0)
+    + (shareVisible ? 1 : 0);
 
   /** The leftover fields worth reading at a glance, as one line. */
   const summarise = (it: LineItem): string => {
@@ -301,6 +320,14 @@ export default function LineItemsEditor({
               {show('unit_price') && <th className="w-28 pb-2 pr-2 text-right font-medium">Unit Price</th>}
               <th className="w-28 pb-2 pr-2 font-medium">Unit</th>
               {taxVisible && <th className="w-16 pb-2 pr-2 text-right font-medium">Tax %</th>}
+              {shareVisible && (
+                <th
+                  className="w-20 pb-2 pr-2 text-right font-medium"
+                  title="Share of the container space these goods take up. Working figure — not printed."
+                >
+                  Share
+                </th>
+              )}
               {amountVisible && <th className="w-32 pb-2 pr-2 text-right font-medium">Amount</th>}
               <th className="w-8 pb-2" />
             </tr>
@@ -450,6 +477,11 @@ export default function LineItemsEditor({
                   {taxVisible && (
                     <td className="py-2 pr-2">
                       <Input type="number" min={0} max={100} step="any" value={it.tax_pct ?? ''} onChange={(e) => set(i, { tax_pct: e.target.value === '' ? 0 : Number(e.target.value) })} />
+                    </td>
+                  )}
+                  {shareVisible && (
+                    <td className="py-2 pr-2 pt-4 text-right tabular-nums text-slate-500">
+                      {share!.has(i) ? `${share!.get(i)!.toFixed(1)}%` : '—'}
                     </td>
                   )}
                   {amountVisible && (

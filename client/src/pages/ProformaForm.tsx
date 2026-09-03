@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
@@ -9,6 +9,7 @@ import { DocNumber, IncoTermsInput, HeaderCharges } from '../components/DocField
 import LineItemsEditor from '../components/LineItemsEditor';
 import ReadOnlyItems from '../components/ReadOnlyItems';
 import ContainerFitment from '../components/ContainerFitment';
+import { fitmentPlan, type ContainerSize } from '../lib/containerPlan';
 import FollowupButton from '../components/FollowupButton';
 import InternalNotes from '../components/InternalNotes';
 import PaymentsCard from '../components/PaymentsCard';
@@ -191,6 +192,31 @@ export default function ProformaFormPage() {
   // returns below: a hook after them runs on some renders and not others, which
   // React treats as a changed hook order and unmounts the whole page for.
   useDefaultNotes(isNew, draft.remarks, (remarks) => setDraft((d) => ({ ...d, remarks })));
+
+  /**
+   * How this document's goods load, computed once and read twice.
+   *
+   * The Container Fitment card states the totals and the Line Items table
+   * carries each line's Share, and both have to be the same plan against the
+   * same container size — one plan, one size, since space is a fraction of its
+   * own container type. So the size lives here rather than in the card, and the
+   * card's toggle sets it. The opening guess is the card's own, lifted
+   * unchanged: whatever the Containers field mentions is usually right.
+   *
+   * Above the early returns, with the rest of the hooks.
+   */
+  const [containerSize, setContainerSize] = useState<ContainerSize>(
+    /\b20/.test(String(draft.container_count ?? '')) ? '20ft' : '40ft'
+  );
+  const fitment = useMemo(() => fitmentPlan(draft.items, containerSize), [draft.items, containerSize]);
+  // fitmentPlan numbers its rows by their index in the items array it was
+  // given — it maps before it filters — so this keys straight onto the editor's
+  // lines. Only rows with a loadability recorded are entered: a line whose
+  // product has none occupies no space, and 0.0% would state that as a fact.
+  const shareByLine = useMemo(
+    () => new Map(fitment.rows.filter((r) => r.boxesPerContainer).map((r) => [r.productId, r.sharePct])),
+    [fitment]
+  );
 
   if (loadError) return <ErrorText error={loadError} />;
   if (!isNew && !existing) return <div className="text-slate-400">Loading…</div>;
@@ -477,7 +503,7 @@ export default function ProformaFormPage() {
           {readOnly ? (
             <ReadOnlyItems items={draft.items} currency={draft.currency} />
           ) : (
-            <LineItemsEditor items={draft.items} onChange={(items) => set({ items })} currency={draft.currency} taxType={draft.tax_type} config={draft.column_config} omit={proformaOmit(!!draft.is_export)} forced={PROFORMA_FORCED} />
+            <LineItemsEditor items={draft.items} onChange={(items) => set({ items })} currency={draft.currency} taxType={draft.tax_type} config={draft.column_config} omit={proformaOmit(!!draft.is_export)} forced={PROFORMA_FORCED} share={shareByLine} />
           )}
           <HeaderCharges
             freight={draft.freight}
@@ -490,7 +516,7 @@ export default function ProformaFormPage() {
 
         {/* Working information, deliberately not on the PDF: it answers
             "does the Container field above say the right thing?" */}
-        <ContainerFitment items={draft.items} containerCount={draft.container_count} />
+        <ContainerFitment items={draft.items} plan={fitment} size={containerSize} onSize={setContainerSize} />
 
         {/* Saved through its own endpoint, so it needs an id — and so saving a
             note cannot reset an approved proforma the way the form's Save does. */}

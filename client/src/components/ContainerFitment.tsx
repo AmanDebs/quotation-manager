@@ -1,7 +1,6 @@
-import { useMemo, useState } from 'react';
 import type { LineItem } from '../types';
 import { Card } from './ui';
-import { fitmentPlan, type ContainerSize } from '../lib/containerPlan';
+import type { ContainerSize, PlanResult } from '../lib/containerPlan';
 
 /**
  * How many containers this proforma's goods actually need.
@@ -26,27 +25,30 @@ import { fitmentPlan, type ContainerSize } from '../lib/containerPlan';
  *
  * Charge lines are excluded outright, as everywhere else — freight is not
  * something that goes in a box.
+ *
+ * It used to print every line again underneath — Item, Boxes, Pcs/Box, Total
+ * Pieces, Boxes per container, Space, Share — and six of those columns were
+ * already on screen in the Line Items table above, in the boxes they had been
+ * typed into. The one figure only that table could give is **Share**, and it
+ * now sits in the items table as a column of its own. What is left here is what
+ * this panel alone can say: how many containers, how full, and what is missing.
+ *
+ * The size is chosen here and owned by the form, because the Share column has
+ * to be read against the same container — one plan, one size, as ever.
  */
 
 const fmt = (n: number, dp = 0) =>
   n.toLocaleString('en-IN', { minimumFractionDigits: dp, maximumFractionDigits: dp });
 
 export default function ContainerFitment({
-  items, containerCount,
+  items, plan, size, onSize,
 }: {
   items: LineItem[];
-  /** The free-text Container field, used only to guess the size to open on. */
-  containerCount?: string;
+  /** Computed by the form, which reads the same plan for the Share column. */
+  plan: PlanResult;
+  size: ContainerSize;
+  onSize: (size: ContainerSize) => void;
 }) {
-  // A per-document choice, but not part of the document — it is not printed and
-  // not stored, so it lives here rather than costing a column. Opening on
-  // whatever the Container field mentions makes the guess right most of the time.
-  const [size, setSize] = useState<ContainerSize>(
-    /\b20/.test(String(containerCount ?? '')) ? '20ft' : '40ft'
-  );
-
-  const plan = useMemo(() => fitmentPlan(items, size), [items, size]);
-
   const priced = plan.rows.filter((r) => r.boxes > 0);
   const unknown = plan.rows.filter((r) => r.boxes > 0 && !r.boxesPerContainer);
   const totalBoxes = priced.reduce((s, r) => s + r.boxes, 0);
@@ -66,7 +68,7 @@ export default function ContainerFitment({
             <button
               key={s}
               type="button"
-              onClick={() => setSize(s)}
+              onClick={() => onSize(s)}
               className={`rounded px-2.5 py-1 ${
                 size === s ? 'bg-slate-800 text-white' : 'text-slate-600 hover:bg-slate-100'
               }`}
@@ -87,7 +89,7 @@ export default function ContainerFitment({
         </p>
       ) : (
         <>
-          <div className="mb-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <div className="rounded-md bg-slate-50 p-3">
               <div className="text-xs uppercase tracking-wide text-slate-500">Containers</div>
               <div className="text-2xl font-semibold tabular-nums">
@@ -115,56 +117,6 @@ export default function ContainerFitment({
             </div>
           </div>
 
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-slate-200 text-left text-xs uppercase text-slate-500">
-                <th className="pb-1 pr-3">Item</th>
-                <th className="pb-1 pr-3 text-right">Boxes</th>
-                {/* Next to Boxes on purpose: the three read left to right as
-                    boxes × pcs/box = total pieces, which is the sum somebody
-                    will check by eye. */}
-                <th className="pb-1 pr-3 text-right">Pcs / Box</th>
-                <th className="pb-1 pr-3 text-right">Total Pieces</th>
-                <th className="pb-1 pr-3 text-right">Boxes / {size}</th>
-                <th className="pb-1 pr-3 text-right">Space</th>
-                <th className="pb-1 text-right">Share</th>
-              </tr>
-            </thead>
-            <tbody>
-              {priced.map((r) => (
-                <tr key={r.productId} className="border-b border-slate-100 last:border-0">
-                  <td className="py-1.5 pr-3">
-                    {r.name}
-                    {!r.boxesPerContainer && (
-                      <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-xs text-amber-800">
-                        no loadability
-                      </span>
-                    )}
-                  </td>
-                  <td className="py-1.5 pr-3 text-right tabular-nums">{fmt(r.boxes)}</td>
-                  {/* A line with no pcs/box recorded has no piece count either —
-                      shown as "—" rather than 0, which would read as "empty
-                      boxes" instead of "nobody has said". */}
-                  <td className="py-1.5 pr-3 text-right tabular-nums text-slate-500">
-                    {r.pcsPerBox ? fmt(r.pcsPerBox) : '—'}
-                  </td>
-                  <td className="py-1.5 pr-3 text-right tabular-nums">
-                    {r.pieces != null ? fmt(r.pieces) : '—'}
-                  </td>
-                  <td className="py-1.5 pr-3 text-right tabular-nums text-slate-500">
-                    {r.boxesPerContainer ? fmt(r.boxesPerContainer) : '—'}
-                  </td>
-                  <td className="py-1.5 pr-3 text-right tabular-nums">
-                    {r.boxesPerContainer ? fmt(r.space, 3) : '—'}
-                  </td>
-                  <td className="py-1.5 text-right tabular-nums text-slate-500">
-                    {r.boxesPerContainer ? `${fmt(r.sharePct, 1)}%` : '—'}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-
           {plan.leftover && (
             <p className="mt-3 text-sm text-slate-600">
               Room left in the last container for about{' '}
@@ -180,8 +132,8 @@ export default function ContainerFitment({
               </div>
               <p className="mt-0.5 text-amber-800">
                 {unknown.map((r) => r.name).join(', ')} — {unknown.length === 1 ? 'its' : 'their'} boxes
-                are counted above but occupy no space in the container figure, so the real requirement is
-                higher. Set boxes per {size} on the product to include {unknown.length === 1 ? 'it' : 'them'}.
+                are counted in the Boxes total but occupy no space in the container figure, so the real
+                requirement is higher. Set boxes per {size} on the product to include {unknown.length === 1 ? 'it' : 'them'}.
               </p>
             </div>
           )}
