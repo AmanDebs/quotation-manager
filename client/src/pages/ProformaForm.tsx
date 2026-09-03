@@ -205,6 +205,10 @@ export default function ProformaFormPage() {
   // the normal case and the whole point of an advance.
   const lockedByOrder = !!existing?.order_id;
   const readOnly = lockedByOrder;
+  // Plain values sit closer together than the controls they replaced.
+  const gridClass = readOnly
+    ? 'grid grid-cols-1 gap-x-3 gap-y-1 sm:grid-cols-3'
+    : 'grid grid-cols-1 gap-3 sm:grid-cols-3';
 
   const onCustomerChange = (cid: number | '') => {
     const c = customers.find((x) => x.id === cid);
@@ -317,7 +321,7 @@ export default function ProformaFormPage() {
 
       <ReadOnlyFields on={readOnly} className="space-y-4">
         <Card title="Details">
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div className={gridClass}>
             {!isNew && (
               <Field label="PI Number">
                 <DocNumber
@@ -397,7 +401,7 @@ export default function ProformaFormPage() {
         </Card>
 
         <Card title="Buyer's Purchase Order">
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div className={gridClass}>
             <Field label="PO Number"><Input disabled={readOnly} value={draft.po_number} onChange={(e) => set({ po_number: e.target.value })} placeholder="Customer's PO reference" /></Field>
             <Field label="PO Date"><Input disabled={readOnly} type="date" value={draft.po_date} onChange={(e) => set({ po_date: e.target.value })} /></Field>
           </div>
@@ -405,7 +409,7 @@ export default function ProformaFormPage() {
         </Card>
 
         <Card title="Consignee & Notify Parties">
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div className={gridClass}>
             <Field label="Consignee (if different from buyer)">
               <Textarea disabled={readOnly} rows={3} value={draft.consignee} onChange={(e) => set({ consignee: e.target.value })} />
             </Field>
@@ -440,7 +444,7 @@ export default function ProformaFormPage() {
             )}
           </div>
           {!!draft.is_export && (
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <div className={gridClass}>
               <Field label="Country of Origin"><Input disabled={readOnly} value={draft.country_of_origin} onChange={(e) => set({ country_of_origin: e.target.value })} /></Field>
               <Field label="Port of Loading"><Input disabled={readOnly} value={draft.port_of_loading} onChange={(e) => set({ port_of_loading: e.target.value })} placeholder="e.g. Nhava Sheva" /></Field>
               <Field label="Port of Discharge"><Input disabled={readOnly} value={draft.port_of_discharge} onChange={(e) => set({ port_of_discharge: e.target.value })} /></Field>
@@ -486,7 +490,12 @@ export default function ProformaFormPage() {
           </Card>
         )}
 
-        <Card title="Remarks" actions={!readOnly && <NotePresetPicker value={draft.remarks} onChange={(v) => set({ remarks: v })} />}>
+        {/* Nothing to read and nothing to write: gone, like the empty fields. */}
+        <Card
+          title="Remarks"
+          className={readOnly ? 'has-[[data-empty]]:hidden' : ''}
+          actions={!readOnly && <NotePresetPicker value={draft.remarks} onChange={(v) => set({ remarks: v })} />}
+        >
           <Textarea disabled={readOnly} rows={3} value={draft.remarks} onChange={(e) => set({ remarks: e.target.value })} placeholder="Any other conditions specific to this customer…" />
         </Card>
 

@@ -206,6 +206,11 @@ export default function QuotationFormPage() {
   // proforma's own quotation_id, so deleting that proforma unlocks this again.
   const lockedBy = existing?.converted_pi_number ? existing : null;
   const readOnly = isSuperseded || !!lockedBy;
+  // Plain values sit closer together than the controls they replaced, and the
+  // spacers below only exist to keep the boxes in tidy rows.
+  const gridClass = readOnly
+    ? 'grid grid-cols-1 gap-x-3 gap-y-1 sm:grid-cols-3'
+    : 'grid grid-cols-1 gap-3 sm:grid-cols-3';
 
   return (
     <div className="mx-auto max-w-7xl">
@@ -342,7 +347,7 @@ export default function QuotationFormPage() {
             </div>
           }
         >
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div className={gridClass}>
             {!isNew && (
               <Field label="Quotation Number">
                 <DocNumber
@@ -378,7 +383,7 @@ export default function QuotationFormPage() {
                 <option value="igst">IGST (inter-state)</option>
               </Select>
             </Field>
-            <div />
+            {!readOnly && <div />}
             <Field label="Payment Terms"><Input disabled={readOnly} value={draft.payment_terms} onChange={(e) => set({ payment_terms: e.target.value })} placeholder="e.g. 40% advance, rest against shipping docs" /></Field>
             <Field label="Delivery Timeline"><Input disabled={readOnly} value={draft.delivery_terms} onChange={(e) => set({ delivery_terms: e.target.value })} placeholder="e.g. 4–6 weeks from order" /></Field>
             <Field label="Prepared By"><Input disabled={readOnly} value={draft.prepared_by} onChange={(e) => set({ prepared_by: e.target.value })} placeholder="Who prepared this quote" /></Field>
@@ -391,8 +396,8 @@ export default function QuotationFormPage() {
               />
             </Field>
             <Field label="Containers"><Input disabled={readOnly} value={draft.container_count} onChange={(e) => set({ container_count: e.target.value })} placeholder="e.g. 5 X 40ft HQ" /></Field>
-            <div />
-            <div className="col-span-3">
+            {!readOnly && <div />}
+            <div className={`col-span-3 ${readOnly ? 'has-[[data-empty]]:hidden' : ''}`}>
               <div className="mb-1 flex items-center justify-between">
                 <span className="text-xs font-medium text-slate-600">Notes (printed on quotation)</span>
                 {!readOnly && <NotePresetPicker value={draft.notes} onChange={(v) => set({ notes: v })} />}

@@ -98,7 +98,14 @@ export const useReadOnlyFields = () => useContext(ReadOnlyFieldsContext);
 export function StaticValue({ children, className = '', title }: { children?: ReactNode; className?: string; title?: string }) {
   const empty = children == null || children === '';
   return (
-    <div className={`py-1.5 text-sm ${empty ? 'text-slate-300' : 'text-slate-700'} ${className}`} title={title}>
+    <div
+      // Read by `Field` through :has(), so a label can drop itself when the
+      // value under it is blank. An attribute rather than a callback because
+      // nothing then has to be threaded back up through the control.
+      data-empty={empty || undefined}
+      className={`py-0.5 text-sm ${empty ? 'text-slate-300' : 'text-slate-700'} ${className}`}
+      title={title}
+    >
       {empty ? '—' : children}
     </div>
   );
@@ -162,8 +169,15 @@ export function Textarea({ className = '', ...props }: TextareaHTMLAttributes<HT
 }
 
 export function Field({ label, children, className = '' }: { label: string; children: ReactNode; className?: string }) {
+  /**
+   * A blank field on a read-only document is a label and a dash, and five of
+   * them stacked is noise on a page nobody can type into — the blank is still
+   * blank on the PDF, which is where it would be read. Only there: while the
+   * document is editable an empty field is the box you fill in.
+   */
+  const hideIfEmpty = useReadOnlyFields() ? 'has-[[data-empty]]:hidden' : '';
   return (
-    <label className={`block ${className}`}>
+    <label className={`block ${hideIfEmpty} ${className}`}>
       <span className="mb-1 block text-xs font-medium text-slate-600">{label}</span>
       {children}
     </label>
