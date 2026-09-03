@@ -43,18 +43,23 @@ export function syncQuotationConverted(quotationId: number | null | undefined): 
 }
 
 /**
- * A proforma with an order booked against it is confirmed.
+ * A proforma with an order booked against it has its sales order generated.
  *
- * Only from `draft` or `sent`. `advance_received` and `in_production` sit
- * *after* `order_confirmed` in the pipeline, so moving there would drag the
- * document backwards — the trap `orderStatus.ts` documents. `cancelled` is a
- * decision and is never touched.
+ * This used to set `order_confirmed`, which said the wrong thing: *Order
+ * Confirmed* is the buyer telling us to go ahead, and it comes before the
+ * advance is banked, while booking the order is the last step and ours. So the
+ * status it sets is `in_production` — labelled **Sales Order Generated** — and
+ * the two steps in between stay where they belong, as things a person records
+ * about the buyer.
+ *
+ * Forward-only, from anything earlier in the pipeline. `cancelled` is a
+ * decision and is never touched, in or out; `in_production` is already there.
  */
 export function syncProformaOrdered(piId: number | null | undefined): void {
   if (!piId) return;
   db.prepare(
-    `UPDATE proforma_invoices SET status = 'order_confirmed'
-     WHERE id = ? AND status IN ('draft', 'sent')`
+    `UPDATE proforma_invoices SET status = 'in_production'
+     WHERE id = ? AND status IN ('draft', 'sent', 'order_confirmed', 'advance_received')`
   ).run(piId);
 }
 

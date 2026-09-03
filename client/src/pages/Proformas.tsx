@@ -11,7 +11,48 @@ import InternalNotes from '../components/InternalNotes';
 import { useUrlFilter } from '../lib/useUrlFilter';
 import { usePagedList, PAGE_SIZE } from '../lib/usePagedList';
 
-const STATUSES = ['draft', 'sent', 'order_confirmed', 'advance_received', 'in_production', 'cancelled'];
+/**
+ * Draft → Sent → Order Confirmed → Advance Received → Sales Order Generated,
+ * with Cancelled and Expired off to the side (confirmed with Aglo 2026-09-03).
+ *
+ * As on the quotation, the **stored values do not change** — SQLite cannot
+ * ALTER a CHECK constraint, so a rename means rebuilding the table and
+ * rewriting live rows for a wording change. `in_production` is shown as *Sales
+ * Order Generated*, which is the fact it now records: the order document
+ * exists, and production hangs off that order rather than off this proforma.
+ *
+ * `expired` is here for display and filtering but is **not one of the six
+ * stored values** — the server derives it from the validity date on read (see
+ * STATUS_SQL in routes/proformas.ts). That is why it can appear in this list
+ * at all without a migration.
+ */
+export const STATUSES = ['draft', 'sent', 'order_confirmed', 'advance_received', 'in_production', 'cancelled', 'expired'];
+
+/**
+ * The five a person records. The other two are observations:
+ *
+ * - `in_production` (*Sales Order Generated*) by `syncProformaOrdered` when
+ *   the order is booked — by hand it would claim an order that need not exist.
+ * - `expired` by the validity date, and never stored, so there is nothing to
+ *   set. Ending a live proforma early is **Cancelled**.
+ *
+ * Refused by the server too, so this is a closed door and not a hidden button.
+ */
+export const SETTABLE_STATUSES = ['draft', 'sent', 'order_confirmed', 'advance_received', 'cancelled'];
+
+const STATUS_LABELS: Record<string, string> = { in_production: 'Sales Order Generated' };
+
+/** What to call a proforma status on screen. */
+export const proformaStatusLabel = (s: string) =>
+  STATUS_LABELS[s] ?? s.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
+
+/**
+ * What the in-place picker offers on a row: the settable five, plus the row's
+ * own status when that is one of the automatic ones — a `<select>` whose value
+ * matches no option renders blank, so the row would stop saying what it is.
+ */
+export const statusOptions = (current: string) =>
+  SETTABLE_STATUSES.includes(current) ? SETTABLE_STATUSES : [current, ...SETTABLE_STATUSES];
 
 // Tint the inline picker so the list still reads at a glance, the way the
 // badge did. Mirrors the quotation list; the colours follow the stage rather
@@ -23,9 +64,10 @@ const statusTint: Record<string, string> = {
   advance_received: 'bg-green-50 text-green-700 border-green-300',
   in_production: 'bg-amber-50 text-amber-800 border-amber-300',
   cancelled: 'bg-red-50 text-red-700 border-red-300',
+  expired: 'bg-slate-100 text-slate-500 border-slate-300',
 };
 
-const label = (s: string) => s.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
+const label = proformaStatusLabel;
 
 export default function ProformasPage() {
   // Only worth a column once the group has more than one entity.
@@ -182,8 +224,10 @@ export default function ProformasPage() {
                       className={`cursor-pointer rounded-full border px-2 py-0.5 text-xs font-medium focus:outline-none focus:ring-1 focus:ring-brand-600 disabled:opacity-50 ${statusTint[p.status] ?? 'bg-slate-100 text-slate-600 border-slate-300'}`}
                       title="Change status"
                     >
-                      {STATUSES.map((s) => (
-                        <option key={s} value={s} className="bg-white text-slate-800">{label(s)}</option>
+                      {statusOptions(p.status).map((s) => (
+                        <option key={s} value={s} disabled={!SETTABLE_STATUSES.includes(s)} className="bg-white text-slate-800">
+                          {label(s)}
+                        </option>
                       ))}
                     </select>
                     {p.approval_status === 'pending' && (

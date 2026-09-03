@@ -13,8 +13,42 @@ import { buildXlsx, attachmentName, type Column } from '../services/xlsx.js';
 
 export const proformasRouter = Router();
 
+/**
+ * A proforma's status as it reads today — with expiry **derived, never
+ * stored**.
+ *
+ * The quotation stores `expired` because it has to move *back*: extending the
+ * validity revives it, so the row remembers what it was. A proforma needs none
+ * of that, and the reason is the CHECK constraint — `expired` is not one of
+ * its six legal values, and SQLite cannot ALTER a CHECK, so storing it would
+ * mean rebuilding the table and copying every live row for what is, computed,
+ * a five-line expression. Derived, it also corrects itself: extend the
+ * validity and the proforma is simply live again, with no `status_before_*`
+ * column to keep honest.
+ *
+ * **Only a live offer lapses** — `draft` and `sent`, the same rule
+ * `quotationExpiry.ts` applies. Once the buyer has confirmed, paid an advance
+ * or had an order booked, the validity date has nothing left to say. **A blank
+ * validity date never lapses**, plenty being raised without one.
+ *
+ * `date('now')` is UTC, so east of Greenwich a proforma lapses up to five and
+ * a half hours *late*. That is the safe direction — an offer stays live a
+ * little longer rather than dying while it still has hours to run — and it is
+ * what the deployed box does for quotations too, `todayLocal()` there reading
+ * the server's clock, which on Render is UTC.
+ *
+ * It is selected **after `p.*`**, and that is load-bearing: the later alias
+ * wins, which is what lets one expression cover the list, `getFull` and the
+ * spreadsheet export without any of them mapping rows by hand. Measured, not
+ * assumed. Moving it above `p.*` would silently restore the stored value.
+ */
+const STATUS_SQL = `CASE
+    WHEN p.status IN ('draft', 'sent') AND p.validity_date <> '' AND p.validity_date < date('now')
+    THEN 'expired' ELSE p.status END`;
+
 const listSql = `
-  SELECT p.*, c.name AS customer_name, c.country AS customer_country, q.number AS quotation_number,
+  SELECT p.*, ${STATUS_SQL} AS status,
+         c.name AS customer_name, c.country AS customer_country, q.number AS quotation_number,
          co.company_name AS company_name,
          o.number AS order_number, u.name AS created_by_name, a.name AS approved_by_name,
          -- What has actually been banked against this proforma. Derived on
@@ -147,7 +181,10 @@ function proformaListWhere(req: AuthedRequest): { where: string[]; params: unkno
   // somebody has in hand when they come looking for a proforma.
   const text = searchClause(['p.number', 'c.name'], search);
   if (text.sql) { where.push(text.sql); params.push(...text.params); }
-  if (req.query.status) { where.push('p.status = ?'); params.push(String(req.query.status)); }
+  // The same expression the SELECT uses, not `p.status`: an alias cannot be
+  // referenced in WHERE, and filtering on the stored value would make Expired
+  // a status the list shows and cannot find.
+  if (req.query.status) { where.push(`${STATUS_SQL} = ?`); params.push(String(req.query.status)); }
   if (req.query.export === '1' || req.query.export === '0') { where.push('p.is_export = ?'); params.push(Number(req.query.export)); }
   // Narrow to one selling entity. Ignored when the group has just one.
   if (Number(req.query.company) > 0) { where.push('p.company_id = ?'); params.push(Number(req.query.company)); }
@@ -422,8 +459,27 @@ proformasRouter.post('/:id/approve', (req: AuthedRequest, res) => {
 proformasRouter.post('/:id/status', (req: AuthedRequest, res) => {
   const id = Number(req.params.id);
   const { status } = req.body ?? {};
-  const allowed = ['draft', 'sent', 'order_confirmed', 'advance_received', 'in_production', 'cancelled'];
-  if (!allowed.includes(status)) return res.status(400).json({ error: 'Invalid status' });
+  /**
+   * Draft → Sent → Order Confirmed → Advance Received are the buyer's side of
+   * the deal and are recorded by hand; Cancelled is a decision. The other two
+   * are observations, so they are refused here the way the quotation's are:
+   *
+   * - `in_production` reads **Sales Order Generated** and is set by
+   *   `syncProformaOrdered` when the order is booked from this proforma. Typed
+   *   by hand it would claim an order that need not exist.
+   * - `expired` is never stored at all — it is derived from the validity date
+   *   on read (see STATUS_SQL above), so there is nothing here to set.
+   */
+  const settable = ['draft', 'sent', 'order_confirmed', 'advance_received', 'cancelled'];
+  const known = [...settable, 'in_production', 'expired'];
+  if (!known.includes(status)) return res.status(400).json({ error: 'Invalid status' });
+  if (!settable.includes(status)) {
+    return res.status(409).json({
+      error: status === 'in_production'
+        ? 'Sales Order Generated is set when the order is booked, not by hand. Use → Book Order.'
+        : 'Expired follows the validity date on its own. Change that date, or mark the proforma Cancelled.',
+    });
+  }
   const existing = db.prepare('SELECT customer_id FROM proforma_invoices WHERE id = ?').get(id) as { customer_id: number } | undefined;
   if (!existing || !canAccessCustomer(req, existing.customer_id)) return res.status(404).json({ error: 'Proforma invoice not found' });
   const blocked = blockUnapprovedTransition('proforma_invoices', id, String(status), req);

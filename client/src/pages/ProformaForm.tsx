@@ -19,6 +19,7 @@ import { today } from '../lib/format';
 import { useDefaultNotes } from '../lib/useDefaultNotes';
 import { useUnsavedChanges } from '../lib/useUnsavedChanges';
 import HistoryCard from '../components/HistoryCard';
+import { SETTABLE_STATUSES, proformaStatusLabel } from './Proformas';
 
 interface Draft {
   number?: string;
@@ -292,18 +293,23 @@ export default function ProformaFormPage() {
       {!isNew && (
         <div className="mb-4 flex flex-wrap items-center gap-2 text-sm">
           <span className="text-slate-500">Set status:</span>
-          {['draft', 'sent', 'order_confirmed', 'advance_received', 'in_production', 'cancelled'].map((s) => (
+          {SETTABLE_STATUSES.map((s) => (
             <button
               key={s}
               disabled={setStatus.isPending || existing!.status === s}
               onClick={() => setStatus.mutate(s)}
-              className={`rounded-full px-2.5 py-0.5 text-xs font-medium capitalize transition-colors ${
+              className={`rounded-full px-2.5 py-0.5 text-xs font-medium transition-colors ${
                 existing!.status === s ? 'bg-brand-700 text-white' : 'bg-white text-slate-600 border border-slate-300 hover:border-brand-600'
               }`}
             >
-              {s.replace(/_/g, ' ')}
+              {proformaStatusLabel(s)}
             </button>
           ))}
+          {/* The other two are observations, not decisions — see
+              SETTABLE_STATUSES in Proformas.tsx. */}
+          <span className="text-xs text-slate-400">
+            Sales Order Generated and Expired set themselves.
+          </span>
         </div>
       )}
 

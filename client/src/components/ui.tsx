@@ -189,6 +189,12 @@ const statusColors: Record<string, string> = {
  */
 const statusLabels: Record<string, string> = {
   accepted: 'Proforma Generated',
+  // On a proforma this means the order was booked from it. `in_production` is
+  // also an order and a work-order status, where it still means production —
+  // but neither of those renders through StatusBadge (Orders.tsx and
+  // WorkOrders.tsx carry their own tint and label maps), so the two readings
+  // never meet. Checked before relying on it.
+  in_production: 'Sales Order Generated',
 };
 
 export function StatusBadge({ status }: { status: string }) {
