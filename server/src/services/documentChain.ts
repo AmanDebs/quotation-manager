@@ -131,6 +131,30 @@ export function alreadyConvertedError(quotationId: number | null | undefined): s
 }
 
 /**
+ * Refuse booking a *second* order from a proforma that already has one.
+ *
+ * The counterpart of `alreadyConvertedError`, and it was failing more quietly.
+ * `POST /orders` claims a proforma only when `order_id IS NULL` — right, since
+ * re-pointing it would orphan the first order's dispatch figures — but the
+ * order was still **created**, just with nothing linking it back. So a second
+ * booking looked like it worked, and left an order outside the chain:
+ * `dispatchProgress()` cannot see it, the proforma still shows the first
+ * order, and the advance is allocated against invoices raised from a document
+ * this order does not know about.
+ *
+ * Refusing says what the silence did not. A genuine second order for the same
+ * buyer starts from `Duplicate` on the proforma, which deliberately drops
+ * `order_id` for exactly this reason.
+ */
+export function alreadyOrderedError(piId: number | null | undefined): string | null {
+  if (!piId) return null;
+  const by = proformaLockedBy(Number(piId));
+  if (!by) return null;
+  return `Order ${by.number} has already been booked from this proforma. `
+    + `Open that order, or use Duplicate to raise a fresh proforma from this one.`;
+}
+
+/**
  * Refuse a change to a document that has already been converted.
  *
  * Returns a message naming what locked it and how to undo that, or null when

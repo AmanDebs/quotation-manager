@@ -13,7 +13,7 @@ import { scopeClause, canAccessCustomer, linkError, customerChangeError } from '
 import { syncOrderStatus } from '../services/orderStatus.js';
 import { resolveCompanyId } from '../services/companies.js';
 import { listBody, pageRequest } from '../services/pagination.js';
-import { syncProformaOrdered } from '../services/documentChain.js';
+import { syncProformaOrdered, alreadyOrderedError } from '../services/documentChain.js';
 import { blockUnapprovedConversion } from '../services/approval.js';
 
 export const ordersRouter = Router();
@@ -411,8 +411,10 @@ ordersRouter.get('/prefill/from-proforma/:piId', (req: AuthedRequest, res) => {
   const piId = Number(req.params.piId);
   const pi = db.prepare('SELECT * FROM proforma_invoices WHERE id = ?').get(piId) as Record<string, unknown> | undefined;
   if (!pi || !canAccessCustomer(req, Number(pi.customer_id))) return res.status(404).json({ error: 'Proforma invoice not found' });
-  // Said now rather than after the form is filled in. commit: false — a GET
-  // must not approve anything just by being asked.
+  // Both said now rather than after the form is filled in. commit: false — a
+  // GET must not approve anything just by being asked.
+  const ordered = alreadyOrderedError(piId);
+  if (ordered) return res.status(409).json({ error: ordered });
   const unapproved = blockUnapprovedConversion('proforma_invoices', piId, req, false);
   if (unapproved) return res.status(409).json({ error: unapproved });
   const items = db.prepare('SELECT * FROM pi_items WHERE pi_id = ? ORDER BY sort_order, id').all(piId);
@@ -449,6 +451,12 @@ ordersRouter.post('/', (req: AuthedRequest, res) => {
   // Booking the order locks the proforma, so an unapproved one would be frozen
   // unapproved. A manager booking it approves it in the same action.
   if (body.pi_id) {
+    // A proforma is booked once. Enforced here and not only on the prefill,
+    // since the prefill is a GET the form can be got past — and because the
+    // claim below silently declines rather than failing, so without this the
+    // order was created and simply left unlinked.
+    const ordered = alreadyOrderedError(Number(body.pi_id));
+    if (ordered) return res.status(409).json({ error: ordered });
     const unapproved = blockUnapprovedConversion('proforma_invoices', Number(body.pi_id), req);
     if (unapproved) return res.status(409).json({ error: unapproved });
   }
