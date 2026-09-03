@@ -141,7 +141,14 @@ function optionLabel(children: ReactNode, value: unknown): string {
 export function Input({ className = '', ...props }: InputHTMLAttributes<HTMLInputElement>) {
   if (useReadOnlyFields()) {
     const v = props.value == null ? '' : String(props.value);
-    return <StaticValue title={props.title}>{props.type === 'date' && v ? fmtDate(v) : v}</StaticValue>;
+    // A figure keeps the alignment its box gave it: these sit in columns as
+    // often as in grids, and a column of numbers ranged left is harder to
+    // read than one ranged right — the same reason the box does it.
+    return (
+      <StaticValue title={props.title} className={props.type === 'number' ? 'text-right tabular-nums' : ''}>
+        {props.type === 'date' && v ? fmtDate(v) : v}
+      </StaticValue>
+    );
   }
   return (
     <input

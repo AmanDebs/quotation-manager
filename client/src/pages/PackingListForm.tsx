@@ -3,7 +3,7 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { PackingList, PackingListItem, Customer } from '../types';
-import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card } from '../components/ui';
+import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, ReadOnlyFields } from '../components/ui';
 import { fmtQty, today } from '../lib/format';
 import { useUnsavedChanges } from '../lib/useUnsavedChanges';
 import { unitOptions } from './Products';
@@ -166,16 +166,24 @@ export default function PackingListFormPage() {
             <tbody>
               {draft.items.map((it, i) => (
                 <tr key={i} className="border-b border-slate-100 align-top">
-                  <td className="py-1.5 pr-2"><Input value={it.description} disabled={!!linkedInvoiceId} onChange={(e) => setItem(i, { description: e.target.value })} /></td>
-                  <td className="py-1.5 pr-2"><Input value={it.hsn_code ?? ''} disabled={!!linkedInvoiceId} onChange={(e) => setItem(i, { hsn_code: e.target.value })} /></td>
-                  <td className="py-1.5 pr-2">
-                    <Input type="number" min={0} step="any" disabled={!!linkedInvoiceId} value={it.qty ?? ''} onChange={(e) => setItem(i, { qty: e.target.value === '' ? null : Number(e.target.value) })} />
-                  </td>
-                  <td className="py-1.5 pr-2">
-                    <Select value={it.unit} disabled={!!linkedInvoiceId} onChange={(e) => setItem(i, { unit: e.target.value })}>
-                      {unitOptions(it.unit).map((u) => <option key={u} value={u}>{u}</option>)}
-                    </Select>
-                  </td>
+                  {/* The first four columns belong to the invoice —
+                      syncPackingList() rewrites them from invoice_items on
+                      every save, so a box here is one that cannot be typed
+                      into and would only be overwritten if it could. The
+                      banner above says where to edit them. `align-middle`
+                      keeps the text on the same line as the inputs beside it. */}
+                  <ReadOnlyFields on={!!linkedInvoiceId}>
+                    <td className="py-1.5 pr-2 align-middle"><Input value={it.description} disabled={!!linkedInvoiceId} onChange={(e) => setItem(i, { description: e.target.value })} /></td>
+                    <td className="py-1.5 pr-2 align-middle"><Input value={it.hsn_code ?? ''} disabled={!!linkedInvoiceId} onChange={(e) => setItem(i, { hsn_code: e.target.value })} /></td>
+                    <td className="py-1.5 pr-2 align-middle">
+                      <Input type="number" min={0} step="any" disabled={!!linkedInvoiceId} value={it.qty ?? ''} onChange={(e) => setItem(i, { qty: e.target.value === '' ? null : Number(e.target.value) })} />
+                    </td>
+                    <td className="py-1.5 pr-2 align-middle">
+                      <Select value={it.unit} disabled={!!linkedInvoiceId} onChange={(e) => setItem(i, { unit: e.target.value })}>
+                        {unitOptions(it.unit).map((u) => <option key={u} value={u}>{u}</option>)}
+                      </Select>
+                    </td>
+                  </ReadOnlyFields>
                   <td className="py-1.5 pr-2"><Input value={it.packages} onChange={(e) => setItem(i, { packages: e.target.value })} placeholder="e.g. 10 cartons" /></td>
                   <td className="py-1.5 pr-2"><Input value={it.dimensions} onChange={(e) => setItem(i, { dimensions: e.target.value })} placeholder="60x40x40 cm" /></td>
                   <td className="py-1.5 pr-2"><Input type="number" min={0} step="any" value={it.net_weight || ''} onChange={(e) => setItem(i, { net_weight: Number(e.target.value) })} /></td>
