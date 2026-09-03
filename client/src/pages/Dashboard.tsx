@@ -10,6 +10,7 @@ import { useIsManager, useUser, usePatchUser } from '../App';
 import { Button, Card, Input, Select, PageHeader, Modal } from '../components/ui';
 import { useCompanies } from '../components/CompanySelect';
 import { ORDER_STATUSES, orderStatusLabel } from './Orders';
+import { STATUSES as QUOTATION_STATUSES, quotationStatusLabel } from './Quotations';
 import { fmtDate, fmtMoney, fmtQty, today } from '../lib/format';
 
 /* Chart colors from the validated reference palette (light mode) */
@@ -279,10 +280,10 @@ export default function DashboardPage() {
   }, [data, activeCurrency]);
 
   const statusRows = useMemo(() => {
-    const order = ['draft', 'sent', 'negotiating', 'accepted', 'rejected', 'expired'];
+    const order = QUOTATION_STATUSES;
     return order.map((s) => ({
       key: s,
-      status: s.replace(/_/g, ' '),
+      status: quotationStatusLabel(s),
       count: data?.quotationsByStatus.find((r) => r.status === s)?.count ?? 0,
     }));
   }, [data]);

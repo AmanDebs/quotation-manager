@@ -17,6 +17,7 @@ import { useDefaultNotes } from '../lib/useDefaultNotes';
 import { useUnsavedChanges } from '../lib/useUnsavedChanges';
 import HistoryCard from '../components/HistoryCard';
 import ReadOnlyItems from '../components/ReadOnlyItems';
+import { SETTABLE_STATUSES, quotationStatusLabel } from './Quotations';
 
 interface Draft {
   number?: string;
@@ -251,7 +252,15 @@ export default function QuotationFormPage() {
                   <Link to={`/proformas/${lockedBy.converted_pi_id}`} className="self-center text-xs text-brand-600 hover:underline">
                     Proforma {lockedBy.converted_pi_number}
                   </Link>
-                ) : existing!.status === 'accepted' && (
+                ) : !isSuperseded && existing!.status !== 'rejected' && (
+                  /* Gated on `accepted` until that status started meaning "a
+                     proforma exists". It is set *by* this button now, so
+                     requiring it first would be a door locked from the inside.
+                     Rejected is the one status that blocks: a price somebody
+                     turned down is not raised as a proforma. A draft is
+                     offered because the server settles it — a manager
+                     converting one approves it in the same action, and an
+                     employee is told to submit it first. */
                   <Button onClick={() => navigate(`/proformas/new?from_quotation=${id}`)}>→ Create Proforma</Button>
                 )}
               </>
@@ -292,18 +301,23 @@ export default function QuotationFormPage() {
       {!isNew && !readOnly && (
         <div className="mb-4 flex flex-wrap items-center gap-2 text-sm">
           <span className="text-slate-500">Set status:</span>
-          {['draft', 'sent', 'negotiating', 'accepted', 'rejected', 'expired'].map((s) => (
+          {SETTABLE_STATUSES.map((s) => (
             <button
               key={s}
               disabled={setStatus.isPending || existing!.status === s}
               onClick={() => setStatus.mutate(s)}
-              className={`rounded-full px-2.5 py-0.5 text-xs font-medium capitalize transition-colors ${
+              className={`rounded-full px-2.5 py-0.5 text-xs font-medium transition-colors ${
                 existing!.status === s ? 'bg-brand-700 text-white' : 'bg-white text-slate-600 border border-slate-300 hover:border-brand-600'
               }`}
             >
-              {s}
+              {quotationStatusLabel(s)}
             </button>
           ))}
+          {/* The other two are observations, not decisions, so they are stated
+              rather than offered — see SETTABLE_STATUSES in Quotations.tsx. */}
+          <span className="text-xs text-slate-400">
+            Proforma Generated and Expired set themselves.
+          </span>
         </div>
       )}
 

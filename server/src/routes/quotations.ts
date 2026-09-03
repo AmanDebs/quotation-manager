@@ -335,8 +335,37 @@ quotationsRouter.post('/:id/approve', (req: AuthedRequest, res) => {
 quotationsRouter.post('/:id/status', (req: AuthedRequest, res) => {
   const id = Number(req.params.id);
   const { status } = req.body ?? {};
-  const allowed = ['draft', 'sent', 'negotiating', 'accepted', 'rejected', 'expired'];
-  if (!allowed.includes(status)) return res.status(400).json({ error: 'Invalid status' });
+  /**
+   * The three a person decides. The rest of the CHECK constraint's values are
+   * still legal *rows* — they are simply not things anybody types:
+   *
+   * - `accepted` is set by `syncQuotationConverted` when the proforma is
+   *   raised, and reads *Proforma Generated*. Set by hand it would claim a
+   *   document that does not exist, which is the lie `orderStatus.ts` and
+   *   `invoiceStatus.ts` exist to keep out of their own fields.
+   * - `expired` is set by `quotationExpiry.ts` when the validity date passes
+   *   and moved back when it is extended. By hand it is **permanent** —
+   *   `status_before_expired` is filled only when that code expires it, so
+   *   nothing can revive it. Killing a live offer early is `rejected`.
+   * - `sent` is retired in favour of `negotiating`; rows already carrying it
+   *   keep it and still display and filter.
+   *
+   * Refused here and not only hidden on the form, so the rule holds for
+   * anything that can reach the API. 409, not 400: the value is a real status,
+   * it is just not one this route hands out.
+   */
+  const settable = ['draft', 'negotiating', 'rejected'];
+  const known = ['draft', 'sent', 'negotiating', 'accepted', 'rejected', 'expired'];
+  if (!known.includes(status)) return res.status(400).json({ error: 'Invalid status' });
+  if (!settable.includes(status)) {
+    return res.status(409).json({
+      error: status === 'accepted'
+        ? 'Proforma Generated is set when the proforma is raised, not by hand. Use → Create Proforma.'
+        : status === 'expired'
+          ? 'Expired is set when the validity date passes. To end a live offer now, mark it Rejected.'
+          : 'Sent is no longer used — a quotation with the customer is Negotiating.',
+    });
+  }
   const existing = db.prepare('SELECT customer_id FROM quotations WHERE id = ?').get(id) as { customer_id: number } | undefined;
   if (!existing || !canAccessCustomer(req, existing.customer_id)) return res.status(404).json({ error: 'Quotation not found' });
   // A converted quotation reads `accepted` because a proforma answered it.

@@ -177,10 +177,24 @@ const statusColors: Record<string, string> = {
   paid: 'bg-green-100 text-green-700',
 };
 
+/**
+ * Stored values whose name is not what the business calls them.
+ *
+ * `accepted` belongs to the quotation alone — no other document type uses it —
+ * and it now records one specific fact: a proforma was raised from this quote.
+ * Saying so is the point, since it is set automatically and *Accepted* gave no
+ * hint of what accepted it. The stored value is untouched; see the note above
+ * `STATUSES` in `pages/Quotations.tsx` for why. `sent` deliberately keeps its
+ * name here, being a proforma status too.
+ */
+const statusLabels: Record<string, string> = {
+  accepted: 'Proforma Generated',
+};
+
 export function StatusBadge({ status }: { status: string }) {
   return (
     <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium capitalize ${statusColors[status] ?? 'bg-slate-100 text-slate-600'}`}>
-      {status.replace(/_/g, ' ')}
+      {statusLabels[status] ?? status.replace(/_/g, ' ')}
     </span>
   );
 }

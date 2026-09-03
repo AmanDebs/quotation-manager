@@ -17,7 +17,61 @@ const approvalBadge: Record<string, { cls: string; label: string }> = {
   not_submitted: { cls: 'bg-slate-100 text-slate-500', label: 'Not submitted' },
 };
 
-const STATUSES = ['draft', 'sent', 'negotiating', 'accepted', 'rejected', 'expired'];
+/**
+ * Every status a quotation row can be carrying — what the list filters on and
+ * what a badge may have to render.
+ *
+ * **The stored values do not change**, and deliberately: SQLite cannot ALTER a
+ * CHECK constraint, so renaming one means rebuilding the table and rewriting
+ * live rows — for a wording change. Worse, these strings are load-bearing in
+ * five places that have nothing to do with the screen (`approval.ts`'s
+ * outgoing list, `quotationExpiry.ts`, `syncQuotationConverted`, the dashboard
+ * funnel, the list filters). So the vocabulary is a **display** layer over
+ * them: `accepted` is shown as *Proforma Generated*, which is the fact it
+ * actually records.
+ *
+ * `sent` is **retired, not removed**. It is no longer offered, because the
+ * desk's flow is Draft → Negotiating and a quotation with the customer is
+ * being negotiated. Rows already carrying it are on file, so it still has a
+ * label, a colour and a place in the filter — a status you cannot filter for
+ * is a row you cannot find.
+ */
+export const STATUSES = ['draft', 'sent', 'negotiating', 'accepted', 'rejected', 'expired'];
+
+/**
+ * The statuses a person sets. The other three are **observations, not
+ * decisions**, and are set by the code that observes them:
+ *
+ * - `accepted` (*Proforma Generated*) by `syncQuotationConverted` when the
+ *   proforma is raised — typed by hand it would claim a document that does not
+ *   exist.
+ * - `expired` by `quotationExpiry.ts` when the validity date passes, and moved
+ *   back when it is extended. Set by hand it is permanent, because only what
+ *   that code expired can be revived by it — a trap rather than a feature. A
+ *   live offer somebody wants to kill early is **Rejected**, which is what
+ *   that status is for.
+ * - `sent`, retired above.
+ *
+ * The same rule `orderStatus.ts` and `invoiceStatus.ts` follow: a status that
+ * contradicts the record underneath it is worse than no status. Enforced on
+ * the server too — `POST /quotations/:id/status` refuses the rest — so this is
+ * not a hidden button but a closed door.
+ */
+export const SETTABLE_STATUSES = ['draft', 'negotiating', 'rejected'];
+
+const STATUS_LABELS: Record<string, string> = { accepted: 'Proforma Generated' };
+
+/** What to call a status on screen. */
+export const quotationStatusLabel = (s: string) =>
+  STATUS_LABELS[s] ?? s[0].toUpperCase() + s.slice(1);
+
+/**
+ * What the in-place picker offers on a row: the settable three, plus the row's
+ * own status when that is one of the automatic ones — a `<select>` whose value
+ * matches no option renders blank, so the row would stop saying what it is.
+ */
+export const statusOptions = (current: string) =>
+  SETTABLE_STATUSES.includes(current) ? SETTABLE_STATUSES : [current, ...SETTABLE_STATUSES];
 
 // Tint the inline picker so the list still reads at a glance, like the badge did.
 const statusTint: Record<string, string> = {
@@ -104,7 +158,7 @@ export default function QuotationsPage() {
           </Select>
         )}
         <MultiSelectFilter
-          options={STATUSES.map((s) => ({ key: s, label: s[0].toUpperCase() + s.slice(1) }))}
+          options={STATUSES.map((s) => ({ key: s, label: quotationStatusLabel(s) }))}
           value={statusFilter}
           onChange={setStatusFilter}
           // Names the default rather than sitting blank: the list drops
@@ -175,9 +229,14 @@ export default function QuotationsPage() {
                       className={`cursor-pointer rounded-full border px-2 py-0.5 text-xs font-medium capitalize focus:outline-none focus:ring-1 focus:ring-brand-600 disabled:opacity-50 ${statusTint[q.status] ?? 'bg-slate-100 text-slate-600 border-slate-300'}`}
                       title="Change status"
                     >
-                      {STATUSES.map((s) => (
-                        <option key={s} value={s} className="bg-white text-slate-800">
-                          {s[0].toUpperCase() + s.slice(1)}
+                      {statusOptions(q.status).map((s) => (
+                        <option
+                          key={s}
+                          value={s}
+                          disabled={!SETTABLE_STATUSES.includes(s)}
+                          className="bg-white text-slate-800"
+                        >
+                          {quotationStatusLabel(s)}
                         </option>
                       ))}
                     </select>
