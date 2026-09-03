@@ -206,11 +206,17 @@ export default function QuotationFormPage() {
   // proforma's own quotation_id, so deleting that proforma unlocks this again.
   const lockedBy = existing?.converted_pi_number ? existing : null;
   const readOnly = isSuperseded || !!lockedBy;
-  // Plain values sit closer together than the controls they replaced, and the
-  // spacers below only exist to keep the boxes in tidy rows.
+  /**
+   * The proforma's grid, for the same reason: three columns was one shape for
+   * every screen, so a wide desktop got three fields half the window across
+   * holding a date and a currency code. It steps — two up on a tablet, three at
+   * `lg`, four at `xl` — and the rows sit closer, a box being enough to
+   * separate a field from the one under it. Read-only keeps the wider gutters
+   * and taller rows: there are no boxes there to do that job.
+   */
   const gridClass = readOnly
-    ? 'grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-3'
-    : 'grid grid-cols-1 gap-3 sm:grid-cols-3';
+    ? 'grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4'
+    : 'grid grid-cols-1 gap-x-4 gap-y-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4';
 
   return (
     <div className="mx-auto max-w-7xl">
@@ -383,7 +389,6 @@ export default function QuotationFormPage() {
                 <option value="igst">IGST (inter-state)</option>
               </Select>
             </Field>
-            {!readOnly && <div />}
             <Field label="Payment Terms"><Input disabled={readOnly} value={draft.payment_terms} onChange={(e) => set({ payment_terms: e.target.value })} placeholder="e.g. 40% advance, rest against shipping docs" /></Field>
             <Field label="Delivery Timeline"><Input disabled={readOnly} value={draft.delivery_terms} onChange={(e) => set({ delivery_terms: e.target.value })} placeholder="e.g. 4–6 weeks from order" /></Field>
             <Field label="Prepared By"><Input disabled={readOnly} value={draft.prepared_by} onChange={(e) => set({ prepared_by: e.target.value })} placeholder="Who prepared this quote" /></Field>
@@ -396,8 +401,7 @@ export default function QuotationFormPage() {
               />
             </Field>
             <Field label="Containers"><Input disabled={readOnly} value={draft.container_count} onChange={(e) => set({ container_count: e.target.value })} placeholder="e.g. 5 X 40ft HQ" /></Field>
-            {!readOnly && <div />}
-            <div className={`col-span-3 ${readOnly ? 'has-[[data-empty]]:hidden' : ''}`}>
+            <div className={`col-span-full ${readOnly ? 'has-[[data-empty]]:hidden' : ''}`}>
               <div className="mb-1 flex items-center justify-between">
                 <span className={labelClass(readOnly)}>Notes (printed on quotation)</span>
                 {!readOnly && <NotePresetPicker value={draft.notes} onChange={(v) => set({ notes: v })} />}
