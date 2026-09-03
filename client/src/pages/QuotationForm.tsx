@@ -14,6 +14,7 @@ import ColumnsControl, { quotationColumns, quotationOmit, newColumnConfig } from
 import NotePresetPicker from '../components/NotePresetPicker';
 import { fmtMoney, fmtDate, today } from '../lib/format';
 import { useDefaultNotes } from '../lib/useDefaultNotes';
+import { useUnsavedChanges } from '../lib/useUnsavedChanges';
 import HistoryCard from '../components/HistoryCard';
 import ReadOnlyItems from '../components/ReadOnlyItems';
 
@@ -139,9 +140,12 @@ export default function QuotationFormPage() {
     }));
   };
 
+  const { markSaved } = useUnsavedChanges(draft);
+
   const save = useMutation({
     mutationFn: (d: Draft) => (isNew ? api.post<Quotation>('/api/quotations', d) : api.put<Quotation>(`/api/quotations/${id}`, d)),
     onSuccess: (q) => {
+      markSaved();
       queryClient.invalidateQueries({ queryKey: ['quotations'] });
       queryClient.invalidateQueries({ queryKey: ['quotation', String(q.id)] });
       if (isNew) navigate(`/quotations/${q.id}`, { replace: true });
@@ -179,6 +183,8 @@ export default function QuotationFormPage() {
   const remove = useMutation({
     mutationFn: () => api.del(`/api/quotations/${id}`),
     onSuccess: () => {
+      // The document is gone; there is nothing left to warn about losing.
+      markSaved();
       queryClient.invalidateQueries({ queryKey: ['quotations'] });
       navigate('/quotations');
     },

@@ -16,6 +16,7 @@ import FollowupButton from '../components/FollowupButton';
 import { ORDER_STATUSES, orderStatusLabel } from './Orders';
 import { today } from '../lib/format';
 import { useDefaultNotes } from '../lib/useDefaultNotes';
+import { useUnsavedChanges } from '../lib/useUnsavedChanges';
 import HistoryCard from '../components/HistoryCard';
 
 interface Draft {
@@ -138,9 +139,12 @@ export default function OrderFormPage() {
     }
   }, [isNew, fromQuotation, fromProforma, prefilled]);
 
+  const { markSaved } = useUnsavedChanges(draft);
+
   const save = useMutation({
     mutationFn: (d: Draft) => (isNew ? api.post<Order>('/api/orders', d) : api.put<Order>(`/api/orders/${id}`, d)),
     onSuccess: (o) => {
+      markSaved();
       queryClient.invalidateQueries({ queryKey: ['orders'] });
       queryClient.invalidateQueries({ queryKey: ['order', String(o.id)] });
       queryClient.invalidateQueries({ queryKey: ['dashboard'] });
@@ -159,6 +163,8 @@ export default function OrderFormPage() {
   const remove = useMutation({
     mutationFn: () => api.del(`/api/orders/${id}`),
     onSuccess: () => {
+      // The document is gone; there is nothing left to warn about losing.
+      markSaved();
       queryClient.invalidateQueries({ queryKey: ['orders'] });
       navigate('/orders');
     },

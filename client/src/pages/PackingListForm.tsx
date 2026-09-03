@@ -5,6 +5,7 @@ import { api } from '../api/client';
 import type { PackingList, PackingListItem, Customer } from '../types';
 import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card } from '../components/ui';
 import { fmtQty, today } from '../lib/format';
+import { useUnsavedChanges } from '../lib/useUnsavedChanges';
 import { unitOptions } from './Products';
 import HistoryCard from '../components/HistoryCard';
 
@@ -69,9 +70,12 @@ export default function PackingListFormPage() {
     }
   }, [isNew, fromInvoice, prefilled]);
 
+  const { markSaved } = useUnsavedChanges(draft);
+
   const save = useMutation({
     mutationFn: (d: Draft) => (isNew ? api.post<PackingList>('/api/packing-lists', d) : api.put<PackingList>(`/api/packing-lists/${id}`, d)),
     onSuccess: (pl) => {
+      markSaved();
       queryClient.invalidateQueries({ queryKey: ['packing-lists'] });
       queryClient.invalidateQueries({ queryKey: ['packing-list', String(pl.id)] });
       if (isNew) navigate(`/packing-lists/${pl.id}`, { replace: true });
@@ -81,6 +85,8 @@ export default function PackingListFormPage() {
   const remove = useMutation({
     mutationFn: () => api.del(`/api/packing-lists/${id}`),
     onSuccess: () => {
+      // The document is gone; there is nothing left to warn about losing.
+      markSaved();
       queryClient.invalidateQueries({ queryKey: ['packing-lists'] });
       navigate('/packing-lists');
     },

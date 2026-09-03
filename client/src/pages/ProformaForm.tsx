@@ -17,6 +17,7 @@ import ColumnsControl, { proformaColumns, proformaOmit, newColumnConfig, hasColu
 import NotePresetPicker from '../components/NotePresetPicker';
 import { today } from '../lib/format';
 import { useDefaultNotes } from '../lib/useDefaultNotes';
+import { useUnsavedChanges } from '../lib/useUnsavedChanges';
 import HistoryCard from '../components/HistoryCard';
 
 interface Draft {
@@ -145,9 +146,12 @@ export default function ProformaFormPage() {
     }
   }, [isNew, draft.customer_id, customers, prefilled]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const { markSaved } = useUnsavedChanges(draft);
+
   const save = useMutation({
     mutationFn: (d: Draft) => (isNew ? api.post<Proforma>('/api/proformas', d) : api.put<Proforma>(`/api/proformas/${id}`, d)),
     onSuccess: (p) => {
+      markSaved();
       queryClient.invalidateQueries({ queryKey: ['proformas'] });
       queryClient.invalidateQueries({ queryKey: ['proforma', String(p.id)] });
       if (isNew) navigate(`/proformas/${p.id}`, { replace: true });
@@ -175,6 +179,8 @@ export default function ProformaFormPage() {
   const remove = useMutation({
     mutationFn: () => api.del(`/api/proformas/${id}`),
     onSuccess: () => {
+      // The document is gone; there is nothing left to warn about losing.
+      markSaved();
       queryClient.invalidateQueries({ queryKey: ['proformas'] });
       navigate('/proformas');
     },

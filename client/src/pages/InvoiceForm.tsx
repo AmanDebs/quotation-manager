@@ -14,6 +14,7 @@ import ColumnsControl, { PACKING_COLUMNS, newColumnConfig, hasColumnPrefs, invoi
 import NotePresetPicker from '../components/NotePresetPicker';
 import { fmtQty, today } from '../lib/format';
 import { useDefaultNotes } from '../lib/useDefaultNotes';
+import { useUnsavedChanges } from '../lib/useUnsavedChanges';
 import HistoryCard from '../components/HistoryCard';
 
 interface Draft {
@@ -161,9 +162,12 @@ export default function InvoiceFormPage() {
     }
   }, [isNew, draft.customer_id, customers, prefilled]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const { markSaved } = useUnsavedChanges(draft);
+
   const save = useMutation({
     mutationFn: (d: Draft) => (isNew ? api.post<Invoice>('/api/invoices', d) : api.put<Invoice>(`/api/invoices/${id}`, d)),
     onSuccess: (inv) => {
+      markSaved();
       queryClient.invalidateQueries({ queryKey: ['invoices'] });
       queryClient.invalidateQueries({ queryKey: ['invoice', String(inv.id)] });
       if (isNew) navigate(`/invoices/${inv.id}`, { replace: true });
@@ -181,6 +185,8 @@ export default function InvoiceFormPage() {
   const remove = useMutation({
     mutationFn: () => api.del(`/api/invoices/${id}`),
     onSuccess: () => {
+      // The document is gone; there is nothing left to warn about losing.
+      markSaved();
       queryClient.invalidateQueries({ queryKey: ['invoices'] });
       navigate('/invoices');
     },

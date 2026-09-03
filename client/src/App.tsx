@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useRef, useState } from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { Outlet, Navigate, type RouteObject } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { api, ApiError, setUnauthorizedHandler } from './api/client';
 import type { User } from './types';
@@ -49,7 +49,15 @@ export const useIsManager = () => useContext(UserContext)?.role === 'manager';
 const PatchUserContext = createContext<(patch: Partial<User>) => void>(() => {});
 export const usePatchUser = () => useContext(PatchUserContext);
 
-export default function App() {
+/**
+ * The signed-in shell: auth, the chrome, and a slot for the matched page.
+ *
+ * It is the root *route* rather than a component wrapping a `<Routes>`, which
+ * is what lets `main.tsx` mount a data router — and a data router is the only
+ * thing react-router will register a navigation blocker with. See
+ * `lib/useUnsavedChanges.ts`, which is the whole reason for the shape.
+ */
+function App() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [expired, setExpired] = useState(false);
@@ -98,48 +106,61 @@ export default function App() {
     return <LoginPage onLogin={(u) => { setExpired(false); setUser(u); }} expired={expired} />;
   }
 
-  const managerOnly = (element: JSX.Element) =>
-    user.role === 'manager' ? element : <Navigate to="/" replace />;
-
   return (
     <UserContext.Provider value={user}>
       <PatchUserContext.Provider value={(patch) => setUser((u) => (u ? { ...u, ...patch } : u))}>
       <Layout user={user} onLogout={() => setUser(null)}>
-        <Routes>
-          <Route path="/" element={<DashboardPage />} />
-          <Route path="/customers" element={<CustomersPage />} />
-          <Route path="/products" element={<ProductsPage />} />
-          <Route path="/container-planner" element={<ContainerPlannerPage />} />
-          <Route path="/enquiries" element={<EnquiriesPage />} />
-          <Route path="/quotations" element={<QuotationsPage />} />
-          <Route path="/quotations/new" element={<QuotationFormPage />} />
-          <Route path="/quotations/:id" element={<QuotationFormPage />} />
-          <Route path="/proformas" element={<ProformasPage />} />
-          <Route path="/proformas/new" element={<ProformaFormPage />} />
-          <Route path="/proformas/:id" element={<ProformaFormPage />} />
-          <Route path="/orders" element={<OrdersPage />} />
-          <Route path="/orders/new" element={<OrderFormPage />} />
-          <Route path="/orders/:id" element={<OrderFormPage />} />
-          <Route path="/invoices" element={<InvoicesPage />} />
-          <Route path="/invoices/new" element={<InvoiceFormPage />} />
-          <Route path="/invoices/:id" element={<InvoiceFormPage />} />
-          <Route path="/packing-lists" element={<PackingListsPage />} />
-          <Route path="/packing-lists/new" element={<PackingListFormPage />} />
-          <Route path="/packing-lists/:id" element={<PackingListFormPage />} />
-          <Route path="/followups" element={<FollowupsPage />} />
-          <Route path="/work-orders" element={<WorkOrdersPage />} />
-          <Route path="/despatches" element={<DespatchesPage />} />
-          <Route path="/stock" element={<StockPage />} />
-          <Route path="/purchase-orders" element={managerOnly(<PurchaseOrdersPage />)} />
-          <Route path="/masters" element={managerOnly(<MastersPage />)} />
-          <Route path="/approvals" element={managerOnly(<ApprovalsPage />)} />
-          <Route path="/activity" element={managerOnly(<ActivityPage />)} />
-          <Route path="/team" element={managerOnly(<TeamPage />)} />
-          <Route path="/settings" element={managerOnly(<SettingsPage />)} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+        <Outlet />
       </Layout>
       </PatchUserContext.Provider>
     </UserContext.Provider>
   );
 }
+
+/**
+ * Manager-only pages. This was a closure over `user` inside App; the route
+ * table now sits outside it, so the check reads the same context the pages
+ * themselves read.
+ */
+function ManagerOnly({ children }: { children: JSX.Element }) {
+  return useIsManager() ? children : <Navigate to="/" replace />;
+}
+
+export const routes: RouteObject[] = [
+  {
+    element: <App />,
+    children: [
+      { path: '/', element: <DashboardPage /> },
+      { path: '/customers', element: <CustomersPage /> },
+      { path: '/products', element: <ProductsPage /> },
+      { path: '/container-planner', element: <ContainerPlannerPage /> },
+      { path: '/enquiries', element: <EnquiriesPage /> },
+      { path: '/quotations', element: <QuotationsPage /> },
+      { path: '/quotations/new', element: <QuotationFormPage /> },
+      { path: '/quotations/:id', element: <QuotationFormPage /> },
+      { path: '/proformas', element: <ProformasPage /> },
+      { path: '/proformas/new', element: <ProformaFormPage /> },
+      { path: '/proformas/:id', element: <ProformaFormPage /> },
+      { path: '/orders', element: <OrdersPage /> },
+      { path: '/orders/new', element: <OrderFormPage /> },
+      { path: '/orders/:id', element: <OrderFormPage /> },
+      { path: '/invoices', element: <InvoicesPage /> },
+      { path: '/invoices/new', element: <InvoiceFormPage /> },
+      { path: '/invoices/:id', element: <InvoiceFormPage /> },
+      { path: '/packing-lists', element: <PackingListsPage /> },
+      { path: '/packing-lists/new', element: <PackingListFormPage /> },
+      { path: '/packing-lists/:id', element: <PackingListFormPage /> },
+      { path: '/followups', element: <FollowupsPage /> },
+      { path: '/work-orders', element: <WorkOrdersPage /> },
+      { path: '/despatches', element: <DespatchesPage /> },
+      { path: '/stock', element: <StockPage /> },
+      { path: '/purchase-orders', element: <ManagerOnly><PurchaseOrdersPage /></ManagerOnly> },
+      { path: '/masters', element: <ManagerOnly><MastersPage /></ManagerOnly> },
+      { path: '/approvals', element: <ManagerOnly><ApprovalsPage /></ManagerOnly> },
+      { path: '/activity', element: <ManagerOnly><ActivityPage /></ManagerOnly> },
+      { path: '/team', element: <ManagerOnly><TeamPage /></ManagerOnly> },
+      { path: '/settings', element: <ManagerOnly><SettingsPage /></ManagerOnly> },
+      { path: '*', element: <Navigate to="/" replace /> },
+    ],
+  },
+];
