@@ -31,7 +31,35 @@ html {
 }
 
 body {
-  @apply bg-slate-100 text-slate-800 antialiased;
+  @apply text-slate-800 antialiased;
+  /*
+   * The ground the cards sit on.
+   *
+   * Flat slate-100 was fine and said nothing. This is the same idea as the
+   * form the user brought — lavender into blue into mint — kept to a ground
+   * the cards float on rather than a surface anything is read against: every
+   * figure, table and label still sits on white, so legibility is exactly
+   * where it was and only the space between the cards is coloured.
+   *
+   * `fixed` matters: without it the gradient is as tall as the document, so
+   * a long order list would scroll through the whole ramp and a short one
+   * would show a slice of it. Anchored to the viewport, every page opens on
+   * the same wash.
+   */
+  min-height: 100vh;
+  background-image: linear-gradient(150deg, #dfe4fb 0%, #e6f0fb 30%, #ddf3f4 62%, #e3e9fb 100%);
+  background-attachment: fixed;
+}
+
+/*
+ * The sidebar, deepening down its length.
+ *
+ * It reads as depth rather than as colour, and the rail is a solid dark
+ * block with nothing legibility-sensitive on it — labels and icons are white
+ * against every stop.
+ */
+.nav-ground {
+  background-image: linear-gradient(180deg, #1a3a5c 0%, #182f52 55%, #1d2a4d 100%);
 }
 
 /*

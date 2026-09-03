@@ -258,7 +258,7 @@ export default function Layout({ user, onLogout, children }: { user: User; onLog
         animation, which is not worth an hour of cascade archaeology.
       */}
       <aside
-        className={`fixed inset-y-0 left-0 z-40 w-56 flex-col bg-brand-800 text-white md:flex ${
+        className={`nav-ground fixed inset-y-0 left-0 z-40 w-56 flex-col text-white md:flex ${
           drawer ? 'flex' : 'hidden'
         } ${rail ? 'md:w-14' : 'md:w-56'}`}
       >
