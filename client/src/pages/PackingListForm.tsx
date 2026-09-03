@@ -3,7 +3,7 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { PackingList, PackingListItem, Customer } from '../types';
-import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, ReadOnlyFields } from '../components/ui';
+import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, ReadOnlyFields, FIELD_GRID } from '../components/ui';
 import { fmtQty, today } from '../lib/format';
 import { useUnsavedChanges } from '../lib/useUnsavedChanges';
 import { unitOptions } from './Products';
@@ -128,7 +128,7 @@ export default function PackingListFormPage() {
 
       <div className="space-y-4">
         <Card title="Details">
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div className={FIELD_GRID}>
             {!isNew && (
               <Field label="Packing List Number (editable)">
                 <Input value={draft.number ?? ''} onChange={(e) => set({ number: e.target.value })} />
@@ -142,7 +142,7 @@ export default function PackingListFormPage() {
             </Field>
             <Field label="Date"><Input type="date" value={draft.date} onChange={(e) => set({ date: e.target.value })} /></Field>
             <Field label="Lot No."><Input value={draft.lot_no} onChange={(e) => set({ lot_no: e.target.value })} placeholder="e.g. 90/2025" /></Field>
-            <Field label="Shipping Marks" className="col-span-3">
+            <Field label="Shipping Marks" className="col-span-full">
               <Textarea rows={2} value={draft.shipping_marks} onChange={(e) => set({ shipping_marks: e.target.value })} placeholder="Marks and numbers printed on packages…" />
             </Field>
           </div>
