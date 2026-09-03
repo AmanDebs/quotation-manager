@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
-import { Textarea, ErrorText } from './ui';
+import { Textarea, ErrorText, ReadOnlyFields } from './ui';
 
 /**
  * The team's private note on a document.
@@ -66,6 +66,9 @@ export default function InternalNotes({
   };
 
   return (
+    // Editable even where everything around it is not: this saves through its
+    // own PATCH, which is the whole reason it has one. See lockError().
+    <ReadOnlyFields on={false}>
     <div>
       <div className="mb-1 flex items-baseline justify-between gap-3">
         <span className="text-xs font-medium uppercase tracking-wide text-slate-500">
@@ -86,5 +89,6 @@ export default function InternalNotes({
       />
       <ErrorText error={save.error} />
     </div>
+    </ReadOnlyFields>
   );
 }

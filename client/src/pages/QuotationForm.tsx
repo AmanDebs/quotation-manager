@@ -3,7 +3,7 @@ import { useNavigate, useParams, useSearchParams, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Quotation, Customer, LineItem, TaxType, ColumnConfig } from '../types';
-import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, StatusBadge } from '../components/ui';
+import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, StatusBadge, ReadOnlyFields } from '../components/ui';
 import CompanySelect from '../components/CompanySelect';
 import { DocNumber, IncoTermsInput, HeaderCharges } from '../components/DocFields';
 import LineItemsEditor from '../components/LineItemsEditor';
@@ -321,7 +321,7 @@ export default function QuotationFormPage() {
         </div>
       )}
 
-      <div className="space-y-4">
+      <ReadOnlyFields on={readOnly} className="space-y-4">
         <Card
           title="Details"
           actions={
@@ -466,7 +466,7 @@ export default function QuotationFormPage() {
         )}
 
         <HistoryCard entity="quotations" id={id ? Number(id) : undefined} />
-      </div>
+      </ReadOnlyFields>
     </div>
   );
 }

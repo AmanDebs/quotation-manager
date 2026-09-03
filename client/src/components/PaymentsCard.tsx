@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Payment } from '../types';
-import { Button, Input, Select, Field, Card, ErrorText } from './ui';
+import { Button, Input, Select, Field, Card, ErrorText, ReadOnlyFields } from './ui';
 import { fmtDate, fmtMoney, today } from '../lib/format';
 
 const METHODS = ['Bank Transfer', 'Letter of Credit', 'Cheque', 'Cash', 'Other'];
@@ -58,6 +58,11 @@ export default function PaymentsCard({
   const outstanding = balanceDue ?? Math.max(0, Math.round((total - received) * 100) / 100);
 
   return (
+    // Money keeps arriving after the document is frozen — an advance is banked
+    // against a proforma *after* its order is booked, which is the whole point
+    // of an advance. This card is on the list lockError() deliberately leaves
+    // alone, so its fields stay fields.
+    <ReadOnlyFields on={false}>
     <Card
       title={docType === 'proforma' ? 'Payments Received (advance)' : 'Payments Received'}
       actions={!adding && <Button variant="secondary" onClick={() => setAdding(true)}>+ Record Payment</Button>}
@@ -166,5 +171,6 @@ export default function PaymentsCard({
         <span>Balance: <span className={`font-semibold tabular-nums ${outstanding > 0 ? 'text-red-600' : 'text-green-700'}`}>{fmtMoney(outstanding, currency)}</span></span>
       </div>
     </Card>
+    </ReadOnlyFields>
   );
 }

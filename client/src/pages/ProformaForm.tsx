@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Proforma, Customer, LineItem, TaxType, Settings, ColumnConfig } from '../types';
-import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, StatusBadge, SettledDocumentType } from '../components/ui';
+import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, StatusBadge, SettledDocumentType, ReadOnlyFields } from '../components/ui';
 import CompanySelect from '../components/CompanySelect';
 import { DocNumber, IncoTermsInput, HeaderCharges } from '../components/DocFields';
 import LineItemsEditor from '../components/LineItemsEditor';
@@ -315,7 +315,7 @@ export default function ProformaFormPage() {
         </div>
       )}
 
-      <div className="space-y-4">
+      <ReadOnlyFields on={readOnly} className="space-y-4">
         <Card title="Details">
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             {!isNew && (
@@ -458,7 +458,7 @@ export default function ProformaFormPage() {
 
         <Card
           title="Line Items"
-          actions={<ColumnsControl config={draft.column_config} onChange={(c) => set({ column_config: c })} columns={proformaColumns(!!draft.is_export)} />}
+          actions={!readOnly && <ColumnsControl config={draft.column_config} onChange={(c) => set({ column_config: c })} columns={proformaColumns(!!draft.is_export)} />}
         >
           {readOnly ? (
             <ReadOnlyItems items={draft.items} currency={draft.currency} />
@@ -486,7 +486,7 @@ export default function ProformaFormPage() {
           </Card>
         )}
 
-        <Card title="Remarks" actions={<NotePresetPicker value={draft.remarks} onChange={(v) => set({ remarks: v })} />}>
+        <Card title="Remarks" actions={!readOnly && <NotePresetPicker value={draft.remarks} onChange={(v) => set({ remarks: v })} />}>
           <Textarea disabled={readOnly} rows={3} value={draft.remarks} onChange={(e) => set({ remarks: e.target.value })} placeholder="Any other conditions specific to this customer…" />
         </Card>
 
@@ -518,7 +518,7 @@ export default function ProformaFormPage() {
         </div>
 
         <HistoryCard entity="proformas" id={id ? Number(id) : undefined} />
-      </div>
+      </ReadOnlyFields>
     </div>
   );
 }

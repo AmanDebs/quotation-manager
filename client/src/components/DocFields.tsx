@@ -1,6 +1,6 @@
 import { useId } from 'react';
 import type { LineItem } from '../types';
-import { Button, Input } from './ui';
+import { Button, Input, StaticValue, useReadOnlyFields } from './ui';
 import { fmtMoney } from '../lib/format';
 
 /**
@@ -13,6 +13,9 @@ import { fmtMoney } from '../lib/format';
  * still accepts a number on PUT; this is a decision about the form, not a lock.
  */
 export function DocNumber({ value, title }: { value?: string | null; title: string }) {
+  // The grey box says "settled, unlike its neighbours". On a read-only
+  // document nothing is editable, so it would be the only box on the card.
+  if (useReadOnlyFields()) return <StaticValue title={title}>{value}</StaticValue>;
   return (
     <div
       className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-sm text-slate-600"

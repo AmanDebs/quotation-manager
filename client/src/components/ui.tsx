@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { createContext, isValidElement, useContext, useEffect, useRef, useState } from 'react';
 import type { ReactNode, ButtonHTMLAttributes, InputHTMLAttributes, SelectHTMLAttributes, TextareaHTMLAttributes } from 'react';
+import { fmtDate } from '../lib/format';
 
 export function Button({ variant = 'primary', className = '', ...props }: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'secondary' | 'danger' | 'ghost' }) {
   const styles = {
@@ -58,7 +59,83 @@ const numberInputClass =
   'text-right tabular-nums [appearance:textfield] ' +
   '[&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-inner-spin-button]:m-0';
 
+/**
+ * A document that can no longer be edited, shown without the boxes.
+ *
+ * Read-only used to mean `disabled` on every control, which leaves a page of
+ * grey boxes — a form still shaped like a form, only greyer and harder to
+ * read. This is the judgement `ReadOnlyItems` already makes about the
+ * line-items grid, applied to the header fields: the value is the point, the
+ * chrome is not, so each control collapses to plain text.
+ *
+ * A context rather than a prop because these fields are spread over five cards
+ * and forty-odd call sites, and a flag threaded through all of them is a flag
+ * that gets missed on the forty-first. Nesting `on={false}` opts a subtree back
+ * in, which is how payments and internal notes stay editable on a locked
+ * proforma — what a lock deliberately does *not* freeze matters more than what
+ * it does, so those two components say so themselves.
+ *
+ * `className` is taken so a form hands over the section's own wrapper rather
+ * than gaining a bare div just to declare this.
+ */
+const ReadOnlyFieldsContext = createContext(false);
+
+export function ReadOnlyFields({ on, className, children }: { on: boolean; className?: string; children: ReactNode }) {
+  return (
+    <ReadOnlyFieldsContext.Provider value={on}>
+      {className == null ? children : <div className={className}>{children}</div>}
+    </ReadOnlyFieldsContext.Provider>
+  );
+}
+
+export const useReadOnlyFields = () => useContext(ReadOnlyFieldsContext);
+
+/**
+ * What a control collapses to. An empty value reads as an em-dash rather than
+ * as nothing, or a row of blanks looks like a page that failed to load. The
+ * placeholder is dropped on purpose: it is a hint for typing.
+ */
+export function StaticValue({ children, className = '', title }: { children?: ReactNode; className?: string; title?: string }) {
+  const empty = children == null || children === '';
+  return (
+    <div className={`py-1.5 text-sm ${empty ? 'text-slate-300' : 'text-slate-700'} ${className}`} title={title}>
+      {empty ? '—' : children}
+    </div>
+  );
+}
+
+/**
+ * The text of the chosen `<option>`. A select stores a code and shows a word,
+ * so printing the value would put `igst` on screen — a worse answer than the
+ * box it replaced. Walks arrays, fragments and optgroups, since the options are
+ * usually a `.map()` beside a literal or two.
+ */
+function optionLabel(children: ReactNode, value: unknown): string {
+  const text = (node: ReactNode): string =>
+    Array.isArray(node) ? node.map(text).join('')
+      : typeof node === 'string' || typeof node === 'number' ? String(node)
+      : isValidElement(node) ? text((node.props as { children?: ReactNode }).children)
+      : '';
+  let found = '';
+  const walk = (node: ReactNode) => {
+    if (found || !node) return;
+    if (Array.isArray(node)) return node.forEach(walk);
+    if (!isValidElement(node)) return;
+    const props = node.props as { value?: unknown; children?: ReactNode };
+    if (node.type !== 'option') return walk(props.children);
+    const label = text(props.children);
+    // An option with no `value` is identified by its own text, as the DOM does.
+    if (String(props.value ?? label) === String(value)) found = label;
+  };
+  walk(children);
+  return found;
+}
+
 export function Input({ className = '', ...props }: InputHTMLAttributes<HTMLInputElement>) {
+  if (useReadOnlyFields()) {
+    const v = props.value == null ? '' : String(props.value);
+    return <StaticValue title={props.title}>{props.type === 'date' && v ? fmtDate(v) : v}</StaticValue>;
+  }
   return (
     <input
       {...props}
@@ -68,10 +145,19 @@ export function Input({ className = '', ...props }: InputHTMLAttributes<HTMLInpu
 }
 
 export function Select({ className = '', ...props }: SelectHTMLAttributes<HTMLSelectElement>) {
+  if (useReadOnlyFields()) {
+    const v = props.value;
+    // A blank select is blank, not the "Select customer…" prompt sitting at
+    // that value — a prompt is an instruction, and there is nothing to do here.
+    return <StaticValue title={props.title}>{v == null || v === '' ? '' : optionLabel(props.children, v) || String(v)}</StaticValue>;
+  }
   return <select {...props} className={fieldClass(className, 'px-2')} />;
 }
 
 export function Textarea({ className = '', ...props }: TextareaHTMLAttributes<HTMLTextAreaElement>) {
+  if (useReadOnlyFields()) {
+    return <StaticValue className="whitespace-pre-wrap">{props.value == null ? '' : String(props.value)}</StaticValue>;
+  }
   return <textarea {...props} className={fieldClass(className, 'px-2.5')} />;
 }
 
