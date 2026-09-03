@@ -245,7 +245,7 @@ const headerFields = [
   'date', 'customer_id', 'pi_id', 'order_id', 'consignee', 'notify_party', 'currency', 'freight', 'insurance',
   'shipping_details', 'bank_account', 'inco_terms', 'payment_terms',
   'is_export', 'country_of_origin', 'port_of_loading', 'port_of_discharge', 'final_destination',
-  'notify_party_2', 'method_of_despatch', 'lot_no', 'prepared_by',
+  'notify_party_2', 'method_of_despatch', 'lot_no', 'prepared_by', 'arn_ref',
   'remarks', 'tax_type',
 ] as const;
 
@@ -274,6 +274,7 @@ function headerValues(body: Record<string, unknown>, existing?: Record<string, u
     method_of_despatch: String(v('method_of_despatch')),
     lot_no: String(v('lot_no')),
     prepared_by: String(v('prepared_by')),
+    arn_ref: String(v('arn_ref')),
     remarks: String(v('remarks')),
     tax_type: String(v('tax_type', 'none')) as 'none' | 'cgst_sgst' | 'igst',
   };

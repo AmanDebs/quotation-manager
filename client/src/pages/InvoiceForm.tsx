@@ -41,6 +41,8 @@ interface Draft {
   notify_party_2: string;
   method_of_despatch: string;
   lot_no: string;
+  /** This consignment's own LUT/ARN. Export invoices only. */
+  arn_ref: string;
   prepared_by: string;
   remarks: string;
   tax_type: TaxType;
@@ -67,7 +69,7 @@ const emptyDraft = (): Draft => ({
   customer_id: '', pi_id: null, date: today(), currency: 'INR', consignee: '', notify_party: '',
   freight: 0, insurance: 0, shipping_details: '', bank_account: '', inco_terms: '', payment_terms: '',
   is_export: 0, country_of_origin: '', port_of_loading: '', port_of_discharge: '', final_destination: '',
-  notify_party_2: '', method_of_despatch: '', lot_no: '', prepared_by: '',
+  notify_party_2: '', method_of_despatch: '', lot_no: '', arn_ref: '', prepared_by: '',
   remarks: '', tax_type: 'igst', column_config: newColumnConfig(), items: [],
   packing: { date: today(), shipping_marks: '', remarks: '', column_config: {}, items: [] },
 });
@@ -333,6 +335,18 @@ export default function InvoiceFormPage() {
               </Select>
             </Field>
             <Field label="Lot No."><Input value={draft.lot_no} onChange={(e) => set({ lot_no: e.target.value })} placeholder="e.g. 90/2025" /></Field>
+            {/* Per consignment, not per company: a fresh LUT/ARN is obtained for
+                each export shipment. Left blank, the company default in Settings
+                prints instead, so nothing already raised changes. */}
+            {!!draft.is_export && (
+              <Field label="ARN / LUT Reference">
+                <Input
+                  value={draft.arn_ref}
+                  onChange={(e) => set({ arn_ref: e.target.value })}
+                  placeholder="e.g. AD1904250005855 DT. 01.04.25"
+                />
+              </Field>
+            )}
             <Field label="Prepared By"><Input value={draft.prepared_by} onChange={(e) => set({ prepared_by: e.target.value })} /></Field>
             <Field label="Shipping Details" className="col-span-2">
               <Input value={draft.shipping_details} onChange={(e) => set({ shipping_details: e.target.value })} placeholder="Vessel/flight, BL number, shipping line…" />

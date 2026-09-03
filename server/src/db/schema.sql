@@ -425,6 +425,9 @@ CREATE TABLE IF NOT EXISTS commercial_invoices (
   method_of_despatch TEXT NOT NULL DEFAULT '',
   lot_no TEXT NOT NULL DEFAULT '',
   prepared_by TEXT NOT NULL DEFAULT '',
+  -- The LUT/ARN this shipment was cleared under. Per invoice, not per company:
+  -- a fresh reference is obtained for each export consignment.
+  arn_ref TEXT NOT NULL DEFAULT '',
   remarks TEXT NOT NULL DEFAULT '',
   tax_type TEXT NOT NULL DEFAULT 'none' CHECK (tax_type IN ('none','cgst_sgst','igst')),
   status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','final','dispatched','paid')),

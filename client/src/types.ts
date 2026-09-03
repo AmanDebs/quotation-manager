@@ -624,6 +624,8 @@ export interface Invoice {
   is_export: number; country_of_origin: string; port_of_loading: string; port_of_discharge: string;
   final_destination: string;
   notify_party_2: string; method_of_despatch: string; lot_no: string; prepared_by: string;
+  /** This consignment's own LUT/ARN; falls back to the company default. */
+  arn_ref?: string;
   remarks: string; tax_type: TaxType; status: string;
   subtotal: number; tax_total: number; grand_total: number;
   customer_name?: string; pi_number?: string; company_name?: string;

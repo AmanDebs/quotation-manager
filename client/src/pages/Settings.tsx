@@ -340,12 +340,21 @@ export default function SettingsPage() {
           </div>
         </Card>
         <Card title="Tax & Trade Registration">
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <Field label="GSTIN"><Input value={form.gstin} onChange={(e) => set({ gstin: e.target.value })} /></Field>
-            <Field label="PAN"><Input value={form.pan} onChange={(e) => set({ pan: e.target.value })} /></Field>
-            <Field label="IEC (Import-Export Code)"><Input value={form.iec} onChange={(e) => set({ iec: e.target.value })} /></Field>
-            <Field label="ARN / LUT Reference (printed on export invoices)" className="col-span-3">
+          {/* PAN is gone: it was never asked for on any of these documents. The
+              column stays, so nothing already stored is lost. */}
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <Field label="GSTIN (printed on domestic documents only)">
+              <Input value={form.gstin} onChange={(e) => set({ gstin: e.target.value })} />
+            </Field>
+            <Field label="IEC (printed on export commercial invoices only)">
+              <Input value={form.iec} onChange={(e) => set({ iec: e.target.value })} />
+            </Field>
+            <Field label="Default ARN / LUT Reference" className="sm:col-span-2">
               <Input value={form.arn_ref} onChange={(e) => set({ arn_ref: e.target.value })} placeholder="e.g. AD1904250005855 DT. 01.04.25" />
+              <p className="mt-1 text-xs text-slate-500">
+                A starting point only. Each export consignment has its own reference, entered on the
+                commercial invoice itself; this is what prints when that field is left blank.
+              </p>
             </Field>
           </div>
         </Card>

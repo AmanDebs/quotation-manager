@@ -184,13 +184,42 @@ function lv(label: string, value: string, opts: Cell = {}): Cell {
 }
 
 /** Aglo-style page header: logo left, company block right in theme color. */
-function companyHeader(s: Row): Content[] {
+/**
+ * Which registration numbers belong on which document.
+ *
+ * Confirmed with Aglo (2026-09-03), and the rules are narrower than printing
+ * all three on everything:
+ *
+ * - **GSTIN is a domestic thing.** An export sale is zero-rated and the buyer
+ *   is abroad; the number means nothing to them and does not belong on the
+ *   page.
+ * - **PAN is not printed at all.** It was never asked for on any of these
+ *   documents. The column stays — removing it would be a destructive schema
+ *   change for a field nothing now reads.
+ * - **IEC belongs on the export commercial invoice only.** It is the code the
+ *   consignment clears customs under, so it belongs on the document that goes
+ *   with the goods, not on a quotation or an order confirmation.
+ */
+function registrationLine(s: Row, opts: HeaderOpts): string {
+  return [
+    !opts.isExport && s.gstin && `GSTIN: ${s.gstin}`,
+    opts.isExport && opts.isCommercialInvoice && s.iec && `IEC: ${s.iec}`,
+  ].filter(Boolean).join('  |  ');
+}
+
+interface HeaderOpts {
+  isExport?: boolean;
+  /** Only the commercial invoice carries the IEC. */
+  isCommercialInvoice?: boolean;
+}
+
+function companyHeader(s: Row, opts: HeaderOpts = {}): Content[] {
   const right: any = {
     stack: [
       { text: s.company_name || 'Company Name', fontSize: 14, bold: true, color: s.theme, alignment: 'right' },
       { text: [s.address, [s.city, s.state ? s.state : '', s.pincode].filter(Boolean).join(', '), s.country].filter(Boolean).join(', '), fontSize: 8, color: '#555555', alignment: 'right', margin: [0, 2, 0, 0] },
       { text: [s.phone && `Sales cell: ${s.phone}`, s.email && `Email: ${s.email}`, s.website].filter(Boolean).join('  |  '), fontSize: 8, color: '#555555', alignment: 'right', margin: [0, 1.5, 0, 0] },
-      { text: [s.gstin && `GSTIN: ${s.gstin}`, s.pan && `PAN: ${s.pan}`, s.iec && `IEC: ${s.iec}`].filter(Boolean).join('  |  '), fontSize: 7.5, color: '#777777', alignment: 'right', margin: [0, 1.5, 0, 0] },
+      { text: registrationLine(s, opts), fontSize: 7.5, color: '#777777', alignment: 'right', margin: [0, 1.5, 0, 0] },
     ],
     width: '*',
   };
@@ -750,7 +779,7 @@ export function buildQuotationPdf(id: number): TDocumentDefinitions {
     : 'GRAND TOTAL';
 
   const content: Content[] = [
-    ...companyHeader(s),
+    ...companyHeader(s, { isExport: !!q.is_export }),
     docTitle(s, 'QUOTATION'),
     meta,
     itemsTable(s, items, specs, cfg),
@@ -851,7 +880,7 @@ export function buildOrderPdf(id: number): TDocumentDefinitions {
   ];
 
   const content: Content[] = [
-    ...companyHeader(s),
+    ...companyHeader(s, { isExport: !!o.is_export }),
     docTitle(s, 'ORDER CONFIRMATION'),
     {
       table: {
@@ -1115,7 +1144,7 @@ export function buildProformaPdf(id: number): TDocumentDefinitions {
   const money = totalsRows(pi, cur, grandLabel).slice(1);
 
   const content: Content[] = [
-    ...companyHeader(s),
+    ...companyHeader(s, { isExport: !!pi.is_export }),
     docTitle(s, 'PROFORMA INVOICE'),
     infoGrid,
     itemsTable(s, items, specs, cfg, money),
@@ -1148,14 +1177,18 @@ function exportDocGrid(s: Row, opts: {
   bankBlock?: string;     // invoice only
   weightBlock?: string;   // packing list only
   buyer: Row;
+  /** Same rule as the letterhead: this block states the numbers a second time. */
+  reg: HeaderOpts;
 }): Content {
   const companyBlock = [
     s.company_name,
     s.address,
     [s.city, s.state, s.pincode].filter(Boolean).join(', '),
     s.country && `${s.country}`.toUpperCase(),
-    s.gstin && `GSTIN: ${s.gstin}`,
-    s.iec && `IEC: ${s.iec}`,
+    // Not `s.gstin` and `s.iec` unconditionally: this exporter block repeats
+    // what the letterhead says, so it has to follow the same rule, or an export
+    // invoice would carry a GSTIN down here having dropped it at the top.
+    registrationLine(s, opts.reg),
   ].filter(Boolean).join('\n');
 
   const rightBottom = opts.bankBlock
@@ -1227,6 +1260,8 @@ export function buildInvoicePdf(id: number): TDocumentDefinitions {
   ];
 
   const grid = exportDocGrid(s, {
+    // The one document that carries the IEC, and only when it is an export.
+    reg: { isExport: !!inv.is_export, isCommercialInvoice: true },
     refCells,
     consignee: inv.consignee,
     notify1: inv.notify_party,
@@ -1295,7 +1330,12 @@ export function buildInvoicePdf(id: number): TDocumentDefinitions {
           stack: [
             { text: `We certify that the merchandise is of ${(inv.country_of_origin || s.country || 'Indian').replace(/ia$/i, 'ian')} Origin`, fontSize: 8, bold: true },
             ...(inv.inco_terms ? [{ text: `Incoterms® 2020: ${inv.inco_terms}${inv.port_of_discharge ? ` ${inv.port_of_discharge.split(',')[0].toUpperCase()}` : ''}`, fontSize: 8, margin: [0, 2, 0, 0] as any }] : []),
-            ...(s.arn_ref ? [{ text: `Application Reference No. (ARN): ${s.arn_ref}`, fontSize: 8, margin: [0, 2, 0, 0] as any }] : []),
+            // The consignment's own LUT/ARN, falling back to the company's while
+            // an older invoice has none of its own — so nothing already raised
+            // changes what it prints.
+            ...(Number(inv.is_export) && (inv.arn_ref || s.arn_ref)
+              ? [{ text: `Application Reference No. (ARN): ${inv.arn_ref || s.arn_ref}`, fontSize: 8, margin: [0, 2, 0, 0] as any }]
+              : []),
             // Remarks used to sit here as a loose italic line. They are part of
             // the TERMS & CONDITIONS list below now, so this cell keeps only
             // the certifications it exists for.
@@ -1318,7 +1358,7 @@ export function buildInvoicePdf(id: number): TDocumentDefinitions {
   };
 
   const content: Content[] = [
-    ...companyHeader(s),
+    ...companyHeader(s, { isExport: !!inv.is_export, isCommercialInvoice: true }),
     docTitle(s, 'COMMERCIAL INVOICE'),
     grid,
     itemsTable(s, items, specs, cfg, money),
@@ -1371,6 +1411,8 @@ export function buildPackingListPdf(id: number): TDocumentDefinitions {
     consignee: inv?.consignee || c.consignee || '',
     notify1: inv?.notify_party || c.notify_party || '',
     notify2: inv?.notify_party_2 || c.notify_party_2 || '',
+    // The packing list is not a commercial invoice, so it never carries the IEC.
+    reg: { isExport: !!inv?.is_export },
     origin: inv?.country_of_origin || '',
     finalDestination: inv?.final_destination || (c.country || '').toUpperCase(),
     currency: inv?.currency || c.currency,
@@ -1421,7 +1463,10 @@ export function buildPackingListPdf(id: number): TDocumentDefinitions {
           stack: [
             { text: `We certify that the merchandise is of ${(inv?.country_of_origin || s.country || 'Indian').replace(/ia$/i, 'ian')} Origin`, fontSize: 8, bold: true },
             ...(inv?.inco_terms ? [{ text: `Incoterms® 2020: ${inv.inco_terms}${inv.port_of_discharge ? ` ${String(inv.port_of_discharge).split(',')[0].toUpperCase()}` : ''}`, fontSize: 8, margin: [0, 2, 0, 0] as any }] : []),
-            ...(s.arn_ref ? [{ text: `Application Reference No. (ARN): ${s.arn_ref}`, fontSize: 8, margin: [0, 2, 0, 0] as any }] : []),
+            // Same reference as the invoice this list travels with.
+            ...(Number(inv?.is_export) && (inv?.arn_ref || s.arn_ref)
+              ? [{ text: `Application Reference No. (ARN): ${inv?.arn_ref || s.arn_ref}`, fontSize: 8, margin: [0, 2, 0, 0] as any }]
+              : []),
             ...(pl.remarks ? [{ text: pl.remarks, fontSize: 7.5, italics: true, margin: [0, 3, 0, 0] as any }] : []),
           ],
         },
@@ -1441,7 +1486,7 @@ export function buildPackingListPdf(id: number): TDocumentDefinitions {
   };
 
   const content: Content[] = [
-    ...companyHeader(s),
+    ...companyHeader(s, { isExport: !!inv?.is_export }),
     docTitle(s, 'PACKING LIST'),
     grid,
     table,

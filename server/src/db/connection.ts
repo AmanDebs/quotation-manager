@@ -94,6 +94,10 @@ addColumnIfMissing('commercial_invoices', 'prepared_by', "TEXT NOT NULL DEFAULT 
 addColumnIfMissing('packing_lists', 'lot_no', "TEXT NOT NULL DEFAULT ''");
 addColumnIfMissing('customers', 'notify_party_2', "TEXT NOT NULL DEFAULT ''");
 addColumnIfMissing('settings', 'arn_ref', "TEXT NOT NULL DEFAULT ''");
+// The LUT/ARN moved onto the document: a fresh reference is obtained for each
+// export consignment, so it is not a property of the company. The company's
+// value stays as the default an invoice starts from.
+addColumnIfMissing('commercial_invoices', 'arn_ref', "TEXT NOT NULL DEFAULT ''");
 addColumnIfMissing('settings', 'theme_color', "TEXT NOT NULL DEFAULT '#8b1a1a'");
 addColumnIfMissing('settings', 'quote_pattern', "TEXT NOT NULL DEFAULT 'QT/{FY}/{SEQ}'");
 addColumnIfMissing('settings', 'pi_pattern', "TEXT NOT NULL DEFAULT 'PI/{FY}/{SEQ}'");
