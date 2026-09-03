@@ -262,27 +262,39 @@ function notesAndTerms(s: Row, docNotes: string, title = 'NOTES & TERMS:'): Cont
  * `buyerSide`, so its right-hand column is simply empty.
  */
 function signatureBlock(s: Row, opts: { buyerSide?: boolean; preparedBy?: string } = {}): Content {
+  // The seller signs and stamps here; the buyer needs the same room opposite.
+  const signingSpace = 42;
   const supplier: any = {
     stack: [
       { text: `For ${s.company_name || 'Company'}`, fontSize: 8, bold: true },
       ...(s.signature
-        ? [{ image: s.signature, fit: [110, 42] as [number, number], margin: [0, 4, 0, 4] as any }]
-        : [{ text: ' ', margin: [0, 26, 0, 0] as any }]),
+        ? [{ image: s.signature, fit: [110, signingSpace] as [number, number], margin: [0, 4, 0, 4] as any }]
+        : [{ text: ' ', margin: [0, signingSpace / 2, 0, 0] as any }]),
       { text: 'Authorised Signatory', fontSize: 8 },
       ...(opts.preparedBy
-        ? [{ text: `Prepared By: ${opts.preparedBy}`, fontSize: 7.5, color: '#666666', margin: [0, 8, 0, 0] as any }]
+        ? [{ text: `Prepared By: ${opts.preparedBy}`, fontSize: 7.5, color: '#666666', margin: [0, 6, 0, 0] as any }]
         : []),
     ],
     width: '*',
   };
   const buyer: any = {
     stack: opts.buyerSide
-      ? [{ text: "BUYER'S SIGNATURE & STAMP", fontSize: 8, bold: true, margin: [0, 30, 0, 0] as any }]
+      ? [
+        { text: "BUYER'S SIGNATURE & STAMP", fontSize: 8, bold: true },
+        // Empty room to sign into, the same depth the seller's stamp takes, so
+        // the two blocks read as a pair rather than one floating beside the
+        // other's middle.
+        { text: ' ', margin: [0, signingSpace / 2, 0, 0] as any },
+      ]
       : [{ text: '' }],
-    width: 170,
+    width: '*',
   };
   return {
+    // Two equal columns, both headings on the same line. The buyer used to be
+    // pushed 30pt down to clear a signature image that sat on the other side;
+    // once the columns swapped that margin stranded it against nothing.
     columns: [supplier, buyer],
+    columnGap: 24,
     margin: [0, 18, 0, 0] as any,
   };
 }
