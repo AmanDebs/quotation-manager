@@ -205,10 +205,17 @@ export default function ProformaFormPage() {
   // the normal case and the whole point of an advance.
   const lockedByOrder = !!existing?.order_id;
   const readOnly = lockedByOrder;
-  // Plain values sit closer together than the controls they replaced.
+  /**
+   * Three columns was one shape for every screen: on a 1900px desktop it left
+   * three fields half the width of the window each, holding "USD" and a date,
+   * and pushed the form onto a second page. It steps now — two up on a tablet,
+   * four on a wide desktop — and the rows sit closer, a box being enough to
+   * separate a field from the one under it. Read-only keeps its wider gutters
+   * and taller rows: there are no boxes there to do that job.
+   */
   const gridClass = readOnly
-    ? 'grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-3'
-    : 'grid grid-cols-1 gap-3 sm:grid-cols-3';
+    ? 'grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4'
+    : 'grid grid-cols-1 gap-x-4 gap-y-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4';
 
   const onCustomerChange = (cid: number | '') => {
     const c = customers.find((x) => x.id === cid);
@@ -380,7 +387,12 @@ export default function ProformaFormPage() {
             <Field label="Prepared By">
               <Input disabled={readOnly} value={draft.prepared_by} onChange={(e) => set({ prepared_by: e.target.value })} />
             </Field>
-            <Field label="Bank Account (printed on PI)" className="col-span-3">
+            {/* The buyer's own reference. This was a card of its own — a
+                header and 32px of padding around a single row — for two fields
+                that belong with the rest of the document's identity. */}
+            <Field label="Buyer PO Number"><Input disabled={readOnly} value={draft.po_number} onChange={(e) => set({ po_number: e.target.value })} placeholder="Customer's PO reference" /></Field>
+            <Field label="Buyer PO Date"><Input disabled={readOnly} type="date" value={draft.po_date} onChange={(e) => set({ po_date: e.target.value })} /></Field>
+            <Field label="Bank Account (printed on PI)" className="col-span-full">
               <Select disabled={readOnly}
                 value={draft.bank_account}
                 onChange={(e) => set({ bank_account: e.target.value })}
@@ -398,31 +410,15 @@ export default function ProformaFormPage() {
               )}
             </Field>
           </div>
+          <p className="mt-2 text-xs text-slate-400">
+            The buyer's PO prints on the PI as “Buyer PO”; set the status to “Order Confirmed” once it arrives.
+          </p>
         </Card>
 
-        <Card title="Buyer's Purchase Order">
-          <div className={gridClass}>
-            <Field label="PO Number"><Input disabled={readOnly} value={draft.po_number} onChange={(e) => set({ po_number: e.target.value })} placeholder="Customer's PO reference" /></Field>
-            <Field label="PO Date"><Input disabled={readOnly} type="date" value={draft.po_date} onChange={(e) => set({ po_date: e.target.value })} /></Field>
-          </div>
-          <p className="mt-2 text-xs text-slate-400">Printed on the PI as “Buyer PO”. Set status to “order confirmed” once the PO is received.</p>
-        </Card>
-
-        <Card title="Consignee & Notify Parties">
-          <div className={gridClass}>
-            <Field label="Consignee (if different from buyer)">
-              <Textarea disabled={readOnly} rows={3} value={draft.consignee} onChange={(e) => set({ consignee: e.target.value })} />
-            </Field>
-            <Field label="Notify Party 1">
-              <Textarea disabled={readOnly} rows={3} value={draft.notify_party} onChange={(e) => set({ notify_party: e.target.value })} />
-            </Field>
-            <Field label="Notify Party 2">
-              <Textarea disabled={readOnly} rows={3} value={draft.notify_party_2} onChange={(e) => set({ notify_party_2: e.target.value })} />
-            </Field>
-          </div>
-        </Card>
-
-        <Card title="Export Details">
+        {/* Where the goods go and who is told about it: the ports, the
+            parties and the shipment terms were three cards asking one
+            question between them. */}
+        <Card title="Shipment & Parties">
           {/* Editable only before the first save. After that the number has
               been issued from one series or the other and the flag can no
               longer move to match it — the server refuses the change too. */}
@@ -444,7 +440,7 @@ export default function ProformaFormPage() {
             )}
           </div>
           {!!draft.is_export && (
-            <div className={gridClass}>
+            <div className={`${gridClass} mb-3`}>
               <Field label="Country of Origin"><Input disabled={readOnly} value={draft.country_of_origin} onChange={(e) => set({ country_of_origin: e.target.value })} /></Field>
               <Field label="Port of Loading"><Input disabled={readOnly} value={draft.port_of_loading} onChange={(e) => set({ port_of_loading: e.target.value })} placeholder="e.g. Nhava Sheva" /></Field>
               <Field label="Port of Discharge"><Input disabled={readOnly} value={draft.port_of_discharge} onChange={(e) => set({ port_of_discharge: e.target.value })} /></Field>
@@ -458,6 +454,20 @@ export default function ProformaFormPage() {
               </Field>
             </div>
           )}
+
+          {/* Two rows deep rather than three: these hold an address, and the
+              box scrolls for the rare one that runs longer. */}
+          <div className={gridClass}>
+            <Field label="Consignee (if different from buyer)">
+              <Textarea disabled={readOnly} rows={2} value={draft.consignee} onChange={(e) => set({ consignee: e.target.value })} />
+            </Field>
+            <Field label="Notify Party 1">
+              <Textarea disabled={readOnly} rows={2} value={draft.notify_party} onChange={(e) => set({ notify_party: e.target.value })} />
+            </Field>
+            <Field label="Notify Party 2">
+              <Textarea disabled={readOnly} rows={2} value={draft.notify_party_2} onChange={(e) => set({ notify_party_2: e.target.value })} />
+            </Field>
+          </div>
         </Card>
 
         <Card

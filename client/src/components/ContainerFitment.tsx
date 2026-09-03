@@ -51,6 +51,12 @@ export default function ContainerFitment({
   const unknown = plan.rows.filter((r) => r.boxes > 0 && !r.boxesPerContainer);
   const totalBoxes = priced.reduce((s, r) => s + r.boxes, 0);
 
+  // Nothing to fit yet. On a new proforma this sat above the fold as a whole
+  // card reporting an absence — the question it answers does not exist until
+  // there is something to load. Below the hooks, never above: a return between
+  // them changes the hook order and React unmounts the page.
+  if (!items.some((it) => !it.is_charge)) return null;
+
   return (
     <Card
       title="Container Fitment"
