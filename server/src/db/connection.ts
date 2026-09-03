@@ -372,6 +372,33 @@ for (const [column, oldDefault, aglo] of [
   }
 }
 
+/**
+ * Proformas booked before booking set `in_production` (2026-09).
+ *
+ * `syncProformaOrdered` used to set `order_confirmed`, which said the wrong
+ * thing — Order Confirmed is the buyer telling us to go ahead, and it comes
+ * *before* the advance. So a proforma with an order against it reads the same
+ * as one with nothing booked at all, which is exactly the row whose status
+ * picker is now frozen: the lock had no visible cause, because the status that
+ * would have explained it was never set.
+ *
+ * The guard is `syncProformaOrdered`'s own, copied rather than imported —
+ * `documentChain.ts` imports `db` from this file. Keep the two in step. It is
+ * forward-only and never touches `cancelled`, and it fills
+ * `status_before_ordered` as the live path does, so deleting the order still
+ * puts the proforma back where booking found it. Idempotent: `in_production`
+ * is not in the guard, so a second boot moves nothing.
+ */
+const booked = db.prepare(
+  `UPDATE proforma_invoices
+      SET status_before_ordered = status, status = 'in_production'
+    WHERE order_id IS NOT NULL
+      AND status IN ('draft', 'sent', 'order_confirmed', 'advance_received')`
+).run();
+if (Number(booked.changes) > 0) {
+  console.warn(`proforma_invoices: ${booked.changes} row(s) with an order booked moved to Sales Order Generated.`);
+}
+
 // Starter note presets so the feature is useful immediately.
 const presetRow = db.prepare('SELECT id, note_presets FROM companies WHERE is_default = 1 ORDER BY id LIMIT 1').get() as
   { id: number; note_presets: string } | undefined;

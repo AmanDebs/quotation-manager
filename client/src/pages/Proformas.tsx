@@ -179,6 +179,7 @@ export default function ProformasPage() {
                 <th className="pb-2 pr-3 text-right">Balance</th>
                 <th className="pb-2 pr-3">Payment Terms</th>
                 <th className="pb-2 pr-3">Issued By</th>
+                <th className="pb-2 pr-3">Order</th>
                 <th className="pb-2 pr-3">Status</th>
                 <th className="w-8 pb-2" />
               </tr>
@@ -212,6 +213,18 @@ export default function ProformasPage() {
                   </td>
                   <td className="py-2 pr-3 text-xs text-slate-600">{p.payment_terms || '—'}</td>
                   <td className="py-2 pr-3 text-xs text-slate-500">{p.created_by_name ?? '—'}</td>
+                  {/* The order booked from this proforma, which is also why its
+                      status is frozen. Without it on screen the disabled picker
+                      beside it has no visible cause and reads as a fault. */}
+                  <td className="py-2 pr-3 text-xs" onClick={(e) => e.stopPropagation()}>
+                    {p.order_id ? (
+                      <Link to={`/orders/${p.order_id}`} className="text-brand-600 hover:underline">
+                        {p.order_number ?? `#${p.order_id}`}
+                      </Link>
+                    ) : (
+                      <span className="text-slate-300">—</span>
+                    )}
+                  </td>
                   {/* Editable in place — the click must not open the proforma. */}
                   <td className="py-2 pr-3" onClick={(e) => e.stopPropagation()}>
                     <select
@@ -252,7 +265,7 @@ export default function ProformasPage() {
 
                 {noteOpen && (
                   <tr onClick={(e) => e.stopPropagation()}>
-                    <td colSpan={10} className="cursor-default px-1 pb-3">
+                    <td colSpan={11} className="cursor-default px-1 pb-3">
                       <div className="rounded-md border border-slate-200 bg-slate-50/70 p-3">
                         <InternalNotes docType="proforma" docId={p.id} value={p.internal_notes ?? ''} autoFocus />
                       </div>
