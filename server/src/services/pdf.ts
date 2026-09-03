@@ -249,6 +249,18 @@ function notesAndTerms(s: Row, docNotes: string, title = 'NOTES & TERMS:'): Cont
   ];
 }
 
+/**
+ * Who signs, and where.
+ *
+ * The seller's block sits on the **left** with the preparer's name beneath it,
+ * and the buyer signs on the right — the arrangement Aglo asked for on
+ * 2026-09-03. Prepared By belongs with the seller: it names whoever in the
+ * office drew the document up, so it reads as part of that block rather than
+ * as something the buyer is being asked to fill in.
+ *
+ * Shared by the proforma and the order confirmation. The order passes no
+ * `buyerSide`, so its right-hand column is simply empty.
+ */
 function signatureBlock(s: Row, opts: { buyerSide?: boolean; preparedBy?: string } = {}): Content {
   const supplier: any = {
     stack: [
@@ -257,22 +269,20 @@ function signatureBlock(s: Row, opts: { buyerSide?: boolean; preparedBy?: string
         ? [{ image: s.signature, fit: [110, 42] as [number, number], margin: [0, 4, 0, 4] as any }]
         : [{ text: ' ', margin: [0, 26, 0, 0] as any }]),
       { text: 'Authorised Signatory', fontSize: 8 },
+      ...(opts.preparedBy
+        ? [{ text: `Prepared By: ${opts.preparedBy}`, fontSize: 7.5, color: '#666666', margin: [0, 8, 0, 0] as any }]
+        : []),
     ],
+    width: '*',
+  };
+  const buyer: any = {
+    stack: opts.buyerSide
+      ? [{ text: "BUYER'S SIGNATURE & STAMP", fontSize: 8, bold: true, margin: [0, 30, 0, 0] as any }]
+      : [{ text: '' }],
     width: 170,
   };
   return {
-    columns: [
-      {
-        stack: [
-          ...(opts.buyerSide
-            ? [{ text: "BUYER'S SIGNATURE & STAMP", fontSize: 8, bold: true, margin: [0, 30, 0, 0] as any }]
-            : []),
-          ...(opts.preparedBy ? [{ text: `Prepared By: ${opts.preparedBy}`, fontSize: 7.5, color: '#666666', margin: [0, opts.buyerSide ? 8 : 34, 0, 0] as any }] : []),
-        ],
-        width: '*',
-      },
-      supplier,
-    ],
+    columns: [supplier, buyer],
     margin: [0, 18, 0, 0] as any,
   };
 }
