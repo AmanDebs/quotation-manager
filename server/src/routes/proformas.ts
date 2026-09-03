@@ -482,11 +482,32 @@ proformasRouter.post('/:id/status', (req: AuthedRequest, res) => {
   }
   const existing = db.prepare('SELECT customer_id FROM proforma_invoices WHERE id = ?').get(id) as { customer_id: number } | undefined;
   if (!existing || !canAccessCustomer(req, existing.customer_id)) return res.status(404).json({ error: 'Proforma invoice not found' });
+  /**
+   * A booked proforma's status is locked, like its content.
+   *
+   * This used to be exempt, and the exemption was written when
+   * `advance_received` and `in_production` both came *after* the order existed
+   * — so refusing them would have blocked the normal way forward. Neither is
+   * true now: the advance is banked against the proforma **before** the order
+   * is booked, and `in_production` *is* the booked state, set by
+   * `syncProformaOrdered` rather than typed. What was left was a pill row that
+   * could contradict the order sitting downstream of it, on the one document
+   * whose content is otherwise frozen. It matches `POST /quotations/:id/status`
+   * now, which has always been locked once a proforma answered it.
+   *
+   * The escape is the one every lock in this chain has: delete the order. A
+   * deal that dies after booking is cancelled on the order, which carries its
+   * own `cancelled` status and is deliberately never frozen.
+   */
+  const lockedStatus = lockError('proforma_invoices', id, 'given a new status');
+  if (lockedStatus) return res.status(409).json({ error: lockedStatus });
   const blocked = blockUnapprovedTransition('proforma_invoices', id, String(status), req);
   if (blocked) return res.status(409).json({ error: blocked });
   // Clearing the remembered status by hand, as the quotation route does for
   // `status_before_expired`: whatever somebody sets now is theirs, so deleting
   // the order later must not overwrite a choice made after it was booked.
+  // Belt and braces since the lock above landed — a status can now only be set
+  // while there is no order, when there is nothing remembered to clear.
   db.prepare("UPDATE proforma_invoices SET status = ?, status_before_ordered = '' WHERE id = ?")
     .run(String(status), id);
   res.json(getFull(id));

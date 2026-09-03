@@ -290,7 +290,9 @@ export default function ProformaFormPage() {
         />
       )}
 
-      {!isNew && (
+      {/* Hidden once the order is booked, like the quotation's. The banner
+          above already says why and links to the order. */}
+      {!isNew && !readOnly && (
         <div className="mb-4 flex flex-wrap items-center gap-2 text-sm">
           <span className="text-slate-500">Set status:</span>
           {SETTABLE_STATUSES.map((s) => (

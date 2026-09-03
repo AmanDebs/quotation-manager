@@ -216,13 +216,15 @@ export default function ProformasPage() {
                   <td className="py-2 pr-3" onClick={(e) => e.stopPropagation()}>
                     <select
                       value={p.status}
-                      disabled={setStatus.isPending}
+                      // Frozen once an order is booked from it, as on the
+                      // document itself — the server refuses it either way.
+                      disabled={setStatus.isPending || !!p.order_id}
                       onChange={(e) => {
                         setStatus.reset();
                         setStatus.mutate({ id: p.id, status: e.target.value });
                       }}
                       className={`cursor-pointer rounded-full border px-2 py-0.5 text-xs font-medium focus:outline-none focus:ring-1 focus:ring-brand-600 disabled:opacity-50 ${statusTint[p.status] ?? 'bg-slate-100 text-slate-600 border-slate-300'}`}
-                      title="Change status"
+                      title={p.order_id ? `Booked as order ${p.order_number ?? p.order_id} — delete that order to change this` : 'Change status'}
                     >
                       {statusOptions(p.status).map((s) => (
                         <option key={s} value={s} disabled={!SETTABLE_STATUSES.includes(s)} className="bg-white text-slate-800">
