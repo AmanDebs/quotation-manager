@@ -97,6 +97,31 @@ function readOpen(): string[] | null {
   }
 }
 
+/**
+ * Whether the sidebar is folded down to a rail of icons.
+ *
+ * Remembered for the same reason the open groups are: somebody working across
+ * a wide order-lines table wants the width back on every page, not once.
+ *
+ * **A rail, not a disappearance.** Every nav entry already carries an icon, so
+ * folding to 56px gives back 168px of table while leaving every page one click
+ * away; hiding the sidebar outright would trade navigation for space and leave
+ * nothing to click but the button that brings it back.
+ *
+ * **Desktop only.** Below `md` the sidebar is already a drawer that takes no
+ * width at all, so there is nothing to reclaim — every class below is `md:`
+ * scoped, and the drawer opens at full width whatever this says.
+ */
+const RAIL_KEY = 'qm.nav.rail';
+
+function readRail(): boolean {
+  try {
+    return localStorage.getItem(RAIL_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
 export default function Layout({ user, onLogout, children }: { user: User; onLogout: () => void; children: ReactNode }) {
   const isManager = user.role === 'manager';
   const { pathname } = useLocation();
@@ -125,6 +150,11 @@ export default function Layout({ user, onLogout, children }: { user: User; onLog
 
   const toggle = (heading: string) =>
     setOpen((prev) => (prev.includes(heading) ? prev.filter((h) => h !== heading) : [...prev, heading]));
+
+  const [rail, setRail] = useState<boolean>(readRail);
+  useEffect(() => {
+    try { localStorage.setItem(RAIL_KEY, rail ? '1' : '0'); } catch { /* not worth failing over */ }
+  }, [rail]);
   const { data: approvals } = useQuery({
     queryKey: ['approval-count'],
     queryFn: () => api.get<{ pending: number }>('/api/approvals/count'),
@@ -137,21 +167,36 @@ export default function Layout({ user, onLogout, children }: { user: User; onLog
     onLogout();
   };
 
-  const link = (item: NavItem) => (
+  /**
+   * `extra` carries the one case the rail changes: an item in a *folded* group.
+   * On the rail there is no heading to unfold, so those items still have to be
+   * reachable — they render `hidden md:flex`, which shows them in the rail and
+   * keeps the phone drawer honouring the fold the user actually chose.
+   */
+  const link = (item: NavItem, extra = '') => (
     <NavLink
       key={item.to}
       to={item.to}
       end={item.to === '/'}
+      // The label is the tooltip on the rail, where it is the only thing left.
+      title={item.label}
       className={({ isActive }) =>
-        `flex items-center gap-2.5 px-4 py-1.5 text-sm transition-colors ${
-          isActive ? 'bg-white/15 font-medium text-white' : 'text-white/70 hover:bg-white/5 hover:text-white'
-        }`
+        `flex items-center gap-2.5 px-4 py-1.5 text-sm transition-colors ${extra} ${
+          rail ? 'md:justify-center md:gap-0 md:px-0' : ''
+        } ${isActive ? 'bg-white/15 font-medium text-white' : 'text-white/70 hover:bg-white/5 hover:text-white'}`
       }
     >
       <span className="text-base leading-none">{item.icon}</span>
-      <span className="flex-1">{item.label}</span>
+      <span className={`flex-1 ${rail ? 'md:hidden' : ''}`}>{item.label}</span>
       {item.to === '/approvals' && !!approvals?.pending && (
-        <span className="rounded-full bg-amber-400 px-1.5 text-xs font-bold text-slate-900">{approvals.pending}</span>
+        <>
+          <span className={`rounded-full bg-amber-400 px-1.5 text-xs font-bold text-slate-900 ${rail ? 'md:hidden' : ''}`}>
+            {approvals.pending}
+          </span>
+          {/* The count will not fit on the rail, but "there is something
+              waiting" still has to survive the fold. */}
+          {rail && <span className="ml-0.5 hidden h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400 md:block" aria-hidden="true" />}
+        </>
       )}
     </NavLink>
   );
@@ -207,11 +252,27 @@ export default function Layout({ user, onLogout, children }: { user: User; onLog
       <aside
         className={`fixed inset-y-0 left-0 z-40 w-56 flex-col bg-brand-800 text-white md:flex ${
           drawer ? 'flex' : 'hidden'
-        }`}
+        } ${rail ? 'md:w-14' : 'md:w-56'}`}
       >
-        <div className="border-b border-white/10 px-4 py-4">
-          <div className="text-lg font-bold">ERP Tool</div>
-          <div className="text-xs text-white/50">Order-to-Dispatch</div>
+        <div className={`flex items-center gap-2 border-b border-white/10 px-4 py-4 ${rail ? 'md:px-0' : ''}`}>
+          <div className={`min-w-0 flex-1 ${rail ? 'md:hidden' : ''}`}>
+            <div className="text-lg font-bold">ERP Tool</div>
+            <div className="text-xs text-white/50">Order-to-Dispatch</div>
+          </div>
+          {/* Desktop only: below md the sidebar is a drawer and takes no width,
+              so there is nothing to reclaim and nothing to fold. */}
+          <button
+            type="button"
+            onClick={() => setRail((r) => !r)}
+            aria-label={rail ? 'Expand the sidebar' : 'Collapse the sidebar'}
+            aria-expanded={!rail}
+            title={rail ? 'Expand the sidebar' : 'Collapse the sidebar'}
+            className={`hidden shrink-0 rounded p-1 text-white/50 transition-colors hover:bg-white/10 hover:text-white md:block ${
+              rail ? 'md:mx-auto' : ''
+            }`}
+          >
+            {rail ? '»' : '«'}
+          </button>
         </div>
         <nav className="flex-1 overflow-y-auto py-2">
           {link(DASHBOARD)}
@@ -227,7 +288,9 @@ export default function Layout({ user, onLogout, children }: { user: User; onLog
                   type="button"
                   onClick={() => toggle(group.heading)}
                   aria-expanded={expanded}
-                  className="flex w-full items-center gap-1.5 px-4 py-1 text-[0.6875rem] font-semibold uppercase tracking-wider text-white/40 transition-colors hover:text-white/80"
+                  className={`flex w-full items-center gap-1.5 px-4 py-1 text-[0.6875rem] font-semibold uppercase tracking-wider text-white/40 transition-colors hover:text-white/80 ${
+                    rail ? 'md:hidden' : ''
+                  }`}
                 >
                   <span className={`inline-block text-[0.5625rem] transition-transform ${expanded ? 'rotate-90' : ''}`}>▶</span>
                   <span className="flex-1 text-left">{group.heading}</span>
@@ -235,15 +298,26 @@ export default function Layout({ user, onLogout, children }: { user: User; onLog
                       does not make you forget what it held. */}
                   {!expanded && <span className="font-normal text-white/30">{items.length}</span>}
                 </button>
-                {expanded && items.map(link)}
+                {expanded
+                  ? items.map((item) => link(item))
+                  // Folded, so hidden on the drawer — but the rail has no
+                  // heading to unfold, so they still appear there.
+                  : items.map((item) => link(item, 'hidden md:flex'))}
               </div>
             );
           })}
         </nav>
-        <div className="border-t border-white/10 px-4 py-3 text-sm">
-          <div className="mb-0.5 truncate text-white/80">{user.name}</div>
-          <div className="mb-1 text-xs capitalize text-white/40">{user.role}</div>
-          <button onClick={logout} className="text-xs text-white/50 hover:text-white">Sign out</button>
+        <div className={`border-t border-white/10 px-4 py-3 text-sm ${rail ? 'md:px-0 md:text-center' : ''}`}>
+          <div className={`mb-0.5 truncate text-white/80 ${rail ? 'md:hidden' : ''}`}>{user.name}</div>
+          <div className={`mb-1 text-xs capitalize text-white/40 ${rail ? 'md:hidden' : ''}`}>{user.role}</div>
+          <button
+            onClick={logout}
+            title={rail ? `Sign out (${user.name})` : undefined}
+            className="text-xs text-white/50 hover:text-white"
+          >
+            <span className={rail ? 'md:hidden' : ''}>Sign out</span>
+            <span className={rail ? 'hidden text-base md:inline' : 'hidden'} aria-hidden="true">⏻</span>
+          </button>
         </div>
       </aside>
       {/*
@@ -257,7 +331,7 @@ export default function Layout({ user, onLogout, children }: { user: User; onLog
         sidebar is fixed; the top padding is for the phone header, which does
         not exist above `md`.
       */}
-      <main className="min-w-0 flex-1 p-4 pt-16 md:ml-56 md:p-6 md:pt-6">{children}</main>
+      <main className={`min-w-0 flex-1 p-4 pt-16 md:p-6 md:pt-6 ${rail ? 'md:ml-14' : 'md:ml-56'}`}>{children}</main>
     </div>
   );
 }
