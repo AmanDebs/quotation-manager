@@ -280,14 +280,17 @@ function signatureBlock(s: Row, opts: { buyerSide?: boolean; preparedBy?: string
   const buyer: any = {
     stack: opts.buyerSide
       ? [
-        { text: "BUYER'S SIGNATURE & STAMP", fontSize: 8, bold: true },
+        // Flush with the right margin, so it finishes level with the right-hand
+        // edge of the items table above rather than floating mid-page.
+        { text: "BUYER'S SIGNATURE & STAMP", fontSize: 8, bold: true, alignment: 'right' },
         // Empty room to sign into, the same depth the seller's stamp takes, so
         // the two blocks read as a pair rather than one floating beside the
         // other's middle.
         { text: ' ', margin: [0, signingSpace / 2, 0, 0] as any },
       ]
       : [{ text: '' }],
-    width: '*',
+    // Fixed, so the seller's '*' column pushes this one to the right end.
+    width: 190,
   };
   return {
     // Two equal columns, both headings on the same line. The buyer used to be
