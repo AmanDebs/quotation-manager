@@ -2,6 +2,9 @@ import { DatabaseSync } from 'node:sqlite';
 import { readFileSync, mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+// Pure, no db import — see the note at the top of that file for why it is not
+// part of services/numbering.ts, which imports `db` from here.
+import { defaultPatternsFor, PATTERN_COLUMNS, SCHEMA_DEFAULT_PATTERNS } from '../services/companyPatterns.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // DATA_DIR lets deployments (and tests) relocate the database.
@@ -244,6 +247,52 @@ if (!seqCols.some((c) => c.name === 'company_id')) {
     db.exec('ALTER TABLE sequences_new RENAME TO sequences');
     console.warn(`sequences: rebuilt per company; ${after} existing counter(s) assigned to company 1.`);
   });
+}
+
+/**
+ * One-off: give an additional company that was never configured its own
+ * numbering patterns.
+ *
+ * The counters have been per company since multi-company landed, and each
+ * entity has always started at 001. What did not follow was the pattern: a
+ * company added through `POST /api/companies` took the `companies` table's
+ * column defaults, which are *Aglo's* paperwork, so the second entity's first
+ * proforma printed `AGLO/PI/26-27/001` — the same string as the first
+ * entity's, with another company's name in it. Nothing rejected it, and
+ * nothing could: uniqueness is deliberately per company so that both may hold
+ * a 001. The restart worked and was invisible.
+ *
+ * The route derives patterns from now on; this is for the companies already on
+ * file. Two conditions, both strict, because a pattern that has issued a number
+ * must never be rewritten — that number may already be on paper with a
+ * customer:
+ *
+ *   - every pattern column is still *exactly* the schema default, so a company
+ *     somebody deliberately configured is left alone (including one deliberately
+ *     configured to match, which is then their choice, not this code's);
+ *   - the company has no row in `sequences` at all, so no number has ever been
+ *     drawn from any of its series, in any fiscal year.
+ *
+ * Idempotent by construction: after the rewrite the patterns are no longer the
+ * defaults, so a second boot skips the row. The default company is never
+ * touched — its patterns are Aglo's and are meant to be.
+ */
+{
+  const extras = db.prepare('SELECT * FROM companies WHERE is_default = 0').all() as Record<string, unknown>[];
+  for (const co of extras) {
+    const untouched = PATTERN_COLUMNS.every((c) => String(co[c] ?? '') === SCHEMA_DEFAULT_PATTERNS[c]);
+    if (!untouched) continue;
+    const issued = db.prepare('SELECT COUNT(*) AS c FROM sequences WHERE company_id = ?').get(Number(co.id)) as { c: number };
+    if (issued.c > 0) continue;
+    const next = defaultPatternsFor(String(co.company_name ?? ''));
+    db.prepare(
+      `UPDATE companies SET ${PATTERN_COLUMNS.map((c) => `${c} = ?`).join(', ')} WHERE id = ?`
+    ).run(...PATTERN_COLUMNS.map((c) => next[c]), Number(co.id));
+    console.warn(
+      `companies: ${String(co.company_name ?? co.id)} was still numbering from the defaults and has issued nothing — ` +
+      `its series now read ${next.pi_pattern} and ${next.inv_pattern}.`
+    );
+  }
 }
 
 /**

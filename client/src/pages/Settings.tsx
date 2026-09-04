@@ -112,6 +112,68 @@ const SERIES_LABEL: Record<string, string> = {
   purchase_order: 'Purchase Order',
 };
 
+type PatternKey =
+  | 'quote_pattern' | 'pl_pattern' | 'order_pattern' | 'order_export_pattern'
+  | 'pi_pattern' | 'pi_export_pattern' | 'inv_pattern' | 'inv_export_pattern'
+  | 'wo_pattern' | 'po_pattern';
+
+/** Same order and wording as the fields above. */
+const PATTERN_FIELDS: [PatternKey, string][] = [
+  ['quote_pattern', 'Quotation'],
+  ['pl_pattern', 'Packing List'],
+  ['order_pattern', 'Order (domestic)'],
+  ['order_export_pattern', 'Order (export)'],
+  ['pi_pattern', 'Proforma Invoice (domestic)'],
+  ['pi_export_pattern', 'Proforma Invoice (export)'],
+  ['inv_pattern', 'Commercial Invoice (domestic)'],
+  ['inv_export_pattern', 'Commercial Invoice (export)'],
+  ['wo_pattern', 'Work Order'],
+  ['po_pattern', 'Purchase Order'],
+];
+
+/**
+ * Which of this company's series another company is also using.
+ *
+ * Counters have always been per company and every entity starts at 001 — which
+ * is right, since a GSTIN keeps one consecutive series. But two companies
+ * holding the same *pattern* undoes that silently: both restart at 001 and both
+ * print the identical string, so two different entities issue
+ * AGLO/PI/26-27/001 and nothing complains. Nothing can complain, either:
+ * uniqueness is per company precisely so that both may hold a 001.
+ *
+ * A company added from now on derives its patterns from its own name, so this
+ * can only be reached by one that predates that or by one edited here. It reads
+ * the *form's* live values against what the other companies have saved, so it
+ * answers while the pattern is being typed rather than after it is stored.
+ */
+function PatternClashes({ form, companies }: { form: Company; companies: Company[] }) {
+  const clashes = PATTERN_FIELDS.flatMap(([key, label]) => {
+    const mine = String(form[key] ?? '').trim();
+    if (!mine) return [];
+    const others = companies.filter((c) => c.id !== form.id && String(c[key] ?? '').trim() === mine);
+    return others.length
+      ? [{ key, label, mine, who: others.map((c) => c.company_name || `Company ${c.id}`).join(', ') }]
+      : [];
+  });
+  if (!clashes.length) return null;
+  return (
+    <div className="mt-3 rounded-lg bg-amber-50 p-3 text-xs text-amber-800 ring-1 ring-inset ring-amber-200">
+      <div className="font-semibold">Another company issues these numbers too</div>
+      <ul className="mt-1 space-y-0.5">
+        {clashes.map((c) => (
+          <li key={c.key}>
+            <b>{c.label}</b> — <code className="rounded bg-amber-100 px-1">{c.mine}</code> is also used by {c.who}.
+          </li>
+        ))}
+      </ul>
+      <p className="mt-1.5">
+        Each company counts its own series from 001, so both will put the same number on paper. Give this one
+        something of its own in the pattern.
+      </p>
+    </div>
+  );
+}
+
 /**
  * Where each series has got to, and a way to move it on.
  *
@@ -402,7 +464,10 @@ export default function SettingsPage() {
             <Field label="Proforma Invoice (export)"><Input value={form.pi_export_pattern} onChange={(e) => set({ pi_export_pattern: e.target.value })} /></Field>
             <Field label="Commercial Invoice (domestic)"><Input value={form.inv_pattern} onChange={(e) => set({ inv_pattern: e.target.value })} /></Field>
             <Field label="Commercial Invoice (export)"><Input value={form.inv_export_pattern} onChange={(e) => set({ inv_export_pattern: e.target.value })} /></Field>
+            <Field label="Work Order"><Input value={form.wo_pattern} onChange={(e) => set({ wo_pattern: e.target.value })} /></Field>
+            <Field label="Purchase Order"><Input value={form.po_pattern} onChange={(e) => set({ po_pattern: e.target.value })} /></Field>
           </div>
+          <PatternClashes form={form} companies={companies} />
           <p className="mt-2 text-xs text-slate-400">
             Tokens: <code className="rounded bg-slate-100 px-1">{'{FY}'}</code> = fiscal year (Apr–Mar, e.g. 26-27), <code className="rounded bg-slate-100 px-1">{'{SEQ}'}</code> = sequence (001, 002…).
             Also <code className="rounded bg-slate-100 px-1">{'{SEQ4}'}</code> for a four-digit sequence (0001, 0002…).

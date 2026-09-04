@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { db } from '../db/connection.js';
 import type { AuthedRequest } from '../middleware/auth.js';
 import { listCompanies, getCompany, companyUsage } from '../services/companies.js';
+import { defaultPatternsFor, PATTERN_COLUMNS } from '../services/companyPatterns.js';
 
 export const companiesRouter = Router();
 
@@ -17,8 +18,10 @@ const FIELDS = [
   'company_name', 'address', 'city', 'state', 'country', 'pincode', 'phone', 'email', 'website',
   'gstin', 'pan', 'iec', 'logo', 'signature', 'default_terms', 'arn_ref', 'theme_color',
   'quote_prefix', 'pi_prefix', 'inv_prefix', 'pl_prefix',
-  'quote_pattern', 'pi_pattern', 'pi_export_pattern', 'inv_pattern', 'inv_export_pattern',
-  'pl_pattern', 'order_pattern', 'order_export_pattern',
+  // Every pattern column, work orders and purchase orders included — they were
+  // missing here, so those two series could not be set on creation or edited
+  // afterwards, and every company in the group issued WO/26-27/001.
+  ...PATTERN_COLUMNS,
 ];
 const JSON_FIELDS = ['bank_accounts', 'note_presets'];
 
@@ -43,6 +46,23 @@ companiesRouter.post('/', requireManager, (req, res) => {
   for (const f of JSON_FIELDS) {
     if (f in body) { cols.push(f); values.push(JSON.stringify(body[f] ?? [])); }
   }
+  /*
+   * A second entity numbers its documents in its own name.
+   *
+   * The counters were always per company and always restarted at 001; what
+   * this fills in is the pattern, which used to come from the `companies`
+   * table's defaults — Aglo's own paperwork. Two entities then printed the
+   * identical `AGLO/PI/26-27/001`, and nothing refused it, because uniqueness
+   * is per company precisely so that both may hold a 001. Anything the caller
+   * sent still wins; this only fills what was not asked for.
+   *
+   * Only ever reached by an *additional* company: company 1 is created by the
+   * boot migration in db/connection.ts, never through this route.
+   */
+  for (const [col, pattern] of Object.entries(defaultPatternsFor(String(body.company_name)))) {
+    if (!(col in body)) { cols.push(col); values.push(pattern); }
+  }
+
   const info = db.prepare(
     `INSERT INTO companies (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`
   ).run(...(values as never[]));

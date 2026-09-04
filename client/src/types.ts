@@ -94,6 +94,12 @@ export interface Settings {
   quote_pattern: string; pi_pattern: string; pi_export_pattern: string;
   inv_pattern: string; inv_export_pattern: string; pl_pattern: string;
   order_pattern: string; order_export_pattern: string;
+  /**
+   * The two internal series. They were missing from this type and from the
+   * companies route's field list, so every entity in the group issued
+   * WO/26-27/001 with no way to change it.
+   */
+  wo_pattern: string; po_pattern: string;
   bank_accounts: BankAccount[];
   note_presets: NotePreset[];
 }
