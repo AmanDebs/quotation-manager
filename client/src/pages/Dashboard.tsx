@@ -7,7 +7,8 @@ import {
 import { api } from '../api/client';
 import type { Followup, DashboardLayout, WorkOrderStatus } from '../types';
 import { useIsManager, useUser, usePatchUser } from '../App';
-import { Button, Card, Input, Select, PageHeader, Modal } from '../components/ui';
+import { Button, Card, Input, Select, PageHeader, Modal, labelClass } from '../components/ui';
+import { Icon } from '../components/icons';
 import { useCompanies } from '../components/CompanySelect';
 import { ORDER_STATUSES, orderStatusLabel } from './Orders';
 import { STATUSES as QUOTATION_STATUSES, quotationStatusLabel } from './Quotations';
@@ -25,6 +26,41 @@ const GRID = '#e1e0d9';
 const MUTED = '#898781';
 
 const AGE_BUCKETS = ['0-30', '31-60', '61-90', '90+'];
+
+/* ------------------------------------------------------------------ *
+ * Surfaces
+ *
+ * The dashboard is thirteen cards and six tables, and it had been growing its
+ * own versions of things `components/ui.tsx` already owns: tiles with the old
+ * card look beside real Cards with the new one, three bar charts with three
+ * different tracks, and column headings in a fourth kind of small grey type.
+ * These three strings are the whole of it — a caption, a table heading and an
+ * empty state — so a figure here is captioned exactly like a value on a form.
+ * ------------------------------------------------------------------ */
+
+/**
+ * `labelClass` is the field label from the forms, borrowed rather than copied:
+ * a caption over a figure is the same thing as a label over a value, and two
+ * copies of that decision is how the two come to disagree.
+ *
+ * `leading-4` is not decoration. An arbitrary font size sets only the size, so
+ * without it these inherit the line height of whatever they sit in — inside a
+ * `text-sm` table that is 20px, and every heading row would gain four pixels.
+ */
+const CAPTION = `${labelClass(false)} leading-4`;
+const TH = `border-b border-slate-200 text-left ${CAPTION}`;
+/** Tighter than `EmptyState`: this is one card in a two-column grid, not a page. */
+const EMPTY = 'py-6 text-center text-sm text-slate-400';
+
+/*
+ * Each table below also sits in its own `overflow-x-auto`, which the lists have
+ * had all along and this page had not. Receivables Ageing is six money columns
+ * and wants 452px; with nothing to scroll it, it pushed the card, the card
+ * pushed `<main>`, and the whole app carried a horizontal scrollbar on a phone
+ * — the exact thing `min-w-0` was put on `<main>` to prevent. Measured at
+ * 375px: the document was 479px wide and is now 375. Nothing changes above
+ * `sm`, where every one of the six fits and no scrollbar appears.
+ */
 
 const WORK_ORDER_STATUSES: WorkOrderStatus[] = ['planned', 'released', 'running', 'paused', 'done', 'cancelled'];
 
@@ -138,11 +174,13 @@ interface CardDef { id: string; title: string; wide?: boolean; body: ReactNode }
 /** One clickable alert. Only rendered when the count is non-zero. */
 function AttentionChip({ to, count, label, tone }: { to: string; count: number; label: string; tone: 'red' | 'amber' }) {
   if (!count) return null;
+  // A tinted face inside a ring, like `StatusBadge` — the ring is a shadow, so
+  // a row of these no longer pays a border's two pixels per chip.
   const styles = tone === 'red'
-    ? 'border-red-200 bg-red-50 text-red-700 hover:bg-red-100'
-    : 'border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100';
+    ? 'bg-red-50 text-red-700 ring-red-200 hover:bg-red-100'
+    : 'bg-amber-50 text-amber-800 ring-amber-200 hover:bg-amber-100';
   return (
-    <Link to={to} className={`flex items-center gap-2 rounded-md border px-3 py-1.5 text-sm transition-colors ${styles}`}>
+    <Link to={to} className={`flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm ring-1 ring-inset transition-colors ${styles}`}>
       <span className="text-base font-bold tabular-nums">{count}</span>
       <span>{label}</span>
     </Link>
@@ -153,10 +191,16 @@ function AttentionChip({ to, count, label, tone }: { to: string; count: number; 
 function MoneyTile({ label, value, currency, note, tone = 'plain', to }: {
   label: string; value: number; currency: string; note?: string; tone?: 'plain' | 'warn' | 'good'; to: string;
 }) {
-  const valueCls = tone === 'warn' ? 'text-red-600' : tone === 'good' ? 'text-green-700' : 'text-slate-800';
+  const valueCls = tone === 'warn' ? 'text-red-600' : tone === 'good' ? 'text-green-700' : 'text-slate-900';
   return (
-    <Link to={to} className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm transition-shadow hover:shadow">
-      <div className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</div>
+    // The same border, radius and hairline shadow a Card has, because these sit
+    // in a row directly above a page of them. It answers the pointer the way a
+    // field does — a border and a tint, never a size — so nothing shifts.
+    <Link
+      to={to}
+      className="rounded-xl border border-slate-200 bg-white p-4 shadow-[0_1px_2px_rgba(15,23,42,0.04),0_1px_1px_rgba(15,23,42,0.03)] transition-colors hover:border-slate-300 hover:bg-slate-50/60"
+    >
+      <div className={CAPTION}>{label}</div>
       <div className={`mt-1 text-2xl font-bold tabular-nums ${valueCls}`}>{fmtMoney(value, currency)}</div>
       {note && <div className="mt-0.5 text-xs text-slate-400">{note}</div>}
     </Link>
@@ -372,9 +416,10 @@ export default function DashboardPage() {
       wide: true,
       body: (
         // Never filtered by the date range, because an old overdue item is the
-        // most urgent kind, not the least.
-        <div className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
-          <div className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-500">Needs attention</div>
+        // most urgent kind, not the least. A Card like the other twelve: it is
+        // an entry in the same registry and appears in the same Customise list,
+        // so its own rounded box with its own caption inside was the odd one out.
+        <Card title="Needs attention">
           {attentionTotal === 0 ? (
             <p className="text-sm text-slate-400">Nothing overdue. Follow-ups, orders and approvals are all up to date.</p>
           ) : (
@@ -393,7 +438,7 @@ export default function DashboardPage() {
               <AttentionChip to="/despatches" count={a.unbilledDespatches} label="despatches not yet billed" tone="amber" />
             </div>
           )}
-        </div>
+        </Card>
       ),
     },
     {
@@ -453,7 +498,7 @@ export default function DashboardPage() {
                 { label: 'Upcoming', rows: data.followups.upcoming.slice(0, 5), cls: 'text-slate-500' },
               ].map((group) =>
                 group.rows.map((f) => (
-                  <div key={f.id} className="flex items-center gap-2 rounded px-1 py-0.5 hover:bg-slate-50">
+                  <div key={f.id} className="flex items-center gap-2 rounded-md px-1 py-0.5 hover:bg-slate-50">
                     <input type="checkbox" onChange={() => markDone.mutate(f.id)} title="Mark done" />
                     <span className={`w-24 shrink-0 text-xs font-semibold ${group.cls}`}>{group.label} · {fmtDate(f.due_date)}</span>
                     <span className="truncate">{f.customer_name ? `${f.customer_name}: ` : ''}{f.note || f.doc_type}</span>
@@ -474,7 +519,7 @@ export default function DashboardPage() {
           actions={<Link to={listUrl('/orders')} className="text-xs text-brand-600 hover:underline">View orders</Link>}
         >
           {pipeline.every((s) => s.count === 0) ? (
-            <p className="py-6 text-center text-sm text-slate-400">No orders in this period. Book one from an accepted quotation.</p>
+            <p className={EMPTY}>No orders in this period. Book one from an accepted quotation.</p>
           ) : (
             <div className="space-y-1">
               {pipeline.map((s) => (
@@ -482,13 +527,13 @@ export default function DashboardPage() {
                   key={s.status}
                   type="button"
                   onClick={() => navigate(listUrl('/orders', { status: s.status }))}
-                  className="flex w-full items-center gap-2 rounded px-1 text-left text-sm hover:bg-slate-50"
+                  className="flex w-full items-center gap-2 rounded-md px-1 text-left text-sm hover:bg-slate-50"
                   title={`Show ${orderStatusLabel(s.status).toLowerCase()} orders`}
                 >
                   <span className="w-32 shrink-0 text-xs text-slate-500">{orderStatusLabel(s.status)}</span>
-                  <div className="h-5 flex-1 rounded-sm bg-slate-50">
+                  <div className="h-5 flex-1 rounded-full bg-slate-100">
                     <div
-                      className="h-5 rounded-sm"
+                      className="h-5 rounded-full"
                       style={{ width: `${(s.count / pipelineMax) * 100}%`, backgroundColor: SERIES_1, opacity: s.count ? 1 : 0 }}
                     />
                   </div>
@@ -509,7 +554,7 @@ export default function DashboardPage() {
       body: (
         <Card title={`Quoted · Invoiced · Collected (${cur})`}>
           {monthlyRows.length === 0 ? (
-            <p className="py-8 text-center text-sm text-slate-400">No documents in this period yet.</p>
+            <p className={EMPTY}>No documents in this period yet.</p>
           ) : (
             <ResponsiveContainer width="100%" height={220}>
               <BarChart data={monthlyRows} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
@@ -537,41 +582,43 @@ export default function DashboardPage() {
       body: (
         <Card title="Receivables Ageing (by invoice age, all time)">
           {ageingCurrencies.length === 0 ? (
-            <p className="py-6 text-center text-sm text-slate-400">Nothing outstanding — every invoice is settled.</p>
+            <p className={EMPTY}>Nothing outstanding — every invoice is settled.</p>
           ) : (
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-slate-200 text-left text-xs uppercase text-slate-500">
-                  <th className="pb-1 pr-3">Currency</th>
-                  {AGE_BUCKETS.map((b) => (
-                    <th key={b} className={`pb-1 pr-3 text-right ${b === '90+' ? 'text-red-600' : ''}`}>{b} days</th>
-                  ))}
-                  <th className="pb-1 text-right">Total</th>
-                </tr>
-              </thead>
-              <tbody>
-                {ageingCurrencies.map((c) => {
-                  const cells = AGE_BUCKETS.map((b) => ageingFor(c, b));
-                  const total = cells.reduce((s, v) => s + v, 0);
-                  return (
-                    <DrillRow key={c} to={listUrl('/invoices')}>
-                      <td className="py-1.5 pr-3 font-medium">{c}</td>
-                      {cells.map((v, i) => (
-                        <td
-                          key={AGE_BUCKETS[i]}
-                          className={`py-1.5 pr-3 text-right tabular-nums ${
-                            !v ? 'text-slate-300' : i === 3 ? 'font-semibold text-red-600' : i === 2 ? 'text-amber-700' : 'text-slate-700'
-                          }`}
-                        >
-                          {v ? fmtMoney(v, c) : '—'}
-                        </td>
-                      ))}
-                      <td className="py-1.5 text-right font-semibold tabular-nums">{fmtMoney(total, c)}</td>
-                    </DrillRow>
-                  );
-                })}
-              </tbody>
-            </table>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className={TH}>
+                    <th className="pb-1 pr-3">Currency</th>
+                    {AGE_BUCKETS.map((b) => (
+                      <th key={b} className={`pb-1 pr-3 text-right ${b === '90+' ? 'text-red-600' : ''}`}>{b} days</th>
+                    ))}
+                    <th className="pb-1 text-right">Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {ageingCurrencies.map((c) => {
+                    const cells = AGE_BUCKETS.map((b) => ageingFor(c, b));
+                    const total = cells.reduce((s, v) => s + v, 0);
+                    return (
+                      <DrillRow key={c} to={listUrl('/invoices')}>
+                        <td className="py-1.5 pr-3 font-medium">{c}</td>
+                        {cells.map((v, i) => (
+                          <td
+                            key={AGE_BUCKETS[i]}
+                            className={`py-1.5 pr-3 text-right tabular-nums ${
+                              !v ? 'text-slate-300' : i === 3 ? 'font-semibold text-red-600' : i === 2 ? 'text-amber-700' : 'text-slate-700'
+                            }`}
+                          >
+                            {v ? fmtMoney(v, c) : '—'}
+                          </td>
+                        ))}
+                        <td className="py-1.5 text-right font-semibold tabular-nums">{fmtMoney(total, c)}</td>
+                      </DrillRow>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           )}
           <p className="mt-2 text-xs text-slate-400">Age is counted from the invoice date. Chase the right-hand columns first.</p>
         </Card>
@@ -586,28 +633,30 @@ export default function DashboardPage() {
           actions={<Link to={listUrl('/orders')} className="text-xs text-brand-600 hover:underline">View orders</Link>}
         >
           {data.orderBook.length === 0 ? (
-            <p className="py-6 text-center text-sm text-slate-400">No open orders. Book one from an accepted quotation.</p>
+            <p className={EMPTY}>No open orders. Book one from an accepted quotation.</p>
           ) : (
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-slate-200 text-left text-xs uppercase text-slate-500">
-                  <th className="pb-1 pr-3">Currency</th>
-                  <th className="pb-1 pr-3 text-right">Open Orders</th>
-                  <th className="pb-1 pr-3 text-right">Order Value</th>
-                  <th className="pb-1 text-right">Still to Ship</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.orderBook.map((r) => (
-                  <DrillRow key={r.currency} to={listUrl('/orders', { open: '1' })}>
-                    <td className="py-1.5 pr-3 font-medium">{r.currency}</td>
-                    <td className="py-1.5 pr-3 text-right">{r.count}</td>
-                    <td className="py-1.5 pr-3 text-right tabular-nums">{fmtMoney(r.open_value, r.currency)}</td>
-                    <td className="py-1.5 text-right tabular-nums font-semibold text-amber-700">{fmtMoney(r.pending_value, r.currency)}</td>
-                  </DrillRow>
-                ))}
-              </tbody>
-            </table>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className={TH}>
+                    <th className="pb-1 pr-3">Currency</th>
+                    <th className="pb-1 pr-3 text-right">Open Orders</th>
+                    <th className="pb-1 pr-3 text-right">Order Value</th>
+                    <th className="pb-1 text-right">Still to Ship</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.orderBook.map((r) => (
+                    <DrillRow key={r.currency} to={listUrl('/orders', { open: '1' })}>
+                      <td className="py-1.5 pr-3 font-medium">{r.currency}</td>
+                      <td className="py-1.5 pr-3 text-right">{r.count}</td>
+                      <td className="py-1.5 pr-3 text-right tabular-nums">{fmtMoney(r.open_value, r.currency)}</td>
+                      <td className="py-1.5 text-right tabular-nums font-semibold text-amber-700">{fmtMoney(r.pending_value, r.currency)}</td>
+                    </DrillRow>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
           {!!data.overdueOrders && (
             <p className="mt-2 text-xs text-red-600">
@@ -623,30 +672,32 @@ export default function DashboardPage() {
       body: (
         <Card title="Receivables (all invoices)">
           {data.receivables.length === 0 ? (
-            <p className="py-6 text-center text-sm text-slate-400">No invoices yet — outstanding balances will appear here.</p>
+            <p className={EMPTY}>No invoices yet — outstanding balances will appear here.</p>
           ) : (
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-slate-200 text-left text-xs uppercase text-slate-500">
-                  <th className="pb-1 pr-3">Currency</th>
-                  <th className="pb-1 pr-3 text-right">Invoiced</th>
-                  <th className="pb-1 pr-3 text-right">Received</th>
-                  <th className="pb-1 text-right">Outstanding</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.receivables.map((r) => (
-                  <DrillRow key={r.currency} to={listUrl('/invoices')}>
-                    <td className="py-1.5 pr-3 font-medium">{r.currency}</td>
-                    <td className="py-1.5 pr-3 text-right tabular-nums">{fmtMoney(r.invoiced, r.currency)}</td>
-                    <td className="py-1.5 pr-3 text-right tabular-nums text-green-700">{fmtMoney(r.received, r.currency)}</td>
-                    <td className={`py-1.5 text-right tabular-nums font-semibold ${r.outstanding > 0 ? 'text-red-600' : 'text-green-700'}`}>
-                      {fmtMoney(r.outstanding, r.currency)}
-                    </td>
-                  </DrillRow>
-                ))}
-              </tbody>
-            </table>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className={TH}>
+                    <th className="pb-1 pr-3">Currency</th>
+                    <th className="pb-1 pr-3 text-right">Invoiced</th>
+                    <th className="pb-1 pr-3 text-right">Received</th>
+                    <th className="pb-1 text-right">Outstanding</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.receivables.map((r) => (
+                    <DrillRow key={r.currency} to={listUrl('/invoices')}>
+                      <td className="py-1.5 pr-3 font-medium">{r.currency}</td>
+                      <td className="py-1.5 pr-3 text-right tabular-nums">{fmtMoney(r.invoiced, r.currency)}</td>
+                      <td className="py-1.5 pr-3 text-right tabular-nums text-green-700">{fmtMoney(r.received, r.currency)}</td>
+                      <td className={`py-1.5 text-right tabular-nums font-semibold ${r.outstanding > 0 ? 'text-red-600' : 'text-green-700'}`}>
+                        {fmtMoney(r.outstanding, r.currency)}
+                      </td>
+                    </DrillRow>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
           <p className="mt-2 text-xs text-slate-400">Advances taken on a proforma are credited to the shipments raised against it.</p>
         </Card>
@@ -661,7 +712,7 @@ export default function DashboardPage() {
           actions={<Link to="/work-orders" className="text-xs text-brand-600 hover:underline">View jobs</Link>}
         >
           {!floor ? (
-            <p className="py-6 text-center text-sm text-slate-400">This server build does not send production figures yet.</p>
+            <p className={EMPTY}>This server build does not send production figures yet.</p>
           ) : (
             <div className="space-y-3">
               {/* Job counts are the state right now, like the order book — not
@@ -671,7 +722,7 @@ export default function DashboardPage() {
                   <Link
                     key={s}
                     to={`/work-orders?status=${s}`}
-                    className="rounded-md border border-slate-200 px-2 py-1 text-xs hover:bg-slate-50"
+                    className="rounded-lg border border-slate-200 px-2 py-1 text-xs transition-colors hover:border-slate-300 hover:bg-slate-50"
                   >
                     <span className="font-semibold tabular-nums">{jobsAt(s)}</span>{' '}
                     <span className="text-slate-500">{s}</span>
@@ -682,11 +733,11 @@ export default function DashboardPage() {
 
               <div className="grid grid-cols-3 gap-2 border-t border-slate-100 pt-3 text-sm">
                 <div>
-                  <div className="text-xs text-slate-500">Made · {range.label.toLowerCase()}</div>
+                  <div className={CAPTION}>Made · {range.label.toLowerCase()}</div>
                   <div className="font-semibold tabular-nums">{fmtQty(floor.piecesMade)}</div>
                 </div>
                 <div>
-                  <div className="text-xs text-slate-500">Rejected</div>
+                  <div className={CAPTION}>Rejected</div>
                   <div className="font-semibold tabular-nums">
                     {fmtQty(floor.piecesRejected)}
                     {floor.rejectRate !== null && (
@@ -697,7 +748,7 @@ export default function DashboardPage() {
                   </div>
                 </div>
                 <div>
-                  <div className="text-xs text-slate-500">Despatched</div>
+                  <div className={CAPTION}>Despatched</div>
                   <div className="font-semibold tabular-nums">
                     {fmtQty(floor.piecesDespatched)}
                     <span className="ml-1 text-xs font-normal text-slate-400">
@@ -709,22 +760,24 @@ export default function DashboardPage() {
 
               {floor.shortMaterials.length > 0 && (
                 <div className="border-t border-slate-100 pt-3">
-                  <div className="mb-1 text-xs font-medium uppercase tracking-wide text-slate-500">Short for open jobs</div>
-                  <table className="w-full text-sm">
-                    <tbody>
-                      {floor.shortMaterials.map((m) => (
-                        <DrillRow key={m.material_id} to="/stock">
-                          <td className="py-1 pr-3">{m.name}</td>
-                          <td className="py-1 pr-3 text-right tabular-nums text-slate-500">
-                            {fmtQty(m.on_hand)} {m.unit} on hand
-                          </td>
-                          <td className="py-1 text-right font-semibold tabular-nums text-red-600">
-                            short {fmtQty(m.short)} {m.unit}
-                          </td>
-                        </DrillRow>
-                      ))}
-                    </tbody>
-                  </table>
+                  <div className={`mb-1 ${CAPTION}`}>Short for open jobs</div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <tbody>
+                        {floor.shortMaterials.map((m) => (
+                          <DrillRow key={m.material_id} to="/stock">
+                            <td className="py-1 pr-3">{m.name}</td>
+                            <td className="py-1 pr-3 text-right tabular-nums text-slate-500">
+                              {fmtQty(m.on_hand)} {m.unit} on hand
+                            </td>
+                            <td className="py-1 text-right font-semibold tabular-nums text-red-600">
+                              short {fmtQty(m.short)} {m.unit}
+                            </td>
+                          </DrillRow>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                   <p className="mt-1 text-xs text-slate-400">
                     Group-wide, not narrowed by customer or company — the store is shared, and one purchase order covers it.
                   </p>
@@ -741,7 +794,7 @@ export default function DashboardPage() {
       body: (
         <Card title={`Export vs Domestic — invoiced (${cur})`}>
           {splitRows.length === 0 ? (
-            <p className="py-6 text-center text-sm text-slate-400">No invoices in this period.</p>
+            <p className={EMPTY}>No invoices in this period.</p>
           ) : (
             <div className="space-y-3">
               {[1, 0].map((isExport) => {
@@ -753,7 +806,7 @@ export default function DashboardPage() {
                     key={isExport}
                     type="button"
                     onClick={() => navigate(listUrl('/invoices', { export: String(isExport) }))}
-                    className="block w-full rounded px-1 text-left hover:bg-slate-50"
+                    className="block w-full rounded-md px-1 text-left hover:bg-slate-50"
                   >
                     <div className="mb-1 flex items-baseline justify-between text-sm">
                       <span>{isExport ? '🌍 Export' : '🇮🇳 Domestic'}</span>
@@ -784,12 +837,12 @@ export default function DashboardPage() {
                 key={s.label}
                 type="button"
                 onClick={() => navigate(s.to)}
-                className="flex w-full items-center gap-2 rounded text-left hover:bg-slate-50"
+                className="flex w-full items-center gap-2 rounded-md text-left hover:bg-slate-50"
               >
                 <span className="w-20 shrink-0 text-xs text-slate-500">{s.label}</span>
-                <div className="h-6 flex-1 rounded-r-sm bg-slate-50">
+                <div className="h-6 flex-1 rounded-full bg-slate-100">
                   <div
-                    className="flex h-6 items-center rounded-r-sm pl-2"
+                    className="flex h-6 items-center rounded-full pl-2.5"
                     style={{ width: `${Math.max(3, (s.value / funnelMax) * 100)}%`, backgroundColor: FUNNEL_STEPS[i] }}
                   >
                     <span className="text-xs font-semibold text-white">{s.value}</span>
@@ -843,31 +896,33 @@ export default function DashboardPage() {
           }
         >
           {(customerBasis === 'invoiced' ? data.topCustomersInvoiced : data.topCustomers).length === 0 ? (
-            <p className="py-6 text-center text-sm text-slate-400">
+            <p className={EMPTY}>
               {customerBasis === 'invoiced' ? 'No invoices in this period.' : 'No quotations in this period.'}
             </p>
           ) : (
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-slate-200 text-left text-xs uppercase text-slate-500">
-                  <th className="pb-1 pr-3">Customer</th>
-                  <th className="pb-1 pr-3 text-right">{customerBasis === 'invoiced' ? 'Invoices' : 'Quotes'}</th>
-                  <th className="pb-1 text-right">{customerBasis === 'invoiced' ? 'Invoiced Value' : 'Quoted Value'}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(customerBasis === 'invoiced'
-                  ? data.topCustomersInvoiced.map((c) => ({ ...c, n: c.invoices }))
-                  : data.topCustomers.map((c) => ({ ...c, n: c.quotes }))
-                ).map((c, i) => (
-                  <DrillRow key={i} to={`/customers?q=${encodeURIComponent(c.name)}`}>
-                    <td className="py-1.5 pr-3">{c.name}</td>
-                    <td className="py-1.5 pr-3 text-right">{c.n}</td>
-                    <td className="py-1.5 text-right tabular-nums">{fmtMoney(c.total, c.currency)}</td>
-                  </DrillRow>
-                ))}
-              </tbody>
-            </table>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className={TH}>
+                    <th className="pb-1 pr-3">Customer</th>
+                    <th className="pb-1 pr-3 text-right">{customerBasis === 'invoiced' ? 'Invoices' : 'Quotes'}</th>
+                    <th className="pb-1 text-right">{customerBasis === 'invoiced' ? 'Invoiced Value' : 'Quoted Value'}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(customerBasis === 'invoiced'
+                    ? data.topCustomersInvoiced.map((c) => ({ ...c, n: c.invoices }))
+                    : data.topCustomers.map((c) => ({ ...c, n: c.quotes }))
+                  ).map((c, i) => (
+                    <DrillRow key={i} to={`/customers?q=${encodeURIComponent(c.name)}`}>
+                      <td className="py-1.5 pr-3">{c.name}</td>
+                      <td className="py-1.5 pr-3 text-right">{c.n}</td>
+                      <td className="py-1.5 text-right tabular-nums">{fmtMoney(c.total, c.currency)}</td>
+                    </DrillRow>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </Card>
       ),
@@ -878,26 +933,28 @@ export default function DashboardPage() {
       body: (
         <Card title="Most Quoted Products">
           {data.topProducts.length === 0 ? (
-            <p className="py-6 text-center text-sm text-slate-400">No quotations yet.</p>
+            <p className={EMPTY}>No quotations yet.</p>
           ) : (
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-slate-200 text-left text-xs uppercase text-slate-500">
-                  <th className="pb-1 pr-3">Product</th>
-                  <th className="pb-1 text-right">Times Quoted</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.topProducts.map((p, i) => (
-                  // Straight to that product's order lines: "and what is on
-                  // order for it" is the question a quoted-product list provokes.
-                  <DrillRow key={i} to={listUrl('/orders', { view: 'by-product', q: p.name })}>
-                    <td className="py-1.5 pr-3">{p.name}</td>
-                    <td className="py-1.5 text-right">{p.times_quoted}</td>
-                  </DrillRow>
-                ))}
-              </tbody>
-            </table>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className={TH}>
+                    <th className="pb-1 pr-3">Product</th>
+                    <th className="pb-1 text-right">Times Quoted</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.topProducts.map((p, i) => (
+                    // Straight to that product's order lines: "and what is on
+                    // order for it" is the question a quoted-product list provokes.
+                    <DrillRow key={i} to={listUrl('/orders', { view: 'by-product', q: p.name })}>
+                      <td className="py-1.5 pr-3">{p.name}</td>
+                      <td className="py-1.5 text-right">{p.times_quoted}</td>
+                    </DrillRow>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </Card>
       ),
@@ -984,7 +1041,7 @@ export default function DashboardPage() {
       />
 
       {visible.length === 0 ? (
-        <p className="rounded-lg border border-dashed border-slate-300 p-8 text-center text-sm text-slate-400">
+        <p className="rounded-xl border border-dashed border-slate-300 bg-white/60 p-8 text-center text-sm text-slate-400">
           Every card is hidden. Use <b>Customise</b> to bring some back.
         </p>
       ) : (
@@ -1002,7 +1059,7 @@ export default function DashboardPage() {
           </p>
           <div className="space-y-1">
             {ordered.map((c, i) => (
-              <div key={c.id} className="flex items-center gap-2 rounded border border-slate-100 px-2 py-1.5 text-sm">
+              <div key={c.id} className="flex items-center gap-2 rounded-lg border border-slate-200 px-2 py-1.5 text-sm">
                 <input
                   type="checkbox"
                   checked={!hidden.has(c.id)}
@@ -1014,16 +1071,16 @@ export default function DashboardPage() {
                   type="button"
                   onClick={() => move(c.id, -1)}
                   disabled={i === 0}
-                  className="rounded px-2 text-slate-500 hover:bg-slate-100 disabled:opacity-30"
+                  className="rounded-md px-2 py-1 text-slate-500 hover:bg-slate-100 disabled:opacity-30"
                   title="Move up"
-                >↑</button>
+                ><Icon name="chevron-up" /></button>
                 <button
                   type="button"
                   onClick={() => move(c.id, 1)}
                   disabled={i === ordered.length - 1}
-                  className="rounded px-2 text-slate-500 hover:bg-slate-100 disabled:opacity-30"
+                  className="rounded-md px-2 py-1 text-slate-500 hover:bg-slate-100 disabled:opacity-30"
                   title="Move down"
-                >↓</button>
+                ><Icon name="chevron-down" /></button>
               </div>
             ))}
           </div>

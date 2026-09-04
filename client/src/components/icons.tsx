@@ -60,6 +60,11 @@ const PATHS: Record<string, ReactNode> = {
   menu: <><path d="M4 7h16" /><path d="M4 12h16" /><path d="M4 17h16" /></>,
   'chevron-left': <path d="m14.5 6-5.5 6 5.5 6" />,
   'chevron-right': <path d="m9.5 6 5.5 6-5.5 6" />,
+  // The dashboard's Customise dialog reorders cards with these. They were ↑ and
+  // ↓, which is the sidebar's problem in miniature: a glyph drawn by whichever
+  // font happens to have it, at whatever weight that font thinks is right.
+  'chevron-up': <path d="m6 14.5 6-5.5 6 5.5" />,
+  'chevron-down': <path d="m6 9.5 6 5.5 6-5.5" />,
   power: <><path d="M12 3.5v8" /><path d="M7.2 6.6a7 7 0 1 0 9.6 0" /></>,
 };
 
