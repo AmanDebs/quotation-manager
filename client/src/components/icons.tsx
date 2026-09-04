@@ -56,6 +56,9 @@ const PATHS: Record<string, ReactNode> = {
   // eight spokes reads as a sun, which is brightness, not settings.
   cog: <><path d="M4 7h9" /><path d="M17 7h3" /><path d="M4 12h3" /><path d="M11 12h9" /><path d="M4 17h9" /><path d="M17 17h3" /><circle cx="15" cy="7" r="2" /><circle cx="9" cy="12" r="2" /><circle cx="15" cy="17" r="2" /></>,
 
+  // Import from a spreadsheet — a tray with an arrow going into it.
+  upload: <><path d="M12 15V4" /><path d="m8 7.5 4-3.5 4 3.5" /><path d="M4 15v3.5A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5V15" /></>,
+
   // Chrome.
   menu: <><path d="M4 7h16" /><path d="M4 12h16" /><path d="M4 17h16" /></>,
   'chevron-left': <path d="m14.5 6-5.5 6 5.5 6" />,

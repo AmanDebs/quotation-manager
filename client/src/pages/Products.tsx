@@ -3,7 +3,8 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import { useIsManager } from '../App';
 import type { Product } from '../types';
-import { Button, Input, Textarea, Select, Field, PageHeader, EmptyState, ErrorText, Modal, Card , Pagination} from '../components/ui';
+import { Button, Input, Textarea, Select, Field, PageHeader, EmptyState, ErrorText, Modal, Card, Pagination, CAPTION_CLASS, TH_CLASS } from '../components/ui';
+import { Icon } from '../components/icons';
 import ProductImportModal from '../components/ProductImportModal';
 import RecipeModal from '../components/RecipeModal';
 import QcSpecModal from '../components/QcSpecModal';
@@ -32,9 +33,9 @@ function ProductImage({ value, onChange }: { value: string; onChange: (v: string
   return (
     <div className="flex items-center gap-3">
       {value ? (
-        <img src={value} alt="" className="h-16 w-16 rounded border border-slate-200 object-cover" />
+        <img src={value} alt="" className="h-16 w-16 rounded-lg border border-slate-200 object-cover" />
       ) : (
-        <div className="flex h-16 w-16 items-center justify-center rounded border border-dashed border-slate-300 text-xs text-slate-400">None</div>
+        <div className="flex h-16 w-16 items-center justify-center rounded-lg border border-dashed border-slate-300 text-xs text-slate-400">None</div>
       )}
       <input
         type="file"
@@ -90,7 +91,11 @@ export default function ProductsPage() {
         subtitle={`${list.total} product${list.total === 1 ? '' : 's'} in catalog`}
         actions={
           <>
-            {isManager && <Button variant="secondary" onClick={() => setImporting(true)}>⬆ Import from Excel</Button>}
+            {isManager && (
+              <Button variant="secondary" onClick={() => setImporting(true)} className="inline-flex items-center gap-1.5">
+                <Icon name="upload" /> Import from Excel
+              </Button>
+            )}
             <Button onClick={() => { save.reset(); setEditing({ ...empty }); }}>+ New Product</Button>
           </>
         }
@@ -101,11 +106,13 @@ export default function ProductsPage() {
       <ErrorText error={remove.error} />
       <Card className="overflow-x-auto">
         {products.length === 0 ? (
-          <EmptyState message="No products yet. Add products to pick them quickly when building documents." />
+          <EmptyState message={q
+            ? 'Nothing matches that search.'
+            : 'No products yet. Add products to pick them quickly when building documents.'} />
         ) : (
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-slate-200 text-left text-xs uppercase text-slate-500">
+              <tr className={TH_CLASS}>
                 <th className="pb-2 pr-3 w-14" />
                 <th className="pb-2 pr-3">Name</th>
                 <th className="pb-2 pr-3">Colour</th>
@@ -123,8 +130,8 @@ export default function ProductsPage() {
                 <tr key={p.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50">
                   <td className="py-2 pr-3">
                     {p.image
-                      ? <img src={p.image} alt="" className="h-10 w-10 rounded border border-slate-200 object-cover" />
-                      : <div className="h-10 w-10 rounded border border-dashed border-slate-200" />}
+                      ? <img src={p.image} alt="" className="h-10 w-10 rounded-lg border border-slate-200 object-cover" />
+                      : <div className="h-10 w-10 rounded-lg border border-dashed border-slate-200" />}
                   </td>
                   <td className="py-2 pr-3 font-medium">{p.name}</td>
                   <td className="py-2 pr-3">{p.color || '—'}</td>
@@ -170,10 +177,10 @@ export default function ProductsPage() {
       {editing && (
         <Modal title={'id' in editing ? `Edit ${editing.name}` : 'New Product'} onClose={() => setEditing(null)}>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <Field label="Product Name *" className="col-span-2">
+            <Field label="Product Name *" className="sm:col-span-2">
               <Input value={editing.name} onChange={(e) => set({ name: e.target.value })} />
             </Field>
-            <Field label="Description (shown on documents)" className="col-span-2">
+            <Field label="Description (shown on documents)" className="sm:col-span-2">
               <Textarea rows={2} value={editing.description} onChange={(e) => set({ description: e.target.value })} />
             </Field>
             <Field label="HSN Code"><Input value={editing.hsn_code} onChange={(e) => set({ hsn_code: e.target.value })} /></Field>
@@ -189,9 +196,9 @@ export default function ProductsPage() {
             <Field label="Default Colour">
               <Input value={editing.color} onChange={(e) => set({ color: e.target.value })} placeholder="e.g. Red-Yellow (Printing)" />
             </Field>
-            <div className="col-span-2 rounded-md border border-slate-200 p-3">
-              <div className="mb-2 text-xs font-medium text-slate-600">
-                Packing & loadability — used by the container planner
+            <div className="sm:col-span-2 rounded-lg border border-slate-200 bg-slate-50/40 p-3">
+              <div className={`mb-2 ${CAPTION_CLASS}`}>
+                Packing &amp; loadability — used by the container planner
               </div>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                 <Field label="Pcs / Box">
@@ -205,7 +212,7 @@ export default function ProductsPage() {
                 </Field>
               </div>
             </div>
-            <Field label="Product Photo" className="col-span-2">
+            <Field label="Product Photo" className="sm:col-span-2">
               <ProductImage value={editing.image} onChange={(v) => set({ image: v })} />
             </Field>
           </div>

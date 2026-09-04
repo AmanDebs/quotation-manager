@@ -207,6 +207,22 @@ export const labelClass = (_plain: boolean) =>
   'text-[11px] font-semibold uppercase tracking-wide text-slate-500';
 
 /**
+ * The same treatment above a figure or a column of them.
+ *
+ * A caption over a number is a label over a value, so it borrows `labelClass`
+ * rather than restating it — two copies of that decision is how the two come to
+ * disagree, and there were four kinds of small grey heading in the app before
+ * this. `leading-4` is not decoration: an arbitrary font size sets only the
+ * size, so without it a heading inherits the line height of whatever it sits
+ * in — inside a `text-sm` table that is 20px, and every heading row gains four
+ * pixels.
+ */
+export const CAPTION_CLASS = `${labelClass(false)} leading-4`;
+
+/** A list's column headings: the caption, plus the rule under the row. */
+export const TH_CLASS = `border-b border-slate-200 text-left ${CAPTION_CLASS}`;
+
+/**
  * The shape a document form's field grid takes.
  *
  * Three columns on every screen was one answer to four different questions: a

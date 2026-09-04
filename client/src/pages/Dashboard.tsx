@@ -7,7 +7,7 @@ import {
 import { api } from '../api/client';
 import type { Followup, DashboardLayout, WorkOrderStatus } from '../types';
 import { useIsManager, useUser, usePatchUser } from '../App';
-import { Button, Card, Input, Select, PageHeader, Modal, labelClass } from '../components/ui';
+import { Button, Card, Input, Select, PageHeader, Modal, CAPTION_CLASS, TH_CLASS } from '../components/ui';
 import { Icon } from '../components/icons';
 import { useCompanies } from '../components/CompanySelect';
 import { ORDER_STATUSES, orderStatusLabel } from './Orders';
@@ -39,16 +39,11 @@ const AGE_BUCKETS = ['0-30', '31-60', '61-90', '90+'];
  * ------------------------------------------------------------------ */
 
 /**
- * `labelClass` is the field label from the forms, borrowed rather than copied:
- * a caption over a figure is the same thing as a label over a value, and two
- * copies of that decision is how the two come to disagree.
- *
- * `leading-4` is not decoration. An arbitrary font size sets only the size, so
- * without it these inherit the line height of whatever they sit in — inside a
- * `text-sm` table that is 20px, and every heading row would gain four pixels.
+ * Both live in `components/ui.tsx` now — the customers and products lists
+ * wanted the same headings, and three copies of a treatment is two too many.
  */
-const CAPTION = `${labelClass(false)} leading-4`;
-const TH = `border-b border-slate-200 text-left ${CAPTION}`;
+const CAPTION = CAPTION_CLASS;
+const TH = TH_CLASS;
 /** Tighter than `EmptyState`: this is one card in a two-column grid, not a page. */
 const EMPTY = 'py-6 text-center text-sm text-slate-400';
 

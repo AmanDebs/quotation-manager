@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Customer, User } from '../types';
 import { useIsManager } from '../App';
-import { Button, Input, Textarea, Select, Field, PageHeader, EmptyState, ErrorText, Modal, Card, ExportTabs, Pagination } from '../components/ui';
+import { Button, Input, Textarea, Select, Field, PageHeader, EmptyState, ErrorText, Modal, Card, ExportTabs, Pagination, TH_CLASS } from '../components/ui';
 import CompanySelect, { useCompanies } from '../components/CompanySelect';
 import { useUrlFilter } from '../lib/useUrlFilter';
 import { usePagedList, PAGE_SIZE } from '../lib/usePagedList';
@@ -63,11 +63,13 @@ export default function CustomersPage() {
       <ErrorText error={remove.error} />
       <Card className="overflow-x-auto">
         {customers.length === 0 ? (
-          <EmptyState message="No customers yet. Add your first customer to start creating quotations." />
+          <EmptyState message={q || exportFilter
+            ? 'Nothing matches those filters.'
+            : 'No customers yet. Add your first customer to start creating quotations.'} />
         ) : (
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-slate-200 text-left text-xs uppercase text-slate-500">
+              <tr className={TH_CLASS}>
                 <th className="pb-2 pr-3">Name</th>
                 <th className="pb-2 pr-3">Contact</th>
                 <th className="pb-2 pr-3">Country</th>
@@ -110,14 +112,14 @@ export default function CustomersPage() {
       {editing && (
         <Modal title={'id' in editing ? `Edit ${editing.name}` : 'New Customer'} onClose={() => setEditing(null)} wide>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <Field label="Company / Customer Name *" className="col-span-2">
+            <Field label="Company / Customer Name *" className="sm:col-span-2">
               <Input value={editing.name} onChange={(e) => set({ name: e.target.value })} />
             </Field>
             <Field label="Contact Person"><Input value={editing.contact_person} onChange={(e) => set({ contact_person: e.target.value })} /></Field>
             <Field label="Email"><Input value={editing.email} onChange={(e) => set({ email: e.target.value })} /></Field>
             <Field label="Phone"><Input value={editing.phone} onChange={(e) => set({ phone: e.target.value })} /></Field>
             <Field label="City"><Input value={editing.city} onChange={(e) => set({ city: e.target.value })} /></Field>
-            <Field label="Address" className="col-span-2">
+            <Field label="Address" className="sm:col-span-2">
               <Textarea rows={2} value={editing.address} onChange={(e) => set({ address: e.target.value })} />
             </Field>
             <Field label="Country">
@@ -161,17 +163,16 @@ export default function CustomersPage() {
               </Select>
             </Field>
             <Field label="GSTIN (for domestic customers)"><Input value={editing.gstin} onChange={(e) => set({ gstin: e.target.value })} /></Field>
-            <div />
-            <Field label="Default Consignee (if different from buyer)" className="col-span-2">
+            <Field label="Default Consignee (if different from buyer)" className="sm:col-span-2">
               <Textarea rows={2} value={editing.consignee} onChange={(e) => set({ consignee: e.target.value })} placeholder="Name and address of consignee" />
             </Field>
-            <Field label="Default Notify Party 1 (for exports)" className="col-span-2">
+            <Field label="Default Notify Party 1 (for exports)" className="sm:col-span-2">
               <Textarea rows={2} value={editing.notify_party} onChange={(e) => set({ notify_party: e.target.value })} />
             </Field>
-            <Field label="Default Notify Party 2 (optional)" className="col-span-2">
+            <Field label="Default Notify Party 2 (optional)" className="sm:col-span-2">
               <Textarea rows={2} value={editing.notify_party_2} onChange={(e) => set({ notify_party_2: e.target.value })} />
             </Field>
-            <Field label="Notes" className="col-span-2">
+            <Field label="Notes" className="sm:col-span-2">
               <Textarea rows={2} value={editing.notes} onChange={(e) => set({ notes: e.target.value })} />
             </Field>
           </div>
