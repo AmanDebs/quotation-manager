@@ -482,19 +482,38 @@ export function MultiSelectFilter({
   );
 }
 
-export function ExportTabs({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-  const tabs = [
-    { key: '', label: 'All' },
-    { key: '1', label: '🌍 Export' },
-    { key: '0', label: '🇮🇳 Domestic' },
-  ];
+/**
+ * A pill-shaped segmented control: a handful of mutually exclusive views shown
+ * side by side, all of them visible at once.
+ *
+ * Distinct from `Tabs` below, which is an underlined strip for a page made of
+ * sections. This one is for a filter or a way of reading the same list — the
+ * export/domestic filter, and the order book's three views.
+ *
+ * Extracted because those two sit in the *same row* on the orders page and had
+ * drifted: one at `rounded-lg` with a soft border and a hairline shadow, the
+ * other still at `rounded-md` with a hard `slate-300` one. Two segmented
+ * controls an inch apart disagreeing about what a segmented control looks like
+ * is the kind of thing a shared primitive exists to make impossible.
+ *
+ * The inner radius is `rounded-md`, not `rounded`: the container is 0.5rem
+ * with 2px of padding, so the button that nests inside it wants 0.375rem. A
+ * corner is not layout, so nothing moves.
+ */
+export function SegmentedTabs<T extends string>({ value, onChange, tabs, className = '' }: {
+  value: T;
+  onChange: (v: T) => void;
+  tabs: { key: T; label: string }[];
+  className?: string;
+}) {
   return (
-    <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5 shadow-sm">
+    <div className={`inline-flex rounded-lg border border-slate-200 bg-white p-0.5 shadow-sm ${className}`}>
       {tabs.map((t) => (
         <button
           key={t.key}
           onClick={() => onChange(t.key)}
-          className={`rounded px-3 py-1 text-sm transition-colors ${
+          aria-current={value === t.key ? 'page' : undefined}
+          className={`rounded-md px-3 py-1 text-sm transition-colors ${
             value === t.key ? 'bg-brand-700 font-medium text-white' : 'text-slate-600 hover:bg-slate-50'
           }`}
         >
@@ -502,6 +521,20 @@ export function ExportTabs({ value, onChange }: { value: string; onChange: (v: s
         </button>
       ))}
     </div>
+  );
+}
+
+export function ExportTabs({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  return (
+    <SegmentedTabs
+      value={value}
+      onChange={onChange}
+      tabs={[
+        { key: '', label: 'All' },
+        { key: '1', label: '🌍 Export' },
+        { key: '0', label: '🇮🇳 Domestic' },
+      ]}
+    />
   );
 }
 

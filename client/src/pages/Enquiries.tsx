@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Enquiry, EnquiryStatus, Customer } from '../types';
 import {
-  PageHeader, Card, Select, Input, Textarea, Field, Button, EmptyState, ErrorText, Modal, StatusBadge, Pagination,
+  PageHeader, Card, Select, Input, Textarea, Field, Button, EmptyState, ErrorText, Modal, StatusBadge, Pagination, TH_CLASS,
 } from '../components/ui';
 import { fmtDate, today } from '../lib/format';
 import { useUrlFilter } from '../lib/useUrlFilter';
@@ -24,6 +24,8 @@ import { usePagedList, PAGE_SIZE } from '../lib/usePagedList';
  */
 
 const STATUSES: EnquiryStatus[] = ['open', 'quoted', 'lost'];
+
+const statusLabel = (s: string) => s.replace(/^./, (c) => c.toUpperCase());
 
 const Dash = () => <span className="text-slate-300">—</span>;
 
@@ -90,7 +92,7 @@ export default function EnquiriesPage() {
       />
 
       {customers.length === 0 && (
-        <div className="mb-3 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800">
+        <div className="mb-3 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800 ring-1 ring-inset ring-amber-200">
           Add a customer first — an enquiry is always somebody asking.
         </div>
       )}
@@ -99,7 +101,7 @@ export default function EnquiriesPage() {
         <div className="w-40">
           <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
             <option value="">All statuses</option>
-            {STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+            {STATUSES.map((s) => <option key={s} value={s}>{statusLabel(s)}</option>)}
           </Select>
         </div>
         {openTotal > 0 && !statusFilter && (
@@ -111,11 +113,13 @@ export default function EnquiriesPage() {
 
       <Card className="overflow-x-auto">
         {enquiries.length === 0 ? (
-          <EmptyState message="No enquiries. Log one when a customer asks about something you have not quoted yet." />
+          <EmptyState message={statusFilter
+            ? 'Nothing matches that filter.'
+            : 'No enquiries. Log one when a customer asks about something you have not quoted yet.'} />
         ) : (
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-slate-200 text-left text-xs uppercase text-slate-500">
+              <tr className={TH_CLASS}>
                 <th className="pb-2 pr-3">Date</th>
                 <th className="pb-2 pr-3">Customer</th>
                 <th className="pb-2 pr-3">Contact</th>
@@ -212,7 +216,7 @@ export default function EnquiriesPage() {
               </Select>
             </Field>
             {editingCustomer && (
-              <div className="-mt-1 rounded-md bg-slate-50 px-3 py-2 text-xs text-slate-600">
+              <div className="-mt-1 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600 ring-1 ring-inset ring-slate-200">
                 <div className="flex flex-wrap gap-x-4 gap-y-1">
                   <span>{place(editingCustomer.city, editingCustomer.country) || <Dash />}</span>
                   <span>{editingCustomer.contact_person || <Dash />}</span>
@@ -248,7 +252,7 @@ export default function EnquiriesPage() {
                   value={editing.status ?? 'open'}
                   onChange={(e) => setEditing({ ...editing, status: e.target.value as EnquiryStatus })}
                 >
-                  {STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+                  {STATUSES.map((s) => <option key={s} value={s}>{statusLabel(s)}</option>)}
                 </Select>
               </Field>
             )}

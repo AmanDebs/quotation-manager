@@ -3,7 +3,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Order, OrderStatus, OrderLine, ProductDemand, LineState } from '../types';
-import { Button, Select, Input, PageHeader, EmptyState, Card, ExportTabs, ErrorText, Pagination, DownloadButton } from '../components/ui';
+import { Button, Select, Input, PageHeader, EmptyState, Card, ExportTabs, ErrorText, Pagination, DownloadButton, SegmentedTabs, TH_CLASS } from '../components/ui';
 import { useCompanies } from '../components/CompanySelect';
 import { fmtDate, fmtMoney, fmtQty, today } from '../lib/format';
 import { usePagedList, PAGE_SIZE, type PagedList } from '../lib/usePagedList';
@@ -15,23 +15,23 @@ export const ORDER_STATUSES: OrderStatus[] = [
 export const orderStatusLabel = (s: string) => s.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
 
 const statusTint: Record<string, string> = {
-  pending: 'bg-slate-100 text-slate-700 border-slate-300',
-  confirmed: 'bg-blue-50 text-blue-700 border-blue-300',
-  scheduled: 'bg-indigo-50 text-indigo-700 border-indigo-300',
-  in_production: 'bg-purple-50 text-purple-700 border-purple-300',
-  ready: 'bg-teal-50 text-teal-700 border-teal-300',
-  partially_dispatched: 'bg-amber-50 text-amber-800 border-amber-300',
-  completed: 'bg-green-50 text-green-700 border-green-300',
-  cancelled: 'bg-red-50 text-red-700 border-red-300',
+  pending: 'bg-slate-50 text-slate-700 border-slate-200',
+  confirmed: 'bg-blue-50 text-blue-700 border-blue-200',
+  scheduled: 'bg-indigo-50 text-indigo-700 border-indigo-200',
+  in_production: 'bg-purple-50 text-purple-700 border-purple-200',
+  ready: 'bg-teal-50 text-teal-700 border-teal-200',
+  partially_dispatched: 'bg-amber-50 text-amber-800 border-amber-200',
+  completed: 'bg-green-50 text-green-700 border-green-200',
+  cancelled: 'bg-red-50 text-red-700 border-red-200',
 };
 
 /** Line state is derived, so it is shown as a label rather than a control. */
 const LINE_STATE: Record<LineState, { label: string; className: string }> = {
-  not_started: { label: 'Not started', className: 'bg-slate-100 text-slate-600' },
-  in_production: { label: 'In production', className: 'bg-purple-100 text-purple-700' },
-  made: { label: 'Made', className: 'bg-teal-100 text-teal-700' },
-  part_shipped: { label: 'Part shipped', className: 'bg-amber-100 text-amber-800' },
-  shipped: { label: 'Shipped', className: 'bg-green-100 text-green-700' },
+  not_started: { label: 'Not started', className: 'bg-slate-50 text-slate-600 ring-slate-200' },
+  in_production: { label: 'In production', className: 'bg-purple-50 text-purple-700 ring-purple-200' },
+  made: { label: 'Made', className: 'bg-teal-50 text-teal-700 ring-teal-200' },
+  part_shipped: { label: 'Part shipped', className: 'bg-amber-50 text-amber-800 ring-amber-200' },
+  shipped: { label: 'Shipped', className: 'bg-green-50 text-green-700 ring-green-200' },
 };
 
 type View = 'lines' | 'products' | 'orders';
@@ -136,19 +136,7 @@ export default function OrdersPage() {
       />
 
       <div className="mb-3 flex flex-wrap items-center gap-3">
-        <div className="inline-flex rounded-md border border-slate-300 bg-white p-0.5">
-          {VIEWS.map((v) => (
-            <button
-              key={v.key}
-              onClick={() => setView(v.key)}
-              className={`rounded px-3 py-1 text-sm transition-colors ${
-                view === v.key ? 'bg-brand-700 font-medium text-white' : 'text-slate-600 hover:bg-slate-50'
-              }`}
-            >
-              {v.label}
-            </button>
-          ))}
-        </div>
+        <SegmentedTabs value={view} onChange={setView} tabs={VIEWS} />
         <ExportTabs value={exportFilter} onChange={setExportFilter} />
         {showCompany && (
           <Select value={companyFilter} onChange={(e) => setCompanyFilter(e.target.value)} className="max-w-56">
@@ -191,11 +179,13 @@ export default function OrdersPage() {
       {view === 'orders' && (
         <Card className="overflow-x-auto">
           {orders.length === 0 ? (
-            <EmptyState message="No orders yet. Book one from an accepted quotation, or create it directly." />
+            <EmptyState message={statusFilter || exportFilter || companyFilter || openOnly
+              ? 'Nothing matches those filters.'
+              : 'No orders yet. Book one from an accepted quotation, or create it directly.'} />
           ) : (
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-slate-200 text-left text-xs uppercase text-slate-500">
+                <tr className={TH_CLASS}>
                   <th className="pb-2 pr-3">Order No.</th>
                   <th className="pb-2 pr-3">Date</th>
                   <th className="pb-2 pr-3">Customer</th>
@@ -277,7 +267,7 @@ function LinesTable({ lines, showCompany, pager }: {
         <>
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-slate-200 text-left text-xs uppercase text-slate-500">
+              <tr className={TH_CLASS}>
                 <th className="pb-2 pr-3">Order</th>
                 <th className="pb-2 pr-3">Date</th>
                 <th className="pb-2 pr-3">Customer</th>
@@ -338,7 +328,7 @@ function LinesTable({ lines, showCompany, pager }: {
                       {repeat ? '' : l.created_by_name || '—'}
                     </td>
                     <td className="py-1.5 pr-3">
-                      <span className={`inline-block whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ${LINE_STATE[l.state].className}`}>
+                      <span className={`inline-block whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset ${LINE_STATE[l.state].className}`}>
                         {LINE_STATE[l.state].label}
                       </span>
                     </td>
@@ -373,7 +363,7 @@ function DemandTable({ rows, onPick }: { rows: ProductDemand[]; onPick: (row: Pr
         <>
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-slate-200 text-left text-xs uppercase text-slate-500">
+              <tr className={TH_CLASS}>
                 <th className="pb-2 pr-3">Product</th>
                 <th className="pb-2 pr-3">Code</th>
                 <th className="pb-2 pr-3">Colour</th>
