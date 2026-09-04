@@ -1,8 +1,8 @@
-import { useRef, useState, type ReactNode } from 'react';
+import { useMemo, useRef, useState, type ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { LineItem, Product, TaxType, ColumnConfig } from '../types';
-import { Button, Input, Select } from './ui';
+import { Button, Input, Select, SearchSelect, type SearchOption } from './ui';
 import { fmtMoney } from '../lib/format';
 import { shrinkImage } from '../lib/image';
 import { unitOptions } from '../pages/Products';
@@ -156,6 +156,28 @@ export default function LineItemsEditor({
   share?: Map<number, number>;
 }) {
   const { data: products = [] } = useQuery({ queryKey: ['products', ''], queryFn: () => api.get<Product[]>('/api/products') });
+
+  /**
+   * What the product picker offers.
+   *
+   * *custom* and *charge* are sticky: they answer "is this goods at all?",
+   * which is not a question anybody types a name for, and a search that hid
+   * them would be a trap. The hint is colour and pcs/box because a product is
+   * identified by **name + colour + pcs per box** — the catalogue genuinely
+   * stocks the same item at two box counts, and on the name alone those two
+   * rows are indistinguishable. The HSN rides along as a keyword, since it is
+   * the other thing people look a product up by.
+   */
+  const productOptions = useMemo<SearchOption[]>(() => [
+    { value: '', label: '— custom —', sticky: true },
+    { value: CHARGE, label: '— charge (freight, etc.) —', sticky: true },
+    ...products.map((p) => ({
+      value: String(p.id),
+      label: p.name,
+      hint: [p.color, p.pcs_per_pack ? `${p.pcs_per_pack}/box` : ''].filter(Boolean).join(' · '),
+      keywords: p.hsn_code,
+    })),
+  ], [products]);
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
 
   const hidden = new Set([...(config.hidden ?? []), ...(omit ?? [])]);
@@ -350,15 +372,14 @@ export default function LineItemsEditor({
                   <td className="py-2 pr-2 text-xs tabular-nums text-slate-400">{i + 1}</td>
                   <td className="py-2 pr-2">
                     <div className="flex items-center gap-1.5">
-                      <Select
-                        value={charge ? CHARGE : (it.product_id ?? '')}
+                      <SearchSelect
+                        value={charge ? CHARGE : String(it.product_id ?? '')}
                         title={charge ? 'A charge, not goods' : product?.name ?? 'Custom line'}
-                        onChange={(e) => pickProduct(i, e.target.value)}
-                      >
-                        <option value="">— custom —</option>
-                        <option value={CHARGE}>— charge (freight, etc.) —</option>
-                        {products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                      </Select>
+                        placeholder="Type to search…"
+                        className="w-full"
+                        options={productOptions}
+                        onChange={(v) => pickProduct(i, v)}
+                      />
                     </div>
                   </td>
                   <td className="py-2 pr-2">

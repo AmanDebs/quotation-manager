@@ -1,5 +1,6 @@
-import { createContext, isValidElement, useContext, useEffect, useRef, useState } from 'react';
-import type { ReactNode, ButtonHTMLAttributes, InputHTMLAttributes, SelectHTMLAttributes, TextareaHTMLAttributes } from 'react';
+import { createContext, isValidElement, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import type { ReactNode, ButtonHTMLAttributes, InputHTMLAttributes, KeyboardEvent, SelectHTMLAttributes, TextareaHTMLAttributes } from 'react';
+import { createPortal } from 'react-dom';
 import { fmtDate } from '../lib/format';
 
 export function Button({ variant = 'primary', className = '', ...props }: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'secondary' | 'danger' | 'ghost' }) {
@@ -180,6 +181,225 @@ export function Select({ className = '', ...props }: SelectHTMLAttributes<HTMLSe
     return <StaticValue title={props.title}>{v == null || v === '' ? '' : optionLabel(props.children, v) || String(v)}</StaticValue>;
   }
   return <select {...props} className={fieldClass(className, 'px-2')} />;
+}
+
+/* ------------------------------------------------------------------ *
+ * A select you can type into
+ * ------------------------------------------------------------------ */
+
+export interface SearchOption {
+  value: string;
+  label: string;
+  /** A second line under the label — what tells two near-identical rows apart. */
+  hint?: string;
+  /** Matched when filtering, never drawn. HSN codes, mostly. */
+  keywords?: string;
+  /** Pinned to the top and never filtered away. */
+  sticky?: boolean;
+}
+
+/**
+ * A combobox: the same contract as `Select`, with a search box.
+ *
+ * A native `<select>` only jumps by first letter, which is fine for six
+ * currencies and useless for a catalogue of several hundred preforms whose
+ * names all begin with a number. This is the one control in the app where the
+ * list is long enough to need looking through rather than picked from.
+ *
+ * Two things it has to get right.
+ *
+ * **The panel is a portal on `<body>`.** Its first caller is the line-items
+ * editor, whose table sits in an `overflow-x-auto` wrapper — and a scroll
+ * container clips on *both* axes, so a panel positioned inside it would be cut
+ * off at the row below. Same family as the `ColumnsControl` trap that keeps
+ * `overflow-hidden` off `Card`. Being fixed-positioned, it is re-placed on
+ * every scroll and resize while open, and flips above the box when there is no
+ * room under it.
+ *
+ * **A sticky option is never filtered away.** The product picker's first two
+ * entries are *custom* and *charge* — they answer "is this goods at all?",
+ * which is not a thing anybody searches for by name, and losing them mid-search
+ * would make the search a trap.
+ *
+ * Read-only collapses to the chosen label, like every other control here.
+ */
+export function SearchSelect({
+  value, onChange, options, placeholder = 'Search…', title, className = '', disabled,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  options: SearchOption[];
+  placeholder?: string;
+  title?: string;
+  className?: string;
+  disabled?: boolean;
+}) {
+  const plain = useReadOnlyFields();
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const [active, setActive] = useState(0);
+  const [box, setBox] = useState<{ left: number; top: number; width: number; flip: boolean; max: number } | null>(null);
+  const anchor = useRef<HTMLDivElement>(null);
+  const panel = useRef<HTMLDivElement>(null);
+
+  const selected = options.find((o) => o.value === value);
+
+  const matches = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return options;
+    return options.filter((o) =>
+      o.sticky || `${o.label} ${o.hint ?? ''} ${o.keywords ?? ''}`.toLowerCase().includes(q));
+  }, [options, query]);
+
+  /*
+   * A search that found nothing still shows the sticky rows, so `matches` is
+   * never empty and "nothing matches" would never be said. Found by typing
+   * nonsense into it: two unrelated options and silence reads as a list that
+   * failed to load rather than as an answer.
+   */
+  const nothingFound = query.trim() !== '' && matches.every((o) => o.sticky) && options.some((o) => !o.sticky);
+
+  /*
+   * Where the panel goes, and how tall it is allowed to be.
+   *
+   * WANTED is what it would like — deciding the side on that rather than on
+   * what the list currently measures keeps it from flipping about as the rows
+   * filter away. Where neither side can give that much, it takes the roomier
+   * side and is **clamped to the room there**: unclamped it simply ran off the
+   * bottom of the window, and being fixed-positioned nothing could scroll it
+   * back — measured in a short window, the last 31px of the list were
+   * unreachable. FLOOR is the point below which clamping stops helping, and a
+   * panel a few rows deep hanging over the edge beats one two rows deep.
+   */
+  const place = useCallback(() => {
+    const el = anchor.current;
+    if (!el) return;
+    const WANTED = 264, GAP = 8, FLOOR = 120, READABLE = 300;
+    const r = el.getBoundingClientRect();
+    const below = window.innerHeight - r.bottom - GAP;
+    const above = r.top - GAP;
+    const flip = below < WANTED && above > below;
+    const room = flip ? above : below;
+    // A native <select> draws its list as wide as its longest option, and the
+    // column this first landed in is 100px — at the anchor's own width every
+    // product name wrapped over three lines. So the panel is at least
+    // READABLE wide, pulled left where that would take it off the screen.
+    const width = Math.max(r.width, Math.min(READABLE, window.innerWidth - 2 * GAP));
+    setBox({
+      left: Math.max(GAP, Math.min(r.left, window.innerWidth - width - GAP)),
+      top: flip ? r.top - 2 : r.bottom + 2, width, flip,
+      max: Math.max(FLOOR, Math.min(WANTED, room)),
+    });
+  }, []);
+
+  /*
+   * A layout effect, and the placement is thrown away on close, so the panel
+   * can only ever draw at a position measured for this opening — measuring
+   * after paint would put it on screen a frame late, and holding the last
+   * placement would let that frame be the previous open's coordinates.
+   */
+  useLayoutEffect(() => {
+    if (!open) { setBox(null); return; }
+    place();
+    const replace = () => place();
+    // Capture, so a scroll of the table's own wrapper is heard too.
+    window.addEventListener('scroll', replace, true);
+    window.addEventListener('resize', replace);
+    const outside = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (anchor.current?.contains(t) || panel.current?.contains(t)) return;
+      setOpen(false);
+    };
+    document.addEventListener('mousedown', outside);
+    return () => {
+      window.removeEventListener('scroll', replace, true);
+      window.removeEventListener('resize', replace);
+      document.removeEventListener('mousedown', outside);
+    };
+  }, [open, place]);
+
+  // Keep the highlighted row on screen when the keyboard moves it.
+  useEffect(() => {
+    panel.current?.querySelector('[data-active="true"]')?.scrollIntoView({ block: 'nearest' });
+  }, [active, open]);
+
+  if (plain) return <StaticValue title={title}>{selected?.label ?? ''}</StaticValue>;
+
+  const start = () => { if (disabled) return; setQuery(''); setActive(0); setOpen(true); };
+  const choose = (v: string) => { onChange(v); setOpen(false); setQuery(''); };
+
+  const onKey = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Escape') { setOpen(false); return; }
+    // Enter reopens rather than submitting the form this sits in — the line
+    // items are inside one, and Escape-then-Enter would otherwise save the
+    // document from a cell somebody was still choosing.
+    if (!open && (e.key === 'ArrowDown' || e.key === 'Enter')) { e.preventDefault(); start(); return; }
+    if (e.key === 'ArrowDown') { e.preventDefault(); setActive((a) => Math.min(a + 1, matches.length - 1)); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setActive((a) => Math.max(a - 1, 0)); }
+    else if (e.key === 'Enter') { e.preventDefault(); if (matches[active]) choose(matches[active].value); }
+    else if (e.key === 'Tab') setOpen(false);
+  };
+
+  return (
+    <div ref={anchor} className={`relative ${className}`}>
+      <input
+        type="text"
+        role="combobox"
+        aria-expanded={open}
+        title={title}
+        disabled={disabled}
+        // Closed it states the choice; open it holds what is being typed.
+        value={open ? query : (selected?.label ?? '')}
+        placeholder={open || !selected ? placeholder : ''}
+        onChange={(e) => { setQuery(e.target.value); setActive(0); if (!open) setOpen(true); }}
+        onFocus={start}
+        onKeyDown={onKey}
+        className={fieldClass('w-full', 'cursor-pointer px-2 pr-6')}
+      />
+      <span aria-hidden className="pointer-events-none absolute inset-y-0 right-2 flex items-center text-slate-400">
+        <svg viewBox="0 0 24 24" width={12} height={12} fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+          <path d="m6 9.5 6 5.5 6-5.5" />
+        </svg>
+      </span>
+
+      {open && box && createPortal(
+        <div
+          ref={panel}
+          role="listbox"
+          style={{
+            position: 'fixed', left: box.left, width: box.width, zIndex: 60, maxHeight: box.max,
+            ...(box.flip ? { bottom: window.innerHeight - box.top } : { top: box.top }),
+          }}
+          className="overflow-y-auto rounded-lg border border-slate-200 bg-white py-1 shadow-lg"
+        >
+          {matches.length === 0 && (
+            <div className="px-3 py-2 text-sm text-slate-400">Nothing matches that.</div>
+          )}
+          {matches.map((o, i) => (
+            <button
+              key={o.value}
+              type="button"
+              role="option"
+              aria-selected={o.value === value}
+              data-active={i === active}
+              onMouseEnter={() => setActive(i)}
+              onClick={() => choose(o.value)}
+              className={`block w-full px-3 py-1.5 text-left text-sm ${
+                i === active ? 'bg-brand-50 text-brand-800' : 'text-slate-700'
+              } ${o.value === value ? 'font-semibold' : ''}`}
+            >
+              <span className={o.sticky ? 'text-slate-500' : ''}>{o.label}</span>
+              {o.hint && <span className="ml-2 text-xs text-slate-400">{o.hint}</span>}
+            </button>
+          ))}
+          {nothingFound && (
+            <div className="border-t border-slate-100 px-3 py-2 text-sm text-slate-400">No product matches that.</div>
+          )}
+        </div>,
+        document.body
+      )}
+    </div>
+  );
 }
 
 export function Textarea({ className = '', ...props }: TextareaHTMLAttributes<HTMLTextAreaElement>) {
