@@ -42,9 +42,15 @@ export interface ShortfallDraft {
   currency: string;
   tax_type: 'none' | 'cgst_sgst' | 'igst';
   items: ShortfallDraftLine[];
-  /** Jobs whose product has no recipe: their material need is unknown, not zero. */
+  /** Jobs or order lines whose product has no recipe: unknown, not zero. */
   uncosted: { id: number; number: string; description: string }[];
   filtered: boolean;
+  /**
+   * Which question the figures answer: `orders` is what the customers have
+   * ordered and nobody has made yet, `jobs` what the work orders raised so far
+   * are short of. Alternatives, never added.
+   */
+  basis?: 'jobs' | 'orders';
 }
 
 export interface BankAccount { label: string; details: string }
@@ -390,17 +396,41 @@ export type PoStatus = 'draft' | 'sent' | 'part_received' | 'received' | 'cancel
 
 export interface PoItem {
   id?: number;
+  /**
+   * What is being bought: at most one of these, and neither is a free-text
+   * line. A product because Aglo buys finished and semi-finished goods in as
+   * well as resin.
+   */
   material_id: number | null;
+  product_id?: number | null;
   description: string;
   qty: number | null;
   unit: string;
+  /** Packing as the supplier states it — cartons/bags, and what is in one. */
+  packs?: number | null;
+  pcs_per_pack?: number | null;
+  total_pcs?: number | null;
   rate: number;
   tax_pct?: number;
   amount?: number;
   material_name?: string | null;
-  /** Both derived from the ledger on read. */
+  product_name?: string | null;
+  /** Both derived from the receipts on read, per line. */
   qty_received?: number;
   qty_pending?: number;
+}
+
+/** A delivery, against one line of the order. */
+export interface PoReceipt {
+  id: number;
+  po_id: number;
+  po_line: number;
+  date: string;
+  qty: number;
+  location_id: number | null;
+  note: string;
+  location_name?: string | null;
+  created_by_name?: string | null;
 }
 
 export interface PurchaseOrder {
@@ -409,10 +439,21 @@ export interface PurchaseOrder {
   date: string; expected_date: string;
   currency: string; tax_type: TaxType; status: PoStatus;
   payment_terms: string; notes: string;
+  /**
+   * Bought from abroad — not `is_export`: on a purchase the foreign party is
+   * the seller. It picks the import numbering series and is fixed once a
+   * number has been issued.
+   */
+  is_import?: number;
+  /** The header this document's own paperwork prints. */
+  attn?: string; vendor_ref?: string; ship_to?: string;
+  inco_terms?: string; transport?: string; ship_via?: string; packing?: string;
+  /** Tax collected at source: a percentage of the whole, not of a line. */
+  tcs_pct?: number; tcs_amount?: number;
   subtotal: number; tax_total: number; grand_total: number;
   supplier_name?: string; location_name?: string | null; created_by_name?: string | null;
   items?: PoItem[];
-  receipts?: MaterialMove[];
+  receipts?: PoReceipt[];
 }
 
 /* ---------------- Despatch ---------------- */

@@ -1,11 +1,15 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type {
-  PurchaseOrder, PoStatus, PoItem, Supplier, Material, Location, TaxType,
+  PurchaseOrder, PoStatus, PoItem, Supplier, Material, Location, TaxType, Product,
   ShortfallDraft, ShortfallDraftLine,
 } from '../types';
-import { PageHeader, Card, Select, Input, Textarea, Field, Button, EmptyState, ErrorText, Modal , Pagination} from '../components/ui';
+import {
+  PageHeader, Card, Select, Input, Textarea, Field, Button, EmptyState, ErrorText, Modal, Pagination,
+  SearchSelect, SettledDocumentType, SegmentedTabs, type SearchOption,
+} from '../components/ui';
+import { productTypeLabel } from './Products';
 import { fmtMoney, fmtQty, fmtDate, today } from '../lib/format';
 import { usePagedList, PAGE_SIZE } from '../lib/usePagedList';
 
@@ -29,7 +33,16 @@ const statusStyle: Record<PoStatus, string> = {
 
 type Draft = Partial<PurchaseOrder> & { items: PoItem[] };
 
-const emptyItem = (): PoItem => ({ material_id: null, description: '', qty: null, unit: 'kg', rate: 0, tax_pct: 18 });
+const emptyItem = (): PoItem => ({ material_id: null, product_id: null, description: '', qty: null, unit: 'kg', rate: 0, tax_pct: 18 });
+
+/*
+ * A line names a material or a product, so the picker's value has to say which
+ * — `m:3` and `p:3` are different things. Encoded rather than kept as two
+ * fields on the control, so there is exactly one selected value and it cannot
+ * end up meaning both.
+ */
+const itemKey = (it: PoItem): string =>
+  it.material_id ? `m:${it.material_id}` : it.product_id ? `p:${it.product_id}` : '';
 
 export default function PurchaseOrdersPage() {
   const queryClient = useQueryClient();
@@ -46,6 +59,50 @@ export default function PurchaseOrdersPage() {
   const { data: suppliers = [] } = useQuery({ queryKey: ['master', 'suppliers', false], queryFn: () => api.get<Supplier[]>('/api/suppliers') });
   const { data: materials = [] } = useQuery({ queryKey: ['master', 'materials', false], queryFn: () => api.get<Material[]>('/api/materials') });
   const { data: locations = [] } = useQuery({ queryKey: ['master', 'locations', false], queryFn: () => api.get<Location[]>('/api/locations') });
+  // Aglo buys finished and semi-finished goods in as well as resin, so the
+  // catalogue is on the picker beside the materials.
+  const { data: products = [] } = useQuery({ queryKey: ['products', ''], queryFn: () => api.get<Product[]>('/api/products') });
+
+  /**
+   * One picker over both masters.
+   *
+   * The kind is in the hint and in the keywords, so typing "resin" or
+   * "preform" narrows the list to one master without a second control asking
+   * which one first — the question is "what am I buying", not "which table is
+   * it in". Materials lead, because most purchase orders are for resin.
+   */
+  const buyOptions = useMemo<SearchOption[]>(() => [
+    { value: '', label: '— custom —', sticky: true },
+    ...materials.map((m) => ({
+      value: `m:${m.id}`,
+      label: m.name,
+      hint: ['Material', m.category, m.unit].filter(Boolean).join(' · '),
+      keywords: `material ${m.category ?? ''} ${m.hsn_code ?? ''}`,
+    })),
+    ...products.map((p) => ({
+      value: `p:${p.id}`,
+      label: p.name,
+      hint: ['Product', productTypeLabel(p.product_type), p.unit].filter(Boolean).join(' · '),
+      keywords: `product ${productTypeLabel(p.product_type)} ${p.hsn_code ?? ''}`,
+    })),
+  ], [materials, products]);
+
+  /** Picking either master fills the unit from **that master's** own column. */
+  const pickItem = (i: number, value: string) => {
+    if (!value) return setItem(i, { material_id: null, product_id: null });
+    const [kind, rawId] = value.split(':');
+    const id = Number(rawId);
+    if (kind === 'm') {
+      const m = materials.find((x) => x.id === id);
+      setItem(i, { material_id: id, product_id: null, description: m?.name ?? '', unit: m?.unit || 'kg' });
+    } else {
+      const p = products.find((x) => x.id === id);
+      setItem(i, {
+        material_id: null, product_id: id, description: p?.name ?? '', unit: p?.unit || 'unit',
+        pcs_per_pack: p?.pcs_per_pack ?? null,
+      });
+    }
+  };
 
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
@@ -182,6 +239,9 @@ export default function PurchaseOrdersPage() {
                         Receive
                       </Button>
                     )}
+                    <a href={`/api/pdf/purchase-order/${po.id}`} target="_blank" rel="noreferrer">
+                      <Button variant="ghost">PDF</Button>
+                    </a>
                     <Button variant="ghost" onClick={() => openExisting(po)}>Edit</Button>
                     {po.status !== 'cancelled' && (
                       <Button variant="ghost" onClick={() => setStatus.mutate({ id: po.id, status: 'cancelled' })}>Cancel</Button>
@@ -229,12 +289,53 @@ export default function PurchaseOrdersPage() {
               </Select>
             </Field>
             <Field label="Payment terms"><Input value={editing.payment_terms ?? ''} onChange={(e) => set({ payment_terms: e.target.value })} /></Field>
+            <Field label="Kind Attn"><Input value={editing.attn ?? ''} onChange={(e) => set({ attn: e.target.value })} placeholder="Who at the supplier" /></Field>
+            <Field label="Vendor ID"><Input value={editing.vendor_ref ?? ''} onChange={(e) => set({ vendor_ref: e.target.value })} placeholder="Their reference for us" /></Field>
+            <Field label="Terms (FOB / Ex-factory)"><Input value={editing.inco_terms ?? ''} onChange={(e) => set({ inco_terms: e.target.value })} /></Field>
+            <Field label="Transport"><Input value={editing.transport ?? ''} onChange={(e) => set({ transport: e.target.value })} /></Field>
+            <Field label="Ship via"><Input value={editing.ship_via ?? ''} onChange={(e) => set({ ship_via: e.target.value })} /></Field>
+            <Field label="TCS %">
+              <Input
+                type="number" min={0} step="any" className="w-full text-right tabular-nums"
+                value={editing.tcs_pct || ''}
+                onChange={(e) => set({ tcs_pct: e.target.value === '' ? 0 : Number(e.target.value) })}
+              />
+            </Field>
+            <Field label="Ship to" className="sm:col-span-2">
+              <Textarea rows={2} value={editing.ship_to ?? ''} onChange={(e) => set({ ship_to: e.target.value })} placeholder="Leave blank to print the plant above" />
+            </Field>
+            <Field label="Packing">
+              <Input value={editing.packing ?? ''} onChange={(e) => set({ packing: e.target.value })} placeholder="e.g. plain boxes, export standard" />
+            </Field>
+          </div>
+
+          {/*
+            * Editable only while the order is new, then stated — the number is
+            * drawn from the domestic or the import series and never reissued,
+            * so the server refuses a change afterwards. Same control and same
+            * reason as on the proforma.
+            */}
+          <div className="mt-3">
+            {editing.id ? (
+              <SettledDocumentType isExport={!!editing.is_import} number={editing.number} />
+            ) : (
+              <Select
+                className="w-56"
+                value={editing.is_import ? '1' : '0'}
+                onChange={(e) => set({ is_import: e.target.value === '1' ? 1 : 0, tax_type: e.target.value === '1' ? 'none' : (editing.tax_type === 'none' ? 'igst' : editing.tax_type) })}
+              >
+                <option value="0">Domestic purchase</option>
+                <option value="1">Import</option>
+              </Select>
+            )}
           </div>
 
           <table className="mt-4 w-full text-sm">
             <thead>
               <tr className="border-b border-slate-200 text-left text-xs uppercase text-slate-500">
-                <th className="pb-2 pr-2">Material</th>
+                <th className="pb-2 pr-2">Material or product</th>
+                <th className="w-20 pb-2 pr-2 text-right">Boxes</th>
+                <th className="w-20 pb-2 pr-2 text-right">Pcs/Box</th>
                 <th className="w-24 pb-2 pr-2 text-right">Qty</th>
                 <th className="w-20 pb-2 pr-2">Unit</th>
                 <th className="w-24 pb-2 pr-2 text-right">Rate</th>
@@ -247,21 +348,16 @@ export default function PurchaseOrdersPage() {
               {editing.items.map((it, i) => (
                 <tr key={i} className="border-b border-slate-100">
                   <td className="py-2 pr-2">
-                    <Select
-                      value={it.material_id ?? ''}
-                      onChange={(e) => {
-                        const m = materials.find((x) => x.id === Number(e.target.value));
-                        setItem(i, {
-                          material_id: e.target.value ? Number(e.target.value) : null,
-                          description: m?.name ?? it.description,
-                          unit: m?.unit ?? it.unit,
-                        });
-                      }}
-                    >
-                      <option value="">— choose —</option>
-                      {materials.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
-                    </Select>
+                    <SearchSelect
+                      className="w-full"
+                      placeholder="Type to search…"
+                      value={itemKey(it)}
+                      options={buyOptions}
+                      onChange={(v) => pickItem(i, v)}
+                    />
                   </td>
+                  <td className="py-2 pr-2"><Input type="number" min={0} step="any" value={it.packs ?? ''} onChange={(e) => setItem(i, { packs: e.target.value === '' ? null : Number(e.target.value) })} /></td>
+                  <td className="py-2 pr-2"><Input type="number" min={0} step="any" value={it.pcs_per_pack ?? ''} onChange={(e) => setItem(i, { pcs_per_pack: e.target.value === '' ? null : Number(e.target.value) })} /></td>
                   <td className="py-2 pr-2"><Input type="number" min={0} step="any" value={it.qty ?? ''} onChange={(e) => setItem(i, { qty: e.target.value === '' ? null : Number(e.target.value) })} /></td>
                   <td className="py-2 pr-2"><Input value={it.unit} onChange={(e) => setItem(i, { unit: e.target.value })} /></td>
                   <td className="py-2 pr-2"><Input type="number" min={0} step="any" value={it.rate || ''} onChange={(e) => setItem(i, { rate: Number(e.target.value) })} /></td>
@@ -314,8 +410,14 @@ export default function PurchaseOrdersPage() {
 function ReceiveModal({ po, onClose, onSaved }: { po: PurchaseOrder; onClose: () => void; onSaved: () => void }) {
   const [date, setDate] = useState(today());
   const [locationId, setLocationId] = useState(String(po.location_id ?? ''));
+  /*
+   * Keyed by the line's **position**, which is what the server books against.
+   * Keying it by material was the old shape and could not tell two lines of
+   * one material apart — nor receive a line naming a product at all, since
+   * that has no material to key on.
+   */
   const [qty, setQty] = useState<Record<number, number>>(
-    Object.fromEntries((po.items ?? []).filter((i) => i.material_id).map((i) => [i.material_id!, i.qty_pending ?? 0]))
+    Object.fromEntries((po.items ?? []).map((it, i) => [i, it.qty_pending ?? 0]))
   );
   const { data: locations = [] } = useQuery({ queryKey: ['master', 'locations', false], queryFn: () => api.get<Location[]>('/api/locations') });
 
@@ -323,7 +425,7 @@ function ReceiveModal({ po, onClose, onSaved }: { po: PurchaseOrder; onClose: ()
     mutationFn: () => api.post(`/api/purchase-orders/${po.id}/receipts`, {
       date,
       location_id: locationId ? Number(locationId) : null,
-      items: Object.entries(qty).map(([materialId, q]) => ({ material_id: Number(materialId), qty: q })),
+      items: Object.entries(qty).map(([line, q]) => ({ line: Number(line), qty: q })),
     }),
     onSuccess: () => { onSaved(); onClose(); },
   });
@@ -343,7 +445,7 @@ function ReceiveModal({ po, onClose, onSaved }: { po: PurchaseOrder; onClose: ()
       <table className="mt-3 w-full text-sm">
         <thead>
           <tr className="border-b border-slate-200 text-left text-xs uppercase text-slate-500">
-            <th className="pb-2 pr-3">Material</th>
+            <th className="pb-2 pr-3">Line</th>
             <th className="pb-2 pr-3 text-right">Ordered</th>
             <th className="pb-2 pr-3 text-right">Already in</th>
             <th className="pb-2 pr-3 text-right">Outstanding</th>
@@ -351,17 +453,25 @@ function ReceiveModal({ po, onClose, onSaved }: { po: PurchaseOrder; onClose: ()
           </tr>
         </thead>
         <tbody>
-          {(po.items ?? []).filter((i) => i.material_id).map((it) => (
-            <tr key={it.material_id} className="border-b border-slate-100 last:border-0">
-              <td className="py-2 pr-3">{it.material_name ?? it.description}</td>
+          {(po.items ?? []).map((it, i) => (
+            <tr key={i} className="border-b border-slate-100 last:border-0">
+              <td className="py-2 pr-3">
+                {it.material_name ?? it.product_name ?? it.description}
+                {/*
+                  * Said on the row rather than hidden: a product line records
+                  * what arrived and closes the order, but there is no
+                  * finished-goods ledger for it to land in.
+                  */}
+                {it.product_id ? <span className="ml-1.5 text-xs text-slate-400">(not stocked)</span> : null}
+              </td>
               <td className="py-2 pr-3 text-right tabular-nums">{fmtQty(it.qty ?? 0)} {it.unit}</td>
               <td className="py-2 pr-3 text-right tabular-nums text-slate-500">{fmtQty(it.qty_received ?? 0)}</td>
               <td className="py-2 pr-3 text-right tabular-nums">{fmtQty(it.qty_pending ?? 0)}</td>
               <td className="py-2 pr-3">
                 <Input
                   type="number" min={0} step="any"
-                  value={qty[it.material_id!] || ''}
-                  onChange={(e) => setQty({ ...qty, [it.material_id!]: Number(e.target.value) })}
+                  value={qty[i] || ''}
+                  onChange={(e) => setQty({ ...qty, [i]: Number(e.target.value) })}
                 />
               </td>
             </tr>
@@ -369,8 +479,10 @@ function ReceiveModal({ po, onClose, onSaved }: { po: PurchaseOrder; onClose: ()
         </tbody>
       </table>
       <p className="mt-2 text-xs text-slate-400">
-        Each quantity becomes a stock movement at that plant. The order moves to “part received” or
-        “received” by comparing what has arrived with what was ordered — nothing to set by hand.
+        A material line’s quantity also becomes a stock movement at that plant; a product line is
+        recorded against the order only, since finished goods are not held in stock. The order moves
+        to “part received” or “received” by comparing what has arrived with what was ordered —
+        nothing to set by hand.
       </p>
 
       <ErrorText error={receive.error} />
@@ -402,9 +514,20 @@ function ShortfallModal({ suppliers, onClose, onPick }: {
   onPick: (draft: ShortfallDraft, supplierId: number, lines: ShortfallDraftLine[]) => void;
 }) {
   const [pickedSupplier, setPickedSupplier] = useState('');
+  /*
+   * Which question the figures answer.
+   *
+   * *Order book* is what customers have ordered and nobody has made yet;
+   * *planned jobs* is what the work orders raised so far are short of. They
+   * are alternatives, never added — a planned-but-unmade piece is also an
+   * ordered-but-unmade one — and the order book is the default because resin
+   * has to be committed to before the plan exists, which is the whole reason
+   * to ask it one step earlier.
+   */
+  const [basis, setBasis] = useState<'orders' | 'jobs'>('orders');
   const { data: draft, isLoading } = useQuery({
-    queryKey: ['po-shortfall-draft'],
-    queryFn: () => api.get<ShortfallDraft>('/api/purchase-orders/prefill/from-shortfall'),
+    queryKey: ['po-shortfall-draft', basis],
+    queryFn: () => api.get<ShortfallDraft>(`/api/purchase-orders/prefill/from-shortfall?basis=${basis}`),
   });
 
   // Grouped by the suggested supplier; the unmatched ones keep id 0 so they
@@ -420,18 +543,38 @@ function ShortfallModal({ suppliers, onClose, onPick }: {
 
   return (
     <Modal title="Raise a purchase order from the shortfall" onClose={onClose} wide>
-      {isLoading && <p className="text-sm text-slate-400">Working out what the open jobs need…</p>}
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <SegmentedTabs
+          value={basis}
+          onChange={setBasis}
+          tabs={[
+            { key: 'orders', label: 'What is ordered' },
+            { key: 'jobs', label: 'What is planned' },
+          ]}
+        />
+        <span className="text-xs text-slate-400">
+          {basis === 'orders'
+            ? 'Everything the open orders need and nobody has made yet — before any job is raised.'
+            : 'Only what the work orders already raised are short of.'}
+        </span>
+      </div>
+
+      {isLoading && <p className="text-sm text-slate-400">Working out what is needed…</p>}
 
       {draft && draft.items.length === 0 && (
-        <EmptyState message="Nothing is short. Every open job has the material it needs, counting what is already on order." />
+        <EmptyState message={basis === 'orders'
+          ? 'Nothing is short. Everything still to make on the open orders is covered by stock and what is already on order.'
+          : 'Nothing is short. Every open job has the material it needs, counting what is already on order.'} />
       )}
 
       {/* A job with no recipe needs an unknown amount, not none. Saying so is
           the difference between a shortfall report and a misleading one. */}
       {!!draft?.uncosted.length && (
         <div className="mb-3 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800">
-          <b>{draft.uncosted.length} job{draft.uncosted.length === 1 ? ' has' : 's have'} no recipe</b>, so
-          nothing below covers {draft.uncosted.length === 1 ? 'it' : 'them'}:{' '}
+          <b>
+            {draft.uncosted.length} {basis === 'orders' ? 'order line' : 'job'}
+            {draft.uncosted.length === 1 ? ' has' : 's have'} no recipe
+          </b>, so nothing below covers {draft.uncosted.length === 1 ? 'it' : 'them'}:{' '}
           {draft.uncosted.map((u) => u.number).join(', ')}. Add materials to those products to include them.
         </div>
       )}
@@ -506,9 +649,9 @@ function ShortfallModal({ suppliers, onClose, onPick }: {
 
       {!!draft?.items.length && (
         <p className="mt-3 text-xs text-slate-400">
-          To buy is what the open jobs need, less what is on hand and less what is already on order — so
-          raising these will not order the same material twice. Rates are what we last paid; check them
-          before sending.
+          To buy is what {basis === 'orders' ? 'the order book' : 'planned jobs'} need, less what is on hand and
+          less what is already on order — so raising these will not order the same material twice. Rates
+          are what we last paid; check them before sending.
         </p>
       )}
     </Modal>
