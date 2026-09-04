@@ -1545,6 +1545,153 @@ export function buildInvoiceWithPackingPdf(invoiceId: number): TDocumentDefiniti
   };
 }
 
+/**
+ * The purchase order Aglo sends a supplier.
+ *
+ * Modelled on `buildProformaPdf` — the same header/title/items/terms/signature
+ * spine and the same `itemsTable` — and on Aglo's own reference order in
+ * `D:\Quotation Doc\`, which is the spec here exactly as the Sanya and Emeraude
+ * samples are the spec for the quotation and the proforma.
+ *
+ * Three things differ from every other builder in this file, and each is the
+ * document being a *purchase* rather than a sale:
+ *
+ * - **The party is a supplier**, so there is no customer, no `is_export`, and
+ *   `canAccessCustomer` is the wrong question — the whole module is
+ *   manager-only, which `routes/pdf.ts` enforces for this entry.
+ * - **`registrationLine`'s rules do not transfer.** They were written for an
+ *   export *sale*: GSTIN domestic-only, IEC on the export commercial invoice.
+ *   Here we are the buyer, so the letterhead carries the GSTIN on both the
+ *   domestic and the import variant and never the IEC.
+ * - **TCS closes the totals**, which no selling document carries.
+ */
+export function buildPurchaseOrderPdf(id: number): TDocumentDefinitions {
+  const po = db.prepare('SELECT * FROM purchase_orders WHERE id = ?').get(id) as Row;
+  if (!po) throw new Error('Purchase order not found');
+  const s = companyProfile(po.company_id);
+  const sup = db.prepare('SELECT * FROM suppliers WHERE id = ?').get(po.supplier_id) as Row | undefined;
+  const loc = po.location_id
+    ? (db.prepare('SELECT * FROM locations WHERE id = ?').get(po.location_id) as Row | undefined)
+    : undefined;
+  const items = db.prepare(
+    `SELECT i.*, m.name AS material_name, m.hsn_code AS material_hsn,
+            p.name AS product_name, p.hsn_code AS product_hsn
+     FROM po_items i
+     LEFT JOIN materials m ON m.id = i.material_id
+     LEFT JOIN products p ON p.id = i.product_id
+     WHERE i.po_id = ? ORDER BY i.sort_order, i.id`
+  ).all(id) as Row[];
+
+  const cur = String(po.currency);
+  const showTax = po.tax_type !== 'none';
+  const hsnOf = (it: Row) => String(it.material_hsn || it.product_hsn || '');
+
+  const specs: ColumnSpec[] = [
+    { key: 'sl', label: 'SL', width: 18, align: 'center', always: true, value: (_it, i) => String(i + 1) },
+    { key: 'description', label: 'DESCRIPTION', width: '*', always: true, value: (it) => String(it.description || it.material_name || it.product_name || '') },
+    { key: 'hsn', label: 'HSN', width: 44, align: 'center', value: hsnOf },
+    // The reference order's QUANTITY banner sits over these two. The banner
+    // shrinks with its run if either auto-hides, which is what makes it safe
+    // on an order that states no packing at all.
+    { key: 'packs', label: 'NO. OF CART./BAGS', width: 46, align: 'right', group: 'QUANTITY', value: (it) => fmtNum(it.packs, 0), sum: (rows) => fmtNum(rows.reduce((t, r) => t + (Number(r.packs) || 0), 0), 0) },
+    { key: 'pcs_per_pack', label: 'PCS./KGS. IN CART.', width: 48, align: 'right', group: 'QUANTITY', value: (it) => fmtNum(it.pcs_per_pack, 0) },
+    { key: 'qty', label: 'TOTAL QUANTITY', width: 60, align: 'right', always: true, value: (it) => (it.qty != null ? `${fmtNum(it.qty)} ${it.unit ?? ''}`.trim() : '') },
+    { key: 'rate', label: `UNIT PRICE (${cur})`, width: 56, align: 'right', always: true, value: (it) => fmtNum(it.rate, 3) },
+    { key: 'tax', label: 'TAX %', width: 28, align: 'right', value: (it) => (showTax ? `${it.tax_pct ?? 0}%` : '') },
+    { key: 'amount', label: `TOTAL (${cur})`, width: 64, align: 'right', always: true, value: (it) => fmtMoney(Number(it.amount), cur), sum: (rows) => fmtMoney(rows.reduce((t, r) => t + (Number(r.amount) || 0), 0), cur) },
+  ];
+
+  /*
+   * Round off is derived here rather than through `roundOffOf`, which does not
+   * know about TCS and would report it as a rounding difference of a hundred
+   * rupees. A purchase order carries no header freight or insurance.
+   */
+  const tcs = Number(po.tcs_amount) || 0;
+  const roundOff = round2(
+    Number(po.grand_total) - (Number(po.subtotal) + Number(po.tax_total) + tcs)
+  );
+
+  const money: MoneyRow[] = [
+    ...taxRows(po, cur).map(([label, value]) => ({ label, value })),
+    ...(tcs ? [{ label: `TCS @ ${fmtNum(po.tcs_pct, 3)}%`, value: fmtMoney(tcs, cur) }] : []),
+    ...(po.inco_terms ? [{ label: `Incoterms: ${String(po.inco_terms)}`, value: '' }] : []),
+    ...(roundOff !== 0 ? [{ label: 'Round off', value: (roundOff > 0 ? '' : '(') + Math.abs(roundOff).toFixed(2) + (roundOff > 0 ? '' : ')') }] : []),
+    { label: 'TOTAL', value: fmtMoney(Number(po.grand_total), cur), band: true, sums: true },
+  ];
+
+  const vendorLines = [
+    String(sup?.name ?? ''),
+    ...String(sup?.address ?? '').split('\n'),
+    sup?.gstin ? `GSTIN: ${String(sup.gstin)}` : '',
+    sup?.phone ? `Ph: ${String(sup.phone)}` : '',
+  ].filter(Boolean);
+
+  // Kind Attn falls back to whoever the supplier record names, which is the
+  // person the office already deals with there.
+  const attn = String(po.attn || sup?.contact_person || '');
+
+  const shipLines = String(po.ship_to || '').split('\n').filter(Boolean);
+  if (!shipLines.length) {
+    // Nothing typed, so the plant it is being delivered to stands in — which
+    // is what the receipts default to anyway.
+    shipLines.push(String(s.company_name || ''), loc ? String(loc.name) : '');
+  }
+
+  const stack = (title: string, lines: string[]): Cell => ({
+    stack: [
+      { text: title, fontSize: 6.5, bold: true, color: '#333333' },
+      ...lines.filter(Boolean).map((t) => ({ text: t, fontSize: 8, margin: [0, 1, 0, 0] as [number, number, number, number] })),
+    ],
+  });
+
+  const header: Content = {
+    table: {
+      widths: ['*', '*', 78, 78],
+      body: [
+        [
+          stack('VENDOR', vendorLines.length ? vendorLines : ['—']),
+          stack('SHIP TO', shipLines.length ? shipLines : ['—']),
+          lv('PO No.', String(po.number)),
+          lv('Date', fmtDate(String(po.date))),
+        ],
+        [
+          lv('Kind Attn', attn),
+          lv('Vendor ID', String(po.vendor_ref || '')),
+          lv('Expected', po.expected_date ? fmtDate(String(po.expected_date)) : ''),
+          lv('Currency', cur),
+        ],
+        [
+          lv('Terms (FOB)', String(po.inco_terms || '')),
+          lv('Payment Terms', String(po.payment_terms || '')),
+          lv('Transport', String(po.transport || '')),
+          lv('Ship Via', String(po.ship_via || '')),
+        ],
+      ],
+    },
+    layout: boxedLayout,
+    margin: [0, 6, 0, 0] as [number, number, number, number],
+  };
+
+  const content: Content[] = [
+    ...companyHeader(s, {}),
+    docTitle(s, 'PURCHASE ORDER'),
+    header,
+    {
+      text: 'Dear Sir, as per your offer we are pleased to place the order for the following:',
+      fontSize: 8.5,
+      margin: [0, 8, 0, 4] as [number, number, number, number],
+    },
+    itemsTable(s, items, specs, {}, money),
+    amountWords(po, cur),
+    ...(po.packing
+      ? [{ text: `Packing: ${String(po.packing)}`, fontSize: 8, margin: [0, 6, 0, 0] as [number, number, number, number] }]
+      : []),
+    ...notesAndTerms(s, String(po.notes || ''), 'TERMS & CONDITIONS:'),
+    signatureBlock(s, {}),
+  ];
+  return baseDoc(content);
+}
+
 /** Optional diagonal watermark for documents that have not been approved. */
 export function renderPdf(docDefinition: TDocumentDefinitions, watermark?: string): Promise<Buffer> {
   const def: TDocumentDefinitions = watermark

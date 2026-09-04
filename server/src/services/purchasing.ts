@@ -1,5 +1,5 @@
 import { db } from '../db/connection.js';
-import { shortfall } from './stock.js';
+import { shortfall, type ShortfallBasis } from './stock.js';
 import { round2 } from './totals.js';
 
 /**
@@ -90,6 +90,8 @@ export interface ShortfallDraft {
   uncosted: { id: number; number: string; description: string }[];
   /** True when a supplier filter left some short material out of the draft. */
   filtered: boolean;
+  /** Which question the figures answer — see `ShortfallBasis`. */
+  basis: ShortfallBasis;
 }
 
 /**
@@ -102,10 +104,13 @@ export interface ShortfallDraft {
  * no suggestion to match on and is only ever in the unfiltered list.
  */
 export function shortfallDraft(
-  { locationId = null, supplierId = null, date }:
-  { locationId?: number | null; supplierId?: number | null; date: string }
+  { locationId = null, supplierId = null, date, basis = 'orders' }:
+  { locationId?: number | null; supplierId?: number | null; date: string; basis?: ShortfallBasis }
 ): ShortfallDraft {
-  const { rows, uncosted } = shortfall(locationId);
+  // The buying screen defaults to the order book rather than to the jobs
+  // raised from it: resin has to be committed to before the plan exists, which
+  // is the whole reason the question is asked one step earlier.
+  const { rows, uncosted } = shortfall(locationId, basis);
   const short = rows.filter((r) => r.short > 0);
   const last = lastPurchaseByMaterial();
 
@@ -162,5 +167,6 @@ export function shortfallDraft(
     items,
     uncosted,
     filtered: !!supplierId && items.length < short.length,
+    basis,
   };
 }

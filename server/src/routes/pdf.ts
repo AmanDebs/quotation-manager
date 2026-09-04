@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { db } from '../db/connection.js';
-import { buildQuotationPdf, buildOrderPdf, buildProformaPdf, buildInvoicePdf, buildPackingListPdf, buildInvoiceWithPackingPdf, renderPdf } from '../services/pdf.js';
-import type { AuthedRequest } from '../middleware/auth.js';
+import { buildQuotationPdf, buildOrderPdf, buildProformaPdf, buildInvoicePdf, buildPackingListPdf, buildInvoiceWithPackingPdf, buildPurchaseOrderPdf, renderPdf } from '../services/pdf.js';
+import { isManager, type AuthedRequest } from '../middleware/auth.js';
 import { canAccessCustomer } from '../middleware/scope.js';
 
 export const pdfRouter = Router();
@@ -16,6 +16,21 @@ const builders = {
   'packing-list': { build: buildPackingListPdf, table: 'packing_lists', approvable: false },
   // Invoice + its packing list in one file; approval follows the invoice.
   'invoice-with-packing': { build: buildInvoiceWithPackingPdf, table: 'commercial_invoices', approvable: true },
+  /*
+   * The one document here addressed to a supplier rather than a customer, and
+   * the one that is manager-only.
+   *
+   * Both flags are load-bearing. `purchase_orders` has no `customer_id`, so
+   * the customer join below would throw on it; and `/api/pdf` is mounted with
+   * `requireAuth` alone while the purchase order module is mounted
+   * `requireManager` — registering this without the guard would publish every
+   * supplier rate to every employee through a route nobody thinks of as part
+   * of that module.
+   */
+  'purchase-order': {
+    build: buildPurchaseOrderPdf, table: 'purchase_orders', approvable: false,
+    party: 'supplier', managerOnly: true,
+  },
 } as const;
 
 type DocType = keyof typeof builders;
@@ -36,6 +51,7 @@ const DOC_LABEL: Record<DocType, string> = {
   invoice: 'Commercial Invoice',
   'packing-list': 'Packing List',
   'invoice-with-packing': 'Commercial Invoice & Packing List',
+  'purchase-order': 'Purchase Order',
 };
 
 /*
@@ -77,13 +93,26 @@ pdfRouter.get('/:type/:id', async (req: AuthedRequest, res) => {
   const entry = builders[type];
   if (!entry) return res.status(404).json({ error: 'Unknown document type' });
   const id = Number(req.params.id);
-  const row = db.prepare(`
-    SELECT d.number, d.customer_id, c.name AS customer_name
-      FROM ${entry.table} d LEFT JOIN customers c ON c.id = d.customer_id
-     WHERE d.id = ?`).get(id) as
-    | { number: string; customer_id: number; customer_name: string | null }
-    | undefined;
-  if (!row || !canAccessCustomer(req, row.customer_id)) return res.status(404).json({ error: 'Document not found' });
+  // A supplier document has no customer to join or to scope by; it is guarded
+  // by role instead, and 404 rather than 403 so an id cannot be probed for —
+  // the rule every out-of-scope read in this app follows.
+  const supplierSide = 'party' in entry && entry.party === 'supplier';
+  if ('managerOnly' in entry && entry.managerOnly && !isManager(req)) {
+    return res.status(404).json({ error: 'Document not found' });
+  }
+  const row = db.prepare(
+    supplierSide
+      ? `SELECT d.number, NULL AS customer_id, s.name AS party_name
+           FROM ${entry.table} d LEFT JOIN suppliers s ON s.id = d.supplier_id
+          WHERE d.id = ?`
+      : `SELECT d.number, d.customer_id, c.name AS party_name
+           FROM ${entry.table} d LEFT JOIN customers c ON c.id = d.customer_id
+          WHERE d.id = ?`
+  ).get(id) as { number: string; customer_id: number | null; party_name: string | null } | undefined;
+  if (!row) return res.status(404).json({ error: 'Document not found' });
+  if (!supplierSide && !canAccessCustomer(req, row.customer_id as number)) {
+    return res.status(404).json({ error: 'Document not found' });
+  }
 
   // Documents that have not been approved are watermarked, so an unapproved
   // draft can be previewed but never passed off as a final document.
@@ -107,7 +136,7 @@ pdfRouter.get('/:type/:id', async (req: AuthedRequest, res) => {
 
   try {
     const buffer = await renderPdf(entry.build(id), watermark);
-    const filename = pdfFilename([DOC_LABEL[type], row.customer_name ?? undefined, row.number, revision]);
+    const filename = pdfFilename([DOC_LABEL[type], row.party_name ?? undefined, row.number, revision]);
     res.setHeader('Content-Type', 'application/pdf');
     const disposition = req.query.download === '1' ? 'attachment' : 'inline';
     res.setHeader('Content-Disposition', contentDisposition(disposition, filename));

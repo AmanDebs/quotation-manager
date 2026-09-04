@@ -1,6 +1,9 @@
 import { db } from '../db/connection.js';
 import { round2 } from './totals.js';
 import { requirementFor } from './recipe.js';
+// The only place allowed to answer how far along an order line is, so the
+// order-book basis asks it rather than walking the same tables again.
+import { orderLines } from './orderLines.js';
 
 /**
  * How much material there is, and how much is short.
@@ -129,23 +132,63 @@ export interface ShortfallRow {
 
 export interface Shortfall {
   rows: ShortfallRow[];
-  /** Open jobs whose product has no recipe, so nothing could be worked out. */
+  /** Jobs or order lines whose product has no recipe, so nothing could be worked out. */
   uncosted: { id: number; number: string; description: string }[];
+  basis: ShortfallBasis;
 }
 
 /**
- * What the open order book needs against what we have.
+ * Which question is being asked.
  *
- * Requirement counts what is **still to make** on each open job — planned
- * minus produced — because material for pieces already moulded has been
- * consumed, not reserved. Counting the whole plan again would order resin
- * twice for a job that is nearly finished.
+ * `jobs` is what the floor has been told to make and has not yet made.
+ * `orders` is what the customers have actually ordered and not yet been made —
+ * which is the same figure one step earlier, before anybody has raised a work
+ * order, and is what the buyer needs to commit to resin ahead of the plan.
  *
- * Jobs whose product has no recipe are listed separately rather than treated
- * as needing nothing. A shortfall report that quietly ignores half the floor
- * is worse than no report.
+ * They are alternatives, never added: `orders` already contains `jobs`, since
+ * a planned-but-unmade piece is also an ordered-but-unmade one.
  */
-export function shortfall(locationId?: number | null): Shortfall {
+export type ShortfallBasis = 'jobs' | 'orders';
+
+/**
+ * What is still to be made needs against what we have.
+ *
+ * Requirement counts what is **still to make** — made subtracted from what was
+ * asked for — because material for pieces already moulded has been consumed,
+ * not reserved. Counting the whole figure again would order resin twice for
+ * something nearly finished.
+ *
+ * On the `orders` basis the question is asked one step earlier, of the order
+ * book rather than of the jobs raised from it: ordered minus produced, over
+ * the goods lines of orders that are still open. Charge lines never appear —
+ * `orderLines` drops them at the source, the way `goodsOnly()` does — and the
+ * quantities come from that service rather than from a second walk of the same
+ * tables, because it is the only place allowed to answer how far along a line
+ * is.
+ *
+ * Whatever the basis, anything whose product has no recipe is listed
+ * separately rather than treated as needing nothing. A shortfall report that
+ * quietly ignores half the floor is worse than no report.
+ */
+/*
+ * The default stays , which is what every existing caller means: the
+ * dashboard's "materials short" chip has counted open work orders since it was
+ * written, and changing what a figure counts without changing its words is how
+ * a number quietly stops meaning what its reader thinks. The buying screen asks
+ * for  explicitly and says on screen which question it answered.
+ */
+/*
+ * The default stays `jobs`, which is what every caller written before this
+ * meant: the dashboard's "materials short" chip has counted open work orders
+ * since it was written, and changing what a figure counts without changing its
+ * words is how a number quietly stops meaning what its reader thinks. The
+ * buying screen asks for `orders` explicitly, and says which it answered.
+ */
+export function shortfall(locationId?: number | null, basis: ShortfallBasis = 'jobs'): Shortfall {
+  return basis === 'orders' ? fromOrderBook(locationId) : fromJobs(locationId);
+}
+
+function fromJobs(locationId?: number | null): Shortfall {
   const jobs = db.prepare(
     `SELECT w.id, w.number, w.description, w.product_id, w.qty_planned,
             COALESCE((SELECT SUM(e.qty_ok) FROM production_entries e WHERE e.work_order_id = w.id), 0) AS made
@@ -165,22 +208,67 @@ export function shortfall(locationId?: number | null): Shortfall {
       uncosted.push({ id: job.id, number: job.number, description: job.description });
       continue;
     }
-    for (const line of lines) {
-      const seen = required.get(line.material_id);
-      if (seen) seen.required = round2(seen.required + line.qty);
-      else required.set(line.material_id, {
-        material_id: line.material_id,
-        material_name: line.name,
-        unit: line.unit,
-        category: line.category,
-        required: line.qty,
-        on_hand: 0,
-        on_order: 0,
-        short: 0,
-      });
-    }
+    for (const line of lines) addRequirement(required, line);
   }
 
+  return finish(required, uncosted, locationId, 'jobs');
+}
+
+/**
+ * The same arithmetic, asked of the order book.
+ *
+ * `ordered − made` per line, which is exactly `planned − produced` plus the
+ * part nobody has raised a job for yet. A line with nothing left to make
+ * contributes nothing rather than a negative.
+ */
+function fromOrderBook(locationId?: number | null): Shortfall {
+  const lines = orderLines({ openOnly: true });
+  const required = new Map<number, ShortfallRow>();
+  const uncosted: Shortfall['uncosted'] = [];
+
+  for (const line of lines) {
+    const remaining = Math.max(0, Number(line.ordered) - Number(line.made));
+    if (remaining <= 0) continue;
+    const { hasRecipe, lines: needs } = requirementFor(line.product_id, remaining);
+    if (!hasRecipe) {
+      uncosted.push({
+        id: line.order_id,
+        number: line.order_number,
+        description: line.description,
+      });
+      continue;
+    }
+    for (const need of needs) addRequirement(required, need);
+  }
+  return finish(required, uncosted, locationId, 'orders');
+}
+
+/** One material's need, folded into the running total. */
+function addRequirement(
+  required: Map<number, ShortfallRow>,
+  line: { material_id: number; name: string; unit: string; category: string; qty: number }
+) {
+  const seen = required.get(line.material_id);
+  if (seen) seen.required = round2(seen.required + line.qty);
+  else required.set(line.material_id, {
+    material_id: line.material_id,
+    material_name: line.name,
+    unit: line.unit,
+    category: line.category,
+    required: line.qty,
+    on_hand: 0,
+    on_order: 0,
+    short: 0,
+  });
+}
+
+/** What we have, taken off what is needed — shared by both bases. */
+function finish(
+  required: Map<number, ShortfallRow>,
+  uncosted: Shortfall['uncosted'],
+  locationId: number | null | undefined,
+  basis: ShortfallBasis
+): Shortfall {
   const pending = onOrder();
   const rows = [...required.values()].map((r) => {
     const have = onHand(r.material_id, locationId ?? undefined);
@@ -195,5 +283,9 @@ export function shortfall(locationId?: number | null): Shortfall {
     };
   });
 
-  return { rows: rows.sort((a, b) => b.short - a.short || a.material_name.localeCompare(b.material_name)), uncosted };
+  return {
+    rows: rows.sort((a, b) => b.short - a.short || a.material_name.localeCompare(b.material_name)),
+    uncosted,
+    basis,
+  };
 }

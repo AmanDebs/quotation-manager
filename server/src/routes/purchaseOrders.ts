@@ -185,6 +185,9 @@ purchaseOrdersRouter.get('/prefill/from-shortfall', (req, res) => {
     locationId: numOrNull(req.query.location_id),
     supplierId: numOrNull(req.query.supplier_id),
     date: new Date().toISOString().slice(0, 10),
+    // `?basis=jobs` asks what the work orders raised so far are short of;
+    // the default asks it of the order book, before the jobs exist.
+    basis: req.query.basis === 'jobs' ? 'jobs' : 'orders',
   }));
 });
 
