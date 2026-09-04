@@ -10,9 +10,11 @@ import { parseWorkbook, splitHeader, splitAt, type Sheet } from './spreadsheet.j
  * exactly what gets saved.
  */
 
+import { guessProductType, type ProductType } from './productType.js';
+
 export interface FieldSpec {
   key: 'name' | 'description' | 'hsn_code' | 'unit' | 'unit_price' | 'country_of_origin' | 'color'
-     | 'pcs_per_pack' | 'qty_20ft' | 'qty_40ft';
+     | 'pcs_per_pack' | 'qty_20ft' | 'qty_40ft' | 'product_type' | 'weight_grams';
   label: string;
   required?: boolean;
   numeric?: boolean;
@@ -21,6 +23,19 @@ export interface FieldSpec {
 }
 
 export const IMPORT_FIELDS: FieldSpec[] = [
+  /*
+   * First, and the position is load-bearing rather than tidy.
+   *
+   * Fields are matched in this order and a claimed column joins a `taken` set,
+   * so whoever is declared earlier wins an ambiguous heading. `name` carries
+   * the bare word "product" as a synonym, which partial-matches *Product Type*
+   * — measured against the code as it stood, the headers
+   * ["Item Code", "Product Type", "Colour"] mapped **name** onto the Product
+   * Type column and imported a catalogue of items called "Preform" and "Caps".
+   * Declaring the type first takes that column back, and changes no existing
+   * mapping: "product name" does not contain "type".
+   */
+  { key: 'product_type', label: 'Product Type', synonyms: ['product type', 'item type', 'product category', 'category', 'type'] },
   { key: 'name', label: 'Product Name', required: true, synonyms: ['product name', 'product', 'name', 'item name', 'item', 'sku', 'standard name', 'particulars', 'description of goods'] },
   { key: 'description', label: 'Description', synonyms: ['description', 'details', 'specification', 'spec', 'remarks'] },
   { key: 'hsn_code', label: 'HSN Code', synonyms: ['hsn code', 'hsn/sac', 'hsn', 'hs code', 'hscode'] },
@@ -31,6 +46,10 @@ export const IMPORT_FIELDS: FieldSpec[] = [
   { key: 'qty_40ft', label: 'Boxes per 40ft', numeric: true, synonyms: ['boxes per 40ft', 'boxes 40ft', '40ft', '40 ft', "40'", '40ft container', '40'] },
   { key: 'country_of_origin', label: 'Country of Origin', synonyms: ['country of origin', 'origin', 'country'] },
   { key: 'color', label: 'Colour', synonyms: ['colour', 'color'] },
+  // Not 'weight' alone at the front: a packing sheet's "weight" column is as
+  // often a gross carton weight as a per-piece one, so the explicit headings
+  // score first and the bare word is the last resort.
+  { key: 'weight_grams', label: 'Weight (g/pc)', numeric: true, synonyms: ['weight per piece', 'weight g', 'weight gms', 'wt per pc', 'grams per piece', 'gms', 'grams', 'weight', 'wt'] },
 ];
 
 export type Mapping = Partial<Record<FieldSpec['key'], number>>;
@@ -79,6 +98,7 @@ export interface DraftProduct {
   name: string; description: string; hsn_code: string; unit: string;
   unit_price: number; country_of_origin: string; color: string;
   pcs_per_pack: number | null; qty_20ft: number | null; qty_40ft: number | null;
+  product_type: ProductType; weight_grams: number | null;
 }
 
 /**
@@ -175,6 +195,19 @@ export function buildImport(
       pcs_per_pack: num('pcs_per_pack'),
       qty_20ft: num('qty_20ft'),
       qty_40ft: num('qty_40ft'),
+      /*
+       * Read with the same helper the boot migration uses on a product name, so
+       * "Caps", "cap" and "Preform" need no second vocabulary here, and a cell
+       * saying anything else is 'other'.
+       *
+       * With no type column at all it falls back to the **name**, which is
+       * where this catalogue has always carried it. That is only ever used for
+       * a row being created — an update leaves a stored type alone unless the
+       * sheet actually names one, or re-importing would overwrite by guess
+       * something a person had chosen.
+       */
+      product_type: guessProductType(cell(r, mapping.product_type) || name),
+      weight_grams: num('weight_grams'),
     };
     // Row number as the user sees it in Excel: header row + offset + 1.
     const rowNo = headerRow + 2 + i;

@@ -5,6 +5,7 @@ import path from 'node:path';
 // Pure, no db import — see the note at the top of that file for why it is not
 // part of services/numbering.ts, which imports `db` from here.
 import { defaultPatternsFor, PATTERN_COLUMNS, SCHEMA_DEFAULT_PATTERNS } from '../services/companyPatterns.js';
+import { guessProductType } from '../services/productType.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // DATA_DIR lets deployments (and tests) relocate the database.
@@ -19,11 +20,12 @@ const schema = readFileSync(path.join(__dirname, 'schema.sql'), 'utf-8');
 db.exec(schema);
 
 // Additive migrations for databases created before these columns existed.
-function addColumnIfMissing(table: string, column: string, definition: string) {
+/** Returns true when it actually added the column — see the product_type backfill. */
+function addColumnIfMissing(table: string, column: string, definition: string): boolean {
   const cols = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
-  if (!cols.some((c) => c.name === column)) {
-    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
-  }
+  if (cols.some((c) => c.name === column)) return false;
+  db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  return true;
 }
 addColumnIfMissing('proforma_invoices', 'po_number', "TEXT NOT NULL DEFAULT ''");
 addColumnIfMissing('proforma_invoices', 'po_date', "TEXT NOT NULL DEFAULT ''");
@@ -159,6 +161,42 @@ addColumnIfMissing('commercial_invoices', 'order_id', 'INTEGER');
 addColumnIfMissing('products', 'pcs_per_pack', 'REAL');
 addColumnIfMissing('products', 'qty_20ft', 'REAL');
 addColumnIfMissing('products', 'qty_40ft', 'REAL');
+
+/*
+ * Product type and weight (2026-09), asked for by the user for recipe and
+ * composition planning.
+ *
+ * `weight_grams` is grams per piece, which is also kilograms per 1000 pieces —
+ * the basis this catalogue is quoted, priced and recipe'd on. It is nullable
+ * and nothing fills it in: blank means *not recorded*, which is a different
+ * claim from 0 g, and the Products page reports how many rows are blank rather
+ * than guessing a figure that would flow into material planning looking
+ * authoritative. The names do carry it (`28mm Preform 119g`) — reading it out
+ * of them was considered and rejected for exactly that reason.
+ *
+ * The **type** is guessed, once. Every row would otherwise read *Others*, which
+ * makes the filter useless until somebody has been through ninety products by
+ * hand. The guess runs only on the boot that creates the column, so a
+ * correction made afterwards is never overwritten — the same shape of guard as
+ * `status_before_ordered` and the proforma pass further down this file. A name
+ * matching two of the words stays `other`; see `guessProductType`.
+ */
+addColumnIfMissing('products', 'weight_grams', 'REAL');
+if (addColumnIfMissing('products', 'product_type', "TEXT NOT NULL DEFAULT 'other'")) {
+  const named = db.prepare('SELECT id, name FROM products').all() as { id: number; name: string }[];
+  const setType = db.prepare('UPDATE products SET product_type = ? WHERE id = ?');
+  let guessed = 0;
+  for (const p of named) {
+    const t = guessProductType(p.name);
+    if (t !== 'other') {
+      setType.run(t, Number(p.id));
+      guessed++;
+    }
+  }
+  if (guessed > 0) {
+    console.warn(`products: type guessed from the name for ${guessed} of ${named.length} products.`);
+  }
+}
 
 // Per-line photo (2026-08). Added to every item table, not just quotations:
 // the line-items editor is shared, so a column missing from one table would

@@ -130,6 +130,14 @@ export interface Product {
   image: string; color: string;
   /** Packing defaults, used by the line-item editor and the container planner. */
   pcs_per_pack: number | null; qty_20ft: number | null; qty_40ft: number | null;
+  /** cap | preform | handle | other — the shape of the goods, not a procurement class. */
+  product_type: string;
+  /**
+   * Grams per piece, which is the same number as kilograms per 1000 pieces —
+   * the basis this catalogue is quoted, priced and recipe'd on. Null means not
+   * recorded, which is a different claim from 0 g.
+   */
+  weight_grams: number | null;
 }
 
 /* ---------------- Production masters ---------------- */

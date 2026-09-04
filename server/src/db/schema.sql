@@ -148,6 +148,14 @@ CREATE TABLE IF NOT EXISTS products (
   pcs_per_pack REAL,
   qty_20ft REAL,
   qty_40ft REAL,
+  -- The shape of the goods (cap/preform/handle/other). No CHECK: SQLite
+  -- cannot ALTER one, and a list whose fourth entry is "other" expects to
+  -- grow. Enforced in routes/products.ts, like unit, which has none either.
+  product_type TEXT NOT NULL DEFAULT 'other',
+  -- Grams per piece, which is also kilograms per 1000 pieces -- the basis
+  -- the catalogue is quoted, priced and recipe'd on. Nullable: blank means
+  -- not recorded, which is a different claim from 0 g.
+  weight_grams REAL,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 

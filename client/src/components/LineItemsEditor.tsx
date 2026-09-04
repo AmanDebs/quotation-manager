@@ -5,7 +5,7 @@ import type { LineItem, Product, TaxType, ColumnConfig } from '../types';
 import { Button, Input, Select, SearchSelect, type SearchOption } from './ui';
 import { fmtMoney } from '../lib/format';
 import { shrinkImage } from '../lib/image';
-import { unitOptions } from '../pages/Products';
+import { unitOptions, productTypeLabel } from '../pages/Products';
 
 /**
  * The photo for one line. Clicking the thumbnail replaces it, ✕ clears it.
@@ -174,8 +174,12 @@ export default function LineItemsEditor({
     ...products.map((p) => ({
       value: String(p.id),
       label: p.name,
-      hint: [p.color, p.pcs_per_pack ? `${p.pcs_per_pack}/box` : ''].filter(Boolean).join(' · '),
-      keywords: p.hsn_code,
+      hint: [p.color, p.pcs_per_pack ? `${p.pcs_per_pack}/box` : '', p.weight_grams ? `${p.weight_grams} g` : '']
+        .filter(Boolean).join(' · '),
+      // The type is matched but never drawn, like the HSN: nobody reads
+      // "Preform" off a row they already recognise, but plenty will type it to
+      // see the preforms.
+      keywords: [p.hsn_code, productTypeLabel(p.product_type)].filter(Boolean).join(' '),
     })),
   ], [products]);
   const [expanded, setExpanded] = useState<Set<number>>(new Set());

@@ -82,6 +82,8 @@ const FIELD_LABEL: Record<string, string> = {
   items: 'Line items',
   column_config: 'Columns',
   pcs_per_pack: 'Pieces per box',
+  product_type: 'Product type',
+  weight_grams: 'Weight (g/pc)',
   qty_20ft: 'Boxes per 20ft',
   qty_40ft: 'Boxes per 40ft',
   po_number: 'Their PO number',

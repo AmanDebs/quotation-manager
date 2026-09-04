@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { ImportField, ImportPreview } from '../types';
 import { Button, Select, Modal, ErrorText } from './ui';
+import { productTypeLabel } from '../pages/Products';
 
 const MAX_MB = 8;
 
@@ -197,7 +198,9 @@ export default function ProductImportModal({ onClose }: { onClose: () => void })
                         <th className="px-2 py-1">Row</th>
                         <th className="px-2 py-1">Action</th>
                         <th className="px-2 py-1">Name</th>
+                        <th className="px-2 py-1">Type</th>
                         <th className="px-2 py-1">Colour</th>
+                        <th className="px-2 py-1 text-right">Weight</th>
                         <th className="px-2 py-1 text-right">Pcs/Box</th>
                         <th className="px-2 py-1 text-right">20ft</th>
                         <th className="px-2 py-1 text-right">40ft</th>
@@ -213,7 +216,9 @@ export default function ProductImportModal({ onClose }: { onClose: () => void })
                             {r.action === 'create' ? 'Add' : r.action === 'update' ? 'Update' : 'Skip'}
                           </td>
                           <td className="px-2 py-1">{r.product.name || <span className="text-slate-300">—</span>}</td>
+                          <td className="px-2 py-1">{productTypeLabel(r.product.product_type)}</td>
                           <td className="px-2 py-1">{r.product.color || '—'}</td>
+                          <td className="px-2 py-1 text-right tabular-nums">{r.product.weight_grams ?? '—'}</td>
                           <td className="px-2 py-1 text-right tabular-nums">{r.product.pcs_per_pack ?? '—'}</td>
                           <td className="px-2 py-1 text-right tabular-nums">{r.product.qty_20ft ?? '—'}</td>
                           <td className="px-2 py-1 text-right tabular-nums">{r.product.qty_40ft ?? '—'}</td>

@@ -4,6 +4,7 @@ import { requireManager } from '../middleware/auth.js';
 import { paramsFor } from '../services/qc.js';
 import { IMPORT_FIELDS, buildImport, decodeUpload, identityKey, type BuildOptions } from '../services/productImport.js';
 import { recipeFor } from '../services/recipe.js';
+import { PRODUCT_TYPES, isProductType, guessProductType } from '../services/productType.js';
 import { listBody } from '../services/pagination.js';
 
 export const productsRouter = Router();
@@ -15,10 +16,27 @@ export const productsRouter = Router();
  * open because every document form needs the picker.
  */
 
-const fields = ['name', 'description', 'hsn_code', 'unit', 'unit_price', 'country_of_origin', 'image', 'color'];
-/** Numeric packing fields — kept separate because blank must persist as NULL, not 0. */
-const packingFields = ['pcs_per_pack', 'qty_20ft', 'qty_40ft'] as const;
+const fields = ['name', 'description', 'hsn_code', 'unit', 'unit_price', 'country_of_origin', 'image', 'color', 'product_type'];
+/**
+ * Numeric fields — kept separate because blank must persist as NULL, not 0.
+ * `weight_grams` belongs here for that reason and for one more: the import's
+ * `values()` below picks a row's blank fallback purely by membership in this
+ * list, so a numeric column left out of it would be written as `''`.
+ */
+const packingFields = ['pcs_per_pack', 'qty_20ft', 'qty_40ft', 'weight_grams'] as const;
 const numOrNull = (v: unknown) => (v === '' || v === null || v === undefined || Number.isNaN(Number(v)) ? null : Number(v));
+
+/**
+ * The column carries no CHECK — SQLite cannot ALTER one and this vocabulary
+ * expects to grow — so the enum is enforced here, in the shape `masters.ts`
+ * uses: a sentence naming what is accepted, rather than a constraint failure
+ * arriving as a 500.
+ */
+function typeError(body: Record<string, unknown>): string | null {
+  const t = body.product_type;
+  if (t === undefined || t === null || t === '') return null;
+  return isProductType(t) ? null : `Product type must be one of: ${PRODUCT_TYPES.join(', ')}`;
+}
 
 /** Existing catalogue keyed by product identity — how an import spots duplicates. */
 function existingByIdentity(): Map<string, number> {
@@ -79,14 +97,34 @@ productsRouter.post('/import', requireManager, (req, res) => {
 
   // Columns an import writes: everything except the photo, which a spreadsheet
   // never carries and an update must therefore leave alone.
-  const importCols = ['name', 'description', 'hsn_code', 'unit', 'unit_price', 'country_of_origin', 'color', ...packingFields] as const;
+  const importCols = ['name', 'description', 'hsn_code', 'unit', 'unit_price', 'country_of_origin', 'color', 'product_type', ...packingFields] as const;
+  /*
+   * The same reasoning as the photo, one step further. A row being *updated*
+   * keeps its type and its weight when the sheet has no such column: those two
+   * are filled in by hand or by the boot pass, and a price list — which is what
+   * most of these sheets are — would otherwise blank every one of them on the
+   * next import. Every other column stays unconditional, as it always was: the
+   * sheet is the catalogue's own record of them.
+   */
+  const mapped = (c: string) => {
+    const idx = result.mapping[c as keyof typeof result.mapping];
+    return idx !== undefined && idx >= 0;
+  };
+  const updateCols = importCols.filter((c) =>
+    (c !== 'product_type' && c !== 'weight_grams') || mapped(c));
   const insert = db.prepare(
     `INSERT INTO products (${importCols.join(', ')}) VALUES (${importCols.map(() => '?').join(', ')})`
   );
   const update = db.prepare(
-    `UPDATE products SET ${importCols.map((c) => `${c} = ?`).join(', ')} WHERE id = ?`
+    `UPDATE products SET ${updateCols.map((c) => `${c} = ?`).join(', ')} WHERE id = ?`
   );
-  const values = (p: Record<string, unknown>) => importCols.map((c) => p[c] ?? (packingFields.includes(c as never) ? null : '')) as never[];
+  // A numeric column's blank must persist as NULL: '' is stored as TEXT, is not
+  // NULL, and sorts above every number, so `weight_grams > 0` would be true of
+  // a product that has no weight at all.
+  const valuesFor = (cols: readonly string[]) => (p: Record<string, unknown>) =>
+    cols.map((c) => p[c] ?? (packingFields.includes(c as never) ? null : '')) as never[];
+  const values = valuesFor(importCols);
+  const updateValues = valuesFor(updateCols);
 
   const counts = transaction(() => {
     let created = 0;
@@ -96,7 +134,7 @@ productsRouter.post('/import', requireManager, (req, res) => {
         insert.run(...values(row.product as unknown as Record<string, unknown>));
         created++;
       } else if (row.action === 'update' && row.existingId !== undefined) {
-        update.run(...values(row.product as unknown as Record<string, unknown>), row.existingId);
+        update.run(...updateValues(row.product as unknown as Record<string, unknown>), row.existingId);
         updated++;
       }
     }
@@ -207,16 +245,47 @@ productsRouter.put('/:id/materials', requireManager, (req, res) => {
 
 productsRouter.get('/', (req, res) => {
   const q = String(req.query.q ?? '').trim();
-  res.json(listBody(req.query, {
-    sql: `SELECT * FROM products${q ? ' WHERE name LIKE ? OR hsn_code LIKE ?' : ''}`,
-    order: 'ORDER BY name, id',
-    params: q ? [`%${q}%`, `%${q}%`] : [],
-  }));
+  const type = String(req.query.type ?? '').trim();
+  const missing = String(req.query.missing ?? '').trim();
+
+  const where: string[] = [];
+  const params: unknown[] = [];
+  // Parenthesised, or "type = ? AND name LIKE ? OR hsn LIKE ?" would bind as
+  // "(type AND name) OR hsn" and the search would be a way past the filter —
+  // the same bracket services/search.ts has a test for.
+  if (q) {
+    where.push('(name LIKE ? OR hsn_code LIKE ?)');
+    params.push(`%${q}%`, `%${q}%`);
+  }
+  if (isProductType(type)) {
+    where.push('product_type = ?');
+    params.push(type);
+  }
+  if (missing === 'weight') where.push('weight_grams IS NULL');
+  const sql = `SELECT * FROM products${where.length ? ` WHERE ${where.join(' AND ')}` : ''}`;
+
+  const body = listBody(req.query, { sql, order: 'ORDER BY name, id', params });
+  /*
+   * How many of these have no weight recorded — the answer to "weight is
+   * mandatory" that does not refuse anybody's save. Measured over the whole
+   * filtered set rather than the page, because a page total wearing the words
+   * of a list total is worse than no total (routes/despatches.ts makes the same
+   * call in the same shape). An unpaged request keeps returning a bare array:
+   * /api/products with no page is the line-item picker, and a picker handed an
+   * object instead of a list would show nothing.
+   */
+  if (Array.isArray(body)) return res.json(body);
+  const gaps = db.prepare(
+    `SELECT COUNT(*) AS c FROM (${sql}) WHERE weight_grams IS NULL`
+  ).get(...(params as never[])) as { c: number };
+  res.json({ ...body, summary: { missing_weight: Number(gaps.c) } });
 });
 
 productsRouter.post('/', (req, res) => {
   const body = req.body ?? {};
   if (!body.name) return res.status(400).json({ error: 'Product name is required' });
+  const badType = typeError(body);
+  if (badType) return res.status(400).json({ error: badType });
   const info = db
     .prepare(
       `INSERT INTO products (${fields.join(', ')}, ${packingFields.join(', ')})
@@ -231,6 +300,14 @@ productsRouter.post('/', (req, res) => {
       String(body.country_of_origin ?? 'India'),
       String(body.image ?? ''),
       String(body.color ?? ''),
+      // Weight is deliberately not required: the catalogue on file has ninety
+      // rows without one, and refusing to save would make every edit wait on a
+      // figure nobody has to hand. The list reports the gap instead.
+      //
+      // A type that was *not sent* is read off the name — the form always sends
+      // one, so a person's choice always wins, and it is only silence that gets
+      // guessed. Same helper as the boot pass and the import.
+      String(body.product_type || guessProductType(String(body.name))),
       ...(packingFields.map((f) => numOrNull(body[f])) as never[])
     );
   res.status(201).json(db.prepare('SELECT * FROM products WHERE id = ?').get(Number(info.lastInsertRowid)));
@@ -241,6 +318,8 @@ productsRouter.put('/:id', requireManager, (req, res) => {
   const body = req.body ?? {};
   if (!db.prepare('SELECT id FROM products WHERE id = ?').get(id)) return res.status(404).json({ error: 'Product not found' });
   if (!body.name) return res.status(400).json({ error: 'Product name is required' });
+  const badType = typeError(body);
+  if (badType) return res.status(400).json({ error: badType });
   db.prepare(
     `UPDATE products SET ${[...fields, ...packingFields].map((f) => `${f} = ?`).join(', ')} WHERE id = ?`
   ).run(
@@ -252,6 +331,7 @@ productsRouter.put('/:id', requireManager, (req, res) => {
     String(body.country_of_origin ?? 'India'),
     String(body.image ?? ''),
     String(body.color ?? ''),
+    String(body.product_type || guessProductType(String(body.name))),
     ...(packingFields.map((f) => numOrNull(body[f])) as never[]),
     id
   );
