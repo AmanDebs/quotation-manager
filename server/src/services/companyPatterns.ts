@@ -63,7 +63,7 @@ export function nameTokens(name: string): { slug: string; initials: string } {
 /** Every pattern column, in the order Settings shows them. */
 export const PATTERN_COLUMNS = [
   'quote_pattern', 'pi_pattern', 'pi_export_pattern', 'inv_pattern', 'inv_export_pattern',
-  'pl_pattern', 'order_pattern', 'order_export_pattern', 'wo_pattern', 'po_pattern',
+  'pl_pattern', 'order_pattern', 'order_export_pattern', 'wo_pattern', 'po_pattern', 'po_import_pattern',
 ] as const;
 
 export type PatternColumn = (typeof PATTERN_COLUMNS)[number];
@@ -84,6 +84,7 @@ export const SCHEMA_DEFAULT_PATTERNS: Record<PatternColumn, string> = {
   order_export_pattern: 'SO-EX/{FY}/{SEQ}',
   wo_pattern: 'WO/{FY}/{SEQ}',
   po_pattern: 'PO/{FY}/{SEQ}',
+  po_import_pattern: 'PO-IMP/{FY}/{SEQ}',
 };
 
 /**
@@ -106,5 +107,6 @@ export function defaultPatternsFor(name: string): Record<PatternColumn, string> 
     order_export_pattern: `${slug}/SO-EX/{FY}/{SEQ}`,
     wo_pattern: `${slug}/WO/{FY}/{SEQ}`,
     po_pattern: `${slug}/PO/{FY}/{SEQ}`,
+    po_import_pattern: `${slug}/PO-IMP/{FY}/{SEQ}`,
   };
 }

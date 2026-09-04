@@ -82,6 +82,44 @@ addColumnIfMissing('settings', 'wo_pattern', "TEXT NOT NULL DEFAULT 'WO/{FY}/{SE
 addColumnIfMissing('companies', 'wo_pattern', "TEXT NOT NULL DEFAULT 'WO/{FY}/{SEQ}'");
 addColumnIfMissing('settings', 'po_pattern', "TEXT NOT NULL DEFAULT 'PO/{FY}/{SEQ}'");
 addColumnIfMissing('companies', 'po_pattern', "TEXT NOT NULL DEFAULT 'PO/{FY}/{SEQ}'");
+// Imports get their own series (2026-09), like proformas and invoices do for
+// exports. A purchase from abroad is a different book, and mixing the two would
+// make the numbers untraceable.
+addColumnIfMissing('settings', 'po_import_pattern', "TEXT NOT NULL DEFAULT 'PO-IMP/{FY}/{SEQ}'");
+addColumnIfMissing('companies', 'po_import_pattern', "TEXT NOT NULL DEFAULT 'PO-IMP/{FY}/{SEQ}'");
+
+/*
+ * The purchase order, brought up to the shape of the documents around it
+ * (2026-09), against Aglo's own reference PO.
+ *
+ * The header fields are the ones that document prints and this table had no
+ * column for. `tcs_pct` is a percentage of the whole rather than of a line,
+ * which is why it sits here and not on po_items; `computeTotals` owns the
+ * arithmetic and 0 means the document does not carry it.
+ *
+ * On the items: a **product** as well as a material, because Aglo buys
+ * finished and semi-finished goods in — the reference order is for preforms —
+ * and the three packing columns every other item table already has, so a
+ * piece-priced line derives its quantity the same way here as on a quotation.
+ */
+for (const [col, def] of [
+  ['is_import', 'INTEGER NOT NULL DEFAULT 0'],
+  ['attn', "TEXT NOT NULL DEFAULT ''"],
+  ['vendor_ref', "TEXT NOT NULL DEFAULT ''"],
+  ['ship_to', "TEXT NOT NULL DEFAULT ''"],
+  ['inco_terms', "TEXT NOT NULL DEFAULT ''"],
+  ['transport', "TEXT NOT NULL DEFAULT ''"],
+  ['ship_via', "TEXT NOT NULL DEFAULT ''"],
+  ['packing', "TEXT NOT NULL DEFAULT ''"],
+  ['tcs_pct', 'REAL NOT NULL DEFAULT 0'],
+  ['tcs_amount', 'REAL NOT NULL DEFAULT 0'],
+] as [string, string][]) {
+  addColumnIfMissing('purchase_orders', col, def);
+}
+addColumnIfMissing('po_items', 'product_id', 'INTEGER');
+addColumnIfMissing('po_items', 'packs', 'REAL');
+addColumnIfMissing('po_items', 'pcs_per_pack', 'REAL');
+addColumnIfMissing('po_items', 'total_pcs', 'REAL');
 addColumnIfMissing('packing_list_items', 'hsn_code', "TEXT NOT NULL DEFAULT ''");
 addColumnIfMissing('quotations', 'freight', 'REAL NOT NULL DEFAULT 0');
 addColumnIfMissing('quotations', 'insurance', 'REAL NOT NULL DEFAULT 0');
@@ -484,6 +522,96 @@ const booked = db.prepare(
 ).run();
 if (Number(booked.changes) > 0) {
   console.warn(`proforma_invoices: ${booked.changes} row(s) with an order booked moved to Sales Order Generated.`);
+}
+
+/*
+ * Receipts already booked, given a row of their own (2026-09).
+ *
+ * How much has arrived against a purchase order used to be a sum over
+ * `material_moves` grouped by material — which reported the whole quantity
+ * against *every* line naming that material, and nothing at all against a line
+ * naming none. `po_receipts` answers it per line instead. Movements booked
+ * before that table existed have no row in it, so a purchase order on file
+ * would read as nothing received.
+ *
+ * Which line a delivery was against was never recorded, because nothing could
+ * record it, so it has to be inferred. A movement is **allocated across that
+ * order's lines for that material, earliest line first, capped at what each
+ * line ordered** — the rule `services/receivables.ts` already uses to spread an
+ * advance across the invoices raised from a proforma, and for the same reason:
+ * it is the reading a person would give, and it is the only one that does not
+ * report a line as over-delivered while the next reads as never delivered.
+ * Putting the whole quantity on the first matching line was tried and is worse:
+ * measured on a three-line order, it read 1600 received against a line that
+ * ordered 1000 and nothing against the line that took the other 600. Anything
+ * over the total ordered lands on the last of those lines rather than being
+ * dropped, because a delivery that happened is a fact.
+ *
+ * Idempotent by construction, in the shape the company-patterns pass uses: it
+ * runs only while po_receipts is empty, and after it runs it is not.
+ */
+{
+  const already = db.prepare('SELECT COUNT(*) AS c FROM po_receipts').get() as { c: number };
+  if (Number(already.c) === 0) {
+    const moves = db.prepare(
+      `SELECT mm.po_id, mm.material_id, mm.date, mm.qty, mm.location_id, mm.note, mm.created_by
+         FROM material_moves mm
+        WHERE mm.source = 'po_receipt' AND mm.po_id IS NOT NULL
+        ORDER BY mm.date, mm.id`
+    ).all() as {
+      po_id: number; material_id: number; date: string;
+      qty: number; location_id: number | null; note: string; created_by: number | null;
+    }[];
+    if (moves.length) {
+      const linesOf = db.prepare(
+        'SELECT sort_order, COALESCE(qty, 0) AS qty FROM po_items WHERE po_id = ? AND material_id = ? ORDER BY sort_order, id'
+      );
+      const ins = db.prepare(
+        `INSERT INTO po_receipts (po_id, po_line, date, qty, location_id, note, created_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
+      );
+      // How much of each line is still unaccounted for, as the movements are
+      // walked in date order.
+      const room = new Map<string, { line: number; left: number }[]>();
+      let written = 0;
+      for (const m of moves) {
+        const key = `${m.po_id}|${m.material_id}`;
+        if (!room.has(key)) {
+          const lines = linesOf.all(Number(m.po_id), Number(m.material_id)) as { sort_order: number; qty: number }[];
+          room.set(key, lines.map((l) => ({ line: Number(l.sort_order), left: Number(l.qty) })));
+        }
+        const slots = room.get(key)!;
+        const write = (line: number, qty: number) => {
+          ins.run(
+            Number(m.po_id), line, String(m.date), qty,
+            m.location_id === null ? null : Number(m.location_id),
+            String(m.note ?? ''), m.created_by === null ? null : Number(m.created_by)
+          );
+          written++;
+        };
+        if (!slots.length) {
+          // The line was edited away after the delivery. Position 0 keeps the
+          // record rather than losing it.
+          write(0, Number(m.qty));
+          continue;
+        }
+        let rest = Number(m.qty);
+        for (const slot of slots) {
+          if (rest <= 0) break;
+          const take = Math.min(slot.left, rest);
+          if (take > 0) {
+            write(slot.line, take);
+            slot.left -= take;
+            rest -= take;
+          }
+        }
+        if (rest > 0) write(slots[slots.length - 1].line, rest);
+      }
+      console.warn(
+        `po_receipts: ${moves.length} delivery/deliveries already booked were spread over ${written} line(s).`
+      );
+    }
+  }
 }
 
 // Starter note presets so the feature is useful immediately.

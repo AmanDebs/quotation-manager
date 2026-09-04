@@ -34,6 +34,11 @@ export interface Totals {
   items: ComputedItem[];
   subtotal: number;
   tax_total: number;
+  /**
+   * Tax collected at source. 0 on every document that does not ask for it,
+   * which today is everything except a purchase order — see `tcsPct` below.
+   */
+  tcs_amount: number;
   grand_total: number;
 }
 
@@ -96,12 +101,25 @@ export function billedQty(it: Pick<LineItemInput, 'qty' | 'unit' | 'total_pcs' |
  * INR grand totals are rounded to the whole rupee (Indian "round off" practice);
  * PDFs derive the round-off line from the difference vs the components.
  */
+/**
+ * `tcsPct` is tax collected at source, and it is the one figure here charged on
+ * the whole document rather than on a line — a percentage of the taxable value
+ * plus the tax on it, which is how it is stated on Aglo's own purchase orders.
+ * It therefore has no home on `tax_pct`, which is per line and per rate.
+ *
+ * It defaults to 0, and at 0 every figure this function returns is what it
+ * returned before TCS existed: no document already raised moves when it is next
+ * saved. There is a test asserting exactly that across the combination matrix,
+ * because "strictly additive" is the kind of claim that is easy to make and
+ * expensive to be wrong about.
+ */
 export function computeTotals(
   items: LineItemInput[],
   taxType: 'none' | 'cgst_sgst' | 'igst',
   freight = 0,
   insurance = 0,
-  currency = ''
+  currency = '',
+  tcsPct = 0
 ): Totals {
   const computed: ComputedItem[] = items.map((it) => {
     // Derived, then stamped back onto the row, so what is stored can never
@@ -162,7 +180,12 @@ export function computeTotals(
     tax_total = round2(onItems + onCharges);
   }
 
-  let grand_total = round2(taxable + tax_total);
+  // Charged on the taxable value *and* the tax on it, which is what the
+  // reference document adds up to. Rounded on its own before it is added, so
+  // the figure printed on the TCS line is the figure in the total.
+  const tcs_amount = tcsPct > 0 ? round2((taxable + tax_total) * (tcsPct / 100)) : 0;
+
+  let grand_total = round2(taxable + tax_total + tcs_amount);
   if (currency === 'INR') grand_total = Math.round(grand_total);
-  return { items: computed, subtotal, tax_total, grand_total };
+  return { items: computed, subtotal, tax_total, tcs_amount, grand_total };
 }

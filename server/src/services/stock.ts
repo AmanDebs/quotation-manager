@@ -80,7 +80,32 @@ export function onOrder(materialId?: number): Map<number, number> {
   return out;
 }
 
-/** What has been received against one purchase order, per material. */
+/**
+ * What has been received against one purchase order, **per line**.
+ *
+ * The question used to be answered by grouping the ledger on `material_id`,
+ * which was wrong in two directions at once: two lines of the same material
+ * each reported the whole delivered quantity, and a line naming no material
+ * reported nothing for ever. `po_receipts` records the line a delivery was
+ * against, so the answer is per line and a product line has progress at all.
+ *
+ * The key is the line's **position**, because saving a purchase order deletes
+ * and reinserts its lines — see the note on the table in schema.sql.
+ */
+export function receivedByLine(poId: number): Map<number, number> {
+  const rows = db.prepare(
+    'SELECT po_line, SUM(qty) AS q FROM po_receipts WHERE po_id = ? GROUP BY po_line'
+  ).all(poId) as { po_line: number; q: number }[];
+  return new Map(rows.map((r) => [Number(r.po_line), round2(r.q)]));
+}
+
+/**
+ * What has been received against one purchase order, per material.
+ *
+ * Still read from the ledger, and still the right source for the stock-side
+ * question `onOrder` asks — a material line writes both records in one
+ * transaction, so the two can only agree.
+ */
 export function receivedByPo(poId: number): Map<number, number> {
   const rows = db.prepare(
     `SELECT material_id, SUM(qty) AS q FROM material_moves

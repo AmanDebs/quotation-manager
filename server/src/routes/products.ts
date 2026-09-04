@@ -348,8 +348,12 @@ productsRouter.delete('/:id', requireManager, (req, res) => {
     `SELECT (SELECT COUNT(*) FROM quotation_items WHERE product_id = ?) +
             (SELECT COUNT(*) FROM order_items WHERE product_id = ?) +
             (SELECT COUNT(*) FROM pi_items WHERE product_id = ?) +
-            (SELECT COUNT(*) FROM invoice_items WHERE product_id = ?) AS c`
-  ).get(id, id, id, id) as { c: number };
+            (SELECT COUNT(*) FROM invoice_items WHERE product_id = ?) +
+            -- A purchase order line can name a product too, since Aglo buys
+            -- finished and semi-finished goods in as well as resin. Without
+            -- this the delete orphans the line and reaches the user as a 500.
+            (SELECT COUNT(*) FROM po_items WHERE product_id = ?) AS c`
+  ).get(id, id, id, id, id) as { c: number };
   if (used.c > 0) {
     return res.status(409).json({ error: 'This product is used on existing documents and cannot be deleted' });
   }

@@ -64,6 +64,7 @@ CREATE TABLE IF NOT EXISTS companies (
   order_export_pattern TEXT NOT NULL DEFAULT 'SO-EX/{FY}/{SEQ}',
   wo_pattern TEXT NOT NULL DEFAULT 'WO/{FY}/{SEQ}',
   po_pattern TEXT NOT NULL DEFAULT 'PO/{FY}/{SEQ}',
+  po_import_pattern TEXT NOT NULL DEFAULT 'PO-IMP/{FY}/{SEQ}',
   -- The one a document falls back to when neither it nor its customer names one.
   is_default INTEGER NOT NULL DEFAULT 0,
   active INTEGER NOT NULL DEFAULT 1,
@@ -106,6 +107,7 @@ CREATE TABLE IF NOT EXISTS settings (
   order_export_pattern TEXT NOT NULL DEFAULT 'SO-EX/{FY}/{SEQ}',
   wo_pattern TEXT NOT NULL DEFAULT 'WO/{FY}/{SEQ}',
   po_pattern TEXT NOT NULL DEFAULT 'PO/{FY}/{SEQ}',
+  po_import_pattern TEXT NOT NULL DEFAULT 'PO-IMP/{FY}/{SEQ}',
   note_presets TEXT NOT NULL DEFAULT '[]'
 );
 INSERT OR IGNORE INTO settings (id) VALUES (1);
@@ -811,8 +813,27 @@ CREATE TABLE IF NOT EXISTS purchase_orders (
     CHECK (status IN ('draft','sent','part_received','received','cancelled')),
   payment_terms TEXT NOT NULL DEFAULT '',
   notes TEXT NOT NULL DEFAULT '',
+  -- Bought from abroad. Not `is_export`: on a purchase the foreign party is
+  -- the seller, so the word would name the wrong side of the table. It picks
+  -- the import numbering series, and is fixed once a number has been issued.
+  is_import INTEGER NOT NULL DEFAULT 0,
+  -- The header the supplier reads, off Aglo's own purchase order. `ship_to`
+  -- is text rather than the location alone: the plant says where it goes, the
+  -- address says who signs for it, and the two are not always the same words.
+  attn TEXT NOT NULL DEFAULT '',
+  vendor_ref TEXT NOT NULL DEFAULT '',
+  ship_to TEXT NOT NULL DEFAULT '',
+  inco_terms TEXT NOT NULL DEFAULT '',
+  transport TEXT NOT NULL DEFAULT '',
+  ship_via TEXT NOT NULL DEFAULT '',
+  packing TEXT NOT NULL DEFAULT '',
   subtotal REAL NOT NULL DEFAULT 0,
   tax_total REAL NOT NULL DEFAULT 0,
+  -- Tax collected at source: a percentage of the whole, not of a line, which
+  -- is why it is a header field and not a line's tax_pct. computeTotals owns
+  -- the arithmetic; 0 means the document does not carry it and nothing prints.
+  tcs_pct REAL NOT NULL DEFAULT 0,
+  tcs_amount REAL NOT NULL DEFAULT 0,
   grand_total REAL NOT NULL DEFAULT 0,
   created_by INTEGER REFERENCES users(id),
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -821,10 +842,22 @@ CREATE TABLE IF NOT EXISTS purchase_orders (
 CREATE TABLE IF NOT EXISTS po_items (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   po_id INTEGER NOT NULL REFERENCES purchase_orders(id) ON DELETE CASCADE,
+  -- What is being bought. At most one of these is set; neither is a free-text
+  -- line, which has always been legal. A product because Aglo buys finished
+  -- and semi-finished goods in as well as resin — the reference purchase order
+  -- this was built against is for preforms.
   material_id INTEGER REFERENCES materials(id),
+  product_id INTEGER REFERENCES products(id),
   description TEXT NOT NULL DEFAULT '',
   qty REAL,
   unit TEXT NOT NULL DEFAULT 'kg',
+  -- Packing, as the supplier states it: cartons/bags, and what is in one.
+  -- Same three columns and the same meaning as every other item table, so
+  -- billedQty derives the quantity for a piece-priced line exactly as it does
+  -- on a quotation.
+  packs REAL,
+  pcs_per_pack REAL,
+  total_pcs REAL,
   rate REAL NOT NULL DEFAULT 0,
   tax_pct REAL NOT NULL DEFAULT 0,
   amount REAL NOT NULL DEFAULT 0,
@@ -832,6 +865,32 @@ CREATE TABLE IF NOT EXISTS po_items (
 );
 
 CREATE INDEX IF NOT EXISTS idx_po_items_po ON po_items(po_id);
+
+/* What arrived against one purchase order line.
+
+   Two records, one transaction, two different questions: this is *what came in
+   against this order*, and material_moves is *what that did to the stock*.
+   Received is derived from here alone, so the two can never disagree about the
+   first question — and a line naming a product can have progress at all, which
+   it could not while received was a sum over a materials-only ledger.
+
+   Keyed by line **position**, not po_items.id: saving a purchase order deletes
+   and reinserts every line, so a row id does not survive an edit. Position
+   matching is this codebase's rule everywhere else — work_orders.order_line,
+   dispatchProgress, syncPackingList. */
+CREATE TABLE IF NOT EXISTS po_receipts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  po_id INTEGER NOT NULL REFERENCES purchase_orders(id) ON DELETE CASCADE,
+  po_line INTEGER NOT NULL DEFAULT 0,
+  date TEXT NOT NULL,
+  qty REAL NOT NULL,
+  location_id INTEGER REFERENCES locations(id),
+  note TEXT NOT NULL DEFAULT '',
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_po_receipts_po ON po_receipts(po_id);
 
 -- The ledger. `qty` is signed: positive in, negative out. How much has been
 -- received against a purchase order is therefore a sum over these rows, not a

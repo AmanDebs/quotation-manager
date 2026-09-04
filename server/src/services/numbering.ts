@@ -43,16 +43,27 @@ export function fiscalYearOf(date?: string | null): { start: number; label: stri
   return { start, label: `${String(start).slice(2)}-${String(start + 1).slice(2)}` };
 }
 
-const patternColumn: Record<DocType, { std: string; export?: string }> = {
+/**
+ * Which pattern each document type numbers from, and — where it has a second
+ * series — the column that says so and the word for it.
+ *
+ * The second series is *export* on the three selling documents and **import**
+ * on the purchase order, because on a purchase the foreign party is the seller.
+ * The flag and the wording are carried here rather than assumed, or a purchase
+ * order would be refused with a sentence about the export series it has never
+ * had, and `exportChangeError` would read an `is_export` column that does not
+ * exist on that table.
+ */
+const patternColumn: Record<DocType, { std: string; export?: string; flag?: string; altWord?: string }> = {
   quotation: { std: 'quote_pattern' },
-  order: { std: 'order_pattern', export: 'order_export_pattern' },
-  proforma: { std: 'pi_pattern', export: 'pi_export_pattern' },
-  invoice: { std: 'inv_pattern', export: 'inv_export_pattern' },
+  order: { std: 'order_pattern', export: 'order_export_pattern', flag: 'is_export', altWord: 'export' },
+  proforma: { std: 'pi_pattern', export: 'pi_export_pattern', flag: 'is_export', altWord: 'export' },
+  invoice: { std: 'inv_pattern', export: 'inv_export_pattern', flag: 'is_export', altWord: 'export' },
   packing_list: { std: 'pl_pattern' },
   // Internal, so no export/domestic split — the floor does not care who the
   // buyer is, and a second series would only make the numbers harder to trace.
   work_order: { std: 'wo_pattern' },
-  purchase_order: { std: 'po_pattern' },
+  purchase_order: { std: 'po_pattern', export: 'po_import_pattern', flag: 'is_import', altWord: 'import' },
 };
 
 /**
@@ -136,16 +147,18 @@ function applyPattern(pattern: string, seq: number, fyLabel = fiscalYear()): str
  */
 export function exportChangeError(
   docType: DocType,
-  existing: { is_export?: unknown; number?: unknown },
-  bodyIsExport: unknown
+  existing: Record<string, unknown>,
+  bodyFlag: unknown
 ): string | null {
-  if (bodyIsExport === undefined || bodyIsExport === null) return null;
-  if (!patternColumn[docType].export) return null;
-  const before = Number(existing.is_export) ? 1 : 0;
-  const after = Number(bodyIsExport) ? 1 : 0;
+  if (bodyFlag === undefined || bodyFlag === null) return null;
+  const cols = patternColumn[docType];
+  if (!cols.export || !cols.flag) return null;
+  const before = Number(existing[cols.flag]) ? 1 : 0;
+  const after = Number(bodyFlag) ? 1 : 0;
   if (before === after) return null;
-  const was = before ? 'export' : 'domestic';
-  return `This document was numbered ${String(existing.number ?? '')} from the ${was} series, so it cannot be switched to ${before ? 'domestic' : 'export'}. Raise a new document of the right type, or change the Number by hand if the series itself is wrong.`;
+  const alt = cols.altWord ?? 'export';
+  const was = before ? alt : 'domestic';
+  return `This document was numbered ${String(existing.number ?? '')} from the ${was} series, so it cannot be switched to ${before ? 'domestic' : alt}. Raise a new document of the right type, or change the Number by hand if the series itself is wrong.`;
 }
 
 export const seriesKey = (docType: DocType, isExport: boolean): string =>
