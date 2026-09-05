@@ -541,6 +541,14 @@ export default function DashboardPage() {
    * the picture stays a funnel while the percentage underneath still reports
    * what actually happened.
    */
+  /*
+   * Whether any stage is bigger than the one before it. The geometry hides
+   * this — it is clamped so the funnel only narrows — so without a word
+   * somewhere the reader sees a shape that gets smaller above a number that
+   * says 150% and concludes the chart is broken. It is not: it means work
+   * arrived without the step before it.
+   */
+  const funnelGains = funnelStages.some((st, i) => i > 0 && st.value > funnelStages[i - 1].value);
   const funnelHeights = funnelStages.reduce<number[]>((acc, stage) => {
     const want = Math.max(0.08, stage.value / funnelMax);
     acc.push(Math.min(want, acc.length ? acc[acc.length - 1] : 1));
@@ -1142,6 +1150,12 @@ export default function DashboardPage() {
               })}
             </div>
           )}
+          {funnelGains && (
+            <p className="mt-2 text-xs text-slate-400">
+              A stage above 100% had more come in than the step before it — an order booked without a
+              quotation, for instance. The shape still narrows, so it stays readable as a funnel.
+            </p>
+          )}
         </Card>
       ),
     },
@@ -1210,13 +1224,39 @@ export default function DashboardPage() {
                   {activity.map((r) => (
                     <DrillRow key={r.user_id} to="/followups">
                       <td className="py-1.5 pr-3">{r.name}</td>
-                      <td className="py-1.5 pr-3 text-right tabular-nums">{r.followups || '—'}</td>
-                      <td className="py-1.5 pr-3 text-right tabular-nums">{r.customers || '—'}</td>
-                      <td className="py-1.5 text-right tabular-nums">{r.quotations || '—'}</td>
+                      {/*
+                        * A muted **0**, not an em-dash. The dash was read as
+                        * missing data on the first screen it appeared on, and
+                        * it is not: nobody closed a follow-up in this period is
+                        * a fact, and the figure that says so should look like a
+                        * figure. The footnote below covers the one case where
+                        * the data really is absent rather than zero.
+                        */}
+                      <td className="py-1.5 pr-3 text-right tabular-nums">
+                        {r.followups || <span className="text-slate-300">0</span>}
+                      </td>
+                      <td className="py-1.5 pr-3 text-right tabular-nums">
+                        {r.customers || <span className="text-slate-300">0</span>}
+                      </td>
+                      <td className="py-1.5 text-right tabular-nums">
+                        {r.quotations || <span className="text-slate-300">0</span>}
+                      </td>
                     </DrillRow>
                   ))}
                 </tbody>
               </table>
+              {/*
+                * Only while the Chased column is empty for everybody, which is
+                * what "the tracking is new" looks like from here. Once one
+                * follow-up has been closed the column speaks for itself and the
+                * note would just be clutter.
+                */}
+              {activity.every((r) => r.followups === 0) && (
+                <p className="mt-2 text-xs text-slate-400">
+                  Chases have counted here only since follow-up tracking was added — anything closed
+                  before that carries no author, so it is absent rather than zero.
+                </p>
+              )}
             </div>
           )}
         </Card>
