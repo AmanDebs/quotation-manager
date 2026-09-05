@@ -1,4 +1,31 @@
+/** The legacy role, still sent and still meaning "is the super admin". */
 export type Role = 'manager' | 'employee';
+
+/** The five teams. Mirrors `services/permissions.ts` on the server. */
+export type TeamRole = 'super_admin' | 'sales' | 'logistics' | 'production' | 'quality';
+
+export const TEAM_ROLES: { value: TeamRole; label: string }[] = [
+  { value: 'super_admin', label: 'Super Admin' },
+  { value: 'sales', label: 'Sales' },
+  { value: 'logistics', label: 'Logistics' },
+  { value: 'production', label: 'Production' },
+  { value: 'quality', label: 'Quality' },
+];
+
+export const teamRoleLabel = (v: string | undefined | null): string =>
+  TEAM_ROLES.find((r) => r.value === v)?.label ?? '—';
+
+export type Level = 'none' | 'view' | 'full';
+
+/**
+ * What this user may do, computed by the server and sent with `/auth/me`.
+ *
+ * **Not** a copy of the access table: there is no shared package between the
+ * two halves, and a copy would be a second policy that drifts from the one
+ * actually enforced. Sent this way it is a fact about this user, and the
+ * client's only use for it is deciding what to draw.
+ */
+export type Capabilities = Record<string, Level>;
 
 /**
  * Which dashboard cards this person keeps, and in what order. Ids not in
@@ -9,6 +36,9 @@ export interface DashboardLayout { hidden: string[]; order: string[] }
 
 export interface User {
   id: number; name: string; email: string; role: Role;
+  team_role?: TeamRole;
+  /** Only sent by /api/auth/me. */
+  can?: Capabilities;
   active?: number; customer_count?: number; created_at?: string;
   /** Only sent by /api/auth/me — the team list has no use for it. */
   dashboard_layout?: DashboardLayout;

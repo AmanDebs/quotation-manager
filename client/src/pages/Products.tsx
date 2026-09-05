@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
-import { useIsManager } from '../App';
+import { useCan } from '../App';
 import type { Product } from '../types';
 import { Button, Input, Textarea, Select, Field, PageHeader, EmptyState, ErrorText, Modal, Card, Pagination, CAPTION_CLASS, TH_CLASS } from '../components/ui';
 import { Icon } from '../components/icons';
@@ -92,7 +92,9 @@ export default function ProductsPage() {
   const [importing, setImporting] = useState(false);
   // Anyone may add a product mid-quotation, but changing or bulk-replacing the
   // shared catalogue moves everyone's prices — that stays with the manager.
-  const isManager = useIsManager();
+  const can = useCan();
+  // the import and edit controls
+  const isManager = can('product','full');
   const list = usePagedList<Product, { missing_weight: number }>(
     ['products', q, type, missing],
     `/api/products?q=${encodeURIComponent(q)}&type=${encodeURIComponent(type)}&missing=${encodeURIComponent(missing)}`

@@ -6,7 +6,7 @@ import {
 } from 'recharts';
 import { api } from '../api/client';
 import type { Followup, DashboardLayout, WorkOrderStatus } from '../types';
-import { useIsManager, useUser, usePatchUser } from '../App';
+import { useCan, useUser, usePatchUser } from '../App';
 import { Button, Card, Input, Select, PageHeader, Modal, CAPTION_CLASS, TH_CLASS } from '../components/ui';
 import { Icon } from '../components/icons';
 import { useCompanies } from '../components/CompanySelect';
@@ -220,7 +220,9 @@ function DrillRow({ to, children }: { to: string; children: ReactNode }) {
 }
 
 export default function DashboardPage() {
-  const isManager = useIsManager();
+  const can = useCan();
+  // the pending-approvals chip
+  const isManager = can('approval');
   const user = useUser();
   const navigate = useNavigate();
   const queryClient = useQueryClient();

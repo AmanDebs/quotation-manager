@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Customer, User } from '../types';
-import { useIsManager } from '../App';
+import { useCan } from '../App';
 import { Button, Input, Textarea, Select, Field, PageHeader, EmptyState, ErrorText, Modal, Card, ExportTabs, Pagination, TH_CLASS } from '../components/ui';
 import CompanySelect, { useCompanies } from '../components/CompanySelect';
 import { useUrlFilter } from '../lib/useUrlFilter';
@@ -16,7 +16,9 @@ const empty: Omit<Customer, 'id'> = {
 
 export default function CustomersPage() {
   const queryClient = useQueryClient();
-  const isManager = useIsManager();
+  const can = useCan();
+  // the owner column pulls the staff list, which is the team function
+  const isManager = can('team');
   const companies = useCompanies();
   // In the URL, so Top Customers on the dashboard can land on one name.
   const [q, setQ] = useUrlFilter('q');

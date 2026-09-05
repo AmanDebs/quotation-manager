@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
-import { useIsManager } from '../App';
+import { useCan } from '../App';
 import type { Location, Supplier, Transporter, Material, Machine, Mould } from '../types';
 import { PageHeader, Tabs } from '../components/ui';
 import MasterList, { type MasterSpec } from '../components/MasterList';
@@ -138,7 +138,9 @@ type TabKey = 'locations' | 'suppliers' | 'transporters' | 'materials' | 'machin
 
 export default function MastersPage() {
   const [tab, setTab] = useState<TabKey>('locations');
-  const isManager = useIsManager();
+  const can = useCan();
+  // canEdit on the six lists
+  const isManager = can('master','full');
 
   // Machines belong to a plant, so their picker needs the location list.
   const { data: locationRows = [] } = useQuery({

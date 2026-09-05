@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { Outlet, Navigate, type RouteObject } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { api, ApiError, setUnauthorizedHandler } from './api/client';
-import type { User } from './types';
+import type { User, Level } from './types';
 import Layout from './components/Layout';
 import LoginPage from './pages/Login';
 import DashboardPage from './pages/Dashboard';
@@ -34,7 +34,25 @@ import SettingsPage from './pages/Settings';
 const UserContext = createContext<User | null>(null);
 /** Current signed-in user; components use this to branch on role. */
 export const useUser = () => useContext(UserContext)!;
+/** Still means "is the super admin" — kept so the screens that read it work. */
 export const useIsManager = () => useContext(UserContext)?.role === 'manager';
+
+const RANK: Record<string, number> = { none: 0, view: 1, full: 2 };
+
+/**
+ * What this user may do.
+ *
+ * Returns a **function** rather than a boolean, because `Layout` filters a
+ * whole nav array and some screens ask about two functions — neither of which
+ * a `useCan(fn, level)` hook could do from inside a callback.
+ *
+ * The map comes from the server with `/auth/me`; the server enforces every one
+ * of these anyway, so this only ever decides what to draw.
+ */
+export function useCan() {
+  const caps = useContext(UserContext)?.can;
+  return (fn: string, need: Level = 'view') => RANK[caps?.[fn] ?? 'none'] >= RANK[need];
+}
 
 /**
  * Update the signed-in user in place.
@@ -117,49 +135,71 @@ function App() {
   );
 }
 
-/**
- * Manager-only pages. This was a closure over `user` inside App; the route
- * table now sits outside it, so the check reads the same context the pages
- * themselves read.
+
+/*
+ * Where a team lands.
+ *
+ * The dashboard is the front door, but not every team has it — Quality does
+ * not, on the client's own matrix — and a team without it would otherwise open
+ * on a page whose every figure answers 403. So the first screen they can
+ * actually use stands in. It cannot be `Needs` doing this: that sends people
+ * home, and home is this.
  */
-function ManagerOnly({ children }: { children: JSX.Element }) {
-  return useIsManager() ? children : <Navigate to="/" replace />;
+const LANDING: [string, string][] = [
+  ['work_order', '/work-orders'],
+  ['dispatch', '/despatches'],
+  ['quotation', '/quotations'],
+  ['order', '/orders'],
+  ['material', '/stock'],
+  ['customer', '/customers'],
+];
+
+function Home() {
+  const can = useCan();
+  if (can('dashboard')) return <DashboardPage />;
+  const first = LANDING.find(([fn]) => can(fn));
+  return first ? <Navigate to={first[1]} replace /> : <DashboardPage />;
+}
+
+/** A page this team may not open at all. Sends them home rather than to a 403. */
+function Needs({ fn, level = 'view', children }: { fn: string; level?: Level; children: JSX.Element }) {
+  return useCan()(fn, level) ? children : <Navigate to="/" replace />;
 }
 
 export const routes: RouteObject[] = [
   {
     element: <App />,
     children: [
-      { path: '/', element: <DashboardPage /> },
-      { path: '/customers', element: <CustomersPage /> },
-      { path: '/products', element: <ProductsPage /> },
-      { path: '/container-planner', element: <ContainerPlannerPage /> },
-      { path: '/enquiries', element: <EnquiriesPage /> },
-      { path: '/quotations', element: <QuotationsPage /> },
-      { path: '/quotations/new', element: <QuotationFormPage /> },
-      { path: '/quotations/:id', element: <QuotationFormPage /> },
-      { path: '/proformas', element: <ProformasPage /> },
-      { path: '/proformas/new', element: <ProformaFormPage /> },
-      { path: '/proformas/:id', element: <ProformaFormPage /> },
-      { path: '/orders', element: <OrdersPage /> },
-      { path: '/orders/new', element: <OrderFormPage /> },
-      { path: '/orders/:id', element: <OrderFormPage /> },
-      { path: '/invoices', element: <InvoicesPage /> },
-      { path: '/invoices/new', element: <InvoiceFormPage /> },
-      { path: '/invoices/:id', element: <InvoiceFormPage /> },
-      { path: '/packing-lists', element: <PackingListsPage /> },
-      { path: '/packing-lists/new', element: <PackingListFormPage /> },
-      { path: '/packing-lists/:id', element: <PackingListFormPage /> },
-      { path: '/followups', element: <FollowupsPage /> },
-      { path: '/work-orders', element: <WorkOrdersPage /> },
-      { path: '/despatches', element: <DespatchesPage /> },
-      { path: '/stock', element: <StockPage /> },
-      { path: '/purchase-orders', element: <ManagerOnly><PurchaseOrdersPage /></ManagerOnly> },
-      { path: '/masters', element: <ManagerOnly><MastersPage /></ManagerOnly> },
-      { path: '/approvals', element: <ManagerOnly><ApprovalsPage /></ManagerOnly> },
-      { path: '/activity', element: <ManagerOnly><ActivityPage /></ManagerOnly> },
-      { path: '/team', element: <ManagerOnly><TeamPage /></ManagerOnly> },
-      { path: '/settings', element: <ManagerOnly><SettingsPage /></ManagerOnly> },
+      { path: '/', element: <Home /> },
+      { path: '/customers', element: <Needs fn="customer"><CustomersPage /></Needs> },
+      { path: '/products', element: <Needs fn="product"><ProductsPage /></Needs> },
+      { path: '/container-planner', element: <Needs fn="product"><ContainerPlannerPage /></Needs> },
+      { path: '/enquiries', element: <Needs fn="enquiry"><EnquiriesPage /></Needs> },
+      { path: '/quotations', element: <Needs fn="quotation"><QuotationsPage /></Needs> },
+      { path: '/quotations/new', element: <Needs fn="quotation"><QuotationFormPage /></Needs> },
+      { path: '/quotations/:id', element: <Needs fn="quotation"><QuotationFormPage /></Needs> },
+      { path: '/proformas', element: <Needs fn="proforma"><ProformasPage /></Needs> },
+      { path: '/proformas/new', element: <Needs fn="proforma"><ProformaFormPage /></Needs> },
+      { path: '/proformas/:id', element: <Needs fn="proforma"><ProformaFormPage /></Needs> },
+      { path: '/orders', element: <Needs fn="order"><OrdersPage /></Needs> },
+      { path: '/orders/new', element: <Needs fn="order"><OrderFormPage /></Needs> },
+      { path: '/orders/:id', element: <Needs fn="order"><OrderFormPage /></Needs> },
+      { path: '/invoices', element: <Needs fn="invoice"><InvoicesPage /></Needs> },
+      { path: '/invoices/new', element: <Needs fn="invoice"><InvoiceFormPage /></Needs> },
+      { path: '/invoices/:id', element: <Needs fn="invoice"><InvoiceFormPage /></Needs> },
+      { path: '/packing-lists', element: <Needs fn="packing_list"><PackingListsPage /></Needs> },
+      { path: '/packing-lists/new', element: <Needs fn="packing_list"><PackingListFormPage /></Needs> },
+      { path: '/packing-lists/:id', element: <Needs fn="packing_list"><PackingListFormPage /></Needs> },
+      { path: '/followups', element: <Needs fn="followup"><FollowupsPage /></Needs> },
+      { path: '/work-orders', element: <Needs fn="work_order"><WorkOrdersPage /></Needs> },
+      { path: '/despatches', element: <Needs fn="dispatch"><DespatchesPage /></Needs> },
+      { path: '/stock', element: <Needs fn="material"><StockPage /></Needs> },
+      { path: '/purchase-orders', element: <Needs fn="purchasing"><PurchaseOrdersPage /></Needs> },
+      { path: '/masters', element: <Needs fn="master"><MastersPage /></Needs> },
+      { path: '/approvals', element: <Needs fn="approval"><ApprovalsPage /></Needs> },
+      { path: '/activity', element: <Needs fn="audit"><ActivityPage /></Needs> },
+      { path: '/team', element: <Needs fn="team"><TeamPage /></Needs> },
+      { path: '/settings', element: <Needs fn="settings"><SettingsPage /></Needs> },
       { path: '*', element: <Navigate to="/" replace /> },
     ],
   },

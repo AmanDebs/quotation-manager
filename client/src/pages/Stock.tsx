@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
-import { useIsManager } from '../App';
+import { useCan } from '../App';
 import type { StockRow, MaterialMove, Shortfall, Material, Location } from '../types';
 import { PageHeader, Card, Tabs, Select, Input, Field, Button, EmptyState, ErrorText, Modal } from '../components/ui';
 import { fmtQty, fmtMoney, fmtDate, today } from '../lib/format';
@@ -24,7 +24,9 @@ export default function StockPage() {
   const [tab, setTab] = useState<'on-hand' | 'shortfall' | 'moves'>('on-hand');
   const [location, setLocation] = useState('');
   const [adjusting, setAdjusting] = useState(false);
-  const isManager = useIsManager();
+  const can = useCan();
+  // the opening/adjustment button
+  const isManager = can('material','full');
 
   const { data: locations = [] } = useQuery({ queryKey: ['master', 'locations', false], queryFn: () => api.get<Location[]>('/api/locations') });
   const { data: rows = [] } = useQuery({

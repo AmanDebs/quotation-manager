@@ -1,11 +1,12 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
-import type { User, Role } from '../types';
+import type { User, TeamRole } from '../types';
+import { TEAM_ROLES, teamRoleLabel } from '../types';
 import { useUser } from '../App';
 import { Button, Input, Select, Field, PageHeader, EmptyState, ErrorText, Modal, Card } from '../components/ui';
 
-interface Draft { id?: number; name: string; email: string; password: string; role: Role }
+interface Draft { id?: number; name: string; email: string; password: string; team_role: TeamRole }
 
 export default function TeamPage() {
   const me = useUser();
@@ -17,7 +18,7 @@ export default function TeamPage() {
   const save = useMutation({
     mutationFn: (d: Draft) =>
       d.id
-        ? api.put<User>(`/api/users/${d.id}`, { name: d.name, email: d.email, role: d.role, ...(d.password ? { password: d.password } : {}) })
+        ? api.put<User>(`/api/users/${d.id}`, { name: d.name, email: d.email, team_role: d.team_role, ...(d.password ? { password: d.password } : {}) })
         : api.post<User>('/api/users', d),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['users'] });
@@ -43,7 +44,7 @@ export default function TeamPage() {
         title="Team"
         subtitle="Employees see only the customers assigned to them; managers see everything and approve documents"
         actions={
-          <Button onClick={() => { save.reset(); setEditing({ name: '', email: '', password: '', role: 'employee' }); }}>
+          <Button onClick={() => { save.reset(); setEditing({ name: '', email: '', password: '', team_role: 'sales' }); }}>
             + Add Employee
           </Button>
         }
@@ -71,11 +72,11 @@ export default function TeamPage() {
                     {u.name}{u.id === me.id && <span className="ml-1 text-xs text-slate-400">(you)</span>}
                   </td>
                   <td className="py-2 pr-3">{u.email}</td>
-                  <td className="py-2 pr-3 capitalize">{u.role}</td>
+                  <td className="py-2 pr-3">{teamRoleLabel(u.team_role)}</td>
                   <td className="py-2 pr-3 text-right">{u.customer_count ?? 0}</td>
                   <td className="py-2 pr-3">{u.active ? 'Active' : 'Deactivated'}</td>
                   <td className="py-2 text-right whitespace-nowrap">
-                    <Button variant="ghost" onClick={() => { save.reset(); setEditing({ id: u.id, name: u.name, email: u.email, password: '', role: u.role }); }}>
+                    <Button variant="ghost" onClick={() => { save.reset(); setEditing({ id: u.id, name: u.name, email: u.email, password: '', team_role: u.team_role ?? 'sales' }); }}>
                       Edit
                     </Button>
                     {u.id !== me.id && (
@@ -112,9 +113,8 @@ export default function TeamPage() {
               <Input type="text" value={editing.password} onChange={(e) => set({ password: e.target.value })} placeholder="At least 6 characters" />
             </Field>
             <Field label="Role">
-              <Select value={editing.role} onChange={(e) => set({ role: e.target.value as Role })}>
-                <option value="employee">Employee — own customers only</option>
-                <option value="manager">Manager — full access and approvals</option>
+              <Select value={editing.team_role} onChange={(e) => set({ team_role: e.target.value as TeamRole })}>
+                {TEAM_ROLES.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
               </Select>
             </Field>
             <p className="text-xs text-slate-400">Share the starting password privately; they can change it later from their own account.</p>

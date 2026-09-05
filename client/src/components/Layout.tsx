@@ -3,9 +3,15 @@ import { NavLink, useLocation } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { User } from '../types';
+import { useCan } from '../App';
 import { Icon, type IconName } from './icons';
 
-interface NavItem { to: string; label: string; icon: IconName; managerOnly?: boolean }
+/**
+ * `needs` is the function this entry belongs to. Every entry carries one — an
+ * entry with none would be visible to every team, which is the wrong default
+ * for a nav that now differs per person.
+ */
+interface NavItem { to: string; label: string; icon: IconName; needs: string }
 
 /**
  * The sidebar, in four groups.
@@ -30,35 +36,35 @@ const NAV: { heading: string; items: NavItem[] }[] = [
     items: [
       // Before quotations: an enquiry is what arrives first, and the desk
       // works down this list in the order the work happens.
-      { to: '/enquiries', label: 'Enquiries', icon: 'enquiry' },
-      { to: '/quotations', label: 'Quotations', icon: 'document' },
-      { to: '/proformas', label: 'Proforma Invoices', icon: 'receipt' },
-      { to: '/orders', label: 'Orders', icon: 'clipboard' },
+      { to: '/enquiries', label: 'Enquiries', icon: 'enquiry', needs: 'enquiry' },
+      { to: '/quotations', label: 'Quotations', icon: 'document', needs: 'quotation' },
+      { to: '/proformas', label: 'Proforma Invoices', icon: 'receipt', needs: 'proforma' },
+      { to: '/orders', label: 'Orders', icon: 'clipboard', needs: 'order' },
       // No Packing Lists entry: the commercial invoice owns its packing list,
       // so it is created and edited on the invoice. The pages remain routed for
       // any bookmarked link, but they are no longer a place you navigate to.
-      { to: '/invoices', label: 'Commercial Invoices', icon: 'invoice' },
-      { to: '/followups', label: 'Follow-ups', icon: 'bell' },
+      { to: '/invoices', label: 'Commercial Invoices', icon: 'invoice', needs: 'invoice' },
+      { to: '/followups', label: 'Follow-ups', icon: 'bell', needs: 'followup' },
     ],
   },
   {
     heading: 'Factory',
     items: [
-      { to: '/work-orders', label: 'Work Orders', icon: 'wrench' },
-      { to: '/despatches', label: 'Despatches', icon: 'truck' },
-      { to: '/stock', label: 'Stock', icon: 'box' },
+      { to: '/work-orders', label: 'Work Orders', icon: 'wrench', needs: 'work_order' },
+      { to: '/despatches', label: 'Despatches', icon: 'truck', needs: 'dispatch' },
+      { to: '/stock', label: 'Stock', icon: 'box', needs: 'material' },
       // Supplier rates are not everyone's business, and committing a spend is
-      // not a shop-floor action — so purchasing is manager-only, front and back.
-      { to: '/purchase-orders', label: 'Purchase Orders', icon: 'cart', managerOnly: true },
+      // not a shop-floor action — so purchasing is the super admin's, front and back.
+      { to: '/purchase-orders', label: 'Purchase Orders', icon: 'cart', needs: 'purchasing' },
     ],
   },
   {
     // The things documents are built *from*, rather than documents themselves.
     heading: 'Records',
     items: [
-      { to: '/customers', label: 'Customers', icon: 'building' },
-      { to: '/products', label: 'Products', icon: 'tag' },
-      { to: '/container-planner', label: 'Container Planner', icon: 'ship' },
+      { to: '/customers', label: 'Customers', icon: 'building', needs: 'customer' },
+      { to: '/products', label: 'Products', icon: 'tag', needs: 'product' },
+      { to: '/container-planner', label: 'Container Planner', icon: 'ship', needs: 'product' },
     ],
   },
   {
@@ -66,18 +72,20 @@ const NAV: { heading: string; items: NavItem[] }[] = [
     // because it matters least.
     heading: 'Setup',
     items: [
-      { to: '/masters', label: 'Production Masters', icon: 'factory', managerOnly: true },
-      { to: '/approvals', label: 'Approvals', icon: 'check', managerOnly: true },
+      // Read by every team, changed by the super admin — so the page is shown
+      // wherever it is useful and its controls are what differ.
+      { to: '/masters', label: 'Production Masters', icon: 'factory', needs: 'master' },
+      { to: '/approvals', label: 'Approvals', icon: 'check', needs: 'approval' },
       // The whole trail. A document's own history sits on the document, where
       // whoever owns it can read it without being a manager.
-      { to: '/activity', label: 'Activity', icon: 'clock', managerOnly: true },
-      { to: '/team', label: 'Team', icon: 'users', managerOnly: true },
-      { to: '/settings', label: 'Settings', icon: 'cog', managerOnly: true },
+      { to: '/activity', label: 'Activity', icon: 'clock', needs: 'audit' },
+      { to: '/team', label: 'Team', icon: 'users', needs: 'team' },
+      { to: '/settings', label: 'Settings', icon: 'cog', needs: 'settings' },
     ],
   },
 ];
 
-const DASHBOARD: NavItem = { to: '/', label: 'Dashboard', icon: 'dashboard' };
+const DASHBOARD: NavItem = { to: '/', label: 'Dashboard', icon: 'dashboard', needs: 'dashboard' };
 
 /**
  * Which groups are open, remembered between visits.
@@ -124,7 +132,7 @@ function readRail(): boolean {
 }
 
 export default function Layout({ user, onLogout, children }: { user: User; onLogout: () => void; children: ReactNode }) {
-  const isManager = user.role === 'manager';
+  const can = useCan();
   const { pathname } = useLocation();
 
   // The group holding the current page is always open: navigating somewhere and
@@ -159,7 +167,7 @@ export default function Layout({ user, onLogout, children }: { user: User; onLog
   const { data: approvals } = useQuery({
     queryKey: ['approval-count'],
     queryFn: () => api.get<{ pending: number }>('/api/approvals/count'),
-    enabled: isManager,
+    enabled: can('approval'),
     refetchInterval: 60_000,
   });
 
@@ -228,7 +236,7 @@ export default function Layout({ user, onLogout, children }: { user: User; onLog
           <Icon name="menu" size={18} />
         </button>
         <span className="font-semibold">ERP Tool</span>
-        {isManager && !!approvals?.pending && (
+        {can('approval') && !!approvals?.pending && (
           <span className="ml-auto rounded-full bg-amber-400 px-1.5 text-xs font-bold text-slate-900">
             {approvals.pending}
           </span>
@@ -283,11 +291,12 @@ export default function Layout({ user, onLogout, children }: { user: User; onLog
           </button>
         </div>
         <nav className="nav-scroll flex-1 overflow-y-auto py-2">
-          {link(DASHBOARD)}
+          {can(DASHBOARD.needs) && link(DASHBOARD)}
           {NAV.map((group) => {
-            const items = group.items.filter((item) => !item.managerOnly || isManager);
-            // A group an employee may see nothing in takes no space at all —
-            // a heading over an empty list is worse than no heading.
+            const items = group.items.filter((item) => can(item.needs));
+            // A group this team may see nothing in takes no space at all — a
+            // heading over an empty list is worse than no heading, and with
+            // five teams most of them have one.
             if (items.length === 0) return null;
             const expanded = open.includes(group.heading) || group.heading === activeHeading;
             return (

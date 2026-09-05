@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { ApprovalStatus } from '../types';
-import { useIsManager } from '../App';
+import { useCan } from '../App';
 import { Button, Textarea, ErrorText } from './ui';
 import { fmtDate } from '../lib/format';
 
@@ -28,7 +28,9 @@ export default function ApprovalStrip({
   note?: string;
   queryKey: string;
 }) {
-  const isManager = useIsManager();
+  const can = useCan();
+  // Approve vs Submit for Approval
+  const isManager = can('approval','full');
   const queryClient = useQueryClient();
   const [rejecting, setRejecting] = useState(false);
   const [rejectNote, setRejectNote] = useState('');
