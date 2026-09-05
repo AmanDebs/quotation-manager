@@ -34,8 +34,19 @@ import { fmtDate, fmtMoney, fmtQty, today } from '../lib/format';
  * ------------------------------------------------------------------ */
 const BLUE = '#2563eb';       // the primary series, and anything "ours"
 const BLUE_PALE = '#bfdbfe';  // the comparison series, and bar tracks
-/** Ordinal ramp for the funnel: one hue, four values, darkening down the page. */
-const FUNNEL_STEPS = ['#93c5fd', '#60a5fa', '#3b82f6', '#2563eb'];
+/**
+ * The funnel's ramp, as **five** stops for four stages.
+ *
+ * Five because each segment is filled with a gradient running from its own
+ * stop to the next one, so the colour is continuous across the whole shape
+ * rather than four flat blocks butted together — which is most of what makes
+ * the reference version look drawn rather than plotted.
+ *
+ * It runs strong to pale, not pale to strong. The funnel is about attrition,
+ * and fading out as it narrows says that; intensifying as it narrows says the
+ * opposite, which is what it did before.
+ */
+const FUNNEL_RAMP = ['#1d4ed8', '#3b82f6', '#60a5fa', '#93c5fd', '#cfe0fd'];
 const SERIES_1 = BLUE;
 const SERIES_2 = '#60a5fa';
 const SERIES_3 = BLUE_PALE;
@@ -1068,18 +1079,21 @@ export default function DashboardPage() {
           {funnelMax <= 0 ? (
             <p className={EMPTY}>Nothing quoted yet in this period.</p>
           ) : (
-            <div className="flex items-stretch gap-1">
+            <div className="flex items-stretch">
               {funnelStages.map((stage, i) => {
-                // Each stage's height is its share of the widest stage, and the
-                // slope is drawn to the *next* stage so the taper is continuous
-                // across the row rather than four unrelated blocks.
-                // Clamped so the shape only ever narrows. On real data
-                // Orders can exceed Accepted — an order may be booked without a
-                // quotation ever being raised — and drawn honestly that made
-                // the funnel bulge outwards, which reads as a rendering fault
-                // rather than as the fact it is. The *number* still says 150%,
-                // because that is true and worth seeing; only the geometry is
-                // held back.
+                /*
+                 * Each stage's height is its share of the widest stage, and the
+                 * slope is drawn to the *next* stage so the taper runs
+                 * continuously across the row rather than as four unrelated
+                 * blocks.
+                 *
+                 * `funnelHeights` is clamped so the shape only ever narrows. On
+                 * real data Orders can exceed Accepted — an order may be booked
+                 * without a quotation ever being raised — and drawn honestly
+                 * that made the funnel bulge outwards, which reads as a
+                 * rendering fault rather than as the fact it is. The *number*
+                 * still says 150%; only the geometry is held back.
+                 */
                 const h = funnelHeights[i];
                 const hNext = funnelHeights[i + 1] ?? h;
                 const top = (1 - h) * 50;
@@ -1088,23 +1102,40 @@ export default function DashboardPage() {
                 // want, and the one the old bars made you work out.
                 const prev = i === 0 ? null : funnelStages[i - 1].value;
                 const share = prev ? Math.round((stage.value / prev) * 100) : 100;
+                const gid = `funnel-${i}`;
                 return (
                   <button
                     key={stage.label}
                     type="button"
                     onClick={() => navigate(stage.to)}
-                    className="group min-w-0 flex-1 rounded-md p-1 text-left transition-colors hover:bg-slate-50"
+                    // A hairline between stages rather than a gap in the shape:
+                    // it separates the columns of type without cutting the
+                    // taper, which is what keeps the four segments reading as
+                    // one object.
+                    className={`group min-w-0 flex-1 px-3 py-1 text-left transition-colors hover:bg-slate-50/70 ${
+                      i > 0 ? 'border-l border-slate-100' : ''
+                    }`}
                   >
                     <div className={`${CAPTION} truncate`}>{stage.label}</div>
-                    <div className="mt-0.5 text-lg font-bold tabular-nums text-slate-900">{stage.value}</div>
-                    <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="mt-1 h-12 w-full">
+                    <div className="mt-0.5 text-2xl font-semibold tabular-nums tracking-tight text-slate-900">
+                      {stage.value}
+                    </div>
+                    <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="mt-2 h-20 w-full overflow-visible">
+                      <defs>
+                        {/* One gradient per segment, picking up where the last
+                            left off, so the colour crosses the whole funnel. */}
+                        <linearGradient id={gid} x1="0" y1="0" x2="1" y2="0">
+                          <stop offset="0%" stopColor={FUNNEL_RAMP[i]} />
+                          <stop offset="100%" stopColor={FUNNEL_RAMP[i + 1]} />
+                        </linearGradient>
+                      </defs>
                       <polygon
                         points={`0,${top} 100,${topNext} 100,${100 - topNext} 0,${100 - top}`}
-                        fill={FUNNEL_STEPS[i]}
+                        fill={`url(#${gid})`}
                       />
                     </svg>
-                    <div className="mt-0.5 text-center text-xs tabular-nums text-slate-500">
-                      {prev === null ? 'start' : `${share}%`}
+                    <div className="mt-1.5 text-xs tabular-nums text-slate-400">
+                      {prev === null ? '100%' : `${share}%`}
                     </div>
                   </button>
                 );
