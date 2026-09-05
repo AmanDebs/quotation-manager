@@ -193,7 +193,7 @@ const RANGES: Range[] = [
  * never arranged the page, so nobody's saved layout is quietly rewritten, and
  * "Reset to default" brings it back by clearing the layout entirely.
  */
-const DEFAULT_HIDDEN = ['trend', 'pipeline', 'split', 'quotation-status', 'money-detail', 'followups'];
+const DEFAULT_HIDDEN = ['trend', 'pipeline', 'quotation-status', 'money-detail', 'followups'];
 
 /**
  * The order a first look opens in — and it is about packing, not preference.
@@ -206,7 +206,7 @@ const DEFAULT_HIDDEN = ['trend', 'pipeline', 'split', 'quotation-status', 'money
  */
 const DEFAULT_ORDER = [
   'attention', 'money',
-  'funnel',
+  'funnel', 'split',
   'factory', 'top-customers', 'top-products',
 ];
 
@@ -1047,10 +1047,13 @@ export default function DashboardPage() {
        */
       id: 'funnel',
       title: 'Conversion Funnel',
-      // Full width once Pending Follow-ups came off the default page: at span 2
-      // it sat beside an empty third column, and the four stages read better
-      // spread across the band anyway — which is how the reference draws it.
-      span: 3,
+      /*
+       * Two columns, not three. Full width was tried and the user called it
+       * straight away: four numbers do not need 1,202px, and stretched that
+       * far each trapezoid is mostly empty space with a label floating at one
+       * end. The shape only has to be readable, not large.
+       */
+      span: 2,
       body: (
         <Card title="Conversion Funnel">
           {funnelMax <= 0 ? (
@@ -1084,14 +1087,14 @@ export default function DashboardPage() {
                     className="group min-w-0 flex-1 rounded-md p-1 text-left transition-colors hover:bg-slate-50"
                   >
                     <div className={`${CAPTION} truncate`}>{stage.label}</div>
-                    <div className="mt-0.5 text-xl font-bold tabular-nums text-slate-900">{stage.value}</div>
-                    <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="mt-1 h-20 w-full">
+                    <div className="mt-0.5 text-lg font-bold tabular-nums text-slate-900">{stage.value}</div>
+                    <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="mt-1 h-12 w-full">
                       <polygon
                         points={`0,${top} 100,${topNext} 100,${100 - topNext} 0,${100 - top}`}
                         fill={FUNNEL_STEPS[i]}
                       />
                     </svg>
-                    <div className="mt-1 text-center text-xs tabular-nums text-slate-500">
+                    <div className="mt-0.5 text-center text-xs tabular-nums text-slate-500">
                       {prev === null ? 'start' : `${share}%`}
                     </div>
                   </button>
