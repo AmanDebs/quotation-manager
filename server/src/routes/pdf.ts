@@ -88,7 +88,23 @@ function contentDisposition(kind: 'inline' | 'attachment', filename: string): st
   return `${kind}; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
 }
 
-pdfRouter.get('/:type/:id', async (req: AuthedRequest, res) => {
+/*
+ * The name is in the **URL** as well as in the header, and the optional last
+ * segment is why.
+ *
+ * `Content-Disposition` is the right answer and every browser honours it on a
+ * download. But these open *inline*, in a tab, and a PDF viewer that builds its
+ * Save name from the address bar instead sees `/api/pdf/quotation/5` — whose
+ * last segment is a bare id. That is the "file name is coming as a number" the
+ * user reported, and no amount of getting the header right fixes it.
+ *
+ * So a request with no name segment is redirected to one that has it. The
+ * redirect rather than a filename built by the client, because the name is
+ * assembled here from the customer and the number, and a second copy of that
+ * on the client is how the two come to disagree. It costs one round trip and
+ * happens *before* the document is rendered, which is the expensive part.
+ */
+pdfRouter.get('/:type/:id/:name?', async (req: AuthedRequest, res) => {
   const type = req.params.type as DocType;
   const entry = builders[type];
   if (!entry) return res.status(404).json({ error: 'Unknown document type' });
@@ -114,16 +130,6 @@ pdfRouter.get('/:type/:id', async (req: AuthedRequest, res) => {
     return res.status(404).json({ error: 'Document not found' });
   }
 
-  // Documents that have not been approved are watermarked, so an unapproved
-  // draft can be previewed but never passed off as a final document.
-  let watermark: string | undefined;
-  if (entry.approvable) {
-    const appr = db.prepare(`SELECT approval_status FROM ${entry.table} WHERE id = ?`).get(id) as { approval_status: string };
-    if (appr.approval_status !== 'approved') {
-      watermark = appr.approval_status === 'pending' ? 'PENDING APPROVAL' : 'DRAFT — NOT APPROVED';
-    }
-  }
-
   // Revisions share one number, so without this the second one saved to a
   // folder overwrites the first. Only quotations have the column.
   let revision: string | undefined;
@@ -134,9 +140,29 @@ pdfRouter.get('/:type/:id', async (req: AuthedRequest, res) => {
     if (r && r.revision > 0) revision = `R${r.revision}`;
   }
 
+  const filename = pdfFilename([DOC_LABEL[type], row.party_name ?? undefined, row.number, revision]);
+
+  // Put the name in the address bar, then render on the way back. Done here,
+  // before the document is built, so the extra hop costs a query and not a
+  // render — and after the access checks, so it cannot confirm that an id
+  // exists to somebody who may not see it.
+  if (!req.params.name) {
+    const query = req.originalUrl.split('?')[1];
+    return res.redirect(302, `/api/pdf/${type}/${id}/${encodeURIComponent(filename)}${query ? `?${query}` : ''}`);
+  }
+
+  // Documents that have not been approved are watermarked, so an unapproved
+  // draft can be previewed but never passed off as a final document.
+  let watermark: string | undefined;
+  if (entry.approvable) {
+    const appr = db.prepare(`SELECT approval_status FROM ${entry.table} WHERE id = ?`).get(id) as { approval_status: string };
+    if (appr.approval_status !== 'approved') {
+      watermark = appr.approval_status === 'pending' ? 'PENDING APPROVAL' : 'DRAFT — NOT APPROVED';
+    }
+  }
+
   try {
     const buffer = await renderPdf(entry.build(id), watermark);
-    const filename = pdfFilename([DOC_LABEL[type], row.party_name ?? undefined, row.number, revision]);
     res.setHeader('Content-Type', 'application/pdf');
     const disposition = req.query.download === '1' ? 'attachment' : 'inline';
     res.setHeader('Content-Disposition', contentDisposition(disposition, filename));
