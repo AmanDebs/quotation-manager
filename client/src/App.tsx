@@ -7,6 +7,7 @@ import Layout from './components/Layout';
 import LoginPage from './pages/Login';
 import DashboardPage from './pages/Dashboard';
 import CustomersPage from './pages/Customers';
+import CustomerDetailPage from './pages/CustomerDetail';
 import ProductsPage from './pages/Products';
 import ContainerPlannerPage from './pages/ContainerPlanner';
 import EnquiriesPage from './pages/Enquiries';
@@ -174,6 +175,7 @@ export const routes: RouteObject[] = [
     children: [
       { path: '/', element: <Home /> },
       { path: '/customers', element: <Needs fn="customer"><CustomersPage /></Needs> },
+      { path: '/customers/:id', element: <Needs fn="customer"><CustomerDetailPage /></Needs> },
       { path: '/products', element: <Needs fn="product"><ProductsPage /></Needs> },
       { path: '/container-planner', element: <Needs fn="product"><ContainerPlannerPage /></Needs> },
       { path: '/enquiries', element: <Needs fn="enquiry"><EnquiriesPage /></Needs> },

@@ -3,6 +3,7 @@ import { db } from '../db/connection.js';
 import type { AuthedRequest } from '../middleware/auth.js';
 import { scopeClause, canAccessCustomer } from '../middleware/scope.js';
 import { listBody } from '../services/pagination.js';
+import { customerSummary } from '../services/customerSummary.js';
 
 export const customersRouter = Router();
 
@@ -41,6 +42,23 @@ customersRouter.get('/:id', (req: AuthedRequest, res) => {
   const row = db.prepare(`${listSql} WHERE c.id = ?`).get(id);
   if (!row) return res.status(404).json({ error: 'Customer not found' });
   res.json(row);
+});
+
+/*
+ * Everything about one customer on one screen.
+ *
+ * The sections it answers with are chosen by the caller's own permissions, in
+ * `services/customerSummary.ts` — a Production login holds `customer: view`
+ * and `quotation: none`, and must not read a price through a route mounted on
+ * the customer function. Scoping is the same 404 every other detail route
+ * gives, so an id cannot be probed for.
+ */
+customersRouter.get('/:id/summary', (req: AuthedRequest, res) => {
+  const id = Number(req.params.id);
+  if (!canAccessCustomer(req, id)) return res.status(404).json({ error: 'Customer not found' });
+  const exists = db.prepare('SELECT 1 FROM customers WHERE id = ?').get(id);
+  if (!exists) return res.status(404).json({ error: 'Customer not found' });
+  res.json(customerSummary(req, id));
 });
 
 /** Blank means "the group default" — stored as NULL, resolved when a document is raised. */

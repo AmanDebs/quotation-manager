@@ -838,3 +838,69 @@ export interface QcRegisterSummary {
   failed: number;
   unmeasured: number;
 }
+
+/* ------------------------------------------------------------ the customer page */
+
+/**
+ * A money document as the customer page lists it.
+ *
+ * One type for all four, with the per-type extras optional, because they are
+ * all rendered by one `DocRows` — four near-identical tables is how four
+ * document lists come to disagree about how a date is formatted.
+ */
+export interface CustomerDocRow {
+  id: number;
+  number: string;
+  date: string;
+  status: string;
+  currency: string;
+  grand_total: number;
+  /** Quotations only. */
+  revision?: number;
+  superseded?: boolean;
+  /** Orders only — the customer's own reference. */
+  po_number?: string;
+  /** Commercial invoices only. */
+  balance_due?: number;
+}
+
+/** What this customer owes, in one currency. Rows are never added across currencies. */
+export interface CustomerMoneyRow {
+  currency: string;
+  invoiced: number;
+  received: number;
+  outstanding: number;
+  overdue: number;
+  advance_held: number;
+}
+
+export interface CustomerSection<T> {
+  total: number;
+  rows: T[];
+}
+
+/**
+ * Everything about one customer.
+ *
+ * **Every section is optional, and an absent one means the caller's team may
+ * not read it** — the server assembles the map against its own access table
+ * rather than the client filtering by `useCan()`, so there is only ever one
+ * copy of the policy.
+ */
+export interface CustomerSummary {
+  money?: {
+    rows: CustomerMoneyRow[];
+    currency_mismatch: { currency: string; amount: number }[];
+  };
+  enquiries?: CustomerSection<{ id: number; date: string; status: string; notes: string }>;
+  quotations?: CustomerSection<CustomerDocRow>;
+  proformas?: CustomerSection<CustomerDocRow>;
+  orders?: CustomerSection<CustomerDocRow>;
+  invoices?: CustomerSection<CustomerDocRow>;
+  followups?: CustomerSection<{ id: number; due_date: string; note: string; done: number; overdue: boolean }>;
+  payments?: CustomerSection<{
+    id: number; date: string; amount: number; currency: string;
+    method: string; reference: string; against: string;
+  }>;
+  qc?: { products: { product_id: number; product_name: string; params: number }[] };
+}

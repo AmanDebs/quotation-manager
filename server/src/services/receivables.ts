@@ -52,7 +52,7 @@ const sumAmounts = (rows: { amount: number }[]) => round2(rows.reduce((s, r) => 
  * can only be a row that predates that rule — excluding it would quietly reduce
  * a balance that has been right for months.
  */
-const sameCurrency = (payment: string | null | undefined, document: string) =>
+export const sameCurrency = (payment: string | null | undefined, document: string) =>
   !String(payment ?? '').trim() || String(payment).trim() === String(document).trim();
 
 /** Advances on a proforma, split across the invoices raised from it (earliest first). */
