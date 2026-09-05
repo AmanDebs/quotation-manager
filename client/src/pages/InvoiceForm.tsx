@@ -5,6 +5,7 @@ import { api } from '../api/client';
 import { useCan } from '../App';
 import type { Invoice, Customer, LineItem, TaxType, Settings, ColumnConfig, PackingListItem } from '../types';
 import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, StatusBadge, SettledDocumentType, FIELD_GRID } from '../components/ui';
+import { PdfLink } from '../components/PdfLink';
 import CompanySelect from '../components/CompanySelect';
 import { DocNumber, IncoTermsInput, HeaderCharges } from '../components/DocFields';
 import LineItemsEditor from '../components/LineItemsEditor';
@@ -164,7 +165,7 @@ export default function InvoiceFormPage() {
     }
   }, [isNew, draft.customer_id, customers, prefilled]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const { markSaved } = useUnsavedChanges(draft);
+  const { markSaved, isDirty } = useUnsavedChanges(draft);
 
   const save = useMutation({
     mutationFn: (d: Draft) => (isNew ? api.post<Invoice>('/api/invoices', d) : api.put<Invoice>(`/api/invoices/${id}`, d)),
@@ -232,11 +233,11 @@ export default function InvoiceFormPage() {
             {!isNew && <StatusBadge status={existing!.status} />}
             {!isNew && (
               <>
-                <a href={`/api/pdf/invoice/${id}`} target="_blank" rel="noreferrer"><Button variant="secondary">📄 Invoice</Button></a>
-                <a href={`/api/pdf/packing-list/${existing!.packing?.id}`} target="_blank" rel="noreferrer">
+                <PdfLink href={`/api/pdf/invoice/${id}`} isDirty={isDirty}><Button variant="secondary">📄 Invoice</Button></PdfLink>
+                <PdfLink href={`/api/pdf/packing-list/${existing!.packing?.id}`} isDirty={isDirty}>
                   <Button variant="secondary" disabled={!existing!.packing}>📦 Packing List</Button>
-                </a>
-                <a href={`/api/pdf/invoice-with-packing/${id}`} target="_blank" rel="noreferrer"><Button>📄+📦 Both</Button></a>
+                </PdfLink>
+                <PdfLink href={`/api/pdf/invoice-with-packing/${id}`} isDirty={isDirty}><Button>📄+📦 Both</Button></PdfLink>
                 {/*
                   * The quality summary that ships with the shipment. The
                   * standalone report is the `qc` function and so is offered
@@ -245,13 +246,13 @@ export default function InvoiceFormPage() {
                   * is the whole point of it existing.
                   */}
                 {can('qc') && (
-                  <a href={`/api/pdf/invoice-qc-report/${id}`} target="_blank" rel="noreferrer">
+                  <PdfLink href={`/api/pdf/invoice-qc-report/${id}`} isDirty={isDirty}>
                     <Button variant="secondary">🔬 QC Report</Button>
-                  </a>
+                  </PdfLink>
                 )}
-                <a href={`/api/pdf/invoice-with-qc/${id}`} target="_blank" rel="noreferrer">
+                <PdfLink href={`/api/pdf/invoice-with-qc/${id}`} isDirty={isDirty}>
                   <Button variant="secondary">📄+🔬 Invoice &amp; QC</Button>
-                </a>
+                </PdfLink>
                 <FollowupButton docType="invoice" docId={Number(id)} customerId={existing!.customer_id} />
               </>
             )}

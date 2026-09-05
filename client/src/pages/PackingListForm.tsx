@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { PackingList, PackingListItem, Customer } from '../types';
 import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, ReadOnlyFields, FIELD_GRID } from '../components/ui';
+import { PdfLink } from '../components/PdfLink';
 import { fmtQty, today } from '../lib/format';
 import { useUnsavedChanges } from '../lib/useUnsavedChanges';
 import { unitOptions } from './Products';
@@ -70,7 +71,7 @@ export default function PackingListFormPage() {
     }
   }, [isNew, fromInvoice, prefilled]);
 
-  const { markSaved } = useUnsavedChanges(draft);
+  const { markSaved, isDirty } = useUnsavedChanges(draft);
 
   const save = useMutation({
     mutationFn: (d: Draft) => (isNew ? api.post<PackingList>('/api/packing-lists', d) : api.put<PackingList>(`/api/packing-lists/${id}`, d)),
@@ -111,7 +112,7 @@ export default function PackingListFormPage() {
         subtitle={isNew ? (fromInvoice ? 'Pre-filled from invoice — add packages, dimensions and weights' : undefined) : existing!.customer_name}
         actions={
           !isNew && (
-            <a href={`/api/pdf/packing-list/${id}`} target="_blank" rel="noreferrer"><Button variant="secondary">📄 PDF</Button></a>
+            <PdfLink href={`/api/pdf/packing-list/${id}`} isDirty={isDirty}><Button variant="secondary">📄 PDF</Button></PdfLink>
           )
         }
       />

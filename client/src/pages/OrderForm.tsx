@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Order, OrderItem, Customer, TaxType, ColumnConfig, WorkOrder } from '../types';
 import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, Tabs, SettledDocumentType, FIELD_GRID } from '../components/ui';
+import { PdfLink } from '../components/PdfLink';
 import CompanySelect from '../components/CompanySelect';
 import { DocNumber, IncoTermsInput, HeaderCharges } from '../components/DocFields';
 import ProductionTab from '../components/ProductionTab';
@@ -139,7 +140,7 @@ export default function OrderFormPage() {
     }
   }, [isNew, fromQuotation, fromProforma, prefilled]);
 
-  const { markSaved } = useUnsavedChanges(draft);
+  const { markSaved, isDirty } = useUnsavedChanges(draft);
 
   const save = useMutation({
     mutationFn: (d: Draft) => (isNew ? api.post<Order>('/api/orders', d) : api.put<Order>(`/api/orders/${id}`, d)),
@@ -204,7 +205,7 @@ export default function OrderFormPage() {
           <div className="flex flex-wrap items-center gap-2">
             {!isNew && (
               <>
-                <a href={`/api/pdf/order/${id}`} target="_blank" rel="noreferrer"><Button variant="secondary">📄 Order PDF</Button></a>
+                <PdfLink href={`/api/pdf/order/${id}`} isDirty={isDirty}><Button variant="secondary">📄 Order PDF</Button></PdfLink>
                 <FollowupButton docType="general" docId={Number(id)} customerId={existing!.customer_id} />
                 {/* The invoice is what follows an order now. Raising a proforma
                     from here ran the chain backwards — the proforma comes

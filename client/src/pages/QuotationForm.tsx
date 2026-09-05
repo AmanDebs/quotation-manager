@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Quotation, Customer, LineItem, TaxType, ColumnConfig } from '../types';
 import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, StatusBadge, ReadOnlyFields, labelClass, FIELD_GRID, FIELD_GRID_PLAIN } from '../components/ui';
+import { PdfLink } from '../components/PdfLink';
 import CompanySelect from '../components/CompanySelect';
 import { DocNumber, IncoTermsInput, HeaderCharges } from '../components/DocFields';
 import LineItemsEditor from '../components/LineItemsEditor';
@@ -141,7 +142,7 @@ export default function QuotationFormPage() {
     }));
   };
 
-  const { markSaved } = useUnsavedChanges(draft);
+  const { markSaved, isDirty } = useUnsavedChanges(draft);
 
   const save = useMutation({
     mutationFn: (d: Draft) => (isNew ? api.post<Quotation>('/api/quotations', d) : api.put<Quotation>(`/api/quotations/${id}`, d)),
@@ -218,9 +219,9 @@ export default function QuotationFormPage() {
             {!isNew && <StatusBadge status={existing!.status} />}
             {!isNew && (
               <>
-                <a href={`/api/pdf/quotation/${id}`} target="_blank" rel="noreferrer">
+                <PdfLink href={`/api/pdf/quotation/${id}`} isDirty={isDirty}>
                   <Button variant="secondary">📄 PDF</Button>
-                </a>
+                </PdfLink>
                 <FollowupButton docType="quotation" docId={Number(id)} customerId={existing!.customer_id} />
                 {!readOnly && (
                   <Button variant="secondary" onClick={() => revise.mutate()} disabled={revise.isPending} title="Create a new revision for negotiation">

@@ -42,8 +42,19 @@ import { useBlocker, type BlockerFunction } from 'react-router-dom';
  * Deliberately not called by Revise or Duplicate. Both start from the document
  * as the *server* holds it, so unsaved edits really are about to be dropped
  * and the prompt is the correct thing to see.
+ *
+ * **`isDirty` exists because there is a fourth way out and neither mechanism
+ * above can see it.** A PDF link is an `<a target="_blank">`: `useBlocker`
+ * only hears in-app navigation, `beforeunload` only fires for the tab being
+ * left, and a new tab is neither. So opening a PDF with edits on screen
+ * printed the **last saved** version, silently — and that is the copy that
+ * goes to the customer. `components/PdfLink.tsx` asks this and says so; see
+ * there for why the sentence it shows is not the one above.
  */
-export function useUnsavedChanges(draft: unknown): { markSaved: () => void } {
+export function useUnsavedChanges(draft: unknown): {
+  markSaved: () => void;
+  isDirty: () => boolean;
+} {
   const serialized = JSON.stringify(draft);
 
   const touched = useRef(false);
@@ -122,5 +133,10 @@ export function useUnsavedChanges(draft: unknown): { markSaved: () => void } {
     }
   }, [blocker]);
 
-  return { markSaved };
+  // The ref, not the state, for the same reason the blocker reads it: this has
+  // to be callable from a click handler and be right *now*, and it must stay
+  // stable so a link holding it does not re-render on every keystroke.
+  const isDirty = useCallback(() => dirtyRef.current, []);
+
+  return { markSaved, isDirty };
 }

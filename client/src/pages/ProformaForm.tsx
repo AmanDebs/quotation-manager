@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Proforma, Customer, LineItem, TaxType, Settings, ColumnConfig } from '../types';
 import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, StatusBadge, SettledDocumentType, ReadOnlyFields, FIELD_GRID, FIELD_GRID_PLAIN } from '../components/ui';
+import { PdfLink } from '../components/PdfLink';
 import CompanySelect from '../components/CompanySelect';
 import { DocNumber, IncoTermsInput, HeaderCharges } from '../components/DocFields';
 import LineItemsEditor from '../components/LineItemsEditor';
@@ -148,7 +149,7 @@ export default function ProformaFormPage() {
     }
   }, [isNew, draft.customer_id, customers, prefilled]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const { markSaved } = useUnsavedChanges(draft);
+  const { markSaved, isDirty } = useUnsavedChanges(draft);
 
   const save = useMutation({
     mutationFn: (d: Draft) => (isNew ? api.post<Proforma>('/api/proformas', d) : api.put<Proforma>(`/api/proformas/${id}`, d)),
@@ -259,7 +260,7 @@ export default function ProformaFormPage() {
             {!isNew && <StatusBadge status={existing!.status} />}
             {!isNew && (
               <>
-                <a href={`/api/pdf/proforma/${id}`} target="_blank" rel="noreferrer"><Button variant="secondary">📄 PDF</Button></a>
+                <PdfLink href={`/api/pdf/proforma/${id}`} isDirty={isDirty}><Button variant="secondary">📄 PDF</Button></PdfLink>
                 <FollowupButton docType="proforma" docId={Number(id)} customerId={existing!.customer_id} />
                 <Button
                   variant="secondary"
