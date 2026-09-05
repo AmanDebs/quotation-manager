@@ -154,14 +154,19 @@ export default function OrdersPage() {
           <input type="checkbox" checked={openOnly} onChange={(e) => setOpenOnly(e.target.checked)} />
           Open orders only
         </label>
-        {view !== 'orders' && (
-          <Input
-            className="max-w-56"
-            placeholder="Search item, code or colour…"
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-          />
-        )}
+        {/*
+          * Shown on all three views. It used to be hidden on Orders, because
+          * the per-order list could not answer it — which meant a term typed
+          * on one tab silently stopped applying when you switched to another.
+          * `orderSearchClause` now gives all three the same six columns, so
+          * the box means one thing wherever it is used and can always be here.
+          */}
+        <Input
+          className="max-w-64"
+          placeholder="Search order no., PO no., customer or item…"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+        />
       </div>
 
       <ErrorText error={setStatus.error} />

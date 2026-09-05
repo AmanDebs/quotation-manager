@@ -4,6 +4,7 @@ import type { AuthedRequest } from '../middleware/auth.js';
 import { scopeClause, canAccessCustomer } from '../middleware/scope.js';
 import { listBody } from '../services/pagination.js';
 import { customerSummary } from '../services/customerSummary.js';
+import { searchClause } from '../services/search.js';
 
 export const customersRouter = Router();
 
@@ -21,10 +22,13 @@ customersRouter.get('/', (req: AuthedRequest, res) => {
 
   const scope = scopeClause(req, 'c.id');
   if (scope.sql) { where.push(scope.sql); params.push(...scope.params); }
-  if (q) {
-    where.push('(c.name LIKE ? OR c.contact_person LIKE ? OR c.country LIKE ?)');
-    params.push(`%${q}%`, `%${q}%`, `%${q}%`);
-  }
+  // The same helper the document lists use. The hand-written clause was
+  // already bracketed — which matters, since `scopeClause` shares this WHERE
+  // and an unbracketed OR would have been a way straight past data scoping —
+  // so what changes is that `%` and `_` are now escaped rather than treated as
+  // LIKE's wildcards.
+  const search = searchClause(['c.name', 'c.contact_person', 'c.country'], q);
+  if (search.sql) { where.push(search.sql); params.push(...search.params); }
   if (exportFilter === '1' || exportFilter === '0') {
     where.push('c.is_export = ?');
     params.push(Number(exportFilter));

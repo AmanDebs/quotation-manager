@@ -1,4 +1,5 @@
 import { db } from '../db/connection.js';
+import { searchClause } from './search.js';
 import { countOf } from './pagination.js';
 import { round2 } from './totals.js';
 
@@ -63,7 +64,7 @@ export interface Filters {
   isExport?: number;
   companyId?: number;
   openOnly?: boolean;
-  /** Free text over the item description and code. */
+  /** Free text — see `orderSearchClause` for the six columns it covers. */
   q?: string;
 }
 
@@ -118,6 +119,44 @@ const SQL = `
   LEFT JOIN users u ON u.id = o.created_by
   WHERE l.is_charge = 0`;
 
+/**
+ * What the order book's one search box means.
+ *
+ * The Orders page reads the same book three ways and offers one box over all
+ * of them, so the term has to mean the same thing in each — switching tabs
+ * with something typed must not quietly change what is being looked for. That
+ * is what this exists to guarantee, and why it is a function rather than a
+ * column list: the per-order list has no line table joined and has to reach
+ * the item columns through an EXISTS, so the two call sites need different
+ * SQL for one rule. Two hand-written copies is how the tabs come to disagree.
+ *
+ * Six columns — our own number, the customer's PO number, the customer's
+ * name, and the item's description, code and colour. Those are what somebody
+ * at this desk actually has in hand when trying to find an order: a number
+ * off an email, the buyer's reference off their purchase order, or the item.
+ *
+ * `itemAlias` names the line table when one is in scope. Without it the item
+ * half becomes "does any line on this order match", which is the same
+ * question asked of a row that is one order rather than one line.
+ */
+export function orderSearchClause(q: string | undefined, itemAlias?: string): { sql: string; params: unknown[] } {
+  const term = String(q ?? '').trim();
+  if (!term) return { sql: '', params: [] };
+  const header = ['o.number', 'o.po_number', 'c.name'];
+  if (itemAlias) {
+    return searchClause(
+      [...header, `${itemAlias}.description`, `${itemAlias}.code`, `${itemAlias}.color`],
+      term,
+    );
+  }
+  const head = searchClause(header, term);
+  const items = searchClause(['i.description', 'i.code', 'i.color'], term);
+  return {
+    sql: `(${head.sql} OR EXISTS (SELECT 1 FROM order_items i WHERE i.order_id = o.id AND ${items.sql}))`,
+    params: [...head.params, ...items.params],
+  };
+}
+
 function stateOf(ordered: number, made: number, sent: number, billed: number): LineState {
   const out = Math.max(sent, billed);
   if (ordered > 0 && out >= ordered) return 'shipped';
@@ -139,11 +178,8 @@ function lineWhere(f: Filters): { sql: string; params: unknown[] } {
   if (f.isExport === 0 || f.isExport === 1) { where.push('o.is_export = ?'); params.push(f.isExport); }
   if (f.companyId) { where.push('o.company_id = ?'); params.push(f.companyId); }
   if (f.openOnly) where.push("o.status NOT IN ('completed','cancelled')");
-  if (f.q) {
-    where.push('(LOWER(l.description) LIKE ? OR LOWER(l.code) LIKE ? OR LOWER(l.color) LIKE ?)');
-    const like = `%${f.q.toLowerCase()}%`;
-    params.push(like, like, like);
-  }
+  const search = orderSearchClause(f.q, 'l');
+  if (search.sql) { where.push(search.sql); params.push(...search.params); }
   // The base query already carries a WHERE (charge lines are excluded there).
   return { sql: `${SQL}${where.length ? ` AND ${where.join(' AND ')}` : ''}`, params };
 }

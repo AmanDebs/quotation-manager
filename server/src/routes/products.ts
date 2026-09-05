@@ -6,6 +6,7 @@ import { IMPORT_FIELDS, buildImport, decodeUpload, identityKey, type BuildOption
 import { recipeFor } from '../services/recipe.js';
 import { PRODUCT_TYPES, isProductType, guessProductType } from '../services/productType.js';
 import { listBody } from '../services/pagination.js';
+import { searchClause } from '../services/search.js';
 
 export const productsRouter = Router();
 
@@ -277,13 +278,13 @@ productsRouter.get('/', (req, res) => {
 
   const where: string[] = [];
   const params: unknown[] = [];
-  // Parenthesised, or "type = ? AND name LIKE ? OR hsn LIKE ?" would bind as
-  // "(type AND name) OR hsn" and the search would be a way past the filter —
-  // the same bracket services/search.ts has a test for.
-  if (q) {
-    where.push('(name LIKE ? OR hsn_code LIKE ?)');
-    params.push(`%${q}%`, `%${q}%`);
-  }
+  // Through `searchClause` like the document lists. The bracketing this used
+  // to spell out by hand was already right; what it did not do was escape `%`
+  // and `_`, which are LIKE's own wildcards — typing either matched every
+  // product instead of the character. A catalogue name carrying an underscore
+  // is exactly the case, so this one is a real fix rather than tidying.
+  const search = searchClause(['name', 'hsn_code'], q);
+  if (search.sql) { where.push(search.sql); params.push(...search.params); }
   if (isProductType(type)) {
     where.push('product_type = ?');
     params.push(type);

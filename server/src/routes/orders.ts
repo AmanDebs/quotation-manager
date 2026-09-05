@@ -5,7 +5,7 @@ import { computeTotals, round2, type LineItemInput } from '../services/totals.js
 import { productionByOrder } from '../services/production.js';
 import { despatchedByOrder } from './despatches.js';
 import { orderMaterialCost } from '../services/costing.js';
-import { orderLines, productDemand, countOrderLines,
+import { orderLines, productDemand, countOrderLines, orderSearchClause,
   type Filters, type OrderLine, type ProductDemand } from '../services/orderLines.js';
 import { buildXlsx, attachmentName, type Column } from '../services/xlsx.js';
 import type { AuthedRequest } from '../middleware/auth.js';
@@ -202,6 +202,13 @@ function orderListWhere(req: AuthedRequest): { where: string[]; params: unknown[
   if (Number(req.query.company) > 0) { where.push('o.company_id = ?'); params.push(Number(req.query.company)); }
   // ?open=1 → the order book: everything not yet completed or cancelled.
   if (req.query.open === '1') where.push("o.status NOT IN ('completed','cancelled')");
+  // One box, one meaning across all three views — see `orderSearchClause`.
+  // Without an item alias it asks whether *any* line on the order matches,
+  // which is the same question put to a row that is one order rather than one
+  // line. Server-side because the list is paged: filtering the rows already
+  // fetched would search only the page in hand.
+  const search = orderSearchClause(req.query.q as string | undefined);
+  if (search.sql) { where.push(search.sql); params.push(...search.params); }
   return { where, params };
 }
 
