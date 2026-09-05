@@ -115,6 +115,54 @@ function mismatches(rows: PaymentRow[], currency: string): { currency: string; a
   return [...byCurrency].map(([c, amount]) => ({ currency: c, amount }));
 }
 
+export interface ProformaAdvance {
+  /** Every payment banked against the proforma, in date order. */
+  payments: PaymentRow[];
+  /** What the customer has actually paid, in the proforma's own currency. */
+  amount_received: number;
+  /** grand_total − amount_received, floored at zero. */
+  balance_payable: number;
+  /** Money in another currency, credited to nothing and reported instead. */
+  currency_mismatch: { currency: string; amount: number }[];
+}
+
+/**
+ * What has been banked against one proforma.
+ *
+ * The same currency rule as everything else here — a payment credits a
+ * document only when the two agree, and a blank currency counts as matching,
+ * since payments inherit theirs from the document and an empty one can only be
+ * a legacy row.
+ *
+ * It lives here rather than in the route because it now has two readers: the
+ * proforma page and the proforma **PDF**. The list keeps its own correlated
+ * subquery — asking once per row is the N+1 this codebase keeps bounding — and
+ * the invariant between the two is that they apply one rule, so the paper and
+ * the screen can never state different advances.
+ */
+export function proformaAdvance(piId: number): ProformaAdvance {
+  const pi = db.prepare('SELECT id, currency, grand_total FROM proforma_invoices WHERE id = ?').get(piId) as
+    | { id: number; currency: string; grand_total: number }
+    | undefined;
+  if (!pi) return { payments: [], amount_received: 0, balance_payable: 0, currency_mismatch: [] };
+
+  const payments = db.prepare(
+    'SELECT * FROM payments WHERE pi_id = ? ORDER BY date, id'
+  ).all(piId) as unknown as PaymentRow[];
+
+  const received = round2(
+    payments.filter((p) => sameCurrency(p.currency, pi.currency)).reduce((s, p) => s + p.amount, 0)
+  );
+  return {
+    payments,
+    amount_received: received,
+    // A subtraction, not a third opinion: `amount_received` stays the single
+    // source, and an overpayment is not a negative balance.
+    balance_payable: Math.max(0, round2(Number(pi.grand_total) - received)),
+    currency_mismatch: mismatches(payments, pi.currency),
+  };
+}
+
 /** What one invoice has actually been credited with. */
 export function invoiceReceivable(invoiceId: number): InvoiceReceivable {
   const inv = db.prepare('SELECT id, pi_id, currency, grand_total FROM commercial_invoices WHERE id = ?').get(invoiceId) as

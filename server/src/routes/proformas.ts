@@ -8,6 +8,7 @@ import { resolveCompanyId } from '../services/companies.js';
 import { submit, decide, resetApprovalOnEdit, blockUnapprovedTransition, blockUnapprovedConversion } from '../services/approval.js';
 import { listBody } from '../services/pagination.js';
 import { searchClause } from '../services/search.js';
+import { proformaAdvance } from '../services/receivables.js';
 import { lockError, syncQuotationConverted, alreadyConvertedError } from '../services/documentChain.js';
 import { buildXlsx, attachmentName, type Column } from '../services/xlsx.js';
 
@@ -86,22 +87,22 @@ function getFull(id: number) {
   if (!pi) return undefined;
   pi.items = db.prepare('SELECT * FROM pi_items WHERE pi_id = ? ORDER BY sort_order, id').all(id);
   pi.column_config = JSON.parse(String(pi.column_config || '{}'));
-  const payments = db.prepare('SELECT * FROM payments WHERE pi_id = ? ORDER BY date, id').all(id) as { amount: number; currency?: string | null }[];
-  pi.payments = payments;
-  // Money only adds up within one currency — the same rule the list's
-  // `advance_received` applies above, and the one receivables.ts has always
-  // applied to invoices. This used to sum every payment whatever its currency,
-  // so a €10,000 advance and ₹10,000 added to 20,000 of nothing, and the
-  // figure here could disagree with the one on the list. A blank currency
-  // counts as matching, for the reason given above the query.
-  const docCurrency = String(pi.currency ?? '');
-  const matches = (c: unknown) => !c || String(c) === docCurrency;
-  pi.amount_received = round2(payments.filter((p) => matches(p.currency)).reduce((s, p) => s + p.amount, 0));
-  // Not converted and not allocated — there is no rate stored anywhere and
-  // inventing one would put a fiction on a ledger. Reported instead.
-  pi.currency_mismatch = payments
-    .filter((p) => !matches(p.currency))
-    .map((p) => ({ currency: String(p.currency), amount: p.amount }));
+  /*
+   * Money only adds up within one currency — the same rule the list's
+   * `advance_received` applies above, and the one receivables.ts has always
+   * applied to invoices. This used to sum every payment whatever its currency,
+   * so a €10,000 advance and ₹10,000 added to 20,000 of nothing.
+   *
+   * Asked of `receivables.ts` rather than repeated here, because the proforma
+   * PDF now prints the advance too and a third copy of the rule is how the
+   * paper and the screen come to disagree. Not converted and not allocated —
+   * there is no rate stored anywhere and inventing one would put a fiction on
+   * a ledger — so a mismatched payment is reported instead.
+   */
+  const advance = proformaAdvance(id);
+  pi.payments = advance.payments;
+  pi.amount_received = advance.amount_received;
+  pi.currency_mismatch = advance.currency_mismatch;
   return pi;
 }
 

@@ -5,7 +5,7 @@ import { inflateSync } from 'node:zlib';
 import { db } from '../db/connection.js';
 import { amountInWords } from './amountInWords.js';
 import { round2, isPieceBasis, piecesPerBillingUnit } from './totals.js';
-import { invoiceReceivable } from './receivables.js';
+import { invoiceReceivable, proformaAdvance } from './receivables.js';
 import { getCompany, defaultCompany } from './companies.js';
 
 // The npm package ships fonts only as base64 vfs; decode them for the server printer.
@@ -1169,9 +1169,28 @@ export function buildProformaPdf(id: number): TDocumentDefinitions {
     ? `TOTAL PRICE ${cur} ${pi.inco_terms} ${pi.port_of_discharge.split(',')[0].toUpperCase()}`
     : 'GRAND TOTAL';
 
-  // Freight, tax and the grand total ride inside the items table. The table's
-  // own TOTAL row already states the subtotal, so drop the duplicate first line.
-  const money = totalsRows(pi, cur, grandLabel).slice(1);
+  /*
+   * Freight, tax and the grand total ride inside the items table. The table's
+   * own TOTAL row already states the subtotal, so drop the duplicate first line.
+   *
+   * Then what the customer has already paid, which is the point of sending a
+   * proforma: the buyer pays the advance against *this* document, so a
+   * proforma that states a grand total and says nothing about the money
+   * already banked asks for the whole sum a second time. Only shown once there
+   * is an advance — an untouched proforma prints exactly what it always did.
+   *
+   * `sums: true` stays on the grand total rather than defaulting to the last
+   * row, for the reason the invoice states: what is still owed is not a
+   * property of the boxes being shipped.
+   */
+  const advance = proformaAdvance(id);
+  const money: MoneyRow[] = totalsRows(pi, cur, grandLabel)
+    .slice(1)
+    .map((r) => (r.label === grandLabel ? { ...r, sums: true } : r));
+  if (advance.amount_received > 0) {
+    money.push({ label: 'Advance Received', value: fmtMoney(advance.amount_received, cur) });
+    money.push({ label: 'Balance Payable', value: fmtMoney(advance.balance_payable, cur), band: true });
+  }
 
   const content: Content[] = [
     ...companyHeader(s, { isExport: !!pi.is_export }),
