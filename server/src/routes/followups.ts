@@ -7,7 +7,7 @@ import { listBody } from '../services/pagination.js';
 export const followupsRouter = Router();
 
 const listSql = `
-  SELECT f.*, c.name AS customer_name,
+  SELECT f.*, c.name AS customer_name, u.name AS created_by_name,
     CASE f.doc_type
       WHEN 'quotation' THEN (SELECT number || ' R' || revision FROM quotations WHERE id = f.doc_id)
       WHEN 'proforma' THEN (SELECT number FROM proforma_invoices WHERE id = f.doc_id)
@@ -15,7 +15,8 @@ const listSql = `
       ELSE NULL
     END AS doc_number
   FROM followups f
-  LEFT JOIN customers c ON c.id = f.customer_id`;
+  LEFT JOIN customers c ON c.id = f.customer_id
+  LEFT JOIN users u ON u.id = f.created_by`;
 
 followupsRouter.get('/', (req: AuthedRequest, res) => {
   const where: string[] = [];
@@ -39,13 +40,17 @@ followupsRouter.post('/', (req: AuthedRequest, res) => {
     return res.status(404).json({ error: 'Customer not found' });
   }
   const info = db.prepare(
-    'INSERT INTO followups (doc_type, doc_id, customer_id, due_date, note) VALUES (?, ?, ?, ?, ?)'
+    `INSERT INTO followups (doc_type, doc_id, customer_id, due_date, note, created_by)
+     VALUES (?, ?, ?, ?, ?, ?)`
   ).run(
     String(body.doc_type ?? 'general'),
     body.doc_id ? Number(body.doc_id) : null,
     body.customer_id ? Number(body.customer_id) : null,
     String(body.due_date),
-    String(body.note ?? '')
+    String(body.note ?? ''),
+    // Taken from the session, never from the body: who did this is not
+    // something the caller gets to assert.
+    req.user?.id ?? null
   );
   res.status(201).json(db.prepare(`${listSql} WHERE f.id = ?`).get(Number(info.lastInsertRowid)));
 });
@@ -58,10 +63,27 @@ followupsRouter.put('/:id', (req: AuthedRequest, res) => {
   if (existing.customer_id != null && !canAccessCustomer(req, Number(existing.customer_id))) {
     return res.status(404).json({ error: 'Follow-up not found' });
   }
-  db.prepare('UPDATE followups SET due_date = ?, note = ?, done = ? WHERE id = ?').run(
+  const done = body.done != null ? (body.done ? 1 : 0) : (existing.done as number);
+  /*
+   * `done_at` is the day it was closed, and it moves **both ways**: re-opening
+   * a follow-up clears it, so the activity report can never credit somebody
+   * with a chase that was undone. It is only stamped on the transition, so
+   * editing the note of an already-closed follow-up does not move it to today.
+   *
+   * `date('now')` is UTC, as everywhere else in this app — a follow-up closed
+   * after 6:30pm IST lands on the next day's activity. Stated rather than
+   * worked around: the alternative is a timezone the server does not know.
+   */
+  const doneAt = done === (existing.done as number)
+    ? String(existing.done_at ?? '')
+    : done
+      ? String((db.prepare("SELECT date('now') AS d").get() as { d: string }).d)
+      : '';
+  db.prepare('UPDATE followups SET due_date = ?, note = ?, done = ?, done_at = ? WHERE id = ?').run(
     String(body.due_date ?? existing.due_date),
     String(body.note ?? existing.note ?? ''),
-    body.done != null ? (body.done ? 1 : 0) : (existing.done as number),
+    done,
+    doneAt,
     id
   );
   res.json(db.prepare(`${listSql} WHERE f.id = ?`).get(id));

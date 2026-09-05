@@ -122,6 +122,14 @@ interface DashboardData {
    * as "no comparison" rather than as a collapse to zero.
    */
   previous?: { currency: string; quoted: number; invoiced: number; received: number }[] | null;
+  /**
+   * Who did what over the period, one row per person. Optional for the same
+   * reason as everything else here: an older server simply does not send it.
+   */
+  activity?: {
+    user_id: number; name: string;
+    followups: number; quotations: number; orders: number; customers: number;
+  }[];
   // Optional for the same reason: an older server simply has no factory card.
   production?: {
     workOrdersByStatus: { status: string; count: number }[];
@@ -193,7 +201,7 @@ const RANGES: Range[] = [
  * never arranged the page, so nobody's saved layout is quietly rewritten, and
  * "Reset to default" brings it back by clearing the layout entirely.
  */
-const DEFAULT_HIDDEN = ['trend', 'pipeline', 'quotation-status', 'money-detail', 'followups'];
+const DEFAULT_HIDDEN = ['trend', 'pipeline', 'quotation-status', 'money-detail', 'followups', 'split'];
 
 /**
  * The order a first look opens in — and it is about packing, not preference.
@@ -206,7 +214,7 @@ const DEFAULT_HIDDEN = ['trend', 'pipeline', 'quotation-status', 'money-detail',
  */
 const DEFAULT_ORDER = [
   'attention', 'money',
-  'funnel', 'split',
+  'funnel', 'activity',
   'factory', 'top-customers', 'top-products',
 ];
 
@@ -536,6 +544,7 @@ export default function DashboardPage() {
   // and "how does this compare with the best" is the question being asked.
   const topCustomerMax = Math.max(0, ...topCustomerRows.map((c) => c.total));
   const topProductMax = Math.max(0, ...data.topProducts.map((prod) => prod.times_quoted));
+  const activity = data.activity ?? [];
   const pipelineMax = Math.max(1, ...pipeline.map((s) => s.count));
 
   const pendingCount = data.followups.overdue.length + data.followups.today.length;
@@ -1127,6 +1136,58 @@ export default function DashboardPage() {
             </BarChart>
           </ResponsiveContainer>
           <p className="mt-1 text-xs text-slate-400">Click a bar to open that slice of the list.</p>
+        </Card>
+      ),
+    },
+    {
+      /*
+       * Sales activity — the MR daily-activity table from the reference
+       * dashboard, with its pharma columns replaced by what this business
+       * records. Chases closed, customers reached, quotations raised.
+       *
+       * The empty state has to be explicit and is the interesting part: the
+       * two columns this reads (`followups.created_by`, `followups.done_at`)
+       * were added on 2026-09-05 and start empty, so a book full of history
+       * reports nothing here until people work through the new fields. Saying
+       * "nothing recorded yet" over a busy month would read as a fault, so it
+       * says which it is.
+       */
+      id: 'activity',
+      title: 'Sales Activity',
+      body: (
+        <Card
+          title="Sales Activity"
+          actions={<Link to="/followups" className="text-xs text-brand-600 hover:underline">View follow-ups</Link>}
+        >
+          {activity.length === 0 ? (
+            <p className={EMPTY}>
+              Nothing recorded in this period. Follow-ups have only counted towards this since the
+              tracking was added — earlier ones carry no author.
+            </p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className={TH}>
+                    <th className="pb-1 pr-3">Name</th>
+                    <th className="pb-1 pr-3 text-right">Chased</th>
+                    <th className="pb-1 pr-3 text-right">Customers</th>
+                    <th className="pb-1 text-right">Quoted</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {activity.map((r) => (
+                    <DrillRow key={r.user_id} to="/followups">
+                      <td className="py-1.5 pr-3">{r.name}</td>
+                      <td className="py-1.5 pr-3 text-right tabular-nums">{r.followups || '—'}</td>
+                      <td className="py-1.5 pr-3 text-right tabular-nums">{r.customers || '—'}</td>
+                      <td className="py-1.5 text-right tabular-nums">{r.quotations || '—'}</td>
+                    </DrillRow>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </Card>
       ),
     },

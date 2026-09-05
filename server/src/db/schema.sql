@@ -544,6 +544,11 @@ CREATE TABLE IF NOT EXISTS followups (
   due_date TEXT NOT NULL,
   note TEXT NOT NULL DEFAULT '',
   done INTEGER NOT NULL DEFAULT 0,
+  -- Who raised the chase, and the day it was actually closed. Together these
+  -- are what makes "who spoke to which customer, and when" answerable at all;
+  -- `created_at` only ever said when the reminder was written down.
+  created_by INTEGER REFERENCES users(id),
+  done_at TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 

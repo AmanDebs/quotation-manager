@@ -303,6 +303,20 @@ for (const table of ['quotations', 'orders', 'proforma_invoices', 'commercial_in
 }
 addColumnIfMissing('customers', 'company_id', 'INTEGER');
 
+/*
+ * Sales activity, asked for 2026-09-05.
+ *
+ * A follow-up recorded who it was *about* and never who did it, so "how many
+ * customers did this person chase last week" had no answer in the data — only
+ * `created_at`, which is when the reminder was typed, not when the call
+ * happened. Both columns are additive and both start empty, which means the
+ * activity report is **blank for everything already on file and correct from
+ * the day this ships**. That is the honest shape: a backfill would have to
+ * invent an author for every follow-up ever closed.
+ */
+addColumnIfMissing('followups', 'created_by', 'INTEGER');
+addColumnIfMissing('followups', 'done_at', "TEXT NOT NULL DEFAULT ''");
+
 /**
  * `sequences` was keyed (doc_type, year); it has to become
  * (company_id, doc_type, year), and SQLite cannot alter a primary key in place.

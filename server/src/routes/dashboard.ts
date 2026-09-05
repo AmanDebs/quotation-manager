@@ -210,6 +210,61 @@ dashboardRouter.get('/', (req: AuthedRequest, res) => {
     }
   }
 
+  /* ---------------------------------------------------------------- *
+   * Sales activity
+   *
+   * Who did what over the period, one row per person. The shape is the MR
+   * daily-activity table from the reference dashboard the user brought, with
+   * its pharma columns — visits, doctors, samples — replaced by the three
+   * things this business actually records: chases closed, customers reached,
+   * quotations raised.
+   *
+   * **Follow-ups are counted on the day they were closed, not raised.**
+   * `done_at` is stamped on the transition and cleared when one is re-opened,
+   * so this can never credit somebody with a chase that was undone.
+   *
+   * **Customers reached is a distinct count across all three activities**, not
+   * a sum: chasing a customer and quoting them on the same day is one customer
+   * dealt with, and adding the two would flatter whoever does both.
+   *
+   * The whole thing is **scoped like everything else** — a Sales login sees
+   * activity on its own customers only, which means the figures a salesperson
+   * reads are about their own book rather than the group's.
+   */
+  type ActivityRow = {
+    user_id: number; name: string;
+    followups: number; quotations: number; orders: number; customers: number;
+  };
+  const activityRows = q<ActivityRow>(
+    `WITH acts AS (
+        SELECT f.created_by AS user_id, f.customer_id, 'followup' AS kind
+          FROM followups f
+         WHERE f.done = 1 AND f.done_at BETWEEN ? AND ? AND f.created_by IS NOT NULL
+               ${scope.sql ? `AND f.${scope.sql}` : ''}
+        UNION ALL
+        SELECT created_by AS user_id, customer_id, 'quotation' AS kind
+          FROM quotations
+         WHERE superseded_by IS NULL AND date BETWEEN ? AND ? AND created_by IS NOT NULL${and}
+        UNION ALL
+        SELECT created_by AS user_id, customer_id, 'order' AS kind
+          FROM orders
+         WHERE status NOT IN ('cancelled') AND date BETWEEN ? AND ? AND created_by IS NOT NULL${and}
+      )
+      SELECT a.user_id, u.name,
+             SUM(CASE WHEN a.kind = 'followup' THEN 1 ELSE 0 END) AS followups,
+             SUM(CASE WHEN a.kind = 'quotation' THEN 1 ELSE 0 END) AS quotations,
+             SUM(CASE WHEN a.kind = 'order' THEN 1 ELSE 0 END) AS orders,
+             COUNT(DISTINCT a.customer_id) AS customers
+        FROM acts a JOIN users u ON u.id = a.user_id
+       GROUP BY a.user_id, u.name
+       ORDER BY (SUM(CASE WHEN a.kind = 'followup' THEN 1 ELSE 0 END)
+               + SUM(CASE WHEN a.kind = 'quotation' THEN 1 ELSE 0 END)
+               + SUM(CASE WHEN a.kind = 'order' THEN 1 ELSE 0 END)) DESC, u.name`,
+    from, to, ...scope.params,
+    from, to, ...p,
+    from, to, ...p
+  );
+
   // These join in the customer, so the filters need the document's own alias.
   const dq = docFilter('q');
   const di = docFilter('i');
@@ -509,6 +564,6 @@ dashboardRouter.get('/', (req: AuthedRequest, res) => {
     receivedByMonth,
     topCustomers, topCustomersInvoiced, topProducts, currencyTotals, followups, funnel,
     receivables, receivablesAgeing, orderBook, overdueOrders, attention, production,
-    previous,
+    previous, activity: activityRows,
   });
 });
