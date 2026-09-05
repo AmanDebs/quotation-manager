@@ -141,6 +141,75 @@ dashboardRouter.get('/', (req: AuthedRequest, res) => {
     from, to, ...scope.params, ...payCompany.params
   );
 
+  /* ---------------------------------------------------------------- *
+   * The period before this one
+   *
+   * A figure on its own is not information: ₹89,40,000 quoted is good or bad
+   * entirely depending on what the month before it was. So the two tiles that
+   * are genuinely *period* figures — quoted and invoiced — also carry the
+   * same sums over the window immediately preceding, and the client turns the
+   * pair into a direction.
+   *
+   * Three rules, and the first two are about not inventing a comparison.
+   *
+   * **"All time" has no before**, and neither does a request that named no
+   * window at all. Those answer `null`, and a null renders no chip — not a
+   * confident ↑100%, which is what a zero baseline would produce, and not a
+   * grey 0%, which claims it was measured and did not move.
+   *
+   * **The preceding window is the same length**, ending the day before this
+   * one starts. A 30-day period is compared with the 30 days before it, never
+   * with "last calendar month", which would make a 7-day window compare
+   * against 31 days and report a collapse every time.
+   *
+   * **The WHERE clauses are copied from the by-month queries verbatim**, so
+   * the only thing that can differ between a figure and its own baseline is
+   * the dates — the rule `countsByCurrency` already follows about `counts`.
+   * ---------------------------------------------------------------- */
+  const dayMs = 86_400_000;
+  const iso = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+  const boundedWindow = from !== '0000-01-01' && to !== '9999-12-31';
+  let previous: { currency: string; quoted: number; invoiced: number; received: number }[] | null = null;
+
+  if (boundedWindow) {
+    const fromMs = Date.parse(from);
+    const toMs = Date.parse(to);
+    if (Number.isFinite(fromMs) && Number.isFinite(toMs) && toMs >= fromMs) {
+      const prevTo = iso(fromMs - dayMs);
+      const prevFrom = iso(fromMs - dayMs - (toMs - fromMs));
+
+      const bucket = new Map<string, { currency: string; quoted: number; invoiced: number; received: number }>();
+      const add = (currency: string, key: 'quoted' | 'invoiced' | 'received', n: number) => {
+        const row = bucket.get(currency) ?? { currency, quoted: 0, invoiced: 0, received: 0 };
+        row[key] += n;
+        bucket.set(currency, row);
+      };
+      type CurTotal = { currency: string; total: number };
+
+      for (const r of q<CurTotal>(
+        `SELECT currency, SUM(grand_total) AS total
+         FROM quotations WHERE superseded_by IS NULL AND date BETWEEN ? AND ?${and} GROUP BY currency`,
+        prevFrom, prevTo, ...p
+      )) add(r.currency, 'quoted', r.total);
+
+      for (const r of q<CurTotal>(
+        `SELECT currency, SUM(grand_total) AS total
+         FROM commercial_invoices WHERE date BETWEEN ? AND ?${and} GROUP BY currency`,
+        prevFrom, prevTo, ...p
+      )) add(r.currency, 'invoiced', r.total);
+
+      for (const r of q<CurTotal>(
+        `SELECT pay.currency AS currency, SUM(pay.amount) AS total
+         FROM payments pay
+         WHERE pay.date BETWEEN ? AND ?${scope.sql ? ` AND pay.${scope.sql}` : ''}${payCompany.sql}
+         GROUP BY pay.currency`,
+        prevFrom, prevTo, ...scope.params, ...payCompany.params
+      )) add(r.currency, 'received', r.total);
+
+      previous = [...bucket.values()];
+    }
+  }
+
   // These join in the customer, so the filters need the document's own alias.
   const dq = docFilter('q');
   const di = docFilter('i');
@@ -440,5 +509,6 @@ dashboardRouter.get('/', (req: AuthedRequest, res) => {
     receivedByMonth,
     topCustomers, topCustomersInvoiced, topProducts, currencyTotals, followups, funnel,
     receivables, receivablesAgeing, orderBook, overdueOrders, attention, production,
+    previous,
   });
 });
