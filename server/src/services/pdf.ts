@@ -6,6 +6,7 @@ import { db } from '../db/connection.js';
 import { amountInWords } from './amountInWords.js';
 import { round2, isPieceBasis, piecesPerBillingUnit } from './totals.js';
 import { invoiceReceivable, proformaAdvance } from './receivables.js';
+import { paramsFor, specOwner, checksForWorkOrder } from './qc.js';
 import { getCompany, defaultCompany } from './companies.js';
 
 // The npm package ships fonts only as base64 vfs; decode them for the server printer.
@@ -1709,6 +1710,264 @@ export function buildPurchaseOrderPdf(id: number): TDocumentDefinitions {
     signatureBlock(s, {}),
   ];
   return baseDoc(content);
+}
+
+/* ------------------------------------------------------------------ *
+ * The QC report
+ * ------------------------------------------------------------------ */
+
+interface QcJob {
+  id: number;
+  number: string;
+  product_id: number | null;
+  product_name: string | null;
+  description: string;
+  order_id: number;
+  order_number: string;
+  order_line: number;
+  customer_id: number;
+  customer_name: string;
+  process_name: string | null;
+  machine_name: string | null;
+}
+
+const QC_JOB_SQL = `
+  SELECT w.id, w.number, w.product_id, w.description, w.order_id, w.order_line,
+         p.name AS product_name, o.number AS order_number,
+         o.customer_id, c.name AS customer_name,
+         pr.name AS process_name, m.name AS machine_name
+    FROM work_orders w
+    JOIN orders o ON o.id = w.order_id
+    JOIN customers c ON c.id = o.customer_id
+    LEFT JOIN products p ON p.id = w.product_id
+    LEFT JOIN processes pr ON pr.id = w.process_id
+    LEFT JOIN machines m ON m.id = w.machine_id`;
+
+/**
+ * The jobs a commercial invoice covers.
+ *
+ * The same walk `dispatchProgress()` does — an invoice reaches its order
+ * directly or through the proforma that carries the link — and then the same
+ * **index rule** the whole chain uses: an invoice line at position *i* bills
+ * the order line at position *i*, and `work_orders.order_line` is that
+ * position. Positions count charge lines, so nothing is compacted first.
+ */
+function jobsForInvoice(invoiceId: number): QcJob[] {
+  const inv = db.prepare(
+    `SELECT COALESCE(i.order_id, pi.order_id) AS order_id
+       FROM commercial_invoices i
+       LEFT JOIN proforma_invoices pi ON pi.id = i.pi_id
+      WHERE i.id = ?`
+  ).get(invoiceId) as { order_id: number | null } | undefined;
+  if (!inv?.order_id) return [];
+
+  const billed = db.prepare(
+    'SELECT qty FROM invoice_items WHERE invoice_id = ? ORDER BY sort_order, id'
+  ).all(invoiceId) as { qty: number | null }[];
+  const positions = billed
+    .map((it, i) => ({ i, qty: Number(it.qty) || 0 }))
+    .filter((r) => r.qty > 0)
+    .map((r) => r.i);
+  if (!positions.length) return [];
+
+  return db.prepare(
+    `${QC_JOB_SQL} WHERE w.order_id = ? AND w.order_line IN (${positions.map(() => '?').join(',')})
+      ORDER BY w.order_line, w.id`
+  ).all(inv.order_id, ...(positions as never[])) as unknown as QcJob[];
+}
+
+const jobsForOrder = (orderId: number) =>
+  db.prepare(`${QC_JOB_SQL} WHERE w.order_id = ? ORDER BY w.order_line, w.id`)
+    .all(orderId) as unknown as QcJob[];
+
+const jobById = (workOrderId: number) =>
+  db.prepare(`${QC_JOB_SQL} WHERE w.id = ?`).all(workOrderId) as unknown as QcJob[];
+
+/**
+ * The body of a QC report: every job, its specification, and every inspection
+ * against it **grouped by date and shift** — which is what "shift wise details"
+ * asks for, and the first thing in this app to group by a field that has always
+ * been free text.
+ *
+ * The specification printed is the one *in force for that job's customer*, and
+ * the readings are judged against the tolerance **copied onto the result** when
+ * the check was saved — not against today's spec. A batch that met the spec of
+ * the day still reads as passing after the spec moves, which is the whole
+ * reason `qc_results` carries its own copy.
+ */
+function qcReportContent(s: Row, jobs: QcJob[]): Content[] {
+  if (!jobs.length) {
+    return [{ text: 'No quality checks have been recorded against this.', fontSize: 9, margin: [0, 10, 0, 0] as any }];
+  }
+
+  const out: Content[] = [];
+  for (const [n, job] of jobs.entries()) {
+    const params = paramsFor(job.product_id, job.customer_id);
+    const owner = specOwner(job.product_id, job.customer_id);
+    const checks = checksForWorkOrder(job.id);
+
+    out.push({
+      table: {
+        widths: ['*', '*', '*'],
+        body: [[
+          lv('Job', job.number),
+          lv('Product', String(job.product_name || job.description || '')),
+          lv('Order', `${job.order_number} · line ${job.order_line + 1}`),
+        ], [
+          lv('Customer', job.customer_name),
+          lv('Process', String(job.process_name || '')),
+          lv('Machine', String(job.machine_name || '')),
+        ]],
+      },
+      layout: boxedLayout,
+      margin: [0, n === 0 ? 8 : 14, 0, 0] as any,
+    });
+
+    // Which specification was applied, said out loud — "these are the
+    // tolerances" and "these are *your* tolerances" are different sentences.
+    out.push({
+      text: owner === 'customer'
+        ? `Specification: ${job.customer_name}'s own`
+        : owner === 'default' ? 'Specification: the product’s standard' : 'No specification recorded for this product',
+      fontSize: 8,
+      italics: true,
+      color: '#555555',
+      margin: [0, 3, 0, 3] as any,
+    });
+
+    if (params.length) {
+      out.push({
+        table: {
+          headerRows: 1,
+          widths: ['*', 55, 55, 45],
+          body: [
+            ['Parameter', 'Min', 'Max', 'Unit'].map((t) => ({ text: t, fontSize: 7.5, bold: true, color: '#ffffff', fillColor: s.theme })),
+            ...params.map((p) => [
+              { text: p.name, fontSize: 8 },
+              { text: p.kind === 'boolean' ? '—' : (p.min_value ?? '—').toString(), fontSize: 8, alignment: 'right' as const },
+              { text: p.kind === 'boolean' ? '—' : (p.max_value ?? '—').toString(), fontSize: 8, alignment: 'right' as const },
+              { text: p.unit || '', fontSize: 8, alignment: 'center' as const },
+            ]),
+          ],
+        },
+        layout: gridLayout,
+      });
+    }
+
+    if (!checks.length) {
+      out.push({ text: 'No inspection recorded against this job.', fontSize: 8, italics: true, margin: [0, 4, 0, 0] as any });
+      continue;
+    }
+
+    // Grouped by the day and the shift it was inspected on.
+    const groups = new Map<string, typeof checks>();
+    for (const c of checks) {
+      const key = `${c.date}|${c.shift || ''}`;
+      const list = groups.get(key) ?? [];
+      list.push(c);
+      groups.set(key, list);
+    }
+
+    for (const [key, list] of groups) {
+      const [date, shift] = key.split('|');
+      out.push({
+        text: `${fmtDate(date)}${shift ? ` · Shift ${shift}` : ''}`,
+        fontSize: 8.5, bold: true, color: s.theme, margin: [0, 6, 0, 2] as any,
+      });
+      const body: any[][] = [
+        ['Parameter', 'Spec', 'Reading', 'Result', 'Inspector'].map((t) => ({ text: t, fontSize: 7.5, bold: true })),
+      ];
+      for (const c of list) {
+        for (const r of c.results) {
+          const spec = r.kind === 'boolean'
+            ? 'pass / fail'
+            : [r.min_value ?? '', r.max_value ?? ''].some((v) => v !== '')
+              ? `${r.min_value ?? ''} – ${r.max_value ?? ''}`
+              : '—';
+          body.push([
+            { text: r.name, fontSize: 8 },
+            { text: spec, fontSize: 8, alignment: 'center' as const },
+            { text: r.value === null || r.value === undefined ? '—' : String(r.value), fontSize: 8, alignment: 'right' as const },
+            // Never recomputed here: `ok` is the arithmetic `resultOk` did, and
+            // a blank reading is *not measured* rather than a pass.
+            {
+              text: r.ok === null ? 'not measured' : r.ok ? 'Pass' : 'Fail',
+              fontSize: 8, alignment: 'center' as const, bold: r.ok === false,
+              color: r.ok === false ? '#a11' : r.ok ? '#186a3b' : '#888888',
+            },
+            { text: c.inspector || '', fontSize: 8 },
+          ]);
+        }
+        if (c.notes) body.push([{ text: `Note: ${c.notes}`, fontSize: 7.5, italics: true, colSpan: 5, color: '#555555' }, {}, {}, {}, {}]);
+      }
+      out.push({ table: { headerRows: 1, widths: ['*', 70, 55, 55, 70], body }, layout: gridLayout });
+    }
+  }
+  return out;
+}
+
+function qcDocument(s: Row, title: string, subject: string, jobs: QcJob[]): TDocumentDefinitions {
+  return baseDoc([
+    ...companyHeader(s, {}),
+    docTitle(s, title),
+    { text: subject, fontSize: 9, bold: true, margin: [0, 2, 0, 0] as any },
+    ...qcReportContent(s, jobs),
+    signatureBlock(s, {}),
+  ]);
+}
+
+/** One job's quality record. */
+export function buildQcReportPdf(workOrderId: number): TDocumentDefinitions {
+  const jobs = jobById(workOrderId);
+  if (!jobs.length) throw new Error('Work order not found');
+  const wo = db.prepare('SELECT company_id FROM work_orders WHERE id = ?').get(workOrderId) as Row;
+  return qcDocument(companyProfile(wo?.company_id), 'QUALITY REPORT', `Job ${jobs[0].number} — ${jobs[0].customer_name}`, jobs);
+}
+
+/** Every job raised from one sales order. */
+export function buildOrderQcReportPdf(orderId: number): TDocumentDefinitions {
+  const o = db.prepare('SELECT number, company_id, customer_id FROM orders WHERE id = ?').get(orderId) as Row;
+  if (!o) throw new Error('Order not found');
+  const c = db.prepare('SELECT name FROM customers WHERE id = ?').get(o.customer_id) as Row | undefined;
+  return qcDocument(
+    companyProfile(o.company_id), 'QUALITY REPORT',
+    `Order ${String(o.number)} — ${String(c?.name ?? '')}`, jobsForOrder(orderId)
+  );
+}
+
+/** The quality record behind one commercial invoice — the summary that ships with it. */
+export function buildInvoiceQcReportPdf(invoiceId: number): TDocumentDefinitions {
+  const inv = db.prepare('SELECT number, company_id, customer_id FROM commercial_invoices WHERE id = ?').get(invoiceId) as Row;
+  if (!inv) throw new Error('Invoice not found');
+  const c = db.prepare('SELECT name FROM customers WHERE id = ?').get(inv.customer_id) as Row | undefined;
+  return qcDocument(
+    companyProfile(inv.company_id), 'QUALITY REPORT',
+    `Invoice ${String(inv.number)} — ${String(c?.name ?? '')}`, jobsForInvoice(invoiceId)
+  );
+}
+
+/**
+ * The invoice and its quality summary in one file.
+ *
+ * The same mechanism as `buildInvoiceWithPackingPdf` — two builders,
+ * concatenated with a page break, keeping the first document's page settings —
+ * including its behaviour when the second half has nothing to say: an invoice
+ * whose jobs carry no checks comes back as the invoice alone, rather than as an
+ * invoice followed by a page saying nothing.
+ */
+export function buildInvoiceWithQcPdf(invoiceId: number): TDocumentDefinitions {
+  const invoice = buildInvoicePdf(invoiceId);
+  const jobs = jobsForInvoice(invoiceId);
+  if (!jobs.some((j) => checksForWorkOrder(j.id).length > 0)) return invoice;
+  const qc = buildInvoiceQcReportPdf(invoiceId);
+  return {
+    ...invoice,
+    content: [
+      ...(invoice.content as Content[]),
+      { text: '', pageBreak: 'after' },
+      ...(qc.content as Content[]),
+    ],
+  };
 }
 
 /** Optional diagonal watermark for documents that have not been approved. */

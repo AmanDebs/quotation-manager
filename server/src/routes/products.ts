@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { db, transaction } from '../db/connection.js';
 import { requirePermission } from '../middleware/auth.js';
-import { paramsFor } from '../services/qc.js';
+import { paramsFor, specOwner } from '../services/qc.js';
 import { IMPORT_FIELDS, buildImport, decodeUpload, identityKey, type BuildOptions } from '../services/productImport.js';
 import { recipeFor } from '../services/recipe.js';
 import { PRODUCT_TYPES, isProductType, guessProductType } from '../services/productType.js';
@@ -160,12 +160,24 @@ productsRouter.post('/import', requirePermission('product', 'full'), (req, res) 
  * beats diffing. Editing it does **not** disturb checks already recorded:
  * those carry their own copy of the tolerance they were judged against.
  */
+/**
+ * The specification for a product, optionally as one customer sees it.
+ *
+ * `?customer_id=` returns that customer's own list if they have one and the
+ * product's default if they do not — and says which, because "these are the
+ * tolerances" and "these are *your* tolerances" are different sentences.
+ */
 productsRouter.get('/:id/qc-params', (req, res) => {
   const id = Number(req.params.id);
   if (!db.prepare('SELECT id FROM products WHERE id = ?').get(id)) {
     return res.status(404).json({ error: 'Product not found' });
   }
-  res.json(paramsFor(id));
+  const customerId = numOrNull(req.query.customer_id);
+  res.json({
+    items: paramsFor(id, customerId),
+    owner: specOwner(id, customerId),
+    customer_id: customerId,
+  });
 });
 
 productsRouter.put('/:id/qc-params', requirePermission('qc', 'full'), (req, res) => {
@@ -189,16 +201,31 @@ productsRouter.put('/:id/qc-params', requirePermission('qc', 'full'), (req, res)
     }
   }
 
+  /*
+   * Written into whichever list was named, so saving a customer's spec never
+   * disturbs the default and vice versa. Sending an empty list for a customer
+   * therefore *removes* their override and puts them back on the default —
+   * which is the only way to undo one, and the reason the DELETE is scoped the
+   * same way as the INSERT.
+   */
+  const customerId = numOrNull(req.body?.customer_id);
+  if (customerId && !db.prepare('SELECT id FROM customers WHERE id = ?').get(customerId)) {
+    return res.status(400).json({ error: 'That customer no longer exists' });
+  }
   transaction(() => {
-    db.prepare('DELETE FROM product_qc_params WHERE product_id = ?').run(id);
+    db.prepare(
+      customerId
+        ? 'DELETE FROM product_qc_params WHERE product_id = ? AND customer_id = ?'
+        : 'DELETE FROM product_qc_params WHERE product_id = ? AND customer_id IS NULL'
+    ).run(...(customerId ? [id, customerId] : [id]) as never[]);
     const ins = db.prepare(
-      `INSERT INTO product_qc_params (product_id, name, kind, unit, min_value, max_value, notes, sort_order)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO product_qc_params (product_id, customer_id, name, kind, unit, min_value, max_value, notes, sort_order)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
     );
     lines.forEach((r, i) => {
       const kind = String(r.kind ?? 'numeric');
       ins.run(
-        id, String(r.name).trim(), kind, String(r.unit ?? ''),
+        id, customerId, String(r.name).trim(), kind, String(r.unit ?? ''),
         // A pass/fail check has no tolerance to hold.
         kind === 'boolean' ? null : numOrNull(r.min_value),
         kind === 'boolean' ? null : numOrNull(r.max_value),
@@ -206,7 +233,7 @@ productsRouter.put('/:id/qc-params', requirePermission('qc', 'full'), (req, res)
       );
     });
   });
-  res.json(paramsFor(id));
+  res.json({ items: paramsFor(id, customerId), owner: specOwner(id, customerId), customer_id: customerId });
 });
 
 productsRouter.get('/:id/materials', (req, res) => {

@@ -1,6 +1,11 @@
 import { Router } from 'express';
 import { db } from '../db/connection.js';
-import { buildQuotationPdf, buildOrderPdf, buildProformaPdf, buildInvoicePdf, buildPackingListPdf, buildInvoiceWithPackingPdf, buildPurchaseOrderPdf, renderPdf } from '../services/pdf.js';
+import {
+  buildQuotationPdf, buildOrderPdf, buildProformaPdf, buildInvoicePdf, buildPackingListPdf,
+  buildInvoiceWithPackingPdf, buildPurchaseOrderPdf,
+  buildQcReportPdf, buildOrderQcReportPdf, buildInvoiceQcReportPdf, buildInvoiceWithQcPdf,
+  renderPdf,
+} from '../services/pdf.js';
 import { allows, type AuthedRequest } from '../middleware/auth.js';
 import { canAccessCustomer } from '../middleware/scope.js';
 
@@ -39,6 +44,35 @@ const builders = {
     build: buildPurchaseOrderPdf, table: 'purchase_orders', approvable: false,
     party: 'supplier', fn: 'purchasing',
   },
+  /*
+   * The quality reports, and the one place `partySql` earns its keep.
+   *
+   * These hang off a work order rather than off a document with a
+   * `customer_id` of its own, so neither the customer join nor the supplier
+   * one fits. Naming the query per entry generalises what `party: 'supplier'`
+   * was already doing by hand, instead of adding a third special case — and it
+   * still has to return `number`, `customer_id` and `party_name`, because the
+   * filename and the scope check are built from those three.
+   */
+  'qc-report': {
+    build: buildQcReportPdf, table: 'work_orders', approvable: false, fn: 'qc',
+    partySql: `SELECT w.number, o.customer_id, c.name AS party_name
+                 FROM work_orders w
+                 JOIN orders o ON o.id = w.order_id
+                 JOIN customers c ON c.id = o.customer_id
+                WHERE w.id = ?`,
+  },
+  'order-qc-report': {
+    build: buildOrderQcReportPdf, table: 'orders', approvable: false, fn: 'qc',
+  },
+  'invoice-qc-report': {
+    build: buildInvoiceQcReportPdf, table: 'commercial_invoices', approvable: false, fn: 'qc',
+  },
+  // The invoice and its quality summary in one file. Approval follows the
+  // invoice, as it does for the invoice-and-packing-list pair.
+  'invoice-with-qc': {
+    build: buildInvoiceWithQcPdf, table: 'commercial_invoices', approvable: true, fn: 'invoice',
+  },
 } as const;
 
 type DocType = keyof typeof builders;
@@ -60,6 +94,10 @@ const DOC_LABEL: Record<DocType, string> = {
   'packing-list': 'Packing List',
   'invoice-with-packing': 'Commercial Invoice & Packing List',
   'purchase-order': 'Purchase Order',
+  'qc-report': 'Quality Report',
+  'order-qc-report': 'Quality Report',
+  'invoice-qc-report': 'Quality Report',
+  'invoice-with-qc': 'Commercial Invoice & Quality Report',
 };
 
 /*
@@ -123,13 +161,15 @@ pdfRouter.get('/:type/:id/:name?', async (req: AuthedRequest, res) => {
   const supplierSide = 'party' in entry && entry.party === 'supplier';
   if (!allows(req, entry.fn)) return res.status(404).json({ error: 'Document not found' });
   const row = db.prepare(
-    supplierSide
-      ? `SELECT d.number, NULL AS customer_id, s.name AS party_name
-           FROM ${entry.table} d LEFT JOIN suppliers s ON s.id = d.supplier_id
-          WHERE d.id = ?`
-      : `SELECT d.number, d.customer_id, c.name AS party_name
-           FROM ${entry.table} d LEFT JOIN customers c ON c.id = d.customer_id
-          WHERE d.id = ?`
+    'partySql' in entry && entry.partySql
+      ? entry.partySql
+      : supplierSide
+        ? `SELECT d.number, NULL AS customer_id, s.name AS party_name
+             FROM ${entry.table} d LEFT JOIN suppliers s ON s.id = d.supplier_id
+            WHERE d.id = ?`
+        : `SELECT d.number, d.customer_id, c.name AS party_name
+             FROM ${entry.table} d LEFT JOIN customers c ON c.id = d.customer_id
+            WHERE d.id = ?`
   ).get(id) as { number: string; customer_id: number | null; party_name: string | null } | undefined;
   if (!row) return res.status(404).json({ error: 'Document not found' });
   if (!supplierSide && !canAccessCustomer(req, row.customer_id as number)) {

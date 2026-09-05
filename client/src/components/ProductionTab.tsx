@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
-import type { Order, WorkOrder, WorkOrderStatus, Location, Machine, Mould } from '../types';
+import type { Order, WorkOrder, WorkOrderStatus, Location, Machine, Mould, Process } from '../types';
 import { Button, Input, Textarea, Select, Field, Card, EmptyState, ErrorText, Modal } from './ui';
 import QcCheckModal from './QcCheckModal';
 import { fmtQty, today } from '../lib/format';
@@ -42,6 +42,7 @@ export default function ProductionTab({ order }: { order: Order }) {
   const { data: locations = [] } = useQuery({ queryKey: ['master', 'locations', false], queryFn: () => api.get<Location[]>('/api/locations') });
   const { data: machines = [] } = useQuery({ queryKey: ['master', 'machines', false], queryFn: () => api.get<Machine[]>('/api/machines') });
   const { data: moulds = [] } = useQuery({ queryKey: ['master', 'moulds', false], queryFn: () => api.get<Mould[]>('/api/moulds') });
+  const { data: processes = [] } = useQuery({ queryKey: ['master', 'processes', false], queryFn: () => api.get<Process[]>('/api/processes') });
 
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: key });
@@ -80,6 +81,7 @@ export default function ProductionTab({ order }: { order: Order }) {
       location_id: locations[0]?.id ?? null,
       machine_id: null,
       mould_id: null,
+      process_id: null,
       planned_start: '',
       planned_end: '',
       notes: '',
@@ -270,6 +272,15 @@ export default function ProductionTab({ order }: { order: Order }) {
               <Select value={editing.mould_id ?? ''} onChange={(e) => set({ mould_id: e.target.value ? Number(e.target.value) : null })}>
                 <option value="">— none —</option>
                 {moulds.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+              </Select>
+            </Field>
+            {/* The fourth master a job names, and the newest: moulding is not
+                the only thing a job can be — assembly and camera inspection
+                are jobs too, and the quality report says which was done. */}
+            <Field label="Process">
+              <Select value={editing.process_id ?? ''} onChange={(e) => set({ process_id: e.target.value ? Number(e.target.value) : null })}>
+                <option value="">— none —</option>
+                {processes.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
               </Select>
             </Field>
             <Field label="Planned start">

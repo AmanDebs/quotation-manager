@@ -3,7 +3,7 @@ import { db, transaction } from '../db/connection.js';
 import { nextNumber } from '../services/numbering.js';
 import { progressFor, progressForMany } from '../services/production.js';
 import { materialCostByWorkOrder } from '../services/costing.js';
-import { paramsFor, checksForWorkOrder, summaryForWorkOrder } from '../services/qc.js';
+import { paramsFor, checksForWorkOrder, summaryForWorkOrder, specOwner, RESULT_FAILED_SQL } from '../services/qc.js';
 import { requirementFor } from '../services/recipe.js';
 import { syncOrderStatus } from '../services/orderStatus.js';
 import { requirePermission, type AuthedRequest } from '../middleware/auth.js';
@@ -30,7 +30,7 @@ const listSql = `
   SELECT w.*, o.number AS order_number, o.customer_id,
          c.name AS customer_name,
          p.name AS product_name,
-         l.name AS location_name, m.name AS machine_name, md.name AS mould_name,
+         l.name AS location_name, m.name AS machine_name, md.name AS mould_name, pr.name AS process_name,
          u.name AS created_by_name
   FROM work_orders w
   JOIN orders o ON o.id = w.order_id
@@ -39,11 +39,12 @@ const listSql = `
   LEFT JOIN locations l ON l.id = w.location_id
   LEFT JOIN machines m ON m.id = w.machine_id
   LEFT JOIN moulds md ON md.id = w.mould_id
+  LEFT JOIN processes pr ON pr.id = w.process_id
   LEFT JOIN users u ON u.id = w.created_by`;
 
 const fields = [
   'order_id', 'order_line', 'product_id', 'description', 'qty_planned',
-  'location_id', 'machine_id', 'mould_id', 'planned_start', 'planned_end', 'notes',
+  'location_id', 'machine_id', 'mould_id', 'process_id', 'planned_start', 'planned_end', 'notes',
 ] as const;
 
 const STATUSES = ['planned', 'released', 'running', 'paused', 'done', 'cancelled'];
@@ -75,10 +76,14 @@ function getFull(req: AuthedRequest, id: number) {
   // The product's QC specification and every inspection against this job.
   // `has_spec: false` means nobody has said what to measure — not that
   // everything passed, the same distinction `has_recipe` draws for material.
+  // Whose specification applies is part of the answer, not a detail: the same
+  // part is measured to different tolerances for different customers.
+  const forCustomer = wo.customer_id as number | null;
   wo.qc = {
-    params: paramsFor(wo.product_id as number | null),
+    params: paramsFor(wo.product_id as number | null, forCustomer),
+    spec_owner: specOwner(wo.product_id as number | null, forCustomer),
     checks: checksForWorkOrder(id),
-    summary: summaryForWorkOrder(id, wo.product_id as number | null),
+    summary: summaryForWorkOrder(id, wo.product_id as number | null, forCustomer),
   };
   // What this job will eat, if the product has a recipe at all. `has_recipe`
   // false means unanswerable, which the screen shows as "not costed" — never
@@ -145,6 +150,94 @@ workOrdersRouter.get('/', (req: AuthedRequest, res) => {
   res.json(Array.isArray(body) ? body : { ...body, summary: jobSummary(sql, params) });
 });
 
+/* ------------------------------------------------------------------ *
+ * The QC register
+ * ------------------------------------------------------------------ */
+
+/*
+ * The verdict is derived in the database here, not after the fetch, because
+ * this list is paged — `RESULT_FAILED_SQL` is `resultOk` restated, and lives
+ * beside it in `services/qc.ts` with the test that keeps the two honest.
+ */
+const RESULT_FAILED = RESULT_FAILED_SQL;
+const HAS_FAILURE = `EXISTS (SELECT 1 FROM qc_results r WHERE r.check_id = q.id AND (${RESULT_FAILED}))`;
+const HAS_READING = 'EXISTS (SELECT 1 FROM qc_results r WHERE r.check_id = q.id AND r.value IS NOT NULL)';
+
+const registerSql = `
+  SELECT q.id, q.work_order_id, q.date, q.shift, q.sample_size, q.inspector, q.notes,
+         w.number AS work_order_number, w.order_line, w.product_id, w.description,
+         p.name AS product_name, pr.name AS process_name,
+         o.id AS order_id, o.number AS order_number, o.customer_id, c.name AS customer_name,
+         (SELECT COUNT(*) FROM qc_results r WHERE r.check_id = q.id) AS readings,
+         (SELECT COUNT(*) FROM qc_results r WHERE r.check_id = q.id AND r.value IS NOT NULL) AS measured,
+         (SELECT COUNT(*) FROM qc_results r WHERE r.check_id = q.id AND (${RESULT_FAILED})) AS failed_count
+    FROM qc_checks q
+    JOIN work_orders w ON w.id = q.work_order_id
+    JOIN orders o ON o.id = w.order_id
+    JOIN customers c ON c.id = o.customer_id
+    LEFT JOIN products p ON p.id = w.product_id
+    LEFT JOIN processes pr ON pr.id = w.process_id`;
+
+function registerWhere(req: AuthedRequest) {
+  const scope = scopeClause(req, 'o.customer_id');
+  const where: string[] = [];
+  const params: unknown[] = [];
+  if (scope.sql) { where.push(scope.sql); params.push(...scope.params); }
+  const eq = (key: string, col: string) => {
+    if (req.query[key]) { where.push(`${col} = ?`); params.push(Number(req.query[key])); }
+  };
+  eq('work_order_id', 'q.work_order_id');
+  eq('order_id', 'w.order_id');
+  eq('product_id', 'w.product_id');
+  eq('customer_id', 'o.customer_id');
+  eq('process_id', 'w.process_id');
+  if (req.query.from) { where.push('q.date >= ?'); params.push(String(req.query.from)); }
+  if (req.query.to) { where.push('q.date <= ?'); params.push(String(req.query.to)); }
+  if (req.query.shift) { where.push('q.shift = ?'); params.push(String(req.query.shift)); }
+  // The verdict is a filter like any other, and has to be one the *database*
+  // can apply — see `RESULT_FAILED`. The three values are the three a check can
+  // be: a failure, a clean sheet, or nothing measured at all.
+  const result = String(req.query.result ?? '');
+  if (result === 'fail') where.push(HAS_FAILURE);
+  else if (result === 'pass') where.push(`${HAS_READING} AND NOT ${HAS_FAILURE}`);
+  else if (result === 'unmeasured') where.push(`NOT ${HAS_READING}`);
+  return { sql: `${registerSql} ${where.length ? `WHERE ${where.join(' AND ')}` : ''}`, params };
+}
+
+/**
+ * Every inspection recorded, newest first — the register the quality desk works
+ * from, as against the per-job panel on a work order.
+ *
+ * It lives in this router rather than one of its own because it is the `qc`
+ * function on a record that hangs off a work order: the mount, the scope
+ * clause and the customer join are all already here. It must stay declared
+ * **above `/:id`**, or Express reads "qc-checks" as a work order id.
+ */
+workOrdersRouter.get('/qc-checks', requirePermission('qc'), (req: AuthedRequest, res) => {
+  const { sql, params } = registerWhere(req);
+  const body = listBody<Record<string, unknown>>(req.query, {
+    sql,
+    order: 'ORDER BY q.date DESC, q.id DESC',
+    params,
+  }, (rows) => rows.map((r) => ({
+    ...r,
+    // Derived here for exactly the reason it is derived everywhere else: a
+    // check with nothing measured is **not** a pass.
+    passed: Number(r.measured) === 0 ? null : Number(r.failed_count) === 0,
+  })));
+  // Measured over the whole filtered set, never the page — the rule the
+  // despatch and work-order lists already follow.
+  const summary = db.prepare(
+    `WITH f AS (${sql})
+     SELECT COUNT(*) AS checks,
+            COALESCE(SUM(CASE WHEN measured = 0 THEN 1 ELSE 0 END), 0) AS unmeasured,
+            COALESCE(SUM(CASE WHEN measured > 0 AND failed_count = 0 THEN 1 ELSE 0 END), 0) AS passed,
+            COALESCE(SUM(CASE WHEN failed_count > 0 THEN 1 ELSE 0 END), 0) AS failed
+       FROM f`
+  ).get(...(params as never[]));
+  res.json(Array.isArray(body) ? body : { ...body, summary });
+});
+
 workOrdersRouter.get('/:id', (req: AuthedRequest, res) => {
   const wo = getFull(req, Number(req.params.id));
   if (!wo) return res.status(404).json({ error: 'Work order not found' });
@@ -182,6 +275,7 @@ workOrdersRouter.post('/', requirePermission('work_order', 'full'), (req: Authed
       numOrNull(body.location_id),
       numOrNull(body.machine_id),
       numOrNull(body.mould_id),
+      numOrNull(body.process_id),
       String(body.planned_start ?? ''),
       String(body.planned_end ?? ''),
       String(body.notes ?? ''),
@@ -209,7 +303,7 @@ workOrdersRouter.put('/:id', requirePermission('work_order', 'full'), (req: Auth
   // the production figures onto another customer's line.
   db.prepare(
     `UPDATE work_orders SET number = ?, order_line = ?, product_id = ?, description = ?, qty_planned = ?,
-       location_id = ?, machine_id = ?, mould_id = ?, planned_start = ?, planned_end = ?, notes = ?
+       location_id = ?, machine_id = ?, mould_id = ?, process_id = ?, planned_start = ?, planned_end = ?, notes = ?
      WHERE id = ?`
   ).run(
     String(v('number')),
@@ -220,6 +314,7 @@ workOrdersRouter.put('/:id', requirePermission('work_order', 'full'), (req: Auth
     numOrNull(v('location_id', null)),
     numOrNull(v('machine_id', null)),
     numOrNull(v('mould_id', null)),
+    numOrNull(v('process_id', null)),
     String(v('planned_start')),
     String(v('planned_end')),
     String(v('notes')),
@@ -306,7 +401,11 @@ workOrdersRouter.post('/:id/qc-checks', requirePermission('qc', 'full'), (req: A
   const date = String(body.date ?? '').trim();
   if (!date) return res.status(400).json({ error: 'Date is required' });
 
-  const spec = new Map(paramsFor(wo.product_id as number | null).map((p) => [p.id, p]));
+  // Recorded against the tolerances in force for *this* job's customer — and
+  // copied onto the result below, so a batch stays readable when a spec moves.
+  const specCustomer = (db.prepare('SELECT customer_id FROM orders WHERE id = ?')
+    .get(Number(wo.order_id)) as { customer_id: number } | undefined)?.customer_id ?? null;
+  const spec = new Map(paramsFor(wo.product_id as number | null, specCustomer).map((p) => [p.id, p]));
   const rows = Array.isArray(body.results) ? (body.results as Record<string, unknown>[]) : [];
   // A parameter left blank was not measured; it is not a failure, and it is
   // not recorded as one. Only what somebody actually read is stored.

@@ -45,6 +45,9 @@ const PATHS: Record<string, ReactNode> = {
   // Container planner — a ship.
   ship: <><path d="M3.5 14.5 5 10h14l1.5 4.5" /><path d="M8 10V6.5h8V10" /><path d="M12 4v2.5" /><path d="M2.5 15.5c1.6 0 1.6 1.5 3.2 1.5s1.6-1.5 3.2-1.5 1.6 1.5 3.1 1.5 1.6-1.5 3.2-1.5 1.6 1.5 3.2 1.5 1.6-1.5 3.1-1.5" /><path d="M4.5 20c1.6 0 1.6-1.5 3.2-1.5S9.3 20 10.9 20s1.6-1.5 3.2-1.5S15.7 20 17.3 20" /></>,
   // Production masters — a works.
+  // Measurement and a verdict — what quality is. A tick would collide with
+  // Approvals, and at 16px a tick inside a circle is a smudge.
+  gauge: <><path d="M4 17.5a8 8 0 1 1 16 0" /><path d="M12 17.5 16.5 10" /><circle cx="12" cy="17.5" r="1.3" /><path d="M4 17.5h16" /></>,
   factory: <><path d="M3 20V11l5 3V11l5 3V8l5 3.5V20z" /><path d="M18 8V4h2.5v4" /><path d="M2.5 20h19" /></>,
   // Approvals — a tick in a circle.
   check: <><circle cx="12" cy="12" r="8.5" /><path d="m8.5 12.2 2.4 2.4 4.6-5" /></>,

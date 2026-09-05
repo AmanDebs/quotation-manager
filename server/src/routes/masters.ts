@@ -256,6 +256,20 @@ export const MASTERS: MasterConfig[] = [
       { sql: 'SELECT COUNT(*) AS c FROM work_orders WHERE mould_id = ?', message: 'Jobs have been run with this mould — retire it instead of deleting' },
     ],
   },
+  {
+    path: 'processes',
+    table: 'processes',
+    label: 'Process',
+    fields: [
+      { name: 'name', kind: 'text', required: true },
+      { name: 'code', kind: 'text' },
+      { name: 'notes', kind: 'text' },
+      activeFlag,
+    ],
+    guards: [
+      { sql: 'SELECT COUNT(*) AS c FROM work_orders WHERE process_id = ?', message: 'Jobs have been run through this process — retire it instead of deleting' },
+    ],
+  },
 ];
 
 /** Mounts every master under its own path, e.g. /api/materials. */

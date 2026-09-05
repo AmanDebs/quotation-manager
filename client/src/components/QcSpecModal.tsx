@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
-import type { Product, QcParam, QcKind } from '../types';
+import type { Customer, Product, QcParam, QcKind, QcSpecResponse } from '../types';
 import { Button, Input, Select, Modal, ErrorText, EmptyState } from './ui';
 
 /**
@@ -14,6 +14,13 @@ import { Button, Input, Select, Modal, ErrorText, EmptyState } from './ui';
  * Editing this does **not** disturb inspections already recorded. Each result
  * carries its own copy of the tolerance it was judged against, so tightening a
  * spec cannot retroactively fail a batch that met the spec of the day.
+ *
+ * **A customer may have their own**, asked for on 2026-09-05: the same part is
+ * genuinely measured to different tolerances for different buyers. The picker
+ * chooses whose list is being edited, and a customer's rows **replace** the
+ * default rather than merging with it — one list on screen, one list on the
+ * report, and it says whose. A customer with none falls back to the default,
+ * so nothing changes for anybody until somebody writes an override.
  */
 
 const emptyParam = (): QcParam =>
@@ -25,16 +32,37 @@ const numOrNull = (v: string) => (v.trim() === '' || Number.isNaN(Number(v)) ? n
 export default function QcSpecModal({ product, onClose }: { product: Product; onClose: () => void }) {
   const queryClient = useQueryClient();
   const [lines, setLines] = useState<QcParam[]>([]);
+  // Empty string is the product's default spec, which is what NULL means in
+  // the column — not "no customer chosen yet".
+  const [customerId, setCustomerId] = useState('');
 
-  const { data: saved, isLoading } = useQuery({
-    queryKey: ['qc-params', String(product.id)],
-    queryFn: () => api.get<QcParam[]>(`/api/products/${product.id}/qc-params`),
+  const { data: customers = [] } = useQuery({
+    queryKey: ['customers', ''],
+    queryFn: () => api.get<Customer[]>('/api/customers'),
   });
 
-  useEffect(() => { if (saved) setLines(saved.length ? saved : [emptyParam()]); }, [saved]);
+  const { data: saved, isLoading } = useQuery({
+    queryKey: ['qc-params', String(product.id), customerId],
+    queryFn: () => api.get<QcSpecResponse>(
+      `/api/products/${product.id}/qc-params${customerId ? `?customer_id=${customerId}` : ''}`
+    ),
+  });
+
+  /*
+   * What is shown when a customer has no override is the **default**, so the
+   * dialog opens on the spec actually in force and saving it makes that
+   * customer's own copy — which is how an override is written in the first
+   * place. `owner` is what tells the two apart on screen.
+   */
+  useEffect(() => {
+    if (saved) setLines(saved.items.length ? saved.items : [emptyParam()]);
+  }, [saved]);
 
   const save = useMutation({
-    mutationFn: () => api.put<QcParam[]>(`/api/products/${product.id}/qc-params`, { items: lines }),
+    mutationFn: () => api.put<QcSpecResponse>(`/api/products/${product.id}/qc-params`, {
+      items: lines,
+      customer_id: customerId ? Number(customerId) : null,
+    }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['qc-params', String(product.id)] });
       // A job's screen shows the live spec beside its checks.
@@ -43,11 +71,35 @@ export default function QcSpecModal({ product, onClose }: { product: Product; on
     },
   });
 
+  const inherited = !!customerId && saved?.owner === 'default';
+
   const set = (i: number, patch: Partial<QcParam>) =>
     setLines((prev) => prev.map((l, idx) => (idx === i ? { ...l, ...patch } : l)));
 
   return (
     <Modal title={`Quality checks — ${product.name}`} onClose={onClose} wide>
+      <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 ring-1 ring-slate-200">
+        <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Specification for</span>
+        <Select
+          className="w-64"
+          value={customerId}
+          onChange={(e) => setCustomerId(e.target.value)}
+        >
+          <option value="">Every customer (the default)</option>
+          {customers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </Select>
+        {inherited && (
+          <span className="text-xs text-slate-500">
+            No specification of their own — showing the default. Saving makes this their own copy.
+          </span>
+        )}
+        {customerId && saved?.owner === 'customer' && (
+          <span className="text-xs text-slate-500">
+            Their own. Removing every row puts them back on the default.
+          </span>
+        )}
+      </div>
+
       {isLoading ? (
         <EmptyState message="Loading…" />
       ) : (

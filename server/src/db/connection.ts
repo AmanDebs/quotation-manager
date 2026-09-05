@@ -120,6 +120,12 @@ addColumnIfMissing('po_items', 'product_id', 'INTEGER');
 addColumnIfMissing('po_items', 'packs', 'REAL');
 addColumnIfMissing('po_items', 'pcs_per_pack', 'REAL');
 addColumnIfMissing('po_items', 'total_pcs', 'REAL');
+// What was done to make it (2026-09), a fourth master on the job beside the
+// location, the machine and the mould.
+addColumnIfMissing('work_orders', 'process_id', 'INTEGER');
+// A customer's own QC tolerances (2026-09). NULL is the product's default, so
+// every specification on file keeps meaning exactly what it meant.
+addColumnIfMissing('product_qc_params', 'customer_id', 'INTEGER');
 addColumnIfMissing('packing_list_items', 'hsn_code', "TEXT NOT NULL DEFAULT ''");
 addColumnIfMissing('quotations', 'freight', 'REAL NOT NULL DEFAULT 0');
 addColumnIfMissing('quotations', 'insurance', 'REAL NOT NULL DEFAULT 0');
@@ -397,6 +403,15 @@ if (locationCount.c === 0) {
 const transporterCount = db.prepare('SELECT COUNT(*) AS c FROM transporters').get() as { c: number };
 if (transporterCount.c === 0) {
   db.prepare("INSERT INTO transporters (name, notes) VALUES ('Self', 'Own vehicle')").run();
+}
+// The two the user named. A master with nothing in it is a field nobody can
+// fill, and these are the same seed-if-empty shape as the two above — so a
+// plant that has renamed or deleted them is never given them back.
+const processCount = db.prepare('SELECT COUNT(*) AS c FROM processes').get() as { c: number };
+if (processCount.c === 0) {
+  const ins = db.prepare('INSERT INTO processes (name, notes) VALUES (?, ?)');
+  ins.run('Assembly', 'Parts put together');
+  ins.run('Camera inspection', 'Automated visual check');
 }
 
 /**

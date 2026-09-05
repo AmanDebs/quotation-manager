@@ -1,11 +1,16 @@
 /**
  * What kind of thing a catalogue entry is.
  *
- * Four shapes, named by the user on 2026-09-04: caps, preforms, handles, and
- * everything else. It is the shape of the goods, **not** a procurement class —
- * the purchase-order work from the same meeting wants finished / semi-finished
- * / raw material, which is a different axis, and overloading this one is how
- * both end up wrong.
+ * Four shapes named by the user on 2026-09-04 — caps, preforms, handles and
+ * everything else — and **semi-finished** added on 2026-09-05, which is worth
+ * knowing the history of. The original note said this was the shape of the
+ * goods and *not* a procurement class, since the purchase-order work from the
+ * same meeting wanted finished / semi-finished / raw material and overloading
+ * one axis is how both end up wrong. The user then asked for exactly that
+ * value here, and they are right about their own catalogue: a semi-finished
+ * item on this desk is a distinct *thing* they stock and sell on, not a stage
+ * a finished good passes through. Raw materials remain their own master
+ * (`materials`), so the other axis is still separate where it matters.
  *
  * No `db` import, deliberately: `db/connection.ts` needs `guessProductType` for
  * a boot migration, and every service that imports `db` imports it from that
@@ -18,7 +23,7 @@
  * stored. A list whose fourth entry is *Others* is a list expecting to grow, so
  * the enum is enforced in `routes/products.ts` instead.
  */
-export const PRODUCT_TYPES = ['cap', 'preform', 'handle', 'other'] as const;
+export const PRODUCT_TYPES = ['cap', 'preform', 'handle', 'semi_finished', 'other'] as const;
 
 export type ProductType = (typeof PRODUCT_TYPES)[number];
 
@@ -26,6 +31,7 @@ export const PRODUCT_TYPE_LABEL: Record<ProductType, string> = {
   cap: 'Caps',
   preform: 'Preform',
   handle: 'Handle',
+  semi_finished: 'Semi-Finished',
   other: 'Others',
 };
 
@@ -41,7 +47,15 @@ const NAMED: [ProductType, RegExp][] = [
   ['preform', /\bpre-?forms?\b/i],
   ['cap', /\bcaps?\b/i],
   ['handle', /\bhandles?\b/i],
+  ['semi_finished', /\bsemi[- ]?finished\b/i],
 ];
+
+/*
+ * Adding the fifth type re-types nothing on file. The guess runs only on the
+ * boot that creates the column, which has already happened everywhere — so a
+ * product named "Semi Finished Preform" keeps whatever it was given, and by
+ * the ambiguity rule it would have been `other` anyway, matching two words.
+ */
 
 /**
  * The type a product's own name implies, for the one-off backfill.

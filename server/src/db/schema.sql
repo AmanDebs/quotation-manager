@@ -662,6 +662,18 @@ CREATE TABLE IF NOT EXISTS moulds (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- What was done to make it: assembly, camera inspection, moulding. A job names
+-- one, the way it names a machine and a mould, and the QC checks against that
+-- job inherit it.
+CREATE TABLE IF NOT EXISTS processes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  code TEXT NOT NULL DEFAULT '',
+  notes TEXT NOT NULL DEFAULT '',
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- The recipe: what one product consumes, per 1000 pieces.
 --
 -- Per 1000 because that is the basis the whole catalogue is priced and
@@ -687,6 +699,12 @@ CREATE INDEX IF NOT EXISTS idx_product_materials_product ON product_materials(pr
 CREATE TABLE IF NOT EXISTS product_qc_params (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  -- Whose specification this is. NULL is the product's default, which is what
+  -- every job is judged against unless its customer has one of their own —
+  -- and a customer's rows **replace** the default rather than merging with it,
+  -- so there is one list on screen and one on the report. Dimensions and
+  -- tolerances genuinely differ between customers for the same part.
+  customer_id INTEGER REFERENCES customers(id),
   name TEXT NOT NULL,
   -- 'numeric' takes a measurement and compares it to the tolerance below.
   -- 'boolean' is the eye: colour match, flash, short shot — pass or fail.
@@ -770,6 +788,7 @@ CREATE TABLE IF NOT EXISTS work_orders (
   location_id INTEGER REFERENCES locations(id),
   machine_id INTEGER REFERENCES machines(id),
   mould_id INTEGER REFERENCES moulds(id),
+  process_id INTEGER REFERENCES processes(id),
   planned_start TEXT NOT NULL DEFAULT '',
   planned_end TEXT NOT NULL DEFAULT '',
   status TEXT NOT NULL DEFAULT 'planned'

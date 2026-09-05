@@ -166,7 +166,7 @@ export interface Product {
   image: string; color: string;
   /** Packing defaults, used by the line-item editor and the container planner. */
   pcs_per_pack: number | null; qty_20ft: number | null; qty_40ft: number | null;
-  /** cap | preform | handle | other — the shape of the goods, not a procurement class. */
+  /** cap | preform | handle | semi_finished | other. See PRODUCT_TYPES. */
   product_type: string;
   /**
    * Grams per piece, which is the same number as kilograms per 1000 pieces —
@@ -195,6 +195,11 @@ export interface Machine extends MasterBase {
   code: string; location_id: number | null; type: 'moulding' | 'assembly' | 'other';
 }
 export interface Mould extends MasterBase { code: string; cavities: number | null }
+/**
+ * A step a job passes through — Assembly, Camera inspection. The seventh
+ * master, and the fourth nullable master a work order names.
+ */
+export interface Process extends MasterBase { code: string }
 
 /**
  * One line of a product's recipe — what it consumes per 1000 pieces, because
@@ -246,6 +251,7 @@ export interface WorkOrder {
   /** Pieces to make — the floor counts pieces whatever the line is billed in. */
   qty_planned: number;
   location_id: number | null; machine_id: number | null; mould_id: number | null;
+  process_id: number | null;
   planned_start: string; planned_end: string;
   status: WorkOrderStatus;
   /**
@@ -254,12 +260,22 @@ export interface WorkOrder {
    * unlike an uncosted product whose need is unknown. Only sent by GET /:id.
    */
   material_cost?: number;
-  /** Specification, inspections and their verdicts. GET /:id only. */
-  qc?: { params: QcParam[]; checks: QcCheck[]; summary: QcSummary };
+  /**
+   * Specification, inspections and their verdicts. GET /:id only.
+   * `spec_owner` says **whose** tolerances these are — this customer's own, the
+   * product's default, or none at all, which is not the same as passing.
+   */
+  qc?: {
+    params: QcParam[];
+    spec_owner?: QcSpecOwner;
+    checks: QcCheck[];
+    summary: QcSummary;
+  };
   notes: string;
   order_number?: string; customer_id?: number; customer_name?: string;
   product_name?: string | null;
   location_name?: string | null; machine_name?: string | null; mould_name?: string | null;
+  process_name?: string | null;
   created_by_name?: string | null;
   progress?: Progress;
   entries?: ProductionEntry[];
@@ -347,10 +363,30 @@ export interface Enquiry {
 
 export type QcKind = 'numeric' | 'boolean';
 
+/**
+ * Whose tolerances are in force: this customer's own, the product's default,
+ * or nobody's. `none` is **no opinion**, never "everything passed" — the same
+ * distinction `has_recipe: false` draws about material.
+ */
+export type QcSpecOwner = 'customer' | 'default' | 'none';
+
+/**
+ * `GET`/`PUT /api/products/:id/qc-params`. It answers with the list *and* whose
+ * it is, because "these are the tolerances" and "these are *your* tolerances"
+ * are different sentences and the list alone cannot tell them apart.
+ */
+export interface QcSpecResponse {
+  items: QcParam[];
+  owner: QcSpecOwner;
+  customer_id: number | null;
+}
+
 /** What to measure on a product, and what passes. Rewritten whole, like a recipe. */
 export interface QcParam {
   id?: number;
   product_id?: number;
+  /** NULL is the product's default; a customer's rows replace it, never merge. */
+  customer_id?: number | null;
   name: string;
   kind: QcKind;
   unit: string;
@@ -763,4 +799,42 @@ export interface Followup {
   id: number; doc_type: string; doc_id: number | null; customer_id: number | null;
   due_date: string; note: string; done: number;
   customer_name?: string; doc_number?: string;
+}
+
+/**
+ * One row of the QC register (`GET /api/work-orders/qc-checks`) — every
+ * inspection recorded, newest first, with the job and customer it was taken
+ * against. `passed` is derived from the readings and is **null when nothing
+ * was measured**, which is not a pass.
+ */
+export interface QcCheckRow {
+  id: number;
+  work_order_id: number;
+  work_order_number: string;
+  date: string;
+  shift: string;
+  sample_size: number | null;
+  inspector: string;
+  notes: string;
+  order_id: number;
+  order_number: string;
+  order_line: number;
+  customer_id: number;
+  customer_name: string;
+  product_id: number | null;
+  product_name: string | null;
+  description: string;
+  process_name: string | null;
+  readings: number;
+  measured: number;
+  failed_count: number;
+  passed: boolean | null;
+}
+
+/** The register's figures, measured over the whole filtered set, never a page. */
+export interface QcRegisterSummary {
+  checks: number;
+  passed: number;
+  failed: number;
+  unmeasured: number;
 }

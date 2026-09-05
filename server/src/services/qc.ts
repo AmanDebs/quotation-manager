@@ -81,11 +81,61 @@ export function resultOk(r: {
   return true;
 }
 
-export function paramsFor(productId: number | null): QcParam[] {
+/**
+ * `resultOk` restated in SQL, for a caller that must filter and count in the
+ * database rather than over rows already fetched — the QC register, which is
+ * paged, so a verdict computed afterwards could only ever judge one page.
+ *
+ * It lives **here**, next to the function it duplicates, because two copies of
+ * a rule in two files is how they come apart; and it is not assumed to agree —
+ * `qcRegister.test.ts` runs both over a matrix of kinds, readings and
+ * open-ended bounds and asserts they answer identically. Expects the results
+ * table aliased `r`.
+ */
+export const RESULT_FAILED_SQL = `
+  r.value IS NOT NULL AND CASE
+    WHEN r.kind = 'boolean' THEN r.value <> 1
+    ELSE (r.min_value IS NOT NULL AND r.value < r.min_value)
+      OR (r.max_value IS NOT NULL AND r.value > r.max_value)
+  END`;
+
+/**
+ * The specification in force for a product, for a given customer.
+ *
+ * A customer's rows **replace** the product's default rather than merging with
+ * it: dimensions and tolerances genuinely differ between customers for the same
+ * part, and a spec assembled out of two rows is one nobody can check by reading
+ * it. So there is one list, and `specOwner` says whose.
+ *
+ * A customer with no rows of their own falls back to the default, which is why
+ * nothing on file changed when the column arrived.
+ */
+export function paramsFor(productId: number | null, customerId?: number | null): QcParam[] {
   if (!productId) return [];
+  if (customerId) {
+    const own = db.prepare(
+      'SELECT * FROM product_qc_params WHERE product_id = ? AND customer_id = ? ORDER BY sort_order, id'
+    ).all(productId, customerId) as unknown as QcParam[];
+    if (own.length) return own;
+  }
   return db.prepare(
-    'SELECT * FROM product_qc_params WHERE product_id = ? ORDER BY sort_order, id'
+    'SELECT * FROM product_qc_params WHERE product_id = ? AND customer_id IS NULL ORDER BY sort_order, id'
   ).all(productId) as unknown as QcParam[];
+}
+
+/** Whose specification is being applied — for the screen and the report. */
+export function specOwner(productId: number | null, customerId?: number | null): 'customer' | 'default' | 'none' {
+  if (!productId) return 'none';
+  if (customerId) {
+    const own = db.prepare(
+      'SELECT COUNT(*) AS c FROM product_qc_params WHERE product_id = ? AND customer_id = ?'
+    ).get(productId, customerId) as { c: number };
+    if (Number(own.c) > 0) return 'customer';
+  }
+  const base = db.prepare(
+    'SELECT COUNT(*) AS c FROM product_qc_params WHERE product_id = ? AND customer_id IS NULL'
+  ).get(productId) as { c: number };
+  return Number(base.c) > 0 ? 'default' : 'none';
 }
 
 function decorate(check: Record<string, unknown>, results: QcResult[]): QcCheck {
@@ -145,12 +195,12 @@ export interface QcSummary {
   last_date: string;
 }
 
-export function summaryForWorkOrder(workOrderId: number, productId: number | null): QcSummary {
+export function summaryForWorkOrder(workOrderId: number, productId: number | null, customerId?: number | null): QcSummary {
   const checks = checksForWorkOrder(workOrderId);
   const decided = checks.filter((c) => c.passed !== null);
   const last = decided[decided.length - 1];
   return {
-    has_spec: paramsFor(productId).length > 0,
+    has_spec: paramsFor(productId, customerId).length > 0,
     checks: checks.length,
     passed: decided.filter((c) => c.passed).length,
     failed: decided.filter((c) => !c.passed).length,
@@ -199,6 +249,10 @@ export function qcBlockError(orderId: number, lines: { order_line?: unknown }[])
        FROM order_items WHERE order_id = ?`
   ).all(orderId) as { pos: number; product_id: number | null; description: string; is_charge: number }[];
 
+  // Judged against this customer's own tolerances where they have some.
+  const owner = db.prepare('SELECT customer_id FROM orders WHERE id = ?').get(orderId) as
+    { customer_id: number } | undefined;
+
   const wanted = new Set<number>();
   for (const l of lines) {
     const pos = Number(l.order_line);
@@ -219,7 +273,7 @@ export function qcBlockError(orderId: number, lines: { order_line?: unknown }[])
     const line = items.find((it) => Number(it.pos) === pos)!;
     // A charge is a fee, not goods: there is nothing to inspect.
     if (Number(line.is_charge)) continue;
-    if (paramsFor(line.product_id).length === 0) continue;
+    if (paramsFor(line.product_id, owner?.customer_id).length === 0) continue;
     const passed = jobs
       .filter((j) => Number(j.order_line) === pos)
       .some((j) => (checks.get(Number(j.id)) ?? []).some((c) => c.passed === true));

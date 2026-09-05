@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
+import { useCan } from '../App';
 import type { Invoice, Customer, LineItem, TaxType, Settings, ColumnConfig, PackingListItem } from '../types';
 import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, StatusBadge, SettledDocumentType, FIELD_GRID } from '../components/ui';
 import CompanySelect from '../components/CompanySelect';
@@ -80,6 +81,7 @@ export default function InvoiceFormPage() {
   const [search] = useSearchParams();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const can = useCan();
   const isNew = !id;
   // There is no from_proforma any more: the chain runs proforma → order →
   // invoice, and the order is what an invoice is raised from.
@@ -235,6 +237,21 @@ export default function InvoiceFormPage() {
                   <Button variant="secondary" disabled={!existing!.packing}>📦 Packing List</Button>
                 </a>
                 <a href={`/api/pdf/invoice-with-packing/${id}`} target="_blank" rel="noreferrer"><Button>📄+📦 Both</Button></a>
+                {/*
+                  * The quality summary that ships with the shipment. The
+                  * standalone report is the `qc` function and so is offered
+                  * only to somebody who has it; the combined file is the
+                  * invoice, and goes to whoever may send the invoice — which
+                  * is the whole point of it existing.
+                  */}
+                {can('qc') && (
+                  <a href={`/api/pdf/invoice-qc-report/${id}`} target="_blank" rel="noreferrer">
+                    <Button variant="secondary">🔬 QC Report</Button>
+                  </a>
+                )}
+                <a href={`/api/pdf/invoice-with-qc/${id}`} target="_blank" rel="noreferrer">
+                  <Button variant="secondary">📄+🔬 Invoice &amp; QC</Button>
+                </a>
                 <FollowupButton docType="invoice" docId={Number(id)} customerId={existing!.customer_id} />
               </>
             )}

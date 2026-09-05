@@ -56,6 +56,7 @@ export default function QcCheckModal({ job, onClose, onSaved }: {
   const params = full?.qc?.params ?? [];
   const checks = full?.qc?.checks ?? [];
   const summary = full?.qc?.summary;
+  const specOwner = full?.qc?.spec_owner;
 
   const tolerance = (p: { min_value: number | null; max_value: number | null; unit: string }) => {
     if (p.min_value === null && p.max_value === null) return '—';
@@ -78,6 +79,27 @@ export default function QcCheckModal({ job, onClose, onSaved }: {
         <EmptyState message="No quality checks are defined for this product. Set them under Products → QC, then come back." />
       ) : (
         <>
+          {/*
+            * Whose tolerances this job is being judged against. It is on screen
+            * rather than assumed because the same part is genuinely measured to
+            * different tolerances for different buyers — reading a figure
+            * without knowing which spec it was judged by is how a batch gets
+            * passed against somebody else's.
+            */}
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <span className="text-xs text-slate-500">
+              {specOwner === 'customer'
+                ? <>Measured against <b>{full?.customer_name}</b>&rsquo;s own specification.</>
+                : <>Measured against the product&rsquo;s standard specification.</>}
+            </span>
+            <a
+              href={`/api/pdf/qc-report/${job.id}`}
+              target="_blank"
+              rel="noreferrer"
+              className="text-xs font-medium text-brand-700 hover:underline"
+            >Quality report (PDF)</a>
+          </div>
+
           {!!summary && summary.checks > 0 && (
             <div className="mb-3 flex flex-wrap gap-4 text-sm">
               <span>Inspections <strong className="tabular-nums">{summary.checks}</strong></span>

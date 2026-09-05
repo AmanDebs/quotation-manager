@@ -24,6 +24,8 @@ export const PRODUCT_TYPES = [
   { value: 'cap', label: 'Caps' },
   { value: 'preform', label: 'Preform' },
   { value: 'handle', label: 'Handle' },
+  // Asked for on 2026-09-05, and the one-line change the note above promised.
+  { value: 'semi_finished', label: 'Semi-Finished' },
   { value: 'other', label: 'Others' },
 ];
 

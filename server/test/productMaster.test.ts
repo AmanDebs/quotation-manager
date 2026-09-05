@@ -50,6 +50,22 @@ describe('reading a product type off a name', () => {
     assert.equal(guessProductType('Cap with Handle'), 'other');
   });
 
+  /**
+   * The fifth type, added 2026-09-05. The interesting half is the second
+   * assertion: adding a word to the list must not re-read a name that already
+   * had an answer, or the vocabulary could not grow without restating the
+   * catalogue.
+   */
+  test('semi-finished, however it is spelt', () => {
+    for (const n of ['Semi Finished Neck', 'semi-finished insert', 'SEMIFINISHED BODY']) {
+      assert.equal(guessProductType(n), 'semi_finished', n);
+    }
+    assert.equal(guessProductType('28mm Preform 119g'), 'preform');
+    assert.equal(guessProductType('20 LTR Threaded Cap'), 'cap');
+    // And it obeys the ambiguity rule like every other word.
+    assert.equal(guessProductType('Semi Finished Preform'), 'other');
+  });
+
   test('nothing to go on is other, never a guess', () => {
     for (const n of ['', '   ', '1810', 'MS Forged Flange DN100']) assert.equal(guessProductType(n), 'other', n);
   });

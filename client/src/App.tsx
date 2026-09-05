@@ -22,6 +22,7 @@ import PackingListsPage from './pages/PackingLists';
 import PackingListFormPage from './pages/PackingListForm';
 import FollowupsPage from './pages/Followups';
 import WorkOrdersPage from './pages/WorkOrders';
+import QualityPage from './pages/Quality';
 import DespatchesPage from './pages/Despatches';
 import StockPage from './pages/Stock';
 import PurchaseOrdersPage from './pages/PurchaseOrders';
@@ -146,6 +147,7 @@ function App() {
  * home, and home is this.
  */
 const LANDING: [string, string][] = [
+  ['qc', '/quality'],
   ['work_order', '/work-orders'],
   ['dispatch', '/despatches'],
   ['quotation', '/quotations'],
@@ -192,6 +194,7 @@ export const routes: RouteObject[] = [
       { path: '/packing-lists/:id', element: <Needs fn="packing_list"><PackingListFormPage /></Needs> },
       { path: '/followups', element: <Needs fn="followup"><FollowupsPage /></Needs> },
       { path: '/work-orders', element: <Needs fn="work_order"><WorkOrdersPage /></Needs> },
+      { path: '/quality', element: <Needs fn="qc"><QualityPage /></Needs> },
       { path: '/despatches', element: <Needs fn="dispatch"><DespatchesPage /></Needs> },
       { path: '/stock', element: <Needs fn="material"><StockPage /></Needs> },
       { path: '/purchase-orders', element: <Needs fn="purchasing"><PurchaseOrdersPage /></Needs> },

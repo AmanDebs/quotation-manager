@@ -2,15 +2,15 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
 import { useCan } from '../App';
-import type { Location, Supplier, Transporter, Material, Machine, Mould } from '../types';
+import type { Location, Supplier, Transporter, Material, Machine, Mould, Process } from '../types';
 import { PageHeader, Tabs } from '../components/ui';
 import MasterList, { type MasterSpec } from '../components/MasterList';
 
 /**
  * The lists the factory side is built on.
  *
- * Kept on one page behind tabs rather than six sidebar entries: they are set up
- * once and then rarely touched, and six near-empty pages would bury the daily
+ * Kept on one page behind tabs rather than seven sidebar entries: they are set
+ * up once and then rarely touched, and seven near-empty pages would bury the daily
  * screens. The shapes mirror `MASTERS` in server/src/routes/masters.ts.
  */
 
@@ -134,12 +134,37 @@ const moulds: MasterSpec<Mould> = {
   empty: { name: '', code: '', cavities: null, notes: '', active: 1 },
 };
 
-type TabKey = 'locations' | 'suppliers' | 'transporters' | 'materials' | 'machines' | 'moulds';
+/**
+ * The steps a job passes through. Asked for on 2026-09-05 — Assembly and
+ * Camera inspection — and seeded with those two on first boot, the way a plant
+ * and a "Self" transporter already are: a master with nothing in it is a field
+ * nobody can fill.
+ */
+const processes: MasterSpec<Process> = {
+  path: 'processes',
+  title: 'Processes',
+  singular: 'Process',
+  blurb: 'What a job actually does — moulding, assembly, camera inspection. A work order names one.',
+  columns: [
+    { key: 'name', label: 'Name', render: (r) => <span className="font-medium">{r.name}</span> },
+    { key: 'code', label: 'Code', render: (r) => dash(r.code) },
+    { key: 'notes', label: 'Notes', render: (r) => dash(r.notes) },
+  ],
+  fields: [
+    { key: 'name', label: 'Name *', wide: true },
+    { key: 'code', label: 'Code' },
+    { key: 'notes', label: 'Notes', type: 'textarea', wide: true },
+  ],
+  empty: { name: '', code: '', notes: '', active: 1 },
+};
+
+type TabKey =
+  | 'locations' | 'suppliers' | 'transporters' | 'materials' | 'machines' | 'moulds' | 'processes';
 
 export default function MastersPage() {
   const [tab, setTab] = useState<TabKey>('locations');
   const can = useCan();
-  // canEdit on the six lists
+  // canEdit on the seven lists
   const isManager = can('master','full');
 
   // Machines belong to a plant, so their picker needs the location list.
@@ -190,6 +215,7 @@ export default function MastersPage() {
           { key: 'materials', label: 'Materials' },
           { key: 'machines', label: 'Machines' },
           { key: 'moulds', label: 'Moulds' },
+          { key: 'processes', label: 'Processes' },
           { key: 'suppliers', label: 'Suppliers' },
           { key: 'transporters', label: 'Transporters' },
         ]}
@@ -198,6 +224,7 @@ export default function MastersPage() {
       {tab === 'materials' && <MasterList spec={materials} canEdit={isManager} />}
       {tab === 'machines' && <MasterList spec={machines} canEdit={isManager} />}
       {tab === 'moulds' && <MasterList spec={moulds} canEdit={isManager} />}
+      {tab === 'processes' && <MasterList spec={processes} canEdit={isManager} />}
       {tab === 'suppliers' && <MasterList spec={suppliers} canEdit={isManager} />}
       {tab === 'transporters' && <MasterList spec={transporters} canEdit={isManager} />}
     </div>
