@@ -35,15 +35,27 @@ const users = db.prepare('SELECT COUNT(*) AS c FROM users').get() as { c: number
 let managerId: number;
 let employeeId: number;
 if (users.c === 0) {
-  const mk = (name: string, email: string, pw: string, role: string) =>
-    Number(db.prepare('INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, ?, ?)').run(name, email, bcrypt.hashSync(pw, 10), role).lastInsertRowid);
-  managerId = mk('Demo Manager', 'manager@example.com', 'demo1234', 'manager');
-  employeeId = mk('Demo Employee', 'employee@example.com', 'demo1234', 'employee');
-  console.log('Created logins →  manager@example.com / demo1234   and   employee@example.com / demo1234');
+  // One login per team, so every row of the access matrix can actually be
+  // driven. `role` is written in step with the team role for the benefit of an
+  // old backup; nothing authorises on it.
+  const mk = (name: string, email: string, teamRole: string) =>
+    Number(db.prepare(
+      'INSERT INTO users (name, email, password_hash, role, team_role) VALUES (?, ?, ?, ?, ?)'
+    ).run(
+      name, email, bcrypt.hashSync('demo1234', 10),
+      teamRole === 'super_admin' ? 'manager' : 'employee', teamRole
+    ).lastInsertRowid);
+  managerId = mk('Demo Admin', 'manager@example.com', 'super_admin');
+  employeeId = mk('Demo Sales', 'employee@example.com', 'sales');
+  mk('Demo Logistics', 'logistics@example.com', 'logistics');
+  mk('Demo Production', 'production@example.com', 'production');
+  mk('Demo Quality', 'quality@example.com', 'quality');
+  console.log('Created logins (all demo1234) →  manager@ (Super Admin), employee@ (Sales),');
+  console.log('                                  logistics@, production@, quality@example.com');
 } else {
-  managerId = Number((db.prepare("SELECT id FROM users WHERE role = 'manager' ORDER BY id LIMIT 1").get() as { id: number } | undefined)?.id
+  managerId = Number((db.prepare("SELECT id FROM users WHERE team_role = 'super_admin' ORDER BY id LIMIT 1").get() as { id: number } | undefined)?.id
     ?? (db.prepare('SELECT id FROM users ORDER BY id LIMIT 1').get() as { id: number }).id);
-  employeeId = Number((db.prepare("SELECT id FROM users WHERE role = 'employee' ORDER BY id LIMIT 1").get() as { id: number } | undefined)?.id ?? managerId);
+  employeeId = Number((db.prepare("SELECT id FROM users WHERE team_role = 'sales' ORDER BY id LIMIT 1").get() as { id: number } | undefined)?.id ?? managerId);
 }
 
 const seedCompany = db.prepare('SELECT company_name FROM companies WHERE id = ?').get(seedCompanyId) as { company_name: string };

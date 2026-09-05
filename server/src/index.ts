@@ -4,7 +4,7 @@ import cookieParser from 'cookie-parser';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { requireAuth, requireManager } from './middleware/auth.js';
+import { requireAuth, requirePermission, requireFunction } from './middleware/auth.js';
 import { isDuplicateNumberError } from './db/connection.js';
 import { healthRouter } from './routes/health.js';
 import { backupRouter } from './routes/backup.js';
@@ -60,38 +60,47 @@ app.use('/api/health', healthRouter);
 app.use('/api/auth', authRouter);
 // Deliberately NOT under /api/settings: that router lets any GET through, which
 // would make the whole database downloadable by every employee.
-app.use('/api/backup', requireAuth, requireManager, backupRouter);
-app.use('/api/users', requireAuth, requireManager, usersRouter);
-app.use('/api/approvals', requireAuth, requireManager, approvalsRouter);
+app.use('/api/backup', requireAuth, requirePermission('backup', 'full'), backupRouter);
+app.use('/api/users', requireAuth, requirePermission('team', 'full'), usersRouter);
+// The approvals list is deliberately **not** customer-scoped — it is safe only
+// while one team holds it. Widening `approval` means adding a scopeClause here
+// first, or every document number, currency and total is on that screen.
+app.use('/api/approvals', requireAuth, requirePermission('approval', 'view'), approvalsRouter);
 // Settings are readable by everyone (documents need the company profile) but
 // only a manager may change them.
 app.use('/api/settings', requireAuth, (req, res, next) =>
-  req.method === 'GET' ? next() : requireManager(req, res, next), settingsRouter);
+  req.method === 'GET' ? next() : requirePermission('settings', 'full')(req, res, next), settingsRouter);
 // Guards its own writes with requireManager, since reads must stay open —
 // every document form needs the list of who can be selling.
 app.use('/api/companies', requireAuth, companiesRouter);
-app.use('/api/customers', requireAuth, customersRouter);
-app.use('/api/products', requireAuth, productsRouter);
+app.use('/api/customers', requireAuth, requireFunction('customer'), customersRouter);
+app.use('/api/products', requireAuth, requirePermission('product'), productsRouter);
 // Locations, suppliers, transporters, materials, machines, moulds — described
 // once in routes/masters.ts and mounted here under their own paths.
-mountMasters((path, router) => app.use(path, requireAuth, router));
-app.use('/api/enquiries', requireAuth, enquiriesRouter);
-app.use('/api/quotations', requireAuth, quotationsRouter);
-app.use('/api/orders', requireAuth, ordersRouter);
-app.use('/api/work-orders', requireAuth, workOrdersRouter);
+mountMasters((path, router) => app.use(path, requireAuth, requirePermission('master'), router));
+app.use('/api/enquiries', requireAuth, requireFunction('enquiry'), enquiriesRouter);
+app.use('/api/quotations', requireAuth, requireFunction('quotation'), quotationsRouter);
+app.use('/api/orders', requireAuth, requireFunction('order'), ordersRouter);
+// Three functions live in this router — the job itself, the output logged
+// against it and the QC check on it — so the mount only asks for the loosest
+// of them and each route asks for its own. Quality reaches it on `work_order:
+// view` and may write nothing but a QC check.
+app.use('/api/work-orders', requireAuth, requirePermission('work_order'), workOrdersRouter);
 // Purchasing is manager-only in full: supplier rates are not everyone's
 // business, and committing a spend is not a shop-floor action.
-app.use('/api/purchase-orders', requireAuth, requireManager, purchaseOrdersRouter);
+app.use('/api/purchase-orders', requireAuth, requirePermission('purchasing', 'full'), purchaseOrdersRouter);
 // The stock ledger guards its own writes — reads are open because anyone
 // planning a job needs to know whether there is material for it.
-app.use('/api/stock', requireAuth, stockRouter);
-app.use('/api/despatches', requireAuth, despatchesRouter);
-app.use('/api/proformas', requireAuth, proformasRouter);
-app.use('/api/invoices', requireAuth, invoicesRouter);
-app.use('/api/packing-lists', requireAuth, packingListsRouter);
-app.use('/api/followups', requireAuth, followupsRouter);
-app.use('/api/payments', requireAuth, paymentsRouter);
-app.use('/api/dashboard', requireAuth, dashboardRouter);
+app.use('/api/stock', requireAuth, requirePermission('material'), stockRouter);
+app.use('/api/despatches', requireAuth, requireFunction('dispatch'), despatchesRouter);
+app.use('/api/proformas', requireAuth, requireFunction('proforma'), proformasRouter);
+app.use('/api/invoices', requireAuth, requireFunction('invoice'), invoicesRouter);
+app.use('/api/packing-lists', requireAuth, requireFunction('packing_list'), packingListsRouter);
+app.use('/api/followups', requireAuth, requireFunction('followup'), followupsRouter);
+// Payments are the receivables ledger. Behind customer scope alone it would be
+// readable by every role the scope change unrestricts.
+app.use('/api/payments', requireAuth, requireFunction('payment'), paymentsRouter);
+app.use('/api/dashboard', requireAuth, requirePermission('dashboard'), dashboardRouter);
 app.use('/api/pdf', requireAuth, pdfRouter);
 // Guards itself: the whole log is manager-only, one record's history follows
 // the record.

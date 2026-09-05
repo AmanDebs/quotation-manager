@@ -156,6 +156,11 @@ addColumnIfMissing('settings', 'pl_pattern', "TEXT NOT NULL DEFAULT 'PL/{FY}/{SE
 
 // Team roles, approval workflow, flexible columns (2026-07).
 addColumnIfMissing('users', 'role', "TEXT NOT NULL DEFAULT 'employee'");
+// Five roles (2026-09), from the client's access matrix. Additive and with no
+// CHECK: SQLite cannot ALTER one, and `role`'s own CHECK — present on a
+// database created from schema.sql, absent on one migrated from before roles
+// existed — is exactly why this could not be done by widening that column.
+addColumnIfMissing('users', 'team_role', "TEXT NOT NULL DEFAULT ''");
 addColumnIfMissing('users', 'active', 'INTEGER NOT NULL DEFAULT 1');
 // Per-user dashboard layout (2026-08). Blank means the built-in order.
 addColumnIfMissing('users', 'dashboard_layout', "TEXT NOT NULL DEFAULT ''");
@@ -449,6 +454,25 @@ if (founder) {
     db.prepare("UPDATE users SET role = 'manager' WHERE id = ?").run(founder.id);
   }
   db.prepare('UPDATE customers SET owner_id = ? WHERE owner_id IS NULL').run(founder.id);
+  /*
+   * And a team for everyone (2026-09).
+   *
+   * A manager becomes the super admin; everybody else becomes sales, which is
+   * what an employee has always been — `customers.owner_id` is the only thing
+   * that has ever distinguished them, and owning customers is a sales job.
+   *
+   * Placed **after** the promotion above, or the CASE would read a role that
+   * has not been promoted yet and the founding account would come out as
+   * sales — locked out of the app it administers. Idempotent by construction:
+   * it only ever touches a blank, and it never writes one.
+   */
+  const teamed = db.prepare(
+    `UPDATE users SET team_role = CASE WHEN role = 'manager' THEN 'super_admin' ELSE 'sales' END
+      WHERE team_role = ''`
+  ).run();
+  if (Number(teamed.changes) > 0) {
+    console.warn(`users: ${teamed.changes} account(s) given a team role — managers became Super Admin, the rest Sales.`);
+  }
   for (const table of ['quotations', 'proforma_invoices', 'commercial_invoices', 'packing_lists']) {
     db.prepare(`UPDATE ${table} SET created_by = ? WHERE created_by IS NULL`).run(founder.id);
   }

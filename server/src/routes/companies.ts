@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { db } from '../db/connection.js';
-import type { AuthedRequest } from '../middleware/auth.js';
+import { requirePermission, type AuthedRequest } from '../middleware/auth.js';
 import { listCompanies, getCompany, companyUsage } from '../services/companies.js';
 import { defaultPatternsFor, PATTERN_COLUMNS } from '../services/companyPatterns.js';
 
@@ -11,8 +11,7 @@ export const companiesRouter = Router();
  * and the profile is on the paperwork anyway. Writes are manager-only: these
  * are the GSTIN, the bank details and the numbering patterns.
  */
-const requireManager = (req: AuthedRequest, res: any, next: any) =>
-  req.user?.role === 'manager' ? next() : res.status(403).json({ error: 'Only a manager can change company details' });
+const requireManager = requirePermission('settings', 'full');
 
 const FIELDS = [
   'company_name', 'address', 'city', 'state', 'country', 'pincode', 'phone', 'email', 'website',

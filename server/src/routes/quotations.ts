@@ -4,7 +4,7 @@ import { nextNumber } from '../services/numbering.js';
 import { computeTotals, type LineItemInput } from '../services/totals.js';
 import type { AuthedRequest } from '../middleware/auth.js';
 import { scopeClause, canAccessCustomer, customerChangeError } from '../middleware/scope.js';
-import { submit, decide, resetApprovalOnEdit, blockUnapprovedTransition } from '../services/approval.js';
+import { submit, decide, resetApprovalOnEdit, blockUnapprovedTransition , mayApprove } from '../services/approval.js';
 import { resolveCompanyId } from '../services/companies.js';
 import { enquiryLinkId, syncEnquiryStatus } from '../services/enquiries.js';
 import { syncQuotationExpiry } from '../services/quotationExpiry.js';
@@ -322,7 +322,7 @@ quotationsRouter.post('/:id/submit', (req: AuthedRequest, res) => {
 });
 
 quotationsRouter.post('/:id/approve', (req: AuthedRequest, res) => {
-  if (req.user!.role !== 'manager') return res.status(403).json({ error: 'Only a manager can approve documents' });
+  if (!mayApprove(req.user)) return res.status(403).json({ error: 'Your team cannot approve documents' });
   const id = Number(req.params.id);
   if (!db.prepare('SELECT id FROM quotations WHERE id = ?').get(id)) return res.status(404).json({ error: 'Quotation not found' });
   // A converted quotation is approved by rule — the conversion gate saw to it.

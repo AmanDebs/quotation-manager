@@ -1,4 +1,5 @@
 import { db } from '../../src/db/connection.js';
+import type { TeamRole } from '../../src/services/permissions.js';
 
 /**
  * Rows to test against.
@@ -23,10 +24,17 @@ export function makeCustomer(name = `Customer ${next()}`, ownerId: number | null
   return Number(info.lastInsertRowid);
 }
 
-export function makeUser(role: 'manager' | 'employee' = 'manager', name = `User ${next()}`): number {
+/**
+ * A user on one of the five teams.
+ *
+ * Takes a **team role**; the legacy `role` column is written in step with it,
+ * as every other writer does, so a fixture cannot end up in the disagreeing
+ * state the app itself cannot reach.
+ */
+export function makeUser(teamRole: TeamRole = 'super_admin', name = `User ${next()}`): number {
   const info = db.prepare(
-    "INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, 'x', ?)"
-  ).run(name, `u${next()}@test.local`, role);
+    "INSERT INTO users (name, email, password_hash, role, team_role) VALUES (?, ?, 'x', ?, ?)"
+  ).run(name, `u${next()}@test.local`, teamRole === 'super_admin' ? 'manager' : 'employee', teamRole);
   return Number(info.lastInsertRowid);
 }
 

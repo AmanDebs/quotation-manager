@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { db } from '../db/connection.js';
-import { requireManager } from '../middleware/auth.js';
+import { requirePermission } from '../middleware/auth.js';
 
 /**
  * The production masters: locations, suppliers, transporters, materials,
@@ -107,7 +107,7 @@ function masterRouter(cfg: MasterConfig): Router {
     res.json(row);
   });
 
-  router.post('/', requireManager, (req, res) => {
+  router.post('/', requirePermission('master', 'full'), (req, res) => {
     const body = req.body ?? {};
     const bad = validate(body);
     if (bad) return res.status(400).json({ error: bad });
@@ -117,7 +117,7 @@ function masterRouter(cfg: MasterConfig): Router {
     res.status(201).json(one(Number(info.lastInsertRowid)));
   });
 
-  router.put('/:id', requireManager, (req, res) => {
+  router.put('/:id', requirePermission('master', 'full'), (req, res) => {
     const id = Number(req.params.id);
     const existing = one(id);
     if (!existing) return res.status(404).json({ error: `${cfg.label} not found` });
@@ -135,7 +135,7 @@ function masterRouter(cfg: MasterConfig): Router {
    * the failure this codebase keeps having to fix. Retiring (`active = 0`) is
    * the normal way to take something out of use.
    */
-  router.delete('/:id', requireManager, (req, res) => {
+  router.delete('/:id', requirePermission('master', 'full'), (req, res) => {
     const id = Number(req.params.id);
     if (!one(id)) return res.status(404).json({ error: `${cfg.label} not found` });
     for (const guard of cfg.guards ?? []) {

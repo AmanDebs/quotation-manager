@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { db, transaction } from '../db/connection.js';
-import { requireManager } from '../middleware/auth.js';
+import { requirePermission } from '../middleware/auth.js';
 import { paramsFor } from '../services/qc.js';
 import { IMPORT_FIELDS, buildImport, decodeUpload, identityKey, type BuildOptions } from '../services/productImport.js';
 import { recipeFor } from '../services/recipe.js';
@@ -64,7 +64,7 @@ productsRouter.get('/import/fields', (_req, res) => {
  * every row. Writes nothing — the client shows this for confirmation and then
  * posts the same file and options to /import.
  */
-productsRouter.post('/import/preview', requireManager, (req, res) => {
+productsRouter.post('/import/preview', requirePermission('product', 'full'), (req, res) => {
   const body = req.body ?? {};
   if (!body.file) return res.status(400).json({ error: 'No file was uploaded' });
   try {
@@ -77,7 +77,7 @@ productsRouter.post('/import/preview', requireManager, (req, res) => {
 });
 
 /** Apply the import. Re-parses the file so the result matches the preview exactly. */
-productsRouter.post('/import', requireManager, (req, res) => {
+productsRouter.post('/import', requirePermission('product', 'full'), (req, res) => {
   const body = req.body ?? {};
   if (!body.file) return res.status(400).json({ error: 'No file was uploaded' });
 
@@ -168,7 +168,7 @@ productsRouter.get('/:id/qc-params', (req, res) => {
   res.json(paramsFor(id));
 });
 
-productsRouter.put('/:id/qc-params', requireManager, (req, res) => {
+productsRouter.put('/:id/qc-params', requirePermission('qc', 'full'), (req, res) => {
   const id = Number(req.params.id);
   if (!db.prepare('SELECT id FROM products WHERE id = ?').get(id)) {
     return res.status(404).json({ error: 'Product not found' });
@@ -217,7 +217,7 @@ productsRouter.get('/:id/materials', (req, res) => {
   res.json(recipeFor(id));
 });
 
-productsRouter.put('/:id/materials', requireManager, (req, res) => {
+productsRouter.put('/:id/materials', requirePermission('product', 'full'), (req, res) => {
   const id = Number(req.params.id);
   if (!db.prepare('SELECT id FROM products WHERE id = ?').get(id)) {
     return res.status(404).json({ error: 'Product not found' });
@@ -313,7 +313,7 @@ productsRouter.post('/', (req, res) => {
   res.status(201).json(db.prepare('SELECT * FROM products WHERE id = ?').get(Number(info.lastInsertRowid)));
 });
 
-productsRouter.put('/:id', requireManager, (req, res) => {
+productsRouter.put('/:id', requirePermission('product', 'full'), (req, res) => {
   const id = Number(req.params.id);
   const body = req.body ?? {};
   if (!db.prepare('SELECT id FROM products WHERE id = ?').get(id)) return res.status(404).json({ error: 'Product not found' });
@@ -338,7 +338,7 @@ productsRouter.put('/:id', requireManager, (req, res) => {
   res.json(db.prepare('SELECT * FROM products WHERE id = ?').get(id));
 });
 
-productsRouter.delete('/:id', requireManager, (req, res) => {
+productsRouter.delete('/:id', requirePermission('product', 'full'), (req, res) => {
   const id = Number(req.params.id);
   if (!db.prepare('SELECT id FROM products WHERE id = ?').get(id)) {
     return res.status(404).json({ error: 'Product not found' });

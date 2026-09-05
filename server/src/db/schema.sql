@@ -6,7 +6,16 @@ CREATE TABLE IF NOT EXISTS users (
   name TEXT NOT NULL,
   email TEXT NOT NULL UNIQUE,
   password_hash TEXT NOT NULL,
+  -- The legacy role. Kept, and still constrained to two values, because it is
+  -- what every guard written before team_role reads — but it is **derived**
+  -- from team_role in requireAuth and never written as a copy, so the two
+  -- cannot disagree. See services/permissions.ts.
   role TEXT NOT NULL DEFAULT 'employee' CHECK (role IN ('manager','employee')),
+  -- Which team this person is on: super_admin | sales | logistics | production
+  -- | quality. No CHECK, for the reason products.product_type records — SQLite
+  -- cannot ALTER one and a list of roles grows. Enforced in routes/users.ts.
+  -- Blank is an un-backfilled row and is refused everything.
+  team_role TEXT NOT NULL DEFAULT '',
   active INTEGER NOT NULL DEFAULT 1,
   -- Which dashboard cards this person keeps, and in what order. JSON
   -- {"hidden":[],"order":[]} of card ids; blank means the built-in layout.

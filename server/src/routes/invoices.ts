@@ -1,12 +1,13 @@
 import { Router } from 'express';
 import { db, transaction } from '../db/connection.js';
 import { nextNumber, exportChangeError } from '../services/numbering.js';
+import { exportOnlyInvoice } from '../services/permissions.js';
 import { computeTotals, round2, type LineItemInput } from '../services/totals.js';
 import type { AuthedRequest } from '../middleware/auth.js';
 import { scopeClause, canAccessCustomer, linkError, customerChangeError } from '../middleware/scope.js';
 import { resolveCompanyId } from '../services/companies.js';
 import { syncOrderStatus } from '../services/orderStatus.js';
-import { submit, decide, resetApprovalOnEdit, blockUnapprovedTransition } from '../services/approval.js';
+import { submit, decide, resetApprovalOnEdit, blockUnapprovedTransition , mayApprove } from '../services/approval.js';
 import { invoiceReceivable } from '../services/receivables.js';
 import { syncInvoiceStatus, syncInvoicesForProforma } from '../services/invoiceStatus.js';
 import { listBody } from '../services/pagination.js';
@@ -393,9 +394,26 @@ invoicesRouter.get('/:id', (req: AuthedRequest, res) => {
  * advance across and that gates the 10% quantity-variance check.
  */
 
+/**
+ * "Yes - Only export", from the access matrix.
+ *
+ * A level says how *deeply* a team may act, not on which rows, so this sits
+ * beside the table rather than in it. Read on the way in for a create and off
+ * the stored row for an edit: the create path sets the flag freely — only
+ * `exportChangeError` stops it being retyped afterwards — so checking the
+ * body alone would let a domestic invoice be raised as an export and then
+ * left there.
+ */
+function invoiceSideError(req: AuthedRequest, isExport: unknown): string | null {
+  if (!exportOnlyInvoice(req.user?.team_role)) return null;
+  return Number(isExport) ? null : 'Your team can only raise and edit invoices for export shipments';
+}
+
 invoicesRouter.post('/', (req: AuthedRequest, res) => {
   const body = req.body ?? {};
   if (!body.customer_id) return res.status(400).json({ error: 'Customer is required' });
+  const side = invoiceSideError(req, body.is_export);
+  if (side) return res.status(403).json({ error: side });
   if (!canAccessCustomer(req, Number(body.customer_id))) return res.status(403).json({ error: 'That customer is not assigned to you' });
   const h = headerValues(body);
   // The source documents are checked as carefully as the customer is: an
@@ -446,6 +464,10 @@ invoicesRouter.put('/:id', (req: AuthedRequest, res) => {
   // disagreeing. 409, not 403: it is a conflict with what is already on file.
   const retyped = exportChangeError('invoice', existing, (req.body ?? {}).is_export);
   if (retyped) return res.status(409).json({ error: retyped });
+  // Off the stored row, not the body: the flag cannot be changed here anyway,
+  // and reading the body would let it be claimed.
+  const side = invoiceSideError(req, existing.is_export);
+  if (side) return res.status(403).json({ error: side });
   const link = linkError(req, 'proforma_invoices', h.pi_id, h.customer_id, 'Proforma invoice')
     ?? linkError(req, 'orders', h.order_id, h.customer_id, 'Order');
   if (link) return res.status(404).json({ error: link });
@@ -482,7 +504,7 @@ invoicesRouter.post('/:id/submit', (req: AuthedRequest, res) => {
 });
 
 invoicesRouter.post('/:id/approve', (req: AuthedRequest, res) => {
-  if (req.user!.role !== 'manager') return res.status(403).json({ error: 'Only a manager can approve documents' });
+  if (!mayApprove(req.user)) return res.status(403).json({ error: 'Your team cannot approve documents' });
   const id = Number(req.params.id);
   if (!db.prepare('SELECT id FROM commercial_invoices WHERE id = ?').get(id)) return res.status(404).json({ error: 'Invoice not found' });
   decide('commercial_invoices', id, req.user!, req.body?.approve !== false, String(req.body?.note ?? ''));

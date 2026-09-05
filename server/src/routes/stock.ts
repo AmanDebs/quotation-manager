@@ -3,7 +3,7 @@ import { db } from '../db/connection.js';
 import { onHandAll, onOrder, shortfall } from '../services/stock.js';
 import { valuation } from '../services/costing.js';
 import { round2 } from '../services/totals.js';
-import { requireManager, type AuthedRequest } from '../middleware/auth.js';
+import { requirePermission, type AuthedRequest } from '../middleware/auth.js';
 import { canAccessCustomer } from '../middleware/scope.js';
 
 export const stockRouter = Router();
@@ -127,7 +127,7 @@ stockRouter.post('/issue', (req: AuthedRequest, res) => {
  * Opening balances, adjustments, returns and transfers. Manager-only: these
  * change the company's stock position with nothing on the floor to point at.
  */
-stockRouter.post('/moves', requireManager, (req: AuthedRequest, res) => {
+stockRouter.post('/moves', requirePermission('material', 'full'), (req: AuthedRequest, res) => {
   const body = req.body ?? {};
   const source = String(body.source ?? 'adjustment');
   if (!['opening', 'adjustment', 'return', 'transfer'].includes(source)) {
@@ -168,7 +168,7 @@ stockRouter.post('/moves', requireManager, (req: AuthedRequest, res) => {
  * be deleted by the person who made it only in the sense that the manager can,
  * because a balance that anyone can quietly rewrite is not a ledger.
  */
-stockRouter.delete('/moves/:id', requireManager, (req, res) => {
+stockRouter.delete('/moves/:id', requirePermission('material', 'full'), (req, res) => {
   const id = Number(req.params.id);
   if (!db.prepare('SELECT id FROM material_moves WHERE id = ?').get(id)) {
     return res.status(404).json({ error: 'Movement not found' });

@@ -100,12 +100,15 @@ function decorate(check: Record<string, unknown>, results: QcResult[]): QcCheck 
   };
 }
 
-/** Every check against one job, oldest first, each with its verdict. */
-export function checksForWorkOrder(workOrderId: number): QcCheck[] {
+/** Every check against several jobs at once, keyed by work order. */
+export function checksForWorkOrders(workOrderIds: number[]): Map<number, QcCheck[]> {
+  const out = new Map<number, QcCheck[]>();
+  if (!workOrderIds.length) return out;
   const checks = db.prepare(
-    'SELECT * FROM qc_checks WHERE work_order_id = ? ORDER BY date, id'
-  ).all(workOrderId) as Record<string, unknown>[];
-  if (!checks.length) return [];
+    `SELECT * FROM qc_checks WHERE work_order_id IN (${workOrderIds.map(() => '?').join(',')})
+     ORDER BY date, id`
+  ).all(...(workOrderIds as never[])) as Record<string, unknown>[];
+  if (!checks.length) return out;
   const results = db.prepare(
     `SELECT * FROM qc_results WHERE check_id IN (${checks.map(() => '?').join(',')})
      ORDER BY sort_order, id`
@@ -116,7 +119,18 @@ export function checksForWorkOrder(workOrderId: number): QcCheck[] {
     list.push(r);
     byCheck.set(r.check_id, list);
   }
-  return checks.map((c) => decorate(c, byCheck.get(Number(c.id)) ?? []));
+  for (const c of checks) {
+    const wo = Number(c.work_order_id);
+    const list = out.get(wo) ?? [];
+    list.push(decorate(c, byCheck.get(Number(c.id)) ?? []));
+    out.set(wo, list);
+  }
+  return out;
+}
+
+/** Every check against one job, oldest first, each with its verdict. */
+export function checksForWorkOrder(workOrderId: number): QcCheck[] {
+  return checksForWorkOrders([workOrderId]).get(workOrderId) ?? [];
 }
 
 export interface QcSummary {
@@ -143,4 +157,76 @@ export function summaryForWorkOrder(workOrderId: number, productId: number | nul
     last_result: last ? last.passed : null,
     last_date: last ? last.date : '',
   };
+}
+
+/**
+ * Nothing ships until it has passed QC.
+ *
+ * The rule the client asked for on 2026-09-05: *"only after QC it should be
+ * available for dispatch"*. Shaped like `linkError` and `lockError` — a
+ * function returning the sentence to refuse with, or null — so the route calls
+ * it and the rule is testable without an HTTP harness, which this codebase
+ * does not have.
+ *
+ * Three things it has to get right, and each was a way to get it silently
+ * wrong.
+ *
+ * **A product with no specification is never blocked.** `has_spec: false`
+ * means nobody has said what to measure, which is not a failure — the rule
+ * this module states twice about itself. Blocking those would have stopped
+ * every despatch on the day this shipped, since most of the catalogue has no
+ * spec recorded.
+ *
+ * **A check with nothing measured is not a pass.** The verdict is
+ * `measured.length === 0 ? null : failed.length === 0`, which is why this asks
+ * `decorate` rather than writing the arithmetic again in SQL: a second
+ * definition of "passed" would drift from the one on the screen.
+ *
+ * **The line position counts charge lines.** `work_orders.order_line` is
+ * 0-based over *all* order items — `orderLines.ts` numbers first and drops
+ * charges afterwards — so an order whose first line is freight has its first
+ * goods line at position 1. Numbering after the filter would gate the wrong
+ * line and no ordinary fixture would catch it.
+ *
+ * A spec'd line with **no work order at all** is blocked: not raising a job
+ * would otherwise be the way around the gate entirely.
+ */
+export function qcBlockError(orderId: number, lines: { order_line?: unknown }[]): string | null {
+  // Every line of the order, numbered exactly as orderLines.ts numbers them —
+  // charge lines included, because they take a position too.
+  const items = db.prepare(
+    `SELECT ROW_NUMBER() OVER (ORDER BY sort_order, id) - 1 AS pos, product_id, description, is_charge
+       FROM order_items WHERE order_id = ?`
+  ).all(orderId) as { pos: number; product_id: number | null; description: string; is_charge: number }[];
+
+  const wanted = new Set<number>();
+  for (const l of lines) {
+    const pos = Number(l.order_line);
+    if (!Number.isInteger(pos) || pos < 0) return 'Every despatch line must say which order line it is against';
+    if (!items.some((it) => Number(it.pos) === pos)) {
+      return `Line ${pos + 1} is not on this order — it may have been edited since`;
+    }
+    wanted.add(pos);
+  }
+  if (!wanted.size) return null;
+
+  const jobs = db.prepare(
+    "SELECT id, order_line FROM work_orders WHERE order_id = ? AND status <> 'cancelled'"
+  ).all(orderId) as { id: number; order_line: number }[];
+  const checks = checksForWorkOrders(jobs.map((j) => Number(j.id)));
+
+  for (const pos of [...wanted].sort((a, b) => a - b)) {
+    const line = items.find((it) => Number(it.pos) === pos)!;
+    // A charge is a fee, not goods: there is nothing to inspect.
+    if (Number(line.is_charge)) continue;
+    if (paramsFor(line.product_id).length === 0) continue;
+    const passed = jobs
+      .filter((j) => Number(j.order_line) === pos)
+      .some((j) => (checks.get(Number(j.id)) ?? []).some((c) => c.passed === true));
+    if (!passed) {
+      return `${line.description || `Line ${pos + 1}`} has not passed QC yet, so it cannot be despatched. ` +
+        'Record a passing quality check against its work order first.';
+    }
+  }
+  return null;
 }

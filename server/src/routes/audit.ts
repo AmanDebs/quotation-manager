@@ -1,7 +1,8 @@
 import { Router } from 'express';
 import { db } from '../db/connection.js';
 import type { AuthedRequest } from '../middleware/auth.js';
-import { requireManager } from '../middleware/auth.js';
+import { requirePermission, allows } from '../middleware/auth.js';
+import type { Fn } from '../services/permissions.js';
 import { canAccessCustomer } from '../middleware/scope.js';
 import { listBody } from '../services/pagination.js';
 
@@ -33,6 +34,46 @@ export const auditRouter = Router();
  * one owner another owner's history, so each is written out where it can be
  * read and checked. `null` means the entity has no customer at all.
  */
+/**
+ * Which function a record's history belongs to.
+ *
+ * Scope alone used to be enough here, because scope alone was the whole of
+ * authorisation for a non-manager. It is not any more: Production, Logistics
+ * and Quality see every customer, so `canAccessCustomer` says yes to all of
+ * them and a production login could read the **price history** of every
+ * quotation on file — measured, before this was added. The history of a record
+ * follows the same rule as the record.
+ *
+ * Written out beside `OWNER_SQL` and for the same stated reason: an entity
+ * missing from either map is refused outright rather than defaulting to
+ * visible.
+ */
+const ENTITY_FN: Record<string, Fn> = {
+  customers: 'customer',
+  enquiries: 'enquiry',
+  quotations: 'quotation',
+  orders: 'order',
+  proformas: 'proforma',
+  invoices: 'invoice',
+  'packing-lists': 'packing_list',
+  followups: 'followup',
+  payments: 'payment',
+  'work-orders': 'work_order',
+  despatches: 'dispatch',
+  products: 'product',
+  'purchase-orders': 'purchasing',
+  users: 'team',
+  companies: 'settings',
+  // Sign-ins. The trail's own subject, so it follows the trail's own function.
+  auth: 'audit',
+  locations: 'master',
+  suppliers: 'master',
+  transporters: 'master',
+  materials: 'master',
+  machines: 'master',
+  moulds: 'master',
+};
+
 const OWNER_SQL: Record<string, string | null> = {
   customers: 'SELECT id AS customer_id FROM customers WHERE id = ?',
   enquiries: 'SELECT customer_id FROM enquiries WHERE id = ?',
@@ -75,7 +116,7 @@ const parse = (rows: unknown[]) =>
     changes: JSON.parse(String(r.changes || '[]')),
   }));
 
-auditRouter.get('/', requireManager, (req: AuthedRequest, res) => {
+auditRouter.get('/', requirePermission('audit'), (req: AuthedRequest, res) => {
   const where: string[] = [];
   const params: unknown[] = [];
   if (req.query.entity) { where.push('a.entity = ?'); params.push(String(req.query.entity)); }
@@ -118,7 +159,7 @@ auditRouter.get('/', requireManager, (req: AuthedRequest, res) => {
 });
 
 /** The distinct values actually present, so the filters offer only real ones. */
-auditRouter.get('/facets', requireManager, (_req, res) => {
+auditRouter.get('/facets', requirePermission('audit'), (_req, res) => {
   res.json({
     entities: (db.prepare('SELECT DISTINCT entity FROM audit_log ORDER BY entity').all() as { entity: string }[])
       .map((r) => r.entity),
@@ -140,15 +181,22 @@ auditRouter.get('/:entity/:id', (req: AuthedRequest, res) => {
   if (!(entity in OWNER_SQL)) return res.status(404).json({ error: 'Not found' });
   const ownerSql = OWNER_SQL[entity];
 
+  // Whoever may open the record may read its history — and nobody else. Scope
+  // is no longer sufficient on its own, since three of the five teams are
+  // unscoped by design.
+  const fn = ENTITY_FN[entity];
+  if (!fn || !allows(req, fn)) return res.status(404).json({ error: 'Not found' });
+
   if (ownerSql === null) {
-    if (req.user?.role !== 'manager') return res.status(404).json({ error: 'Not found' });
+    // Nothing more to check: the entity has no customer, and the function
+    // above is the whole of the rule.
   } else {
     const row = db.prepare(ownerSql).get(id) as { customer_id: number | null } | undefined;
     // The row may be gone — the history of a deleted document is exactly what
     // somebody would come looking for — so a manager may still read it, while
     // an employee cannot, since there is no longer an owner to check against.
     if (!row) {
-      if (req.user?.role !== 'manager') return res.status(404).json({ error: 'Not found' });
+      if (!allows(req, 'audit')) return res.status(404).json({ error: 'Not found' });
     } else if (row.customer_id !== null && !canAccessCustomer(req, row.customer_id)) {
       return res.status(404).json({ error: 'Not found' });
     }

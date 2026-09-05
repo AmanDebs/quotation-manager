@@ -2,14 +2,28 @@ import { db } from '../db/connection.js';
 import type { AuthedRequest, SessionUser } from './auth.js';
 
 /**
- * Employees only see customers they own (and every document belonging to those
- * customers). Managers see everything.
+ * Which customers this person may touch — and every document belonging to them.
  *
- * Returns null for managers meaning "no restriction"; otherwise the list of
- * customer ids the user may touch (possibly empty).
+ * **Owning customers is a Sales idea**, so it restricts Sales and nobody else.
+ * A salesperson sees the customers assigned to them; the factory teams see
+ * every order, because Production cannot make what it cannot see and Logistics
+ * cannot ship it. Confirmed with the user on 2026-09-05.
+ *
+ * That widening is only safe because every router is **function-gated first**.
+ * This one line used to be the whole of the barrier between a non-manager and
+ * every quotation, proforma, payment and PDF in the database; unrestricting
+ * four roles without the gates in front would have put every price the company
+ * has ever quoted on the shop floor. Production being unscoped is safe exactly
+ * because Production has `quotation: 'none'`.
+ *
+ * Returns null for "no restriction"; otherwise the list of customer ids
+ * (possibly empty, which matches nothing).
  */
 export function visibleCustomerIds(user: SessionUser | undefined): number[] | null {
-  if (!user || user.role === 'manager') return null;
+  // No user at all is nothing, not everything. Nothing reaches this today —
+  // every consumer sits behind requireAuth — but that is the safe direction.
+  if (!user) return [];
+  if (user.team_role !== 'sales') return null;
   const rows = db.prepare('SELECT id FROM customers WHERE owner_id = ?').all(user.id) as { id: number }[];
   return rows.map((r) => r.id);
 }

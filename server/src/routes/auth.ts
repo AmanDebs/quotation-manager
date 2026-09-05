@@ -4,6 +4,7 @@ import { db } from '../db/connection.js';
 import { COOKIE_NAME, requireAuth, signToken, bumpTokenVersion, type AuthedRequest } from '../middleware/auth.js';
 import { loginRateLimit } from '../middleware/rateLimit.js';
 import { record } from '../services/audit.js';
+import { legacyRole, capabilities, type TeamRole } from '../services/permissions.js';
 
 export const authRouter = Router();
 
@@ -37,11 +38,14 @@ authRouter.post('/register', loginRateLimit, (req, res) => {
   if (String(password).length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
   const hash = bcrypt.hashSync(String(password), 10);
   const info = db
-    .prepare("INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, ?, 'manager')")
+    .prepare("INSERT INTO users (name, email, password_hash, role, team_role) VALUES (?, ?, ?, 'manager', 'super_admin')")
     .run(String(name), String(email).toLowerCase(), hash);
   const id = Number(info.lastInsertRowid);
   res.cookie(COOKIE_NAME, signToken(id), cookieOpts);
-  const created = { id, name: String(name), email: String(email), role: 'manager' as const };
+  const created = {
+    id, name: String(name), email: String(email),
+    team_role: 'super_admin' as const, role: 'manager' as const,
+  };
   record({ user: created, entity: 'users', entity_id: id, action: 'register', label: String(email) });
   res.json(created);
 });
@@ -49,7 +53,7 @@ authRouter.post('/register', loginRateLimit, (req, res) => {
 authRouter.post('/login', loginRateLimit, (req, res) => {
   const { email, password } = req.body ?? {};
   const user = db.prepare('SELECT * FROM users WHERE email = ?').get(String(email ?? '').toLowerCase()) as
-    | { id: number; name: string; email: string; password_hash: string; role: string; active: number }
+    | { id: number; name: string; email: string; password_hash: string; role: string; team_role: string; active: number }
     | undefined;
   // Sign-in is the one place the audit middleware deliberately does not reach,
   // because it is the one place a request body holds a secret. The entries are
@@ -67,7 +71,11 @@ authRouter.post('/login', loginRateLimit, (req, res) => {
     return res.status(403).json({ error: 'This account has been deactivated' });
   }
   res.cookie(COOKIE_NAME, signToken(user.id), cookieOpts);
-  const session = { id: user.id, name: user.name, email: user.email, role: user.role as 'manager' | 'employee' };
+  const session = {
+    id: user.id, name: user.name, email: user.email,
+    team_role: user.team_role as TeamRole | '',
+    role: legacyRole(user.team_role),
+  };
   record({ user: session, entity: 'auth', entity_id: user.id, action: 'login', label: attempted });
   res.json(session);
 });
@@ -91,7 +99,21 @@ authRouter.post('/logout', (_req, res) => {
 authRouter.get('/me', requireAuth, (req: AuthedRequest, res) => {
   const row = db.prepare('SELECT dashboard_layout FROM users WHERE id = ?').get(req.user!.id) as
     { dashboard_layout: string } | undefined;
-  res.json({ ...req.user, dashboard_layout: readLayout(row?.dashboard_layout) });
+  /*
+   * The capability map rides along too, computed for this caller.
+   *
+   * Not a copy of the table on the client: there is no shared package between
+   * the two halves and a new dependency is out, so a copy would be a second
+   * policy that drifts from the one the server enforces. Sent this way it is
+   * *a fact about this user* rather than a duplicate of the rule — and the
+   * server still enforces every one of them, so the client's copy only ever
+   * decides what to draw.
+   */
+  res.json({
+    ...req.user,
+    can: capabilities(req.user!.team_role),
+    dashboard_layout: readLayout(row?.dashboard_layout),
+  });
 });
 
 /**

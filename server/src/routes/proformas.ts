@@ -5,7 +5,7 @@ import { computeTotals, round2, type LineItemInput } from '../services/totals.js
 import type { AuthedRequest } from '../middleware/auth.js';
 import { scopeClause, canAccessCustomer, linkError, customerChangeError } from '../middleware/scope.js';
 import { resolveCompanyId } from '../services/companies.js';
-import { submit, decide, resetApprovalOnEdit, blockUnapprovedTransition, blockUnapprovedConversion } from '../services/approval.js';
+import { submit, decide, resetApprovalOnEdit, blockUnapprovedTransition, blockUnapprovedConversion , mayApprove } from '../services/approval.js';
 import { listBody } from '../services/pagination.js';
 import { searchClause } from '../services/search.js';
 import { proformaAdvance } from '../services/receivables.js';
@@ -447,7 +447,7 @@ proformasRouter.post('/:id/submit', (req: AuthedRequest, res) => {
 });
 
 proformasRouter.post('/:id/approve', (req: AuthedRequest, res) => {
-  if (req.user!.role !== 'manager') return res.status(403).json({ error: 'Only a manager can approve documents' });
+  if (!mayApprove(req.user)) return res.status(403).json({ error: 'Your team cannot approve documents' });
   const id = Number(req.params.id);
   if (!db.prepare('SELECT id FROM proforma_invoices WHERE id = ?').get(id)) return res.status(404).json({ error: 'Proforma invoice not found' });
   // Approved by rule before the order could be booked from it.

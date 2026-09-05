@@ -1,35 +1,43 @@
 import { Router } from 'express';
 import { db } from '../db/connection.js';
 import { buildQuotationPdf, buildOrderPdf, buildProformaPdf, buildInvoicePdf, buildPackingListPdf, buildInvoiceWithPackingPdf, buildPurchaseOrderPdf, renderPdf } from '../services/pdf.js';
-import { isManager, type AuthedRequest } from '../middleware/auth.js';
+import { allows, type AuthedRequest } from '../middleware/auth.js';
 import { canAccessCustomer } from '../middleware/scope.js';
 
 export const pdfRouter = Router();
 
+/*
+ * Every entry names the **function** it belongs to, and that is not decoration.
+ *
+ * Until the five roles arrived, the only thing standing between somebody and
+ * a quotation PDF was customer scope — this router has no list, no filter and
+ * no guard of its own beyond `canAccessCustomer`. Scope was quietly doing
+ * document-type duty. The moment Production and Logistics became unscoped,
+ * `/api/pdf/quotation/:id` would have rendered every price the company has
+ * ever quoted for anyone who could guess an id.
+ */
 const builders = {
-  quotation: { build: buildQuotationPdf, table: 'quotations', approvable: true },
+  quotation: { build: buildQuotationPdf, table: 'quotations', approvable: true, fn: 'quotation' },
   // Orders record the customer's commitment rather than an outgoing offer,
   // so they carry no approval gate and no watermark.
-  order: { build: buildOrderPdf, table: 'orders', approvable: false },
-  proforma: { build: buildProformaPdf, table: 'proforma_invoices', approvable: true },
-  invoice: { build: buildInvoicePdf, table: 'commercial_invoices', approvable: true },
-  'packing-list': { build: buildPackingListPdf, table: 'packing_lists', approvable: false },
+  order: { build: buildOrderPdf, table: 'orders', approvable: false, fn: 'order' },
+  proforma: { build: buildProformaPdf, table: 'proforma_invoices', approvable: true, fn: 'proforma' },
+  invoice: { build: buildInvoicePdf, table: 'commercial_invoices', approvable: true, fn: 'invoice' },
+  'packing-list': { build: buildPackingListPdf, table: 'packing_lists', approvable: false, fn: 'packing_list' },
   // Invoice + its packing list in one file; approval follows the invoice.
-  'invoice-with-packing': { build: buildInvoiceWithPackingPdf, table: 'commercial_invoices', approvable: true },
+  'invoice-with-packing': { build: buildInvoiceWithPackingPdf, table: 'commercial_invoices', approvable: true, fn: 'invoice' },
   /*
-   * The one document here addressed to a supplier rather than a customer, and
-   * the one that is manager-only.
+   * The one document here addressed to a supplier rather than a customer.
    *
-   * Both flags are load-bearing. `purchase_orders` has no `customer_id`, so
+   * Both fields are load-bearing. `purchase_orders` has no `customer_id`, so
    * the customer join below would throw on it; and `/api/pdf` is mounted with
-   * `requireAuth` alone while the purchase order module is mounted
-   * `requireManager` — registering this without the guard would publish every
-   * supplier rate to every employee through a route nobody thinks of as part
-   * of that module.
+   * `requireAuth` alone while the purchase order module is mounted behind
+   * `purchasing` — registering this without its own `fn` would publish every
+   * supplier rate through a route nobody thinks of as part of that module.
    */
   'purchase-order': {
     build: buildPurchaseOrderPdf, table: 'purchase_orders', approvable: false,
-    party: 'supplier', managerOnly: true,
+    party: 'supplier', fn: 'purchasing',
   },
 } as const;
 
@@ -109,13 +117,11 @@ pdfRouter.get('/:type/:id/:name?', async (req: AuthedRequest, res) => {
   const entry = builders[type];
   if (!entry) return res.status(404).json({ error: 'Unknown document type' });
   const id = Number(req.params.id);
-  // A supplier document has no customer to join or to scope by; it is guarded
-  // by role instead, and 404 rather than 403 so an id cannot be probed for —
-  // the rule every out-of-scope read in this app follows.
+  // 404 rather than 403 throughout, so an id cannot be probed for — the rule
+  // every out-of-scope read in this app follows. A supplier document has no
+  // customer to join or to scope by, and is guarded by its function alone.
   const supplierSide = 'party' in entry && entry.party === 'supplier';
-  if ('managerOnly' in entry && entry.managerOnly && !isManager(req)) {
-    return res.status(404).json({ error: 'Document not found' });
-  }
+  if (!allows(req, entry.fn)) return res.status(404).json({ error: 'Document not found' });
   const row = db.prepare(
     supplierSide
       ? `SELECT d.number, NULL AS customer_id, s.name AS party_name

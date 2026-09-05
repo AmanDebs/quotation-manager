@@ -3,6 +3,7 @@ import { db, transaction } from '../db/connection.js';
 import { round2 } from '../services/totals.js';
 import type { AuthedRequest } from '../middleware/auth.js';
 import { scopeClause, canAccessCustomer } from '../middleware/scope.js';
+import { qcBlockError } from '../services/qc.js';
 import { syncOrderStatus } from '../services/orderStatus.js';
 import { listBody } from '../services/pagination.js';
 
@@ -154,6 +155,10 @@ despatchesRouter.post('/', (req: AuthedRequest, res) => {
   if (!items.some((it) => numOrNull(it.qty) !== null || numOrNull(it.packs) !== null)) {
     return res.status(400).json({ error: 'Record what went — pieces or boxes on at least one line' });
   }
+  // Nothing ships until it has passed QC. See qcBlockError for what "passed"
+  // means and for the two things it deliberately does not block.
+  const blocked = qcBlockError(order.id, items);
+  if (blocked) return res.status(409).json({ error: blocked });
   // An invoice can be named, but only one belonging to the same customer.
   const invoiceId = numOrNull(body.invoice_id);
   if (invoiceId !== null) {
@@ -198,6 +203,10 @@ despatchesRouter.put('/:id', (req: AuthedRequest, res) => {
     if (!inv || inv.customer_id !== Number(existing.customer_id)) {
       return res.status(400).json({ error: 'That invoice belongs to another customer' });
     }
+  }
+  if (Array.isArray(body.items)) {
+    const stopped = qcBlockError(Number(existing.order_id), body.items as ItemInput[]);
+    if (stopped) return res.status(409).json({ error: stopped });
   }
   transaction(() => {
     // order_id is not editable: moving a despatch would move goods onto

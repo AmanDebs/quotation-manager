@@ -1,5 +1,17 @@
 import { db } from '../db/connection.js';
 import type { AuthedRequest, SessionUser } from '../middleware/auth.js';
+import { can } from './permissions.js';
+
+/**
+ * Who may approve — including **implicitly**.
+ *
+ * One capability covers three different acts: submitting your own document,
+ * converting an unapproved one, and moving its status. The last two approve as
+ * a side effect of something that reads like a guard, so granting this to a
+ * second team silently gives that team the power to approve documents it never
+ * opened. Named here so that is one decision rather than three.
+ */
+export const mayApprove = (user: { team_role?: unknown } | undefined) => can(user?.team_role, 'approval', 'full');
 
 export type DocTable = 'quotations' | 'proforma_invoices' | 'commercial_invoices';
 
@@ -17,7 +29,7 @@ export const requiresApproval = (table: DocTable, status: string) => outgoingSta
  * when they submit. Employees must wait for a manager.
  */
 export function submit(table: DocTable, id: number, user: SessionUser) {
-  if (user.role === 'manager') {
+  if (mayApprove(user)) {
     db.prepare(
       `UPDATE ${table} SET approval_status = 'approved', approved_by = ?, approved_at = datetime('now'), approval_note = '' WHERE id = ?`
     ).run(user.id, id);
@@ -71,7 +83,7 @@ export function blockUnapprovedConversion(
   const row = db.prepare(`SELECT approval_status FROM ${table} WHERE id = ?`).get(id) as { approval_status: string } | undefined;
   if (!row) return 'Document not found';
   if (row.approval_status === 'approved') return null;
-  if (req.user?.role === 'manager') {
+  if (req.user && mayApprove(req.user)) {
     if (commit) decide(table, id, req.user, true, '');
     return null;
   }
@@ -90,7 +102,7 @@ export function blockUnapprovedTransition(table: DocTable, id: number, nextStatu
   const row = db.prepare(`SELECT approval_status FROM ${table} WHERE id = ?`).get(id) as { approval_status: string } | undefined;
   if (!row) return 'Document not found';
   if (row.approval_status === 'approved') return null;
-  if (req.user?.role === 'manager') {
+  if (req.user && mayApprove(req.user)) {
     // A manager moving a document forward approves it in the same action.
     decide(table, id, req.user, true, '');
     return null;

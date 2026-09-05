@@ -4,6 +4,7 @@ import crypto from 'node:crypto';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { db, dataDir } from '../db/connection.js';
+import { can, legacyRole, type Fn, type Level, type TeamRole } from '../services/permissions.js';
 
 const secretFile = path.join(dataDir, 'jwt-secret');
 
@@ -37,7 +38,18 @@ export interface SessionUser {
   id: number;
   name: string;
   email: string;
+  /**
+   * The legacy role, and **derived** rather than read from the row: it is
+   * `manager` for a super admin and `employee` for everyone else.
+   *
+   * It stays because every guard written before `team_role` reads it, so each
+   * one keeps meaning *super admin* until it is converted, and anything missed
+   * fails closed rather than open. Deriving rather than storing is what makes
+   * the two impossible to disagree — see `legacyRole` in services/permissions.
+   */
   role: 'manager' | 'employee';
+  /** Which team this person is on. Blank on a row the backfill has not reached. */
+  team_role: TeamRole | '';
 }
 
 export interface AuthedRequest extends Request {
@@ -71,9 +83,13 @@ export function requireAuth(req: AuthedRequest, res: Response, next: NextFunctio
   if (!token) return res.status(401).json({ error: 'Not authenticated' });
   try {
     const payload = jwt.verify(token, JWT_SECRET) as { userId: number; tv?: number };
+    // team_role is on this SELECT and must stay on it: without it every
+    // capability check denies, and the whole app locks out at once.
     const user = db
-      .prepare('SELECT id, name, email, role, active, token_version FROM users WHERE id = ?')
-      .get(payload.userId) as (SessionUser & { active: number; token_version: number }) | undefined;
+      .prepare('SELECT id, name, email, team_role, active, token_version FROM users WHERE id = ?')
+      .get(payload.userId) as
+      | { id: number; name: string; email: string; team_role: TeamRole | ''; active: number; token_version: number }
+      | undefined;
     if (!user) return res.status(401).json({ error: 'User not found' });
     if (!user.active) return res.status(403).json({ error: 'This account has been deactivated' });
     // A token signed before this claim existed reads as version 0, which is
@@ -82,7 +98,11 @@ export function requireAuth(req: AuthedRequest, res: Response, next: NextFunctio
     if ((payload.tv ?? 0) !== user.token_version) {
       return res.status(401).json({ error: 'Your password was changed — please sign in again' });
     }
-    req.user = { id: user.id, name: user.name, email: user.email, role: user.role };
+    req.user = {
+      id: user.id, name: user.name, email: user.email,
+      team_role: user.team_role,
+      role: legacyRole(user.team_role),
+    };
     next();
   } catch {
     return res.status(401).json({ error: 'Session expired' });
@@ -98,3 +118,48 @@ export function requireManager(req: AuthedRequest, res: Response, next: NextFunc
 }
 
 export const isManager = (req: AuthedRequest) => req.user?.role === 'manager';
+
+/**
+ * Guard a route by function rather than by role.
+ *
+ * 403 with the reason, matching `requireManager` — the 404-rather-than-403 rule
+ * this codebase follows elsewhere is about not confirming that a *record*
+ * exists to somebody who may not see it, which is a different question from
+ * whether a whole screen is yours. Routes that answer about one record keep
+ * using `can()` directly and keep answering 404.
+ */
+export function requirePermission(fn: Fn, level: Level = 'view') {
+  return (req: AuthedRequest, res: Response, next: NextFunction) => {
+    if (!can(req.user?.team_role, fn, level === 'full' ? 'full' : 'view')) {
+      return res.status(403).json({
+        error: level === 'full'
+          ? 'Your team does not have permission to change this'
+          : 'Your team does not have access to this',
+      });
+    }
+    next();
+  };
+}
+
+/**
+ * Read it with `view`, change it with `full`.
+ *
+ * The shape most document routers want: a team given *view* on something can
+ * open it and cannot touch it. Mounting `requirePermission(fn)` alone would
+ * have let Logistics — which may only view an order — edit one, and Sales
+ * raise a commercial invoice it is supposed to read and download.
+ *
+ * Not used on the routers that serve more than one function (work orders,
+ * stock, products, masters): there a write is not always the mounted
+ * function's, and Quality writing a QC check holds only `work_order: view`.
+ */
+export function requireFunction(fn: Fn) {
+  const read = requirePermission(fn, 'view');
+  const write = requirePermission(fn, 'full');
+  return (req: AuthedRequest, res: Response, next: NextFunction) =>
+    (req.method === 'GET' ? read : write)(req, res, next);
+}
+
+/** Whether the signed-in user may do this — for routes that answer 404 instead. */
+export const allows = (req: AuthedRequest, fn: Fn, level: 'view' | 'full' = 'view') =>
+  can(req.user?.team_role, fn, level);

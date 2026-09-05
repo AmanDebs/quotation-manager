@@ -6,7 +6,7 @@ import { materialCostByWorkOrder } from '../services/costing.js';
 import { paramsFor, checksForWorkOrder, summaryForWorkOrder } from '../services/qc.js';
 import { requirementFor } from '../services/recipe.js';
 import { syncOrderStatus } from '../services/orderStatus.js';
-import type { AuthedRequest } from '../middleware/auth.js';
+import { requirePermission, type AuthedRequest } from '../middleware/auth.js';
 import { scopeClause, canAccessCustomer } from '../middleware/scope.js';
 import { resolveCompanyId } from '../services/companies.js';
 import { listBody } from '../services/pagination.js';
@@ -151,7 +151,7 @@ workOrdersRouter.get('/:id', (req: AuthedRequest, res) => {
   res.json(wo);
 });
 
-workOrdersRouter.post('/', (req: AuthedRequest, res) => {
+workOrdersRouter.post('/', requirePermission('work_order', 'full'), (req: AuthedRequest, res) => {
   const body = req.body ?? {};
   const order = db.prepare('SELECT id, customer_id, company_id FROM orders WHERE id = ?')
     .get(Number(body.order_id)) as { id: number; customer_id: number; company_id: number } | undefined;
@@ -196,7 +196,7 @@ workOrdersRouter.post('/', (req: AuthedRequest, res) => {
   res.status(201).json(getFull(req, id));
 });
 
-workOrdersRouter.put('/:id', (req: AuthedRequest, res) => {
+workOrdersRouter.put('/:id', requirePermission('work_order', 'full'), (req: AuthedRequest, res) => {
   const id = Number(req.params.id);
   const existing = accessible(req, id);
   if (!existing) return res.status(404).json({ error: 'Work order not found' });
@@ -228,7 +228,7 @@ workOrdersRouter.put('/:id', (req: AuthedRequest, res) => {
   res.json(getFull(req, id));
 });
 
-workOrdersRouter.post('/:id/status', (req: AuthedRequest, res) => {
+workOrdersRouter.post('/:id/status', requirePermission('work_order', 'full'), (req: AuthedRequest, res) => {
   const id = Number(req.params.id);
   if (!accessible(req, id)) return res.status(404).json({ error: 'Work order not found' });
   const status = String(req.body?.status ?? '');
@@ -237,7 +237,7 @@ workOrdersRouter.post('/:id/status', (req: AuthedRequest, res) => {
   res.json(getFull(req, id));
 });
 
-workOrdersRouter.delete('/:id', (req: AuthedRequest, res) => {
+workOrdersRouter.delete('/:id', requirePermission('work_order', 'full'), (req: AuthedRequest, res) => {
   const id = Number(req.params.id);
   if (!accessible(req, id)) return res.status(404).json({ error: 'Work order not found' });
   // Output already booked against the job is a record of what the floor made.
@@ -264,7 +264,7 @@ workOrdersRouter.delete('/:id', (req: AuthedRequest, res) => {
 
 /* ---------------- production entries ---------------- */
 
-workOrdersRouter.post('/:id/entries', (req: AuthedRequest, res) => {
+workOrdersRouter.post('/:id/entries', requirePermission('output', 'full'), (req: AuthedRequest, res) => {
   const id = Number(req.params.id);
   if (!accessible(req, id)) return res.status(404).json({ error: 'Work order not found' });
   const body = req.body ?? {};
@@ -298,7 +298,7 @@ workOrdersRouter.post('/:id/entries', (req: AuthedRequest, res) => {
  *
  * Scoped through the job's own order, like every other floor action.
  */
-workOrdersRouter.post('/:id/qc-checks', (req: AuthedRequest, res) => {
+workOrdersRouter.post('/:id/qc-checks', requirePermission('qc', 'full'), (req: AuthedRequest, res) => {
   const id = Number(req.params.id);
   const wo = accessible(req, id);
   if (!wo) return res.status(404).json({ error: 'Work order not found' });
@@ -344,7 +344,7 @@ workOrdersRouter.post('/:id/qc-checks', (req: AuthedRequest, res) => {
   res.status(201).json(getFull(req, id));
 });
 
-workOrdersRouter.delete('/qc-checks/:checkId', (req: AuthedRequest, res) => {
+workOrdersRouter.delete('/qc-checks/:checkId', requirePermission('qc', 'full'), (req: AuthedRequest, res) => {
   const checkId = Number(req.params.checkId);
   const check = db.prepare('SELECT work_order_id FROM qc_checks WHERE id = ?')
     .get(checkId) as { work_order_id: number } | undefined;
@@ -359,7 +359,7 @@ workOrdersRouter.delete('/qc-checks/:checkId', (req: AuthedRequest, res) => {
   res.json(getFull(req, check.work_order_id));
 });
 
-workOrdersRouter.delete('/entries/:entryId', (req: AuthedRequest, res) => {
+workOrdersRouter.delete('/entries/:entryId', requirePermission('output', 'full'), (req: AuthedRequest, res) => {
   const entryId = Number(req.params.entryId);
   const entry = db.prepare('SELECT work_order_id FROM production_entries WHERE id = ?')
     .get(entryId) as { work_order_id: number } | undefined;

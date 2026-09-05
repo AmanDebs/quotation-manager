@@ -89,9 +89,9 @@ transaction(() => {
   db.prepare('DELETE FROM products WHERE pcs_per_pack IS NULL').run();
 });
 
-const managerId = Number((db.prepare("SELECT id FROM users WHERE role = 'manager' ORDER BY id LIMIT 1").get() as { id: number } | undefined)?.id
+const managerId = Number((db.prepare("SELECT id FROM users WHERE team_role = 'super_admin' ORDER BY id LIMIT 1").get() as { id: number } | undefined)?.id
   ?? (db.prepare('SELECT id FROM users ORDER BY id LIMIT 1').get() as { id: number }).id);
-const employeeId = Number((db.prepare("SELECT id FROM users WHERE role = 'employee' ORDER BY id LIMIT 1").get() as { id: number } | undefined)?.id ?? managerId);
+const employeeId = Number((db.prepare("SELECT id FROM users WHERE team_role = 'sales' ORDER BY id LIMIT 1").get() as { id: number } | undefined)?.id ?? managerId);
 
 /* ------------------------------------------------------------------ */
 /* Masters                                                             */
