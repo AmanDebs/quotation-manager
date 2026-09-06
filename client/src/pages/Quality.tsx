@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { QcCheckRow, QcRegisterSummary, Customer, Product } from '../types';
-import { PageHeader, Card, Select, Input, EmptyState, Pagination, TH_CLASS } from '../components/ui';
+import { PageHeader, Card, Select, Input, EmptyState, Pagination, DownloadButton, TH_CLASS } from '../components/ui';
 import { fmtDate } from '../lib/format';
 import { useUrlFilter } from '../lib/useUrlFilter';
 import { usePagedList, PAGE_SIZE } from '../lib/usePagedList';
@@ -70,6 +70,7 @@ export default function QualityPage() {
       <PageHeader
         title="Quality"
         subtitle="Every inspection recorded, against the tolerance it was judged by"
+        actions={<DownloadButton href={`/api/work-orders/qc-checks/export${query.toString() ? `?${query}` : ''}`} />}
       />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">

@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { PaymentRow, PaymentRegisterSummary, Customer } from '../types';
-import { PageHeader, Card, Select, Input, EmptyState, Pagination, TH_CLASS, CAPTION_CLASS } from '../components/ui';
+import { PageHeader, Card, Select, Input, EmptyState, Pagination, DownloadButton, TH_CLASS, CAPTION_CLASS } from '../components/ui';
 import { fmtDate, fmtMoney } from '../lib/format';
 import { useUrlFilter } from '../lib/useUrlFilter';
 import { usePagedList, PAGE_SIZE } from '../lib/usePagedList';
@@ -78,7 +78,13 @@ export default function PaymentsPage() {
 
   return (
     <div>
-      <PageHeader title="Payments" subtitle="Every payment banked, and what it was banked against" />
+      <PageHeader
+        title="Payments"
+        subtitle="Every payment banked, and what it was banked against"
+        // The same query the table is reading, so the download and the screen
+        // cannot disagree; the server ignores `page`/`limit` and sends the lot.
+        actions={<DownloadButton href={`/api/payments/export${query.toString() ? `?${query}` : ''}`} />}
+      />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <Input type="date" className="w-40" value={from} onChange={(e) => setFrom(e.target.value)} />

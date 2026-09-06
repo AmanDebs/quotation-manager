@@ -6,6 +6,7 @@ import { syncInvoicesForPayment } from '../services/invoiceStatus.js';
 import { currencyMismatchSql } from '../services/receivables.js';
 import { listBody } from '../services/pagination.js';
 import { searchClause } from '../services/search.js';
+import { buildXlsx, attachmentName, type Column } from '../services/xlsx.js';
 
 export const paymentsRouter = Router();
 
@@ -104,6 +105,48 @@ paymentsRouter.get('/', (req: AuthedRequest, res) => {
     sql, order: 'ORDER BY p.date DESC, p.id DESC', params,
   });
   res.json(Array.isArray(body) ? body : { ...body, summary: registerSummary(sql, params) });
+});
+
+/**
+ * The register as a spreadsheet — the whole filtered set, never a page.
+ *
+ * Declared above `/methods` for tidiness rather than necessity: this router
+ * has no `GET /:id` for "export" to be mistaken for. It shares `registerWhere`
+ * with the list, so a download cannot hold rows the table above it did not.
+ *
+ * `Credited to` is the column worth having in Excel: a payment in a currency
+ * its document is not billed in is allocated to nothing, and a reconciliation
+ * that silently dropped it would be wrong in the direction nobody checks.
+ */
+const paymentColumns: Column<Record<string, unknown>>[] = [
+  { header: 'Date', value: (r) => String(r.date ?? ''), type: 'date' },
+  { header: 'Customer', value: (r) => String(r.customer_name ?? '') },
+  { header: 'Against', value: (r) => String(r.against_number ?? '') },
+  { header: 'Type', value: (r) => (r.against_type === 'proforma' ? 'Advance' : r.against_type === 'invoice' ? 'Against invoice' : '') },
+  { header: 'Method', value: (r) => String(r.method ?? '') },
+  { header: 'Reference', value: (r) => String(r.reference ?? '') },
+  // `money` rather than `number`, so Excel shows it as currency and it can
+  // still be summed — the rule `services/xlsx.ts` exists to enforce.
+  { header: 'Amount', value: (r) => Number(r.amount ?? 0), type: 'money' },
+  { header: 'Currency', value: (r) => String(r.currency ?? '') },
+  { header: 'Document currency', value: (r) => String(r.doc_currency ?? '') },
+  {
+    header: 'Credited to',
+    value: (r) => (Number(r.mismatched) === 1
+      ? `Nothing — document is in ${String(r.doc_currency ?? '')}`
+      : String(r.against_number ?? '')),
+  },
+  { header: 'Notes', value: (r) => String(r.notes ?? '') },
+];
+
+paymentsRouter.get('/export', (req: AuthedRequest, res) => {
+  const { where, params } = registerWhere(req);
+  const rows = db.prepare(
+    `${listSql}${where.length ? ` WHERE ${where.join(' AND ')}` : ''} ORDER BY p.date DESC, p.id DESC`
+  ).all(...(params as never[])) as Record<string, unknown>[];
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', `attachment; filename="${attachmentName('Payments')}"`);
+  res.send(buildXlsx('Payments', paymentColumns, rows));
 });
 
 /** The distinct methods actually used, so the filter offers what is on file. */

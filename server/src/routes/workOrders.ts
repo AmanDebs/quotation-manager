@@ -10,6 +10,7 @@ import { requirePermission, type AuthedRequest } from '../middleware/auth.js';
 import { scopeClause, canAccessCustomer } from '../middleware/scope.js';
 import { resolveCompanyId } from '../services/companies.js';
 import { listBody } from '../services/pagination.js';
+import { buildXlsx, attachmentName, type Column } from '../services/xlsx.js';
 
 export const workOrdersRouter = Router();
 
@@ -236,6 +237,50 @@ workOrdersRouter.get('/qc-checks', requirePermission('qc'), (req: AuthedRequest,
        FROM f`
   ).get(...(params as never[]));
   res.json(Array.isArray(body) ? body : { ...body, summary });
+});
+
+/**
+ * The QC register as a spreadsheet.
+ *
+ * Declared above `/:id` like the register itself, and gated on the same `qc`
+ * permission — an export is a read, and one mounted without its own guard is
+ * how a whole list escapes through a route nobody thinks of as part of the
+ * module. It shares `registerWhere`, so the download can never hold rows the
+ * table above it did not, and it exports the **whole filtered set, never a
+ * page**.
+ *
+ * The verdict is written out as a word rather than left as three counts,
+ * because that is what somebody reconciling in Excel filters on — and it keeps
+ * the file honest about the one distinction that matters here: **nothing
+ * measured is not a pass**.
+ */
+const qcColumns: Column<Record<string, unknown>>[] = [
+  { header: 'Date', value: (r) => String(r.date ?? ''), type: 'date' },
+  { header: 'Shift', value: (r) => String(r.shift ?? '') },
+  { header: 'Work order', value: (r) => String(r.work_order_number ?? '') },
+  { header: 'Order', value: (r) => String(r.order_number ?? '') },
+  { header: 'Customer', value: (r) => String(r.customer_name ?? '') },
+  { header: 'Product', value: (r) => String(r.product_name ?? r.description ?? '') },
+  { header: 'Process', value: (r) => String(r.process_name ?? '') },
+  { header: 'Inspector', value: (r) => String(r.inspector ?? '') },
+  { header: 'Sample size', value: (r) => (r.sample_size == null ? null : Number(r.sample_size)), type: 'number' },
+  { header: 'Readings', value: (r) => Number(r.readings ?? 0), type: 'number' },
+  { header: 'Measured', value: (r) => Number(r.measured ?? 0), type: 'number' },
+  { header: 'Failed', value: (r) => Number(r.failed_count ?? 0), type: 'number' },
+  {
+    header: 'Verdict',
+    value: (r) => (Number(r.measured) === 0 ? 'Not measured' : Number(r.failed_count) === 0 ? 'Pass' : 'Fail'),
+  },
+  { header: 'Notes', value: (r) => String(r.notes ?? '') },
+];
+
+workOrdersRouter.get('/qc-checks/export', requirePermission('qc'), (req: AuthedRequest, res) => {
+  const { sql, params } = registerWhere(req);
+  const rows = db.prepare(`${sql} ORDER BY q.date DESC, q.id DESC`)
+    .all(...(params as never[])) as Record<string, unknown>[];
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', `attachment; filename="${attachmentName('QC checks')}"`);
+  res.send(buildXlsx('QC checks', qcColumns, rows));
 });
 
 workOrdersRouter.get('/:id', (req: AuthedRequest, res) => {

@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Despatch, Location } from '../types';
-import { PageHeader, Card, Select, Input, EmptyState , Pagination} from '../components/ui';
+import { PageHeader, Card, Select, Input, EmptyState, Pagination, DownloadButton } from '../components/ui';
 import { fmtQty, fmtDate } from '../lib/format';
 import { usePagedList, PAGE_SIZE } from '../lib/usePagedList';
 
@@ -34,7 +34,13 @@ export default function DespatchesPage() {
 
   return (
     <div>
-      <PageHeader title="Despatches" subtitle="What has left the plants, and what has not been billed yet" />
+      <PageHeader
+        title="Despatches"
+        subtitle="What has left the plants, and what has not been billed yet"
+        // The desk reconciles this sheet in Excel, so the register it is
+        // compared against has to come out of here.
+        actions={<DownloadButton href={`/api/despatches/export${query.toString() ? `?${query}` : ''}`} />}
+      />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <Select className="w-44" value={location} onChange={(e) => setLocation(e.target.value)}>

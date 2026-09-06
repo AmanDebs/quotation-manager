@@ -6,6 +6,7 @@ import { scopeClause, canAccessCustomer } from '../middleware/scope.js';
 import { qcBlockError } from '../services/qc.js';
 import { syncOrderStatus } from '../services/orderStatus.js';
 import { listBody } from '../services/pagination.js';
+import { buildXlsx, attachmentName, type Column } from '../services/xlsx.js';
 
 export const despatchesRouter = Router();
 
@@ -112,7 +113,13 @@ function despatchSummary(sql: string, params: unknown[]) {
   ).get(...(params as never[])) as { trips: number; unbilled: number; pieces: number; boxes: number };
 }
 
-despatchesRouter.get('/', (req: AuthedRequest, res) => {
+/**
+ * The register's filters, built once so the list and its export cannot drift
+ * apart — an export that quietly disagreed with the table it sits under is
+ * worse than no export, which is the rule `routes/orders.ts` states about its
+ * own `orderListWhere`.
+ */
+function despatchListWhere(req: AuthedRequest): { where: string[]; params: unknown[] } {
   const scope = scopeClause(req, 'o.customer_id');
   const where: string[] = [];
   const params: unknown[] = [];
@@ -123,11 +130,71 @@ despatchesRouter.get('/', (req: AuthedRequest, res) => {
   if (req.query.to) { where.push('d.date <= ?'); params.push(String(req.query.to)); }
   // Gone but not billed — the reason these rows exist at all.
   if (req.query.uninvoiced === '1') where.push('d.invoice_id IS NULL');
+  return { where, params };
+}
+
+const whereSql = (where: string[]) => (where.length ? `WHERE ${where.join(' AND ')}` : '');
+
+/**
+ * The despatch register as a spreadsheet.
+ *
+ * Declared **above `/:id`**, or Express reads "export" as a despatch id — the
+ * trap every export in this codebase has to step over.
+ *
+ * The desk's own sheet runs to roughly 465 rows a month and reconciling it
+ * against ours is done in Excel, so this is the list people actually need out.
+ * Pieces and boxes are summed **in SQL** rather than by loading each trip's
+ * items: the list does the latter because it shows the lines, and the export
+ * only needs the totals.
+ */
+const despatchColumns: Column<Record<string, unknown>>[] = [
+  { header: 'Date', value: (r) => String(r.date ?? ''), type: 'date' },
+  { header: 'Plant', value: (r) => String(r.location_name ?? '') },
+  { header: 'Order', value: (r) => String(r.order_number ?? '') },
+  { header: 'Customer', value: (r) => String(r.customer_name ?? '') },
+  { header: 'Destination', value: (r) => String(r.destination ?? '') },
+  { header: 'Transporter', value: (r) => String(r.transporter_name ?? '') },
+  { header: 'CN no.', value: (r) => String(r.cn_no ?? '') },
+  { header: 'Vehicle', value: (r) => String(r.vehicle_no ?? '') },
+  { header: 'Pieces', value: (r) => Number(r.pieces ?? 0), type: 'number' },
+  { header: 'Boxes', value: (r) => Number(r.boxes ?? 0), type: 'number' },
+  { header: 'Invoice', value: (r) => String(r.invoice_number ?? '') },
+  // The column the paper sheet could not have, and the reason to open this one.
+  { header: 'Billed', value: (r) => (r.invoice_id ? 'Yes' : 'Not billed') },
+  // Free text on the real sheet — "5-6 Days" and the like.
+  { header: 'Tentative delivery', value: (r) => String(r.tentative_delivery ?? '') },
+  { header: 'Freight terms', value: (r) => String(r.freight_terms ?? '') },
+  { header: 'Notes', value: (r) => String(r.notes ?? '') },
+];
+
+despatchesRouter.get('/export', (req: AuthedRequest, res) => {
+  const { where, params } = despatchListWhere(req);
+  const rows = db.prepare(
+    `SELECT d.*, o.number AS order_number, o.customer_id, c.name AS customer_name,
+            l.name AS location_name, t.name AS transporter_name, i.number AS invoice_number,
+            COALESCE((SELECT SUM(di.qty) FROM despatch_items di WHERE di.despatch_id = d.id), 0) AS pieces,
+            COALESCE((SELECT SUM(di.packs) FROM despatch_items di WHERE di.despatch_id = d.id), 0) AS boxes
+     FROM despatches d
+     JOIN orders o ON o.id = d.order_id
+     JOIN customers c ON c.id = o.customer_id
+     LEFT JOIN locations l ON l.id = d.location_id
+     LEFT JOIN transporters t ON t.id = d.transporter_id
+     LEFT JOIN commercial_invoices i ON i.id = d.invoice_id
+     ${whereSql(where)} ORDER BY d.date DESC, d.id DESC`
+  ).all(...(params as never[])) as Record<string, unknown>[];
+
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', `attachment; filename="${attachmentName('Despatches')}"`);
+  res.send(buildXlsx('Despatches', despatchColumns, rows));
+});
+
+despatchesRouter.get('/', (req: AuthedRequest, res) => {
+  const { where, params } = despatchListWhere(req);
 
   // This list has always been capped — at 300 rows, silently, with no way to
   // reach the 301st. Paging replaces the cap outright: `?limit=` now means a
   // page size rather than a ceiling, and the rows beyond it are reachable.
-  const sql = `${listSql} ${where.length ? `WHERE ${where.join(' AND ')}` : ''}`;
+  const sql = `${listSql} ${whereSql(where)}`;
   const body = listBody<Record<string, unknown>>(req.query, {
     sql, order: 'ORDER BY d.date DESC, d.id DESC', params,
   }, (rows) => rows.map(withItems));
