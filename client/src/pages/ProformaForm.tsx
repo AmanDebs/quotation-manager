@@ -458,21 +458,13 @@ export default function ProformaFormPage() {
               been issued from one series or the other and the flag can no
               longer move to match it — the server refuses the change too. */}
           <div className="mb-3">
-            {isNew ? (
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={!!draft.is_export}
-                  onChange={(e) => {
-                    const isExport = e.target.checked;
-                    set({ is_export: isExport ? 1 : 0, tax_type: isExport ? 'none' : draft.tax_type === 'none' ? 'igst' : draft.tax_type });
-                  }}
-                />
-                This is an export order
-              </label>
-            ) : (
-              <SettledDocumentType isExport={!!draft.is_export} number={draft.number} />
-            )}
+            {/*
+              * Stated, not offered — on a new document as well as a saved one.
+              * The New dialog asks export or domestic first and then lists only
+              * that kind of customer, and a carry-forward brings the answer with
+              * it, so the tick-box was a second answer to a settled question.
+              */}
+            <SettledDocumentType isExport={!!draft.is_export} number={draft.number} />
           </div>
           {!!draft.is_export && (
             <div className={`${gridClass} mb-3`}>

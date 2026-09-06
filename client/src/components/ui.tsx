@@ -518,8 +518,16 @@ export function SettledDocumentType({ isExport, number }: { isExport: boolean; n
         {isExport ? '🌍 Export' : '🇮🇳 Domestic'}
       </span>
       <span className="text-xs text-slate-500">
-        Set when this was created{number ? ` — ${number} came from the ${kind} numbering series` : ''}, so it cannot be
-        changed here. Raise a new document if the type is wrong.
+        {number
+          // Once a number is issued the flag really is frozen — it came from
+          // one series or the other and `exportChangeError` refuses the change.
+          ? `${number} came from the ${kind} numbering series, so this cannot be changed here. Raise a new document if the type is wrong.`
+          // Before that it is settled by choice rather than by rule: the New
+          // dialog asks export or domestic first and then lists only that
+          // kind of customer, so offering it again here is a second answer to
+          // a question already put — and one that can leave a domestic
+          // customer on an export document.
+          : 'Chosen when you started this document, and it follows the customer. Start again from + New if the type is wrong.'}
       </span>
     </div>
   );

@@ -3,7 +3,7 @@ import { useNavigate, useParams, useSearchParams, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Quotation, Customer, LineItem, TaxType, ColumnConfig } from '../types';
-import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, StatusBadge, ReadOnlyFields, labelClass, FIELD_GRID, FIELD_GRID_PLAIN } from '../components/ui';
+import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, StatusBadge, ReadOnlyFields, labelClass, FIELD_GRID, FIELD_GRID_PLAIN, SettledDocumentType } from '../components/ui';
 import { PdfLink } from '../components/PdfLink';
 import CompanySelect from '../components/CompanySelect';
 import { DocNumber, IncoTermsInput, HeaderCharges } from '../components/DocFields';
@@ -125,11 +125,34 @@ export default function QuotationFormPage() {
     }));
   }, [isNew, search]);
 
-  // Once customers load, adopt the chosen customer's currency.
+  /**
+   * What the customer decides about a new quotation.
+   *
+   * One copy, because it is applied from two places — picking a customer in
+   * the select, and arriving with one already chosen — and the two used to
+   * disagree. Arriving from an **enquiry** carries a customer but no `type`,
+   * and this effect only ever adopted the currency, so an overseas buyer got a
+   * domestic quotation with IGST on it and nothing said so. That mattered more
+   * once the Type control stopped being offered on a new document.
+   */
+  const fromCustomer = (c: Customer) => {
+    const isExport = c.is_export ?? (c.country.trim().toLowerCase() !== 'india' ? 1 : 0);
+    return {
+      currency: c.currency,
+      is_export: isExport,
+      tax_type: (isExport ? 'none' : 'igst') as TaxType,
+    };
+  };
+
+  // Once customers load, adopt what the chosen customer decides.
   useEffect(() => {
     if (!isNew || !draft.customer_id || customers.length === 0) return;
     const c = customers.find((x) => x.id === draft.customer_id);
-    if (c && draft.currency !== c.currency) setDraft((d) => ({ ...d, currency: c.currency }));
+    if (!c) return;
+    const want = fromCustomer(c);
+    if (draft.currency !== want.currency || draft.is_export !== want.is_export) {
+      setDraft((d) => ({ ...d, ...want }));
+    }
   }, [isNew, draft.customer_id, customers]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-pick currency and tax type from the selected customer.
@@ -142,9 +165,7 @@ export default function QuotationFormPage() {
         ? {
             // The entity that usually serves them; still changeable below.
             company_id: c.company_id ?? undefined,
-            currency: c.currency,
-            is_export: c.is_export ?? (c.country.trim().toLowerCase() !== 'india' ? 1 : 0),
-            tax_type: (c.country.trim().toLowerCase() !== 'india' ? 'none' : d.tax_type === 'none' ? 'igst' : d.tax_type) as TaxType,
+            ...fromCustomer(c),
           }
         : {}),
     }));
@@ -344,21 +365,35 @@ export default function QuotationFormPage() {
         <Card
           title="Details"
           actions={
-            <div className="flex items-center gap-2 text-sm">
-              <span className="text-slate-500">Type:</span>
-              <Select
-                value={draft.is_export ? 'export' : 'domestic'}
-                disabled={readOnly}
-                onChange={(e) => {
-                  const isExport = e.target.value === 'export';
-                  set({ is_export: isExport ? 1 : 0, tax_type: isExport ? 'none' : draft.tax_type === 'none' ? 'igst' : draft.tax_type });
-                }}
-                className="w-32"
-              >
-                <option value="export">🌍 Export</option>
-                <option value="domestic">🇮🇳 Domestic</option>
-              </Select>
-            </div>
+            /*
+             * Not offered on a new quotation. The New dialog asks export or
+             * domestic before anything else and then lists only that kind of
+             * customer, so a second control here answers a question already
+             * put — and answering it differently leaves a domestic customer on
+             * an export document, which is exactly what the dialog exists to
+             * prevent. It stays editable once saved: a quotation draws from
+             * one numbering series whatever its type, so nothing can disagree,
+             * which is why `exportChangeError` deliberately does not guard it.
+             */
+            isNew ? (
+              <SettledDocumentType isExport={!!draft.is_export} />
+            ) : (
+              <div className="flex items-center gap-2 text-sm">
+                <span className="text-slate-500">Type:</span>
+                <Select
+                  value={draft.is_export ? 'export' : 'domestic'}
+                  disabled={readOnly}
+                  onChange={(e) => {
+                    const isExport = e.target.value === 'export';
+                    set({ is_export: isExport ? 1 : 0, tax_type: isExport ? 'none' : draft.tax_type === 'none' ? 'igst' : draft.tax_type });
+                  }}
+                  className="w-32"
+                >
+                  <option value="export">🌍 Export</option>
+                  <option value="domestic">🇮🇳 Domestic</option>
+                </Select>
+              </div>
+            )
           }
         >
           <div className={gridClass}>
