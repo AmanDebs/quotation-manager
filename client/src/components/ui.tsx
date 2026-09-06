@@ -402,6 +402,21 @@ export function SearchSelect({
   );
 }
 
+/**
+ * How tall the printed notes box starts.
+ *
+ * Three rows was set before the note presets could be pre-written into a new
+ * document. Aglo's standard clauses run to six lines, so the box opened
+ * already scrolled — the terms that go on nearly every quotation could not be
+ * read without dragging the corner first, which is a poor way to check what is
+ * about to be printed.
+ *
+ * Sized to the content rather than picked: it is the number of default
+ * clauses. It stays a **starting** height — the textarea is still resizable,
+ * and a document with more to say can be dragged bigger as before.
+ */
+export const NOTES_ROWS = 6;
+
 export function Textarea({ className = '', ...props }: TextareaHTMLAttributes<HTMLTextAreaElement>) {
   if (useReadOnlyFields()) {
     return <StaticValue className="whitespace-pre-wrap">{props.value == null ? '' : String(props.value)}</StaticValue>;

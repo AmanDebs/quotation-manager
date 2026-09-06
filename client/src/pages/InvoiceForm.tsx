@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import { useCan, useUser } from '../App';
 import type { Invoice, Customer, LineItem, TaxType, Settings, ColumnConfig, PackingListItem } from '../types';
-import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, StatusBadge, SettledDocumentType, FIELD_GRID, TH_CLASS } from '../components/ui';
+import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, StatusBadge, SettledDocumentType, FIELD_GRID, TH_CLASS, NOTES_ROWS } from '../components/ui';
 import { PdfLink } from '../components/PdfLink';
 import CompanySelect from '../components/CompanySelect';
 import { DocNumber, IncoTermsInput, HeaderCharges } from '../components/DocFields';
@@ -539,7 +539,7 @@ export default function InvoiceFormPage() {
         </Card>
 
         <Card title="Remarks / Disclaimers" actions={<NotePresetPicker value={draft.remarks} onChange={(v) => set({ remarks: v })} />}>
-          <Textarea rows={3} value={draft.remarks} onChange={(e) => set({ remarks: e.target.value })} />
+          <Textarea rows={NOTES_ROWS} value={draft.remarks} onChange={(e) => set({ remarks: e.target.value })} />
         </Card>
 
         {!isNew && (

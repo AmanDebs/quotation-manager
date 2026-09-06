@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Proforma, Customer, LineItem, TaxType, Settings, ColumnConfig } from '../types';
-import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, StatusBadge, SettledDocumentType, ReadOnlyFields, FIELD_GRID, FIELD_GRID_PLAIN } from '../components/ui';
+import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, StatusBadge, SettledDocumentType, ReadOnlyFields, FIELD_GRID, FIELD_GRID_PLAIN, NOTES_ROWS } from '../components/ui';
 import { PdfLink } from '../components/PdfLink';
 import CompanySelect from '../components/CompanySelect';
 import { DocNumber, IncoTermsInput, HeaderCharges } from '../components/DocFields';
@@ -533,7 +533,7 @@ export default function ProformaFormPage() {
           className={readOnly ? 'has-[[data-empty]]:hidden' : ''}
           actions={!readOnly && <NotePresetPicker value={draft.remarks} onChange={(v) => set({ remarks: v })} />}
         >
-          <Textarea disabled={readOnly} rows={3} value={draft.remarks} onChange={(e) => set({ remarks: e.target.value })} placeholder="Any other conditions specific to this customer…" />
+          <Textarea disabled={readOnly} rows={NOTES_ROWS} value={draft.remarks} onChange={(e) => set({ remarks: e.target.value })} placeholder="Any other conditions specific to this customer…" />
         </Card>
 
         {!isNew && (
