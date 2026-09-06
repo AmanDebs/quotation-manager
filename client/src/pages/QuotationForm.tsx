@@ -443,7 +443,23 @@ export default function QuotationFormPage() {
                 onChange={(v) => set({ inco_terms: v })}
               />
             </Field>
-            <Field label="Containers"><Input disabled={readOnly} value={draft.container_count} onChange={(e) => set({ container_count: e.target.value })} placeholder="e.g. 5 X 40ft HQ" /></Field>
+            {/*
+              * Export only — a domestic sale goes on a lorry, not in a box on a
+              * ship, and "5 X 40ft HQ" is not a question anybody at this desk
+              * answers for one. The proforma and the order already gated it
+              * this way; the quotation was the one that did not, which is also
+              * why its loadability columns are export-only already.
+              *
+              * Still shown on a domestic quotation that **already carries a
+              * value**, so a figure entered before this can be seen and
+              * cleared rather than becoming invisible and unreachable — the
+              * rule `HeaderCharges` follows about the freight it replaced. The
+              * PDF needs no matching change: it prints the containers only
+              * when there is a value, so an empty field was already silent.
+              */}
+            {(!!draft.is_export || !!draft.container_count) && (
+              <Field label="Containers"><Input disabled={readOnly} value={draft.container_count} onChange={(e) => set({ container_count: e.target.value })} placeholder="e.g. 5 X 40ft HQ" /></Field>
+            )}
             <div className={`col-span-full ${readOnly ? 'has-[[data-empty]]:hidden' : ''}`}>
               <div className="mb-1 flex items-center justify-between">
                 <span className={labelClass(readOnly)}>Notes (printed on quotation)</span>
