@@ -1,6 +1,7 @@
 import { db } from '../db/connection.js';
 import type { AuthedRequest, SessionUser } from '../middleware/auth.js';
 import { can } from './permissions.js';
+import { incompleteError } from './documentChecks.js';
 
 /**
  * Who may approve — including **implicitly**.
@@ -84,6 +85,13 @@ export function blockUnapprovedConversion(
   if (!row) return 'Document not found';
   if (row.approval_status === 'approved') return null;
   if (req.user && mayApprove(req.user)) {
+    /*
+     * The manager's pass-through is still an approval, so it answers to the
+     * completeness gate like any other. Checked *before* `decide`, or the one
+     * path that approves as a side effect would be the one way past it.
+     */
+    const incomplete = incompleteError(table, id);
+    if (incomplete) return incomplete;
     if (commit) decide(table, id, req.user, true, '');
     return null;
   }
@@ -103,7 +111,10 @@ export function blockUnapprovedTransition(table: DocTable, id: number, nextStatu
   if (!row) return 'Document not found';
   if (row.approval_status === 'approved') return null;
   if (req.user && mayApprove(req.user)) {
-    // A manager moving a document forward approves it in the same action.
+    // A manager moving a document forward approves it in the same action — and
+    // so has to clear the same completeness gate a submitted one does.
+    const incomplete = incompleteError(table, id);
+    if (incomplete) return incomplete;
     decide(table, id, req.user, true, '');
     return null;
   }

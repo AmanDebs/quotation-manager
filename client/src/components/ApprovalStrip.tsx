@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
-import type { ApprovalStatus } from '../types';
+import type { ApprovalStatus, DocumentFinding } from '../types';
 import { useCan } from '../App';
 import { Button, Textarea, ErrorText } from './ui';
 import { fmtDate } from '../lib/format';
@@ -18,7 +18,7 @@ const styles: Record<ApprovalStatus, { bg: string; label: string }> = {
  * Employees submit; managers approve or reject inline.
  */
 export default function ApprovalStrip({
-  docType, docId, status, approvedByName, approvedAt, note, queryKey,
+  docType, docId, status, approvedByName, approvedAt, note, queryKey, checks,
 }: {
   docType: 'quotations' | 'proformas' | 'invoices';
   docId: number;
@@ -27,6 +27,11 @@ export default function ApprovalStrip({
   approvedAt?: string;
   note?: string;
   queryKey: string;
+  /**
+   * What the server says is still missing. Optional so a server not yet
+   * redeployed reads as "nothing to report" rather than throwing.
+   */
+  checks?: DocumentFinding[];
 }) {
   const can = useCan();
   // Approve vs Submit for Approval
@@ -51,6 +56,14 @@ export default function ApprovalStrip({
   });
 
   const s = styles[status];
+  /*
+   * Shown here rather than left to the 422. The server refuses an approval a
+   * blocking finding applies to, and a button that fails when pressed teaches
+   * people to press it twice — so the reasons sit above the button and the
+   * button itself goes quiet.
+   */
+  const blocking = (checks ?? []).filter((c) => c.level === 'block');
+  const warnings = (checks ?? []).filter((c) => c.level === 'warn');
 
   return (
     <div className={`mb-4 rounded-md px-3 py-2 text-sm ${s.bg}`}>
@@ -71,13 +84,25 @@ export default function ApprovalStrip({
         </div>
         <div className="flex gap-2">
           {(status === 'not_submitted' || status === 'rejected') && (
-            <Button onClick={() => submit.mutate()} disabled={submit.isPending}>
+            <Button
+              onClick={() => submit.mutate()}
+              disabled={submit.isPending || blocking.length > 0}
+              title={blocking.length ? 'Finish the document first — see below' : undefined}
+            >
               {isManager ? 'Approve' : 'Submit for Approval'}
             </Button>
           )}
           {isManager && status === 'pending' && (
             <>
-              <Button onClick={() => decide.mutate({ approve: true, note: '' })} disabled={decide.isPending}>Approve</Button>
+              <Button
+                onClick={() => decide.mutate({ approve: true, note: '' })}
+                disabled={decide.isPending || blocking.length > 0}
+                title={blocking.length ? 'Finish the document first — see below' : undefined}
+              >
+                Approve
+              </Button>
+              {/* Rejecting is never blocked: an unfinished document that could
+                  not be rejected would be stuck in `pending` for good. */}
               <Button variant="danger" onClick={() => setRejecting(true)}>Reject</Button>
             </>
           )}
@@ -92,6 +117,23 @@ export default function ApprovalStrip({
               Confirm Rejection
             </Button>
           </div>
+        </div>
+      )}
+      {blocking.length > 0 && (
+        <div className="mt-2 rounded-md bg-white/70 px-3 py-2 text-sm ring-1 ring-red-200">
+          <div className="font-medium text-red-800">Not ready to approve</div>
+          <ul className="mt-1 list-disc space-y-0.5 pl-5 text-red-900/90">
+            {blocking.map((c) => <li key={c.key}>{c.message}</li>)}
+          </ul>
+        </div>
+      )}
+      {warnings.length > 0 && (
+        // Worth saying, never worth refusing over — see services/documentChecks.ts.
+        <div className="mt-2 rounded-md bg-white/70 px-3 py-2 text-sm ring-1 ring-amber-200">
+          <div className="font-medium text-amber-800">Worth checking</div>
+          <ul className="mt-1 list-disc space-y-0.5 pl-5 text-amber-900/90">
+            {warnings.map((c) => <li key={c.key}>{c.message}</li>)}
+          </ul>
         </div>
       )}
       <ErrorText error={submit.error ?? decide.error} />

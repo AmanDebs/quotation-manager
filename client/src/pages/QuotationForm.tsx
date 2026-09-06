@@ -296,6 +296,7 @@ export default function QuotationFormPage() {
           approvedByName={existing!.approved_by_name}
           approvedAt={existing!.approved_at}
           note={existing!.approval_note}
+          checks={existing!.checks}
           queryKey="quotation"
         />
       )}

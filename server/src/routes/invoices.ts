@@ -8,6 +8,7 @@ import { scopeClause, canAccessCustomer, linkError, customerChangeError } from '
 import { resolveCompanyId } from '../services/companies.js';
 import { syncOrderStatus } from '../services/orderStatus.js';
 import { submit, decide, resetApprovalOnEdit, blockUnapprovedTransition , mayApprove } from '../services/approval.js';
+import { incompleteError, checkDocument } from '../services/documentChecks.js';
 import { invoiceReceivable } from '../services/receivables.js';
 import { syncInvoiceStatus, syncInvoicesForProforma } from '../services/invoiceStatus.js';
 import { listBody } from '../services/pagination.js';
@@ -72,6 +73,8 @@ function getFull(id: number) {
   if (!inv) return undefined;
   inv.items = db.prepare('SELECT * FROM invoice_items WHERE invoice_id = ? ORDER BY sort_order, id').all(id);
   inv.column_config = JSON.parse(String(inv.column_config || '{}'));
+  // See the quotation's own getFull: shown on the form, not sprung on Submit.
+  inv.checks = checkDocument('commercial_invoices', id);
   /**
    * Quantity variance against the source proforma — the 10% clause — computed
    * here for the client to show.
@@ -499,6 +502,10 @@ invoicesRouter.post('/:id/submit', (req: AuthedRequest, res) => {
   const id = Number(req.params.id);
   const existing = db.prepare('SELECT customer_id FROM commercial_invoices WHERE id = ?').get(id) as { customer_id: number } | undefined;
   if (!existing || !canAccessCustomer(req, existing.customer_id)) return res.status(404).json({ error: 'Invoice not found' });
+  // Submitting is asking for approval, so the document has to be
+  // finished. 422 rather than 409: nothing conflicts, it is incomplete.
+  const incomplete = incompleteError('commercial_invoices', id);
+  if (incomplete) return res.status(422).json({ error: incomplete });
   submit('commercial_invoices', id, req.user!);
   res.json(getFull(id));
 });
@@ -507,6 +514,12 @@ invoicesRouter.post('/:id/approve', (req: AuthedRequest, res) => {
   if (!mayApprove(req.user)) return res.status(403).json({ error: 'Your team cannot approve documents' });
   const id = Number(req.params.id);
   if (!db.prepare('SELECT id FROM commercial_invoices WHERE id = ?').get(id)) return res.status(404).json({ error: 'Invoice not found' });
+  // Only an approval is gated. A rejection must always be possible —
+  // refusing to let a manager reject an unfinished document would trap
+  // it in `pending` with no way out.
+  const approving = req.body?.approve !== false;
+  const unfinished = approving ? incompleteError('commercial_invoices', id) : null;
+  if (unfinished) return res.status(422).json({ error: unfinished });
   decide('commercial_invoices', id, req.user!, req.body?.approve !== false, String(req.body?.note ?? ''));
   // Approval can be the last thing standing between an already-settled invoice
   // and 'paid', since an unapproved one is deliberately never promoted.

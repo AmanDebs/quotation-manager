@@ -6,6 +6,7 @@ import type { AuthedRequest } from '../middleware/auth.js';
 import { scopeClause, canAccessCustomer, linkError, customerChangeError } from '../middleware/scope.js';
 import { resolveCompanyId } from '../services/companies.js';
 import { submit, decide, resetApprovalOnEdit, blockUnapprovedTransition, blockUnapprovedConversion , mayApprove } from '../services/approval.js';
+import { incompleteError, checkDocument } from '../services/documentChecks.js';
 import { listBody } from '../services/pagination.js';
 import { searchClause } from '../services/search.js';
 import { proformaAdvance } from '../services/receivables.js';
@@ -87,6 +88,8 @@ function getFull(id: number) {
   if (!pi) return undefined;
   pi.items = db.prepare('SELECT * FROM pi_items WHERE pi_id = ? ORDER BY sort_order, id').all(id);
   pi.column_config = JSON.parse(String(pi.column_config || '{}'));
+  // See the quotation's own getFull: shown on the form, not sprung on Submit.
+  pi.checks = checkDocument('proforma_invoices', id);
   /*
    * Money only adds up within one currency — the same rule the list's
    * `advance_received` applies above, and the one receivables.ts has always
@@ -442,6 +445,10 @@ proformasRouter.post('/:id/submit', (req: AuthedRequest, res) => {
   if (!existing || !canAccessCustomer(req, existing.customer_id)) return res.status(404).json({ error: 'Proforma invoice not found' });
   const lockedSubmit = lockError('proforma_invoices', id, 'submitted for approval');
   if (lockedSubmit) return res.status(409).json({ error: lockedSubmit });
+  // Submitting is asking for approval, so the document has to be
+  // finished. 422 rather than 409: nothing conflicts, it is incomplete.
+  const incomplete = incompleteError('proforma_invoices', id);
+  if (incomplete) return res.status(422).json({ error: incomplete });
   submit('proforma_invoices', id, req.user!);
   res.json(getFull(id));
 });
@@ -453,6 +460,12 @@ proformasRouter.post('/:id/approve', (req: AuthedRequest, res) => {
   // Approved by rule before the order could be booked from it.
   const lockedDecide = lockError('proforma_invoices', id, 'approved or rejected');
   if (lockedDecide) return res.status(409).json({ error: lockedDecide });
+  // Only an approval is gated. A rejection must always be possible —
+  // refusing to let a manager reject an unfinished document would trap
+  // it in `pending` with no way out.
+  const approving = req.body?.approve !== false;
+  const unfinished = approving ? incompleteError('proforma_invoices', id) : null;
+  if (unfinished) return res.status(422).json({ error: unfinished });
   decide('proforma_invoices', id, req.user!, req.body?.approve !== false, String(req.body?.note ?? ''));
   res.json(getFull(id));
 });

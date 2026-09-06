@@ -657,6 +657,8 @@ export interface Quotation {
   converted_pi_id?: number | null;
   converted_pi_number?: string | null;
   column_config?: ColumnConfig;
+  /** What is still missing before approval — see `DocumentFinding`. */
+  checks?: DocumentFinding[];
 }
 
 export type OrderStatus =
@@ -757,6 +759,8 @@ export interface Proforma {
   approved_at?: string; approval_note?: string;
   approved_by_name?: string | null; created_by_name?: string | null;
   column_config?: ColumnConfig;
+  /** What is still missing before approval — see `DocumentFinding`. */
+  checks?: DocumentFinding[];
 }
 
 export interface Invoice {
@@ -797,6 +801,8 @@ export interface Invoice {
   column_config?: ColumnConfig;
   /** The paired packing list, created and kept in sync with this invoice. */
   packing?: PackingList;
+  /** What is still missing before approval — see `DocumentFinding`. */
+  checks?: DocumentFinding[];
 }
 
 export interface PackingListItem {
@@ -924,4 +930,17 @@ export interface CustomerSummary {
     method: string; reference: string; against: string;
   }>;
   qc?: { products: { product_id: number; product_name: string; params: number }[] };
+}
+
+/**
+ * One thing a document is missing before it can be approved.
+ *
+ * `block` refuses the approval; `warn` is shown and refuses nothing. The rule
+ * table is `server/src/services/documentChecks.ts` — promoting a warning to a
+ * block is a one-word change there, and this side needs no edit for it.
+ */
+export interface DocumentFinding {
+  key: string;
+  level: 'block' | 'warn';
+  message: string;
 }

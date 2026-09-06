@@ -5,6 +5,7 @@ import { computeTotals, type LineItemInput } from '../services/totals.js';
 import type { AuthedRequest } from '../middleware/auth.js';
 import { scopeClause, canAccessCustomer, customerChangeError } from '../middleware/scope.js';
 import { submit, decide, resetApprovalOnEdit, blockUnapprovedTransition , mayApprove } from '../services/approval.js';
+import { incompleteError, checkDocument } from '../services/documentChecks.js';
 import { resolveCompanyId } from '../services/companies.js';
 import { enquiryLinkId, syncEnquiryStatus } from '../services/enquiries.js';
 import { syncQuotationExpiry } from '../services/quotationExpiry.js';
@@ -36,6 +37,9 @@ function getFull(id: number) {
   if (!quotation) return undefined;
   quotation.items = db.prepare('SELECT * FROM quotation_items WHERE quotation_id = ? ORDER BY sort_order, id').all(id);
   quotation.column_config = JSON.parse(String(quotation.column_config || '{}'));
+  // What is still missing before this can be approved, so the form can say
+  // so rather than leaving the 422 to be discovered on the Submit button.
+  quotation.checks = checkDocument('quotations', id);
   return quotation;
 }
 
@@ -317,6 +321,10 @@ quotationsRouter.post('/:id/submit', (req: AuthedRequest, res) => {
   if (!existing || !canAccessCustomer(req, existing.customer_id)) return res.status(404).json({ error: 'Quotation not found' });
   const lockedSubmit = lockError('quotations', id, 'submitted for approval');
   if (lockedSubmit) return res.status(409).json({ error: lockedSubmit });
+  // Submitting is asking for approval, so the document has to be
+  // finished. 422 rather than 409: nothing conflicts, it is incomplete.
+  const incomplete = incompleteError('quotations', id);
+  if (incomplete) return res.status(422).json({ error: incomplete });
   submit('quotations', id, req.user!);
   res.json(getFull(id));
 });
@@ -328,6 +336,12 @@ quotationsRouter.post('/:id/approve', (req: AuthedRequest, res) => {
   // A converted quotation is approved by rule — the conversion gate saw to it.
   const lockedDecide = lockError('quotations', id, 'approved or rejected');
   if (lockedDecide) return res.status(409).json({ error: lockedDecide });
+  // Only an approval is gated. A rejection must always be possible —
+  // refusing to let a manager reject an unfinished document would trap
+  // it in `pending` with no way out.
+  const approving = req.body?.approve !== false;
+  const unfinished = approving ? incompleteError('quotations', id) : null;
+  if (unfinished) return res.status(422).json({ error: unfinished });
   decide('quotations', id, req.user!, req.body?.approve !== false, String(req.body?.note ?? ''));
   res.json(getFull(id));
 });
