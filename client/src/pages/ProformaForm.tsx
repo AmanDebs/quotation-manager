@@ -16,7 +16,6 @@ import InternalNotes from '../components/InternalNotes';
 import PaymentsCard from '../components/PaymentsCard';
 import ApprovalStrip from '../components/ApprovalStrip';
 import ColumnsControl, { proformaColumns, proformaOmit, newColumnConfig, hasColumnPrefs, PROFORMA_FORCED } from '../components/ColumnsControl';
-import NotePresetPicker from '../components/NotePresetPicker';
 import { today, addDays, DEFAULT_VALIDITY_DAYS } from '../lib/format';
 import { useDefaultNotes } from '../lib/useDefaultNotes';
 import { useUser } from '../App';
@@ -531,7 +530,6 @@ export default function ProformaFormPage() {
         <Card
           title="Remarks"
           className={readOnly ? 'has-[[data-empty]]:hidden' : ''}
-          actions={!readOnly && <NotePresetPicker value={draft.remarks} onChange={(v) => set({ remarks: v })} />}
         >
           <Textarea disabled={readOnly} rows={NOTES_ROWS} value={draft.remarks} onChange={(e) => set({ remarks: e.target.value })} placeholder="Any other conditions specific to this customer…" />
         </Card>

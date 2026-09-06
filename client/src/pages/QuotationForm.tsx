@@ -12,7 +12,6 @@ import FollowupButton from '../components/FollowupButton';
 import ApprovalStrip from '../components/ApprovalStrip';
 import InternalNotes from '../components/InternalNotes';
 import ColumnsControl, { quotationColumns, quotationOmit, newColumnConfig } from '../components/ColumnsControl';
-import NotePresetPicker from '../components/NotePresetPicker';
 import { fmtMoney, fmtDate, today, addDays, DEFAULT_VALIDITY_DAYS } from '../lib/format';
 import { useDefaultNotes } from '../lib/useDefaultNotes';
 import { useUser } from '../App';
@@ -461,10 +460,7 @@ export default function QuotationFormPage() {
               <Field label="Containers"><Input disabled={readOnly} value={draft.container_count} onChange={(e) => set({ container_count: e.target.value })} placeholder="e.g. 5 X 40ft HQ" /></Field>
             )}
             <div className={`col-span-full ${readOnly ? 'has-[[data-empty]]:hidden' : ''}`}>
-              <div className="mb-1 flex items-center justify-between">
-                <span className={labelClass(readOnly)}>Notes (printed on quotation)</span>
-                {!readOnly && <NotePresetPicker value={draft.notes} onChange={(v) => set({ notes: v })} />}
-              </div>
+              <span className={`mb-1 block ${labelClass(readOnly)}`}>Notes (printed on quotation)</span>
               <Textarea rows={NOTES_ROWS} disabled={readOnly} value={draft.notes} onChange={(e) => set({ notes: e.target.value })} />
             </div>
           </div>

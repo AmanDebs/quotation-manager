@@ -3,7 +3,7 @@ import { useNavigate, useParams, useSearchParams, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Order, OrderItem, Customer, TaxType, ColumnConfig, WorkOrder } from '../types';
-import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, Tabs, SettledDocumentType, FIELD_GRID } from '../components/ui';
+import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, Tabs, SettledDocumentType, FIELD_GRID, NOTES_ROWS } from '../components/ui';
 import { PdfLink } from '../components/PdfLink';
 import CompanySelect from '../components/CompanySelect';
 import { DocNumber, IncoTermsInput, HeaderCharges } from '../components/DocFields';
@@ -12,7 +12,6 @@ import MaterialTab from '../components/MaterialTab';
 import DispatchTab from '../components/DispatchTab';
 import LineItemsEditor from '../components/LineItemsEditor';
 import ColumnsControl, { newColumnConfig, hasColumnPrefs, orderColumns, ORDER_FORCED } from '../components/ColumnsControl';
-import NotePresetPicker from '../components/NotePresetPicker';
 import FollowupButton from '../components/FollowupButton';
 import { ORDER_STATUSES, orderStatusLabel } from './Orders';
 import { today } from '../lib/format';
@@ -402,13 +401,21 @@ export default function OrderFormPage() {
             Dispatch tab, which says the same thing and more — sent as well as
             billed — and keeping a second copy invited the two to disagree. */}
 
-        <Card title="Remarks & Notes" actions={<NotePresetPicker value={draft.notes} onChange={(v) => set({ notes: v })} />}>
+        <Card title="Remarks & Notes">
+          {/*
+            * Both, not just the printed one. They sit side by side, so a tall
+            * box next to a short one reads as a mistake rather than as a
+            * decision — and the internal remarks are where the running
+            * commentary on an order goes, which is the longer text of the two
+            * as often as not. Notes takes clauses from the picker above, so it
+            * fills up the same way the outgoing documents' boxes do.
+            */}
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <Field label="Remarks (internal)">
-              <Textarea rows={3} value={draft.remarks} onChange={(e) => set({ remarks: e.target.value })} />
+              <Textarea rows={NOTES_ROWS} value={draft.remarks} onChange={(e) => set({ remarks: e.target.value })} />
             </Field>
             <Field label="Notes (printed on the order confirmation)">
-              <Textarea rows={3} value={draft.notes} onChange={(e) => set({ notes: e.target.value })} />
+              <Textarea rows={NOTES_ROWS} value={draft.notes} onChange={(e) => set({ notes: e.target.value })} />
             </Field>
           </div>
         </Card>

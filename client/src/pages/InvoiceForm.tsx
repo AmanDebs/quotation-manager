@@ -13,7 +13,6 @@ import FollowupButton from '../components/FollowupButton';
 import PaymentsCard from '../components/PaymentsCard';
 import ApprovalStrip from '../components/ApprovalStrip';
 import ColumnsControl, { PACKING_COLUMNS, newColumnConfig, hasColumnPrefs, invoiceColumns, INVOICE_OMIT, INVOICE_FORCED } from '../components/ColumnsControl';
-import NotePresetPicker from '../components/NotePresetPicker';
 import { fmtQty, today } from '../lib/format';
 import { useDefaultNotes } from '../lib/useDefaultNotes';
 import { useDefaultOnce } from '../lib/useDefaultOnce';
@@ -538,7 +537,7 @@ export default function InvoiceFormPage() {
           </Field>
         </Card>
 
-        <Card title="Remarks / Disclaimers" actions={<NotePresetPicker value={draft.remarks} onChange={(v) => set({ remarks: v })} />}>
+        <Card title="Remarks / Disclaimers">
           <Textarea rows={NOTES_ROWS} value={draft.remarks} onChange={(e) => set({ remarks: e.target.value })} />
         </Card>
 
