@@ -15,6 +15,8 @@ import ColumnsControl, { quotationColumns, quotationOmit, newColumnConfig } from
 import NotePresetPicker from '../components/NotePresetPicker';
 import { fmtMoney, fmtDate, today, addDays, DEFAULT_VALIDITY_DAYS } from '../lib/format';
 import { useDefaultNotes } from '../lib/useDefaultNotes';
+import { useUser } from '../App';
+import { useDefaultOnce } from '../lib/useDefaultOnce';
 import { useUnsavedChanges } from '../lib/useUnsavedChanges';
 import HistoryCard from '../components/HistoryCard';
 import ReadOnlyItems from '../components/ReadOnlyItems';
@@ -60,6 +62,8 @@ export default function QuotationFormPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const isNew = !id;
+  // Who is filling this in — see the prepared-by default below.
+  const user = useUser();
 
   const { data: customers = [] } = useQuery({ queryKey: ['customers', ''], queryFn: () => api.get<Customer[]>('/api/customers') });
   const { data: existing, error: loadError } = useQuery({
@@ -200,6 +204,14 @@ export default function QuotationFormPage() {
   // early returns below: a hook after them runs on some renders and not others,
   // which React treats as a changed hook order and unmounts the whole page for.
   useDefaultNotes(isNew, draft.notes, (notes) => setDraft((d) => ({ ...d, notes })));
+  /*
+   * Whoever is signed in prepared it, unless they say otherwise. Filled from
+   * the session rather than typed, since the name is already known and getting
+   * it wrong is a matter of spelling; it stays editable, because the person at
+   * the keyboard is not always the person the customer should reply to.
+   */
+  useDefaultOnce(isNew, user?.name ?? '', draft.prepared_by, (prepared_by) =>
+    setDraft((d) => ({ ...d, prepared_by })));
 
   if (loadError) return <ErrorText error={loadError} />;
   if (!isNew && !existing) return <div className="text-slate-400">Loading…</div>;

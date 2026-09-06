@@ -19,6 +19,8 @@ import ColumnsControl, { proformaColumns, proformaOmit, newColumnConfig, hasColu
 import NotePresetPicker from '../components/NotePresetPicker';
 import { today, addDays, DEFAULT_VALIDITY_DAYS } from '../lib/format';
 import { useDefaultNotes } from '../lib/useDefaultNotes';
+import { useUser } from '../App';
+import { useDefaultOnce } from '../lib/useDefaultOnce';
 import { useUnsavedChanges } from '../lib/useUnsavedChanges';
 import HistoryCard from '../components/HistoryCard';
 import { SETTABLE_STATUSES, proformaStatusLabel } from './Proformas';
@@ -81,6 +83,8 @@ export default function ProformaFormPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const isNew = !id;
+  // Who is filling this in — see the prepared-by default below.
+  const user = useUser();
   const fromQuotation = search.get('from_quotation');
   const fromOrder = search.get('from_order');
 
@@ -198,6 +202,14 @@ export default function ProformaFormPage() {
   // returns below: a hook after them runs on some renders and not others, which
   // React treats as a changed hook order and unmounts the whole page for.
   useDefaultNotes(isNew, draft.remarks, (remarks) => setDraft((d) => ({ ...d, remarks })));
+  /*
+   * Whoever is signed in prepared it, unless they say otherwise. Filled from
+   * the session rather than typed, since the name is already known and getting
+   * it wrong is a matter of spelling; it stays editable, because the person at
+   * the keyboard is not always the person the customer should reply to.
+   */
+  useDefaultOnce(isNew, user?.name ?? '', draft.prepared_by, (prepared_by) =>
+    setDraft((d) => ({ ...d, prepared_by })));
 
   /**
    * How this document's goods load, computed once and read twice.

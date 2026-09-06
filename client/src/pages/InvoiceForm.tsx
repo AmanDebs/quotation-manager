@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
-import { useCan } from '../App';
+import { useCan, useUser } from '../App';
 import type { Invoice, Customer, LineItem, TaxType, Settings, ColumnConfig, PackingListItem } from '../types';
 import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, StatusBadge, SettledDocumentType, FIELD_GRID, TH_CLASS } from '../components/ui';
 import { PdfLink } from '../components/PdfLink';
@@ -16,6 +16,7 @@ import ColumnsControl, { PACKING_COLUMNS, newColumnConfig, hasColumnPrefs, invoi
 import NotePresetPicker from '../components/NotePresetPicker';
 import { fmtQty, today } from '../lib/format';
 import { useDefaultNotes } from '../lib/useDefaultNotes';
+import { useDefaultOnce } from '../lib/useDefaultOnce';
 import { useUnsavedChanges } from '../lib/useUnsavedChanges';
 import HistoryCard from '../components/HistoryCard';
 
@@ -84,6 +85,8 @@ export default function InvoiceFormPage() {
   const queryClient = useQueryClient();
   const can = useCan();
   const isNew = !id;
+  // Who is filling this in — see the prepared-by default below.
+  const user = useUser();
   // There is no from_proforma any more: the chain runs proforma → order →
   // invoice, and the order is what an invoice is raised from.
   const fromOrder = search.get('from_order');
@@ -199,6 +202,14 @@ export default function InvoiceFormPage() {
   // returns below: a hook after them runs on some renders and not others, which
   // React treats as a changed hook order and unmounts the whole page for.
   useDefaultNotes(isNew, draft.remarks, (remarks) => setDraft((d) => ({ ...d, remarks })));
+  /*
+   * Whoever is signed in prepared it, unless they say otherwise. Filled from
+   * the session rather than typed, since the name is already known and getting
+   * it wrong is a matter of spelling; it stays editable, because the person at
+   * the keyboard is not always the person the customer should reply to.
+   */
+  useDefaultOnce(isNew, user?.name ?? '', draft.prepared_by, (prepared_by) =>
+    setDraft((d) => ({ ...d, prepared_by })));
 
   if (loadError) return <ErrorText error={loadError} />;
   if (!isNew && !existing) return <div className="text-slate-400">Loading…</div>;
