@@ -8,6 +8,7 @@ import LoginPage from './pages/Login';
 import DashboardPage from './pages/Dashboard';
 import CustomersPage from './pages/Customers';
 import CustomerDetailPage from './pages/CustomerDetail';
+import PaymentsPage from './pages/Payments';
 import ProductsPage from './pages/Products';
 import ContainerPlannerPage from './pages/ContainerPlanner';
 import EnquiriesPage from './pages/Enquiries';
@@ -195,6 +196,7 @@ export const routes: RouteObject[] = [
       { path: '/packing-lists/new', element: <Needs fn="packing_list"><PackingListFormPage /></Needs> },
       { path: '/packing-lists/:id', element: <Needs fn="packing_list"><PackingListFormPage /></Needs> },
       { path: '/followups', element: <Needs fn="followup"><FollowupsPage /></Needs> },
+      { path: '/payments', element: <Needs fn="payment"><PaymentsPage /></Needs> },
       { path: '/work-orders', element: <Needs fn="work_order"><WorkOrdersPage /></Needs> },
       { path: '/quality', element: <Needs fn="qc"><QualityPage /></Needs> },
       { path: '/despatches', element: <Needs fn="dispatch"><DespatchesPage /></Needs> },

@@ -24,6 +24,15 @@ const PATHS: Record<string, ReactNode> = {
   document: <><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5" /><path d="M9 13h6" /><path d="M9 17h4" /></>,
   // Proforma — a till receipt, torn at the foot.
   receipt: <><path d="M6 3h12v18l-2-1.4-2 1.4-2-1.4-2 1.4-2-1.4L6 21z" /><path d="M9.5 8h5" /><path d="M9.5 12h5" /></>,
+  /*
+   * Payments — two stacked coins seen edge-on.
+   *
+   * A banknote was tried and is unreadable at 16px: the detail that says
+   * "money" rather than "document" is inside the rectangle, and it fills in.
+   * Stacked ellipses keep their silhouette all the way down, which is the
+   * test every icon in this file has to pass.
+   */
+  coins: <><ellipse cx="12" cy="7" rx="7" ry="3" /><path d="M5 7v5c0 1.7 3.1 3 7 3s7-1.3 7-3V7" /><path d="M5 12v5c0 1.7 3.1 3 7 3s7-1.3 7-3v-5" /></>,
   // Order — a clipboard.
   clipboard: <><path d="M9 4H7a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-2" /><path d="M9 3.5h6V6H9z" /><path d="M9 11h6" /><path d="M9 15h4" /></>,
   // Commercial invoice — a sheet with a currency mark.

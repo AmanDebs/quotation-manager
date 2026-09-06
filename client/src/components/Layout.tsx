@@ -44,6 +44,9 @@ const NAV: { heading: string; items: NavItem[] }[] = [
       // so it is created and edited on the invoice. The pages remain routed for
       // any bookmarked link, but they are no longer a place you navigate to.
       { to: '/invoices', label: 'Commercial Invoices', icon: 'invoice', needs: 'invoice' },
+      // Money in, beside the documents it is banked against. Sales and the
+      // super admin hold `payment`; nobody on the floor does.
+      { to: '/payments', label: 'Payments', icon: 'coins', needs: 'payment' },
       { to: '/followups', label: 'Follow-ups', icon: 'bell', needs: 'followup' },
     ],
   },

@@ -707,6 +707,27 @@ export interface Payment {
   applied_amount?: number;
 }
 
+/**
+ * A payment as the register lists it: the record, plus the document it was
+ * banked against and whether its currency agrees with that document's.
+ */
+export interface PaymentRow extends Payment {
+  customer_name: string | null;
+  against_number: string | null;
+  against_type: 'invoice' | 'proforma' | '';
+  doc_currency: string | null;
+  /** 1 when the money is credited to nothing — see `receivables.ts`. */
+  mismatched: number;
+}
+
+/** The register's figures, over the whole filtered set rather than the page. */
+export interface PaymentRegisterSummary {
+  payments: number;
+  /** Never a single total: money only adds up within one currency. */
+  by_currency: { currency: string; count: number; amount: number }[];
+  mismatched: number;
+}
+
 export interface Proforma {
   id: number; number: string; date: string; quotation_id: number | null; customer_id: number; company_id?: number;
   /** The order this proforma belongs to — set either way round, whichever was raised first. */

@@ -55,6 +55,27 @@ const sumAmounts = (rows: { amount: number }[]) => round2(rows.reduce((s, r) => 
 export const sameCurrency = (payment: string | null | undefined, document: string) =>
   !String(payment ?? '').trim() || String(payment).trim() === String(document).trim();
 
+/**
+ * `sameCurrency` restated in SQL.
+ *
+ * A second copy of a rule is what this codebase normally refuses, and the
+ * precedent for allowing it is `RESULT_FAILED_SQL` in `services/qc.ts`: the
+ * payments register is **paged**, so a verdict derived after the fetch could
+ * only filter and count the page in hand rather than the register. What makes
+ * it safe is that the two are not assumed to agree — `paymentsRegister.test.ts`
+ * runs both over every combination of blank, padded and differing currency and
+ * asserts they answer identically.
+ *
+ * Read it beside `sameCurrency` above, which it must mirror exactly: a payment
+ * mismatches only when it names a currency of its own **and** that currency
+ * differs from the document's. A blank counts as matching, so it is not a
+ * mismatch; and a payment against no document at all cannot mismatch, there
+ * being nothing to disagree with.
+ */
+export const currencyMismatchSql = (payment: string, document: string) =>
+  `(${document} IS NOT NULL AND TRIM(COALESCE(${payment}, '')) <> ''`
+  + ` AND TRIM(${payment}) <> TRIM(${document}))`;
+
 /** Advances on a proforma, split across the invoices raised from it (earliest first). */
 function allocateAdvances(piId: number): Map<number, AppliedPayment[]> {
   const pool = db.prepare(
