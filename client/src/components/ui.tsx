@@ -514,21 +514,26 @@ export function SettledDocumentType({ isExport, number }: { isExport: boolean; n
   const kind = isExport ? 'export' : 'domestic';
   return (
     <div className="flex flex-wrap items-center gap-2 text-sm">
-      <span className="rounded-lg bg-slate-100 px-2 py-0.5 font-medium text-slate-700 ring-1 ring-inset ring-slate-200">
+      <span
+        className="rounded-lg bg-slate-100 px-2 py-0.5 font-medium text-slate-700 ring-1 ring-inset ring-slate-200"
+        // On a new document the badge is the whole message: the New dialog
+        // just asked, so a sentence explaining the answer back to the person
+        // who gave it is noise. The reason stays on hover rather than on screen.
+        title={number ? undefined : 'Chosen when you started this document. Start again from + New if it is wrong.'}
+      >
         {isExport ? '🌍 Export' : '🇮🇳 Domestic'}
       </span>
-      <span className="text-xs text-slate-500">
-        {number
-          // Once a number is issued the flag really is frozen — it came from
-          // one series or the other and `exportChangeError` refuses the change.
-          ? `${number} came from the ${kind} numbering series, so this cannot be changed here. Raise a new document if the type is wrong.`
-          // Before that it is settled by choice rather than by rule: the New
-          // dialog asks export or domestic first and then lists only that
-          // kind of customer, so offering it again here is a second answer to
-          // a question already put — and one that can leave a domestic
-          // customer on an export document.
-          : 'Chosen when you started this document, and it follows the customer. Start again from + New if the type is wrong.'}
-      </span>
+      {/*
+        * Only once a number exists. Then the flag really is frozen — it came
+        * from one series or the other and `exportChangeError` refuses the
+        * change — so somebody looking for the missing control needs telling
+        * why it is missing.
+        */}
+      {number && (
+        <span className="text-xs text-slate-500">
+          {`${number} came from the ${kind} numbering series, so it cannot be changed here.`}
+        </span>
+      )}
     </div>
   );
 }
