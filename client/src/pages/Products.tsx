@@ -42,7 +42,10 @@ export const unitOptions = (current: string | undefined | null): string[] =>
   current && !UNITS.includes(current) ? [...UNITS, current] : UNITS;
 
 const empty: Omit<Product, 'id'> = {
-  name: '', description: '', hsn_code: '', unit: 'unit', unit_price: 0, country_of_origin: 'India',
+  // Per 1000 pieces, the basis this catalogue is quoted and recipe'd on, and
+  // the same default a new line item starts on. Editable, and no product
+  // already on file changes.
+  name: '', description: '', hsn_code: '', unit: 'per 1000', unit_price: 0, country_of_origin: 'India',
   image: '', color: '', pcs_per_pack: null, qty_20ft: null, qty_40ft: null,
   product_type: 'other', weight_grams: null,
 };

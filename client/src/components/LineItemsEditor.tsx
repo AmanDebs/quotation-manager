@@ -80,6 +80,21 @@ function PhotoCell({ value, onChange }: { value: string; onChange: (v: string) =
 const PIECES_PER_BILLING_UNIT: Record<string, number> = { 'per 1000': 1000, unit: 1 };
 
 /**
+ * What a new line is billed on (asked for 2026-09-06).
+ *
+ * This catalogue is quoted, priced and recipe'd per 1000 pieces — a preform's
+ * weight is stated as kilograms per 1000, the proforma's rate column is per
+ * 1000, and every line here is entered as boxes x pcs/box. Starting at `unit`
+ * made the field one to correct rather than one to fill in, and a line left on
+ * it prices 120,000 pieces at the per-1000 rate: a thousand times the money.
+ *
+ * A **default, not a rule**: the select is in the row, nothing already saved
+ * changes, and picking a catalogue product still adopts that product's own
+ * unit, which is the more specific answer.
+ */
+const DEFAULT_UNIT = 'per 1000';
+
+/**
  * Whether a derived "per 1000 pcs" figure says anything the Unit Price does
  * not: it must be piece-based, and priced on some *other* piece basis. Quote a
  * line per 1000 and the derived rate is the unit price back again.
@@ -651,7 +666,7 @@ export default function LineItemsEditor({
       <div className="mt-3 flex items-center justify-between">
         <Button
           variant="secondary"
-          onClick={() => onChange([...items, { description: '', hsn_code: '', qty: null, unit: 'unit', unit_price: 0, tax_pct: DEFAULT_TAX_PCT, color: '', packs: null, pcs_per_pack: null, total_pcs: null, custom1: '', custom2: '', custom3: '' }])}
+          onClick={() => onChange([...items, { description: '', hsn_code: '', qty: null, unit: DEFAULT_UNIT, unit_price: 0, tax_pct: DEFAULT_TAX_PCT, color: '', packs: null, pcs_per_pack: null, total_pcs: null, custom1: '', custom2: '', custom3: '' }])}
         >
           + Add Line
         </Button>
