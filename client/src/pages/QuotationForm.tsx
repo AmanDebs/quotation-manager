@@ -13,7 +13,7 @@ import ApprovalStrip from '../components/ApprovalStrip';
 import InternalNotes from '../components/InternalNotes';
 import ColumnsControl, { quotationColumns, quotationOmit, newColumnConfig } from '../components/ColumnsControl';
 import NotePresetPicker from '../components/NotePresetPicker';
-import { fmtMoney, fmtDate, today } from '../lib/format';
+import { fmtMoney, fmtDate, today, addDays, DEFAULT_VALIDITY_DAYS } from '../lib/format';
 import { useDefaultNotes } from '../lib/useDefaultNotes';
 import { useUnsavedChanges } from '../lib/useUnsavedChanges';
 import HistoryCard from '../components/HistoryCard';
@@ -44,7 +44,11 @@ interface Draft {
 }
 
 const emptyDraft = (): Draft => ({
-  customer_id: '', enquiry_id: null, date: today(), currency: 'INR', validity_date: '',
+  // Offered for a week unless somebody says otherwise. Derived from the
+  // draft's own date rather than the clock, so the two cannot disagree
+  // across a timezone boundary; it is a default and stays editable.
+  customer_id: '', enquiry_id: null, date: today(), currency: 'INR',
+  validity_date: addDays(today(), DEFAULT_VALIDITY_DAYS),
   payment_terms: '', delivery_terms: '', notes: '', freight: 0, insurance: 0,
   inco_terms: '', container_count: '', prepared_by: '', tax_type: 'igst',
   is_export: 0, column_config: newColumnConfig(), items: [],

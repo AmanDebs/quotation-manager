@@ -17,7 +17,7 @@ import PaymentsCard from '../components/PaymentsCard';
 import ApprovalStrip from '../components/ApprovalStrip';
 import ColumnsControl, { proformaColumns, proformaOmit, newColumnConfig, hasColumnPrefs, PROFORMA_FORCED } from '../components/ColumnsControl';
 import NotePresetPicker from '../components/NotePresetPicker';
-import { today } from '../lib/format';
+import { today, addDays, DEFAULT_VALIDITY_DAYS } from '../lib/format';
 import { useDefaultNotes } from '../lib/useDefaultNotes';
 import { useUnsavedChanges } from '../lib/useUnsavedChanges';
 import HistoryCard from '../components/HistoryCard';
@@ -64,7 +64,12 @@ interface Draft {
 const emptyDraft = (): Draft => ({
   customer_id: '', quotation_id: null, date: today(), currency: 'INR', consignee: '', notify_party: '',
   freight: 0, insurance: 0, lead_time: '', bank_account: '', inco_terms: '', payment_terms: '',
-  delivery_terms: '', validity_date: '', is_export: 0, country_of_origin: '', port_of_loading: '',
+  delivery_terms: '',
+  // Offered for a week unless somebody says otherwise. Derived from the
+  // draft's own date rather than the clock, so the two cannot disagree
+  // across a timezone boundary; it is a default and stays editable.
+  validity_date: addDays(today(), DEFAULT_VALIDITY_DAYS),
+  is_export: 0, country_of_origin: '', port_of_loading: '',
   port_of_discharge: '', final_destination: '', container_count: '', partial_shipment: 'Not Allowed',
   po_number: '', po_date: '', notify_party_2: '', method_of_despatch: '', quantity_tolerance: '',
   hs_code: '', prepared_by: '', remarks: '', tax_type: 'igst', column_config: newColumnConfig(), items: [],

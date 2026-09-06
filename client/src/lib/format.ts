@@ -39,3 +39,32 @@ export function fmtDateTime(stamp: string | null | undefined): string {
 }
 
 export const today = () => new Date().toISOString().slice(0, 10);
+
+/**
+ * `days` after an ISO date, as another ISO date.
+ *
+ * Built by parsing the string into digits and doing the arithmetic in UTC, so
+ * no local timezone ever touches it — the trap the dashboard's date presets
+ * already record, where `toISOString()` on a local midnight lands a day early
+ * anywhere east of Greenwich. Taking the *string* rather than the clock is
+ * also what keeps a default validity exactly seven days after the date on the
+ * document, whatever `today()` happened to say.
+ *
+ * A blank or unparseable date gives a blank, so a caller can pass a field
+ * straight through without checking it first.
+ */
+export function addDays(iso: string, days: number): string {
+  const [y, m, d] = String(iso ?? '').split('-').map(Number);
+  if (!y || !m || !d) return '';
+  const t = new Date(Date.UTC(y, m - 1, d + days));
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${t.getUTCFullYear()}-${pad(t.getUTCMonth() + 1)}-${pad(t.getUTCDate())}`;
+}
+
+/**
+ * How long a new quotation or proforma is offered for, unless somebody says
+ * otherwise. Asked for on 2026-09-06; it is a **default, not a rule** — the
+ * field is on the form and editable before the document is ever saved, and
+ * nothing already raised is touched.
+ */
+export const DEFAULT_VALIDITY_DAYS = 7;
