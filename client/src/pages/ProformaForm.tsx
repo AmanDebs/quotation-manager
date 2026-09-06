@@ -6,7 +6,7 @@ import type { Proforma, Customer, LineItem, TaxType, Settings, ColumnConfig } fr
 import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, StatusBadge, SettledDocumentType, ReadOnlyFields, FIELD_GRID, FIELD_GRID_PLAIN, NOTES_ROWS } from '../components/ui';
 import { PdfLink } from '../components/PdfLink';
 import CompanySelect from '../components/CompanySelect';
-import { DocNumber, IncoTermsInput, HeaderCharges } from '../components/DocFields';
+import { DocNumber, IncoTermsInput, PaymentTermsInput, HeaderCharges } from '../components/DocFields';
 import LineItemsEditor from '../components/LineItemsEditor';
 import ReadOnlyItems from '../components/ReadOnlyItems';
 import ContainerFitment from '../components/ContainerFitment';
@@ -399,7 +399,14 @@ export default function ProformaFormPage() {
               </Select>
             </Field>
             <Field label="Production Lead Time"><Input disabled={readOnly} value={draft.lead_time} onChange={(e) => set({ lead_time: e.target.value })} placeholder="e.g. 4 weeks from advance" /></Field>
-            <Field label="Payment Terms"><Input disabled={readOnly} value={draft.payment_terms} onChange={(e) => set({ payment_terms: e.target.value })} /></Field>
+            <Field label="Payment Terms">
+              <PaymentTermsInput
+                isExport={!!draft.is_export}
+                disabled={readOnly}
+                value={draft.payment_terms}
+                onChange={(v) => set({ payment_terms: v })}
+              />
+            </Field>
             <Field label="Delivery Terms"><Input disabled={readOnly} value={draft.delivery_terms} onChange={(e) => set({ delivery_terms: e.target.value })} /></Field>
             <Field label="INCO Terms">
               <IncoTermsInput isExport={!!draft.is_export} disabled={readOnly} value={draft.inco_terms} onChange={(v) => set({ inco_terms: v })} />

@@ -43,14 +43,17 @@ export function DocNumber({ value, title }: { value?: string | null; title: stri
  * risk: a document holding `FCA` or `CPT` still shows it, the list simply no
  * longer offers it.
  */
-export interface IncoTerm { value: string; label: string }
+export interface Suggestion { value: string; label: string }
 
-export const INCO_TERMS_DOMESTIC: IncoTerm[] = [
+/** @deprecated The name this list had when it was the only one. */
+export type IncoTerm = Suggestion;
+
+export const INCO_TERMS_DOMESTIC: Suggestion[] = [
   { value: 'EX-Works', label: 'EX-Works' },
   { value: 'FOR', label: 'FOR (Free on Road)' },
 ];
 
-export const INCO_TERMS_EXPORT: IncoTerm[] = [
+export const INCO_TERMS_EXPORT: Suggestion[] = [
   { value: 'EX-Works', label: 'EX-Works' },
   { value: 'FOB', label: 'FOB (Free on Board)' },
   { value: 'CIF', label: 'CIF (Cost, Insurance & Freight)' },
@@ -59,7 +62,40 @@ export const INCO_TERMS_EXPORT: IncoTerm[] = [
 ];
 
 /**
- * INCO terms as suggestions, not a fixed set.
+ * The payment terms this desk actually offers, per document type (Aglo,
+ * 2026-09-06). Two families on each side, and the split is the point:
+ *
+ * - **Domestic** — an advance with the balance settled *before dispatch*, or
+ *   plain credit counted from the invoice.
+ * - **Export** — an advance with the balance *against shipping documents*,
+ *   which is how a consignment travelling on a bill of lading is settled, or
+ *   credit counted **from the BL date** rather than from the invoice.
+ *
+ * The advance percentage genuinely varies by deal, hence three of each rather
+ * than one with a blank to fill in. `value` and `label` are the same string
+ * here — unlike the INCO list, where the gloss helps at the moment of choosing
+ * and would be noise printed on a customer's invoice — because these terms are
+ * written on the document exactly as they read.
+ *
+ * They stay **suggestions**: the box takes whatever is typed, so a deal on
+ * 20/80 or "100% CAD" is still expressible, and nothing already stored is at
+ * risk — a document holding its own wording still shows it.
+ */
+const ADVANCE_PCT = [30, 40, 50];
+const term = (t: string): Suggestion => ({ value: t, label: t });
+
+export const PAYMENT_TERMS_DOMESTIC: Suggestion[] = [
+  ...ADVANCE_PCT.map((p) => term(`${p}% Advance and Balance before Dispatch`)),
+  ...[30, 45, 60].map((d) => term(`${d} Days Credit`)),
+];
+
+export const PAYMENT_TERMS_EXPORT: Suggestion[] = [
+  ...ADVANCE_PCT.map((p) => term(`${p}% Advance and Balance against shipping documents`)),
+  ...[30, 60, 75].map((d) => term(`${d} Days from BL date`)),
+];
+
+/**
+ * A text box that offers suggestions, drawn by us.
  *
  * A `<datalist>` did this job and was dropped for one reason: the browser
  * draws that list itself, so on Windows it arrived as a black OS menu in the
@@ -73,18 +109,21 @@ export const INCO_TERMS_EXPORT: IncoTerm[] = [
  * header fields on a `Card`, which has no `overflow` of its own — the reason
  * `Card` must never gain `overflow-hidden`. The line-items table is the case
  * that needs a portal, and this is not it.
+ *
+ * It is one component with two callers rather than two components, because two
+ * copies of a control is how the two come to look different from each other.
  */
-export function IncoTermsInput({
-  value, onChange, disabled, isExport, placeholder,
+function SuggestInput({
+  options, value, onChange, disabled, placeholder, label,
 }: {
+  options: Suggestion[];
   value: string;
   onChange: (v: string) => void;
   disabled?: boolean;
-  /** Which basis list to offer. Domestic is the default a form starts on. */
-  isExport?: boolean;
   placeholder?: string;
+  /** What the chevron announces to a screen reader. */
+  label: string;
 }) {
-  const terms = isExport ? INCO_TERMS_EXPORT : INCO_TERMS_DOMESTIC;
   const [open, setOpen] = useState(false);
   const wrap = useRef<HTMLDivElement>(null);
 
@@ -103,8 +142,8 @@ export function IncoTermsInput({
   // qualified with a place ("CIF Mozambique") stops matching its own code
   // after the space, and a list that emptied itself would look broken.
   const q = value.trim().toLowerCase();
-  const matches = terms.filter((t) => !q || t.label.toLowerCase().includes(q) || q.includes(t.value.toLowerCase()));
-  const shown = matches.length ? matches : terms;
+  const matches = options.filter((t) => !q || t.label.toLowerCase().includes(q) || q.includes(t.value.toLowerCase()));
+  const shown = matches.length ? matches : options;
 
   if (useReadOnlyFields()) return <StaticValue>{value}</StaticValue>;
 
@@ -116,7 +155,7 @@ export function IncoTermsInput({
         onChange={(e) => { onChange(e.target.value); setOpen(true); }}
         onFocus={() => setOpen(true)}
         onKeyDown={(e) => { if (e.key === 'Escape') setOpen(false); }}
-        placeholder={placeholder ?? (isExport ? 'e.g. FOB Nhava Sheva, or type your own' : 'e.g. EX-Works, or type your own')}
+        placeholder={placeholder}
         className="w-full pr-7"
       />
       {!disabled && (
@@ -126,7 +165,7 @@ export function IncoTermsInput({
           // would otherwise reopen the panel this click is trying to close.
           onMouseDown={(e) => { e.preventDefault(); setOpen((o) => !o); }}
           className="absolute inset-y-0 right-0 flex w-7 items-center justify-center text-slate-400 hover:text-slate-600"
-          aria-label="Show delivery bases"
+          aria-label={label}
         >
           <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2">
             <path d="M6 9l6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
@@ -140,7 +179,10 @@ export function IncoTermsInput({
               key={t.value}
               type="button"
               onMouseDown={(e) => { e.preventDefault(); onChange(t.value); setOpen(false); }}
-              className={`block w-full px-3 py-1.5 text-left text-sm hover:bg-slate-50 ${
+              // `leading-snug`: a payment term runs to a sentence and wraps in
+              // a narrow column, and two lines of an option have to read as
+              // one entry rather than as two.
+              className={`block w-full px-3 py-1.5 text-left text-sm leading-snug hover:bg-slate-50 ${
                 value === t.value ? 'font-medium text-brand-700' : 'text-slate-700'
               }`}
             >
@@ -150,6 +192,53 @@ export function IncoTermsInput({
         </div>
       )}
     </div>
+  );
+}
+
+/** The delivery basis, offered from the list this document type quotes on. */
+export function IncoTermsInput({
+  value, onChange, disabled, isExport, placeholder,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  disabled?: boolean;
+  /** Which list to offer. Domestic is the default a form starts on. */
+  isExport?: boolean;
+  placeholder?: string;
+}) {
+  return (
+    <SuggestInput
+      options={isExport ? INCO_TERMS_EXPORT : INCO_TERMS_DOMESTIC}
+      value={value}
+      onChange={onChange}
+      disabled={disabled}
+      label="Show delivery bases"
+      placeholder={placeholder ?? (isExport ? 'e.g. FOB Nhava Sheva, or type your own' : 'e.g. EX-Works, or type your own')}
+    />
+  );
+}
+
+/** How this document is to be paid, offered from the list its type is sold on. */
+export function PaymentTermsInput({
+  value, onChange, disabled, isExport, placeholder,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  disabled?: boolean;
+  isExport?: boolean;
+  placeholder?: string;
+}) {
+  return (
+    <SuggestInput
+      options={isExport ? PAYMENT_TERMS_EXPORT : PAYMENT_TERMS_DOMESTIC}
+      value={value}
+      onChange={onChange}
+      disabled={disabled}
+      label="Show payment terms"
+      placeholder={placeholder ?? (isExport
+        ? 'e.g. 40% Advance and Balance against shipping documents'
+        : 'e.g. 40% Advance and Balance before Dispatch')}
+    />
   );
 }
 

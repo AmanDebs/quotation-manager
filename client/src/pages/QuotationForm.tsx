@@ -6,7 +6,7 @@ import type { Quotation, Customer, LineItem, TaxType, ColumnConfig } from '../ty
 import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, StatusBadge, ReadOnlyFields, labelClass, FIELD_GRID, FIELD_GRID_PLAIN, SettledDocumentType, NOTES_ROWS } from '../components/ui';
 import { PdfLink } from '../components/PdfLink';
 import CompanySelect from '../components/CompanySelect';
-import { DocNumber, IncoTermsInput, HeaderCharges } from '../components/DocFields';
+import { DocNumber, IncoTermsInput, PaymentTermsInput, HeaderCharges } from '../components/DocFields';
 import LineItemsEditor from '../components/LineItemsEditor';
 import FollowupButton from '../components/FollowupButton';
 import ApprovalStrip from '../components/ApprovalStrip';
@@ -431,7 +431,14 @@ export default function QuotationFormPage() {
                 <option value="igst">IGST (inter-state)</option>
               </Select>
             </Field>
-            <Field label="Payment Terms"><Input disabled={readOnly} value={draft.payment_terms} onChange={(e) => set({ payment_terms: e.target.value })} placeholder="e.g. 40% advance, rest against shipping docs" /></Field>
+            <Field label="Payment Terms">
+              <PaymentTermsInput
+                isExport={!!draft.is_export}
+                disabled={readOnly}
+                value={draft.payment_terms}
+                onChange={(v) => set({ payment_terms: v })}
+              />
+            </Field>
             <Field label="Delivery Timeline"><Input disabled={readOnly} value={draft.delivery_terms} onChange={(e) => set({ delivery_terms: e.target.value })} placeholder="e.g. 4–6 weeks from order" /></Field>
             <Field label="Prepared By"><Input disabled={readOnly} value={draft.prepared_by} onChange={(e) => set({ prepared_by: e.target.value })} placeholder="Who prepared this quote" /></Field>
             <Field label="INCO Terms / Basis">

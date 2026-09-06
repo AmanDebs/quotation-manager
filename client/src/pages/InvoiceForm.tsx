@@ -7,7 +7,7 @@ import type { Invoice, Customer, LineItem, TaxType, Settings, ColumnConfig, Pack
 import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, StatusBadge, SettledDocumentType, FIELD_GRID, TH_CLASS, NOTES_ROWS } from '../components/ui';
 import { PdfLink } from '../components/PdfLink';
 import CompanySelect from '../components/CompanySelect';
-import { DocNumber, IncoTermsInput, HeaderCharges } from '../components/DocFields';
+import { DocNumber, IncoTermsInput, PaymentTermsInput, HeaderCharges } from '../components/DocFields';
 import LineItemsEditor from '../components/LineItemsEditor';
 import FollowupButton from '../components/FollowupButton';
 import PaymentsCard from '../components/PaymentsCard';
@@ -360,7 +360,13 @@ export default function InvoiceFormPage() {
             <Field label="INCO Terms">
               <IncoTermsInput isExport={!!draft.is_export} value={draft.inco_terms} onChange={(v) => set({ inco_terms: v })} />
             </Field>
-            <Field label="Payment Terms"><Input value={draft.payment_terms} onChange={(e) => set({ payment_terms: e.target.value })} /></Field>
+            <Field label="Payment Terms">
+              <PaymentTermsInput
+                isExport={!!draft.is_export}
+                value={draft.payment_terms}
+                onChange={(v) => set({ payment_terms: v })}
+              />
+            </Field>
             <Field label="Method of Despatch">
               <Select value={draft.method_of_despatch} onChange={(e) => set({ method_of_despatch: e.target.value })}>
                 <option value="">— select —</option>
