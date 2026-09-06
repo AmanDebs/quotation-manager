@@ -376,7 +376,7 @@ export default function OrderFormPage() {
             {!!draft.is_export && (
               <>
                 <Field label="INCO Terms">
-                  <IncoTermsInput value={draft.inco_terms} onChange={(v) => set({ inco_terms: v })} />
+                  <IncoTermsInput isExport={!!draft.is_export} value={draft.inco_terms} onChange={(v) => set({ inco_terms: v })} />
                 </Field>
                 <Field label="Containers"><Input value={draft.container_count} onChange={(e) => set({ container_count: e.target.value })} placeholder="e.g. 2 X 40ft HQ" /></Field>
               </>

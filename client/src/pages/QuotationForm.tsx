@@ -437,10 +437,10 @@ export default function QuotationFormPage() {
             <Field label="Prepared By"><Input disabled={readOnly} value={draft.prepared_by} onChange={(e) => set({ prepared_by: e.target.value })} placeholder="Who prepared this quote" /></Field>
             <Field label="INCO Terms / Basis">
               <IncoTermsInput
+                isExport={!!draft.is_export}
                 disabled={readOnly}
                 value={draft.inco_terms}
                 onChange={(v) => set({ inco_terms: v })}
-                placeholder="e.g. CIF Dakar Port, or type your own"
               />
             </Field>
             <Field label="Containers"><Input disabled={readOnly} value={draft.container_count} onChange={(e) => set({ container_count: e.target.value })} placeholder="e.g. 5 X 40ft HQ" /></Field>

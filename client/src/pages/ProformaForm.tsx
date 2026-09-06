@@ -403,7 +403,7 @@ export default function ProformaFormPage() {
             <Field label="Payment Terms"><Input disabled={readOnly} value={draft.payment_terms} onChange={(e) => set({ payment_terms: e.target.value })} /></Field>
             <Field label="Delivery Terms"><Input disabled={readOnly} value={draft.delivery_terms} onChange={(e) => set({ delivery_terms: e.target.value })} /></Field>
             <Field label="INCO Terms">
-              <IncoTermsInput disabled={readOnly} value={draft.inco_terms} onChange={(v) => set({ inco_terms: v })} />
+              <IncoTermsInput isExport={!!draft.is_export} disabled={readOnly} value={draft.inco_terms} onChange={(v) => set({ inco_terms: v })} />
             </Field>
             <Field label="Method of Despatch">
               <Select disabled={readOnly} value={draft.method_of_despatch} onChange={(e) => set({ method_of_despatch: e.target.value })}>

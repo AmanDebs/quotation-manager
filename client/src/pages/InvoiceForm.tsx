@@ -359,7 +359,7 @@ export default function InvoiceFormPage() {
               </Select>
             </Field>
             <Field label="INCO Terms">
-              <IncoTermsInput value={draft.inco_terms} onChange={(v) => set({ inco_terms: v })} />
+              <IncoTermsInput isExport={!!draft.is_export} value={draft.inco_terms} onChange={(v) => set({ inco_terms: v })} />
             </Field>
             <Field label="Payment Terms"><Input value={draft.payment_terms} onChange={(e) => set({ payment_terms: e.target.value })} /></Field>
             <Field label="Method of Despatch">
