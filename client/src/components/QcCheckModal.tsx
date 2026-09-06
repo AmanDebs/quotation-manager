@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { WorkOrder } from '../types';
-import { Button, Input, Select, Field, Modal, ErrorText, EmptyState } from './ui';
+import { Button, Input, Select, Field, Modal, ErrorText, EmptyState, TH_CLASS } from './ui';
 import { fmtDate, today } from '../lib/format';
 
 /**
@@ -134,7 +134,7 @@ export default function QcCheckModal({ job, onClose, onSaved }: {
 
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-slate-200 text-left text-xs uppercase text-slate-500">
+                <tr className={TH_CLASS}>
                   <th className="pb-1 pr-2">Check</th>
                   <th className="pb-1 pr-2">Should be</th>
                   <th className="w-40 pb-1">Measured</th>
@@ -187,7 +187,7 @@ export default function QcCheckModal({ job, onClose, onSaved }: {
               <div className="mb-1 text-xs font-semibold uppercase text-slate-500">Previous inspections</div>
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b border-slate-200 text-left text-xs uppercase text-slate-500">
+                  <tr className={TH_CLASS}>
                     <th className="pb-1 pr-2">Date</th>
                     <th className="pb-1 pr-2">Shift</th>
                     <th className="pb-1 pr-2">Result</th>

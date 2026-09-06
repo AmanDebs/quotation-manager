@@ -1,6 +1,6 @@
 import { Link, useNavigate } from 'react-router-dom';
 import type { PackingList } from '../types';
-import { Button, PageHeader, EmptyState, Card, Pagination } from '../components/ui';
+import { Button, PageHeader, EmptyState, Card, Pagination, TH_CLASS } from '../components/ui';
 import { fmtDate } from '../lib/format';
 import { usePagedList, PAGE_SIZE } from '../lib/usePagedList';
 
@@ -22,7 +22,7 @@ export default function PackingListsPage() {
         ) : (
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-slate-200 text-left text-xs uppercase text-slate-500">
+              <tr className={TH_CLASS}>
                 <th className="pb-2 pr-3">Number</th>
                 <th className="pb-2 pr-3">Date</th>
                 <th className="pb-2 pr-3">Customer</th>

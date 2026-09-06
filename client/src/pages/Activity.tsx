@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
-import { PageHeader, Card, Select, Input, EmptyState, Pagination } from '../components/ui';
+import { PageHeader, Card, Select, Input, EmptyState, Pagination, TH_CLASS } from '../components/ui';
 import { fmtDateTime } from '../lib/format';
 import { useUrlFilter } from '../lib/useUrlFilter';
 import { usePagedList, PAGE_SIZE } from '../lib/usePagedList';
@@ -127,7 +127,7 @@ export default function ActivityPage() {
         ) : (
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-slate-200 text-left text-xs uppercase text-slate-500">
+              <tr className={TH_CLASS}>
                 <th className="pb-2 pr-3">When</th>
                 <th className="pb-2 pr-3">Who</th>
                 <th className="pb-2 pr-3">What</th>

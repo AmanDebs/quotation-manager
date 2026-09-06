@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import { useCan } from '../App';
 import type { StockRow, MaterialMove, Shortfall, Material, Location } from '../types';
-import { PageHeader, Card, Tabs, Select, Input, Field, Button, EmptyState, ErrorText, Modal } from '../components/ui';
+import { PageHeader, Card, Tabs, Select, Input, Field, Button, EmptyState, ErrorText, Modal, TH_CLASS } from '../components/ui';
 import { fmtQty, fmtMoney, fmtDate, today } from '../lib/format';
 
 /**
@@ -93,7 +93,7 @@ export default function StockPage() {
           ) : (
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-slate-200 text-left text-xs uppercase text-slate-500">
+                <tr className={TH_CLASS}>
                   <th className="pb-2 pr-3">Material</th>
                   <th className="pb-2 pr-3">Category</th>
                   <th className="pb-2 pr-3">Plant</th>
@@ -165,7 +165,7 @@ export default function StockPage() {
               {short.rows.length > 0 && (
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="border-b border-slate-200 text-left text-xs uppercase text-slate-500">
+                    <tr className={TH_CLASS}>
                       <th className="pb-2 pr-3">Material</th>
                       <th className="pb-2 pr-3 text-right">Needed</th>
                       <th className="pb-2 pr-3 text-right">On hand</th>
@@ -211,7 +211,7 @@ export default function StockPage() {
           ) : (
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-slate-200 text-left text-xs uppercase text-slate-500">
+                <tr className={TH_CLASS}>
                   <th className="pb-2 pr-3">Date</th>
                   <th className="pb-2 pr-3">Material</th>
                   <th className="pb-2 pr-3">Plant</th>

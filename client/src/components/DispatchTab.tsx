@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Order, Despatch, DespatchItem, Location, Transporter } from '../types';
-import { Button, Input, Textarea, Select, Field, Card, EmptyState, ErrorText, Modal } from './ui';
+import { Button, Input, Textarea, Select, Field, Card, EmptyState, ErrorText, Modal, TH_CLASS } from './ui';
 import { fmtQty, fmtMoney, fmtDate, today } from '../lib/format';
 
 /**
@@ -70,7 +70,7 @@ export default function DispatchTab({ order }: { order: Order }) {
         ) : (
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-slate-200 text-left text-xs uppercase text-slate-500">
+              <tr className={TH_CLASS}>
                 <th className="pb-2 pr-3">Line</th>
                 <th className="pb-2 pr-3 text-right">Ordered</th>
                 <th className="pb-2 pr-3 text-right">Made</th>
@@ -159,7 +159,7 @@ export default function DispatchTab({ order }: { order: Order }) {
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-slate-200 text-left text-xs uppercase text-slate-500">
+                <tr className={TH_CLASS}>
                   <th className="pb-2 pr-3">Date</th>
                   <th className="pb-2 pr-3">From</th>
                   <th className="pb-2 pr-3">To</th>
@@ -279,7 +279,7 @@ function DespatchModal({
 
       <table className="mt-4 w-full text-sm">
         <thead>
-          <tr className="border-b border-slate-200 text-left text-xs uppercase text-slate-500">
+          <tr className={TH_CLASS}>
             <th className="pb-2 pr-2">Line</th>
             <th className="w-32 pb-2 pr-2 text-right">Pieces</th>
             <th className="w-24 pb-2 pr-2 text-right">Boxes</th>

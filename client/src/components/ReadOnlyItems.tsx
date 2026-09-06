@@ -1,5 +1,6 @@
 import type { LineItem } from '../types';
 import { fmtMoney, fmtQty } from '../lib/format';
+import { TH_CLASS } from './ui';
 
 /**
  * The line items of a document that can no longer be edited.
@@ -18,7 +19,7 @@ export default function ReadOnlyItems({ items, currency }: { items: LineItem[]; 
   return (
     <table className="w-full text-sm">
       <thead>
-        <tr className="border-b border-slate-200 text-left text-xs uppercase text-slate-500">
+        <tr className={TH_CLASS}>
           <th className="pb-1 pr-3">Description</th>
           {hasPacking && <th className="pb-1 pr-3 text-right">Pcs/Box</th>}
           {hasPacking && <th className="pb-1 pr-3 text-right">Boxes</th>}

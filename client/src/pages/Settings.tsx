@@ -2,7 +2,7 @@ import { useEffect, useState, type ChangeEvent } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Company, BankAccount, NotePreset } from '../types';
-import { Button, Input, Textarea, Field, Card, PageHeader, ErrorText } from '../components/ui';
+import { Button, Input, Textarea, Field, Card, PageHeader, ErrorText, TH_CLASS } from '../components/ui';
 import { shrinkImage } from '../lib/image';
 
 /**
@@ -226,7 +226,7 @@ function SequenceCard({ companyId }: { companyId: number }) {
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
-            <tr className="border-b border-slate-200 text-left text-xs uppercase text-slate-500">
+            <tr className={TH_CLASS}>
               <th className="pb-2 pr-3">Series</th>
               <th className="pb-2 pr-3">Pattern</th>
               <th className="pb-2 pr-3 text-right">Next no.</th>

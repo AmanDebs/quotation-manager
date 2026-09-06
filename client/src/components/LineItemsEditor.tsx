@@ -2,7 +2,7 @@ import { useMemo, useRef, useState, type ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { LineItem, Product, TaxType, ColumnConfig } from '../types';
-import { Button, Input, Select, SearchSelect, type SearchOption } from './ui';
+import { Button, Input, Select, SearchSelect, type SearchOption, TH_CLASS } from './ui';
 import { fmtMoney, fmtDate } from '../lib/format';
 import { shrinkImage } from '../lib/image';
 import { unitOptions, productTypeLabel } from '../pages/Products';
@@ -341,7 +341,7 @@ export default function LineItemsEditor({
             it scrolls in the wrapper instead, as the other tables do. */}
         <table className="w-full min-w-[1100px] text-sm">
           <thead>
-            <tr className="border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-500">
+            <tr className={TH_CLASS}>
               <th className="w-8 pb-2 pr-2 font-medium">#</th>
               {/* w-52 fits ~75% of the catalogue's names; longer ones clip, but
                   the full name sits in Description and in the select's title. */}

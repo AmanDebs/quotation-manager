@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Material, Product, RecipeLine } from '../types';
-import { Button, Input, Select, Modal, ErrorText, EmptyState } from './ui';
+import { Button, Input, Select, Modal, ErrorText, EmptyState, TH_CLASS } from './ui';
 
 /**
  * What one product is made of, per 1000 pieces.
@@ -53,7 +53,7 @@ export default function RecipeModal({ product, onClose }: { product: Product; on
         <>
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-slate-200 text-left text-xs uppercase text-slate-500">
+              <tr className={TH_CLASS}>
                 <th className="pb-2 pr-2">Material</th>
                 <th className="w-32 pb-2 pr-2 text-right">Per 1000 pcs</th>
                 <th className="w-24 pb-2 pr-2 text-right">Wastage %</th>

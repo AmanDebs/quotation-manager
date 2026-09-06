@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Product } from '../types';
-import { Button, Input, Select, Card, PageHeader, EmptyState } from '../components/ui';
+import { Button, Input, Select, Card, PageHeader, EmptyState, CAPTION_CLASS, TH_CLASS } from '../components/ui';
 import { fmtQty } from '../lib/format';
 import {
   planFill, planRequirement, capacityFor,
@@ -126,7 +126,7 @@ export default function ContainerPlannerPage() {
           <Card className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-slate-200 text-left text-xs uppercase text-slate-500">
+                <tr className={TH_CLASS}>
                   <th className="pb-2 pr-3">Product</th>
                   <th className="pb-2 pr-3 text-right">Pcs / Box</th>
                   <th className="pb-2 pr-3 text-right">Boxes / {size}</th>
@@ -200,19 +200,19 @@ export default function ContainerPlannerPage() {
           <Card>
             <div className="flex flex-wrap items-center gap-x-8 gap-y-3">
               <div>
-                <div className="text-xs uppercase tracking-wide text-slate-500">Containers</div>
+                <div className={CAPTION_CLASS}>Containers</div>
                 <div className="text-2xl font-bold text-slate-800">
                   {plan.containers} × {size}
                 </div>
               </div>
               <div>
-                <div className="text-xs uppercase tracking-wide text-slate-500">Utilisation</div>
+                <div className={CAPTION_CLASS}>Utilisation</div>
                 <div className={`text-2xl font-bold ${plan.utilisation >= 98 ? 'text-green-700' : plan.utilisation >= 85 ? 'text-amber-600' : 'text-red-600'}`}>
                   {plan.utilisation.toFixed(1)}%
                 </div>
               </div>
               <div className="min-w-48 flex-1">
-                <div className="mb-1 text-xs uppercase tracking-wide text-slate-500">Fill</div>
+                <div className={`mb-1 ${CAPTION_CLASS}`}>Fill</div>
                 <div className="h-3 rounded-full bg-slate-100">
                   <div
                     className={`h-3 rounded-full ${plan.utilisation >= 98 ? 'bg-green-600' : plan.utilisation >= 85 ? 'bg-amber-500' : 'bg-red-500'}`}

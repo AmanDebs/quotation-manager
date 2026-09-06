@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { PendingApproval } from '../types';
-import { Button, Select, Textarea, Field, PageHeader, EmptyState, ErrorText, Card, Modal , Pagination} from '../components/ui';
+import { Button, Select, Textarea, Field, PageHeader, EmptyState, ErrorText, Card, Modal, Pagination, TH_CLASS } from '../components/ui';
 import { fmtDate, fmtMoney } from '../lib/format';
 import { usePagedList, PAGE_SIZE } from '../lib/usePagedList';
 
@@ -68,7 +68,7 @@ export default function ApprovalsPage() {
         ) : (
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-slate-200 text-left text-xs uppercase text-slate-500">
+              <tr className={TH_CLASS}>
                 <th className="pb-2 pr-3">Document</th>
                 <th className="pb-2 pr-3">Type</th>
                 <th className="pb-2 pr-3">Date</th>

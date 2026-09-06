@@ -5,10 +5,7 @@ import type {
   PurchaseOrder, PoStatus, PoItem, Supplier, Material, Location, TaxType, Product,
   ShortfallDraft, ShortfallDraftLine,
 } from '../types';
-import {
-  PageHeader, Card, Select, Input, Textarea, Field, Button, EmptyState, ErrorText, Modal, Pagination,
-  SearchSelect, SettledDocumentType, SegmentedTabs, type SearchOption,
-} from '../components/ui';
+import { PageHeader, Card, Select, Input, Textarea, Field, Button, EmptyState, ErrorText, Modal, Pagination, SearchSelect, SettledDocumentType, SegmentedTabs, type SearchOption, CAPTION_CLASS, TH_CLASS } from '../components/ui';
 import { productTypeLabel } from './Products';
 import { fmtMoney, fmtQty, fmtDate, today } from '../lib/format';
 import { usePagedList, PAGE_SIZE } from '../lib/usePagedList';
@@ -208,7 +205,7 @@ export default function PurchaseOrdersPage() {
         ) : (
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-slate-200 text-left text-xs uppercase text-slate-500">
+              <tr className={TH_CLASS}>
                 <th className="pb-2 pr-3">Number</th>
                 <th className="pb-2 pr-3">Date</th>
                 <th className="pb-2 pr-3">Supplier</th>
@@ -332,7 +329,7 @@ export default function PurchaseOrdersPage() {
 
           <table className="mt-4 w-full text-sm">
             <thead>
-              <tr className="border-b border-slate-200 text-left text-xs uppercase text-slate-500">
+              <tr className={TH_CLASS}>
                 <th className="pb-2 pr-2">Material or product</th>
                 <th className="w-20 pb-2 pr-2 text-right">Boxes</th>
                 <th className="w-20 pb-2 pr-2 text-right">Pcs/Box</th>
@@ -444,7 +441,7 @@ function ReceiveModal({ po, onClose, onSaved }: { po: PurchaseOrder; onClose: ()
 
       <table className="mt-3 w-full text-sm">
         <thead>
-          <tr className="border-b border-slate-200 text-left text-xs uppercase text-slate-500">
+          <tr className={TH_CLASS}>
             <th className="pb-2 pr-3">Line</th>
             <th className="pb-2 pr-3 text-right">Ordered</th>
             <th className="pb-2 pr-3 text-right">Already in</th>
@@ -610,7 +607,7 @@ function ShortfallModal({ suppliers, onClose, onPick }: {
               </div>
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b border-slate-100 text-left text-xs uppercase text-slate-500">
+                  <tr className={`${CAPTION_CLASS} border-b border-slate-100 text-left`}>
                     <th className="px-3 py-1">Material</th>
                     <th className="px-3 py-1 text-right">Needed</th>
                     <th className="px-3 py-1 text-right">On hand</th>

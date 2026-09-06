@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Payment } from '../types';
-import { Button, Input, Select, Field, Card, ErrorText, ReadOnlyFields } from './ui';
+import { Button, Input, Select, Field, Card, ErrorText, ReadOnlyFields, TH_CLASS } from './ui';
 import { fmtDate, fmtMoney, today } from '../lib/format';
 
 const METHODS = ['Bank Transfer', 'Letter of Credit', 'Cheque', 'Cash', 'Other'];
@@ -77,7 +77,7 @@ export default function PaymentsCard({
       {payments.length > 0 && (
         <table className="mb-2 w-full text-sm">
           <thead>
-            <tr className="border-b border-slate-200 text-left text-xs uppercase text-slate-500">
+            <tr className={TH_CLASS}>
               <th className="pb-1 pr-3">Date</th>
               <th className="pb-1 pr-3">Method</th>
               <th className="pb-1 pr-3">Reference</th>

@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Despatch, Location } from '../types';
-import { PageHeader, Card, Select, Input, EmptyState, Pagination, DownloadButton } from '../components/ui';
+import { PageHeader, Card, Select, Input, EmptyState, Pagination, DownloadButton, TH_CLASS } from '../components/ui';
 import { fmtQty, fmtDate } from '../lib/format';
 import { usePagedList, PAGE_SIZE } from '../lib/usePagedList';
 
@@ -66,7 +66,7 @@ export default function DespatchesPage() {
         ) : (
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-slate-200 text-left text-xs uppercase text-slate-500">
+              <tr className={TH_CLASS}>
                 <th className="pb-2 pr-3">Date</th>
                 <th className="pb-2 pr-3">From</th>
                 <th className="pb-2 pr-3">Order</th>

@@ -3,7 +3,7 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { PackingList, PackingListItem, Customer } from '../types';
-import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, ReadOnlyFields, FIELD_GRID } from '../components/ui';
+import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, ReadOnlyFields, FIELD_GRID, TH_CLASS } from '../components/ui';
 import { PdfLink } from '../components/PdfLink';
 import { fmtQty, today } from '../lib/format';
 import { useUnsavedChanges } from '../lib/useUnsavedChanges';
@@ -152,7 +152,7 @@ export default function PackingListFormPage() {
         <Card title="Packages">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-slate-200 text-left text-xs uppercase text-slate-500">
+              <tr className={TH_CLASS}>
                 <th className="pb-1 pr-2">Description</th>
                 <th className="pb-1 pr-2 w-20">HSN</th>
                 <th className="pb-1 pr-2 w-20">Qty</th>

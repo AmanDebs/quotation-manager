@@ -1,5 +1,5 @@
 import type { LineItem } from '../types';
-import { Card } from './ui';
+import { Card, CAPTION_CLASS } from './ui';
 import type { ContainerSize, PlanResult } from '../lib/containerPlan';
 
 /**
@@ -91,18 +91,18 @@ export default function ContainerFitment({
         <>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <div className="rounded-md bg-slate-50 p-3">
-              <div className="text-xs uppercase tracking-wide text-slate-500">Containers</div>
+              <div className={CAPTION_CLASS}>Containers</div>
               <div className="text-2xl font-semibold tabular-nums">
                 {plan.containers}
                 <span className="ml-1 text-sm font-normal text-slate-500">× {size}</span>
               </div>
             </div>
             <div className="rounded-md bg-slate-50 p-3">
-              <div className="text-xs uppercase tracking-wide text-slate-500">Space used</div>
+              <div className={CAPTION_CLASS}>Space used</div>
               <div className="text-2xl font-semibold tabular-nums">{fmt(plan.spaceUsed, 2)}</div>
             </div>
             <div className="rounded-md bg-slate-50 p-3">
-              <div className="text-xs uppercase tracking-wide text-slate-500">Utilisation</div>
+              <div className={CAPTION_CLASS}>Utilisation</div>
               <div
                 className={`text-2xl font-semibold tabular-nums ${
                   plan.utilisation >= 90 ? 'text-green-700' : plan.utilisation >= 70 ? 'text-slate-800' : 'text-amber-700'
@@ -112,7 +112,7 @@ export default function ContainerFitment({
               </div>
             </div>
             <div className="rounded-md bg-slate-50 p-3">
-              <div className="text-xs uppercase tracking-wide text-slate-500">Boxes</div>
+              <div className={CAPTION_CLASS}>Boxes</div>
               <div className="text-2xl font-semibold tabular-nums">{fmt(totalBoxes)}</div>
             </div>
           </div>

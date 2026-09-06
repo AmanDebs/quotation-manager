@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
-import { Button, Input, Textarea, Select, Field, Card, EmptyState, ErrorText, Modal } from './ui';
+import { Button, Input, Textarea, Select, Field, Card, EmptyState, ErrorText, Modal, TH_CLASS } from './ui';
 
 /**
  * One production master — locations, suppliers, transporters, materials,
@@ -99,7 +99,7 @@ export default function MasterList<T extends Row>({ spec, canEdit }: { spec: Mas
         ) : (
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-slate-200 text-left text-xs uppercase text-slate-500">
+              <tr className={TH_CLASS}>
                 {spec.columns.map((c) => (
                   <th key={c.key} className={`pb-2 pr-3 ${c.align === 'right' ? 'text-right' : ''}`}>{c.label}</th>
                 ))}

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Order, WorkOrder, WorkOrderStatus, Location, Machine, Mould, Process } from '../types';
-import { Button, Input, Textarea, Select, Field, Card, EmptyState, ErrorText, Modal } from './ui';
+import { Button, Input, Textarea, Select, Field, Card, EmptyState, ErrorText, Modal, TH_CLASS } from './ui';
 import QcCheckModal from './QcCheckModal';
 import { fmtQty, today } from '../lib/format';
 
@@ -98,7 +98,7 @@ export default function ProductionTab({ order }: { order: Order }) {
         ) : (
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-slate-200 text-left text-xs uppercase text-slate-500">
+              <tr className={TH_CLASS}>
                 <th className="pb-2 pr-3">Line</th>
                 <th className="pb-2 pr-3 text-right">Ordered</th>
                 <th className="pb-2 pr-3 text-right">Planned</th>
@@ -155,7 +155,7 @@ export default function ProductionTab({ order }: { order: Order }) {
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-slate-200 text-left text-xs uppercase text-slate-500">
+                <tr className={TH_CLASS}>
                   <th className="pb-2 pr-3">Job</th>
                   <th className="pb-2 pr-3">For</th>
                   <th className="pb-2 pr-3">Machine / mould</th>
@@ -360,7 +360,7 @@ function LogOutput({ job, onClose, onSaved }: { job: WorkOrder; onClose: () => v
       ) : (
         <table className="mt-3 w-full text-sm">
           <thead>
-            <tr className="border-b border-slate-200 text-left text-xs uppercase text-slate-500">
+            <tr className={TH_CLASS}>
               <th className="pb-2 pr-3">Date</th>
               <th className="pb-2 pr-3">Shift</th>
               <th className="pb-2 pr-3 text-right">Good</th>

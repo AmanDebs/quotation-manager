@@ -4,7 +4,7 @@ import { api } from '../api/client';
 import type { User, TeamRole } from '../types';
 import { TEAM_ROLES, teamRoleLabel } from '../types';
 import { useUser } from '../App';
-import { Button, Input, Select, Field, PageHeader, EmptyState, ErrorText, Modal, Card } from '../components/ui';
+import { Button, Input, Select, Field, PageHeader, EmptyState, ErrorText, Modal, Card, TH_CLASS } from '../components/ui';
 
 interface Draft { id?: number; name: string; email: string; password: string; team_role: TeamRole }
 
@@ -56,7 +56,7 @@ export default function TeamPage() {
         ) : (
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-slate-200 text-left text-xs uppercase text-slate-500">
+              <tr className={TH_CLASS}>
                 <th className="pb-2 pr-3">Name</th>
                 <th className="pb-2 pr-3">Email</th>
                 <th className="pb-2 pr-3">Role</th>

@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { WorkOrder, WorkOrderStatus, Location, Machine } from '../types';
-import { PageHeader, Card, Select, EmptyState , Pagination} from '../components/ui';
+import { PageHeader, Card, Select, EmptyState, Pagination, TH_CLASS } from '../components/ui';
 import { fmtQty, fmtDate } from '../lib/format';
 import { useUrlFilter } from '../lib/useUrlFilter';
 import { usePagedList, PAGE_SIZE } from '../lib/usePagedList';
@@ -91,7 +91,7 @@ export default function WorkOrdersPage() {
         ) : (
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-slate-200 text-left text-xs uppercase text-slate-500">
+              <tr className={TH_CLASS}>
                 <th className="pb-2 pr-3">Job</th>
                 <th className="pb-2 pr-3">Order</th>
                 <th className="pb-2 pr-3">Customer</th>

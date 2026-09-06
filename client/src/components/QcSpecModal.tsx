@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Customer, Product, QcParam, QcKind, QcSpecResponse } from '../types';
-import { Button, Input, Select, Modal, ErrorText, EmptyState } from './ui';
+import { Button, Input, Select, Modal, ErrorText, EmptyState, TH_CLASS } from './ui';
 
 /**
  * What to check on this product, and what passes.
@@ -106,7 +106,7 @@ export default function QcSpecModal({ product, onClose }: { product: Product; on
         <>
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-slate-200 text-left text-xs uppercase text-slate-500">
+              <tr className={TH_CLASS}>
                 <th className="pb-2 pr-2">Check</th>
                 <th className="w-32 pb-2 pr-2">Type</th>
                 <th className="w-20 pb-2 pr-2">Unit</th>

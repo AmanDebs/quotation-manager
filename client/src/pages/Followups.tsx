@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Followup, Customer } from '../types';
-import { Button, Input, Textarea, Select, Field, PageHeader, EmptyState, ErrorText, Modal, Card, Pagination } from '../components/ui';
+import { Button, Input, Textarea, Select, Field, PageHeader, EmptyState, ErrorText, Modal, Card, Pagination, TH_CLASS } from '../components/ui';
 import { fmtDate, today } from '../lib/format';
 import { usePagedList, PAGE_SIZE } from '../lib/usePagedList';
 
@@ -71,7 +71,7 @@ export default function FollowupsPage() {
         ) : (
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-slate-200 text-left text-xs uppercase text-slate-500">
+              <tr className={TH_CLASS}>
                 <th className="pb-2 pr-3 w-8" />
                 <th className="pb-2 pr-3">Due</th>
                 <th className="pb-2 pr-3">Customer</th>

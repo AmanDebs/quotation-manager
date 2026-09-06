@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Order, WorkOrder, Material, Location, StockRow } from '../types';
-import { Button, Input, Select, Field, Card, EmptyState, ErrorText, Modal } from './ui';
+import { Button, Input, Select, Field, Card, EmptyState, ErrorText, Modal, TH_CLASS } from './ui';
 import { fmtQty, fmtMoney, today } from '../lib/format';
 
 /**
@@ -110,7 +110,7 @@ export default function MaterialTab({ order }: { order: Order }) {
             {need.size > 0 && (
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b border-slate-200 text-left text-xs uppercase text-slate-500">
+                  <tr className={TH_CLASS}>
                     <th className="pb-2 pr-3">Material</th>
                     <th className="pb-2 pr-3 text-right">Needed</th>
                     <th className="pb-2 pr-3 text-right">Issued</th>
