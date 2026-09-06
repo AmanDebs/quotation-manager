@@ -214,13 +214,32 @@ interface HeaderOpts {
   isCommercialInvoice?: boolean;
 }
 
+/**
+ * How tall the logo may be, in points.
+ *
+ * Matched to the right-hand text stack — company name, address, contacts and
+ * the registration line, about 52pt — so the letterhead row is as tall as its
+ * words and no taller.
+ */
+const LOGO_MAX_H = 56;
+
 function companyHeader(s: Row, opts: HeaderOpts = {}): Content[] {
   const right: any = {
     stack: [
       { text: s.company_name || 'Company Name', fontSize: 14, bold: true, color: s.theme, alignment: 'right' },
       { text: [s.address, [s.city, s.state ? s.state : '', s.pincode].filter(Boolean).join(', '), s.country].filter(Boolean).join(', '), fontSize: 8, color: '#555555', alignment: 'right', margin: [0, 2, 0, 0] },
       { text: [s.phone && `Sales cell: ${s.phone}`, s.email && `Email: ${s.email}`, s.website].filter(Boolean).join('  |  '), fontSize: 8, color: '#555555', alignment: 'right', margin: [0, 1.5, 0, 0] },
-      { text: registrationLine(s, opts), fontSize: 7.5, color: '#777777', alignment: 'right', margin: [0, 1.5, 0, 0] },
+      /*
+       * Only when there is something to print. An empty text node is still a
+       * line box — measured on a domestic quotation with no GSTIN recorded, it
+       * left a blank line under the contact row and pushed the rule down with
+       * it. `registrationLine` returns '' more often than not: it is blank on
+       * every export document that is not a commercial invoice, and on any
+       * domestic one whose company has no GSTIN in Settings.
+       */
+      ...(registrationLine(s, opts)
+        ? [{ text: registrationLine(s, opts), fontSize: 7.5, color: '#777777', alignment: 'right', margin: [0, 1.5, 0, 0] }]
+        : []),
     ],
     width: '*',
   };
@@ -230,11 +249,17 @@ function companyHeader(s: Row, opts: HeaderOpts = {}): Content[] {
   // company's "Sales cell | Email | website" line broke in two. 158 leaves
   // 349pt, within a few points of what that row had before.
   //
-  // The row is as tall as the logo or the text stack, whichever is taller, and
-  // the stack runs about 52pt, so height up to that is free. A wide logo is
-  // bound by the width above, not the height here.
+  // The height is capped at the text stack rather than above it. The row is as
+  // tall as whichever side is taller, so an 80pt box let the logo set the
+  // height and open a band of white between the address and the rule — worst
+  // with a logo whose file has padding baked around the mark, which is the
+  // ordinary shape of a letterhead image and cannot be cropped here (there is
+  // no image library, and there is not going to be one). At 158 wide this only
+  // binds on a logo taller than about 2.6:1, and it costs that logo some size
+  // rather than costing every document a gap. Re-uploading a tightly cropped
+  // logo is the way to get the size back.
   const cols: Content = s.logo
-    ? { columns: [{ image: s.logo, fit: [158, 80] as [number, number], width: 158 }, right], columnGap: 8 }
+    ? { columns: [{ image: s.logo, fit: [158, LOGO_MAX_H] as [number, number], width: 158 }, right], columnGap: 8 }
     : right;
   return [
     cols,
