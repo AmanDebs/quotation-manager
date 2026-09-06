@@ -112,9 +112,19 @@ export const PAYMENT_TERMS_EXPORT: Suggestion[] = [
  *
  * It is one component with two callers rather than two components, because two
  * copies of a control is how the two come to look different from each other.
+ *
+ * `multiple` is the payment-terms case: a deal is regularly two terms — an
+ * advance *and* the credit on the balance — so picking **adds** rather than
+ * replaces, the panel stays open, and what is already on the document is
+ * ticked. The chosen set is not held in state: it is read back out of the text
+ * by splitting it, so a term deleted by hand untick itself and there is no
+ * second copy of the answer to drift from the one that prints.
  */
+const JOIN = '; ';
+const partsOf = (v: string) => v.split(';').map((s) => s.trim()).filter(Boolean);
+
 function SuggestInput({
-  options, value, onChange, disabled, placeholder, label,
+  options, value, onChange, disabled, placeholder, label, multiple,
 }: {
   options: Suggestion[];
   value: string;
@@ -123,6 +133,8 @@ function SuggestInput({
   placeholder?: string;
   /** What the chevron announces to a screen reader. */
   label: string;
+  /** Add to the line instead of replacing it, and keep the panel open. */
+  multiple?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const wrap = useRef<HTMLDivElement>(null);
@@ -141,9 +153,24 @@ function SuggestInput({
   // Typing filters the suggestions, but never removes them all: a basis
   // qualified with a place ("CIF Mozambique") stops matching its own code
   // after the space, and a list that emptied itself would look broken.
-  const q = value.trim().toLowerCase();
+  //
+  // A multi-select does not filter at all. Once two terms are on the line the
+  // box holds a compound string that matches no single option, and narrowing
+  // by it would hide the very rows whose ticks say what is already chosen.
+  const q = multiple ? '' : value.trim().toLowerCase();
   const matches = options.filter((t) => !q || t.label.toLowerCase().includes(q) || q.includes(t.value.toLowerCase()));
   const shown = matches.length ? matches : options;
+
+  const chosen = multiple ? partsOf(value) : [];
+  const isPicked = (t: Suggestion) => (multiple ? chosen.includes(t.value) : value === t.value);
+  const pick = (t: Suggestion) => {
+    if (!multiple) {
+      onChange(t.value);
+      setOpen(false);
+      return;
+    }
+    onChange((isPicked(t) ? chosen.filter((p) => p !== t.value) : [...chosen, t.value]).join(JOIN));
+  };
 
   if (useReadOnlyFields()) return <StaticValue>{value}</StaticValue>;
 
@@ -178,15 +205,31 @@ function SuggestInput({
             <button
               key={t.value}
               type="button"
-              onMouseDown={(e) => { e.preventDefault(); onChange(t.value); setOpen(false); }}
+              // `onMouseDown` with `preventDefault` keeps the focus in the box,
+              // which is what lets a multi-select take a second pick without
+              // the click-away closing the panel first.
+              onMouseDown={(e) => { e.preventDefault(); pick(t); }}
               // `leading-snug`: a payment term runs to a sentence and wraps in
               // a narrow column, and two lines of an option have to read as
               // one entry rather than as two.
-              className={`block w-full px-3 py-1.5 text-left text-sm leading-snug hover:bg-slate-50 ${
-                value === t.value ? 'font-medium text-brand-700' : 'text-slate-700'
+              className={`flex w-full items-start gap-2 px-3 py-1.5 text-left text-sm leading-snug hover:bg-slate-50 ${
+                isPicked(t) ? 'font-medium text-brand-700' : 'text-slate-700'
               }`}
             >
-              {t.label}
+              {multiple && (
+                <span
+                  className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
+                    isPicked(t) ? 'border-brand-600 bg-brand-600 text-white' : 'border-slate-300 bg-white'
+                  }`}
+                >
+                  {isPicked(t) && (
+                    <svg viewBox="0 0 24 24" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="3">
+                      <path d="M5 13l4 4L19 7" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  )}
+                </span>
+              )}
+              <span>{t.label}</span>
             </button>
           ))}
         </div>
@@ -234,6 +277,7 @@ export function PaymentTermsInput({
       value={value}
       onChange={onChange}
       disabled={disabled}
+      multiple
       label="Show payment terms"
       placeholder={placeholder ?? (isExport
         ? 'e.g. 40% Advance and Balance against shipping documents'
