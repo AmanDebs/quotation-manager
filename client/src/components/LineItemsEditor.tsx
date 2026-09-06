@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { LineItem, Product, TaxType, ColumnConfig } from '../types';
 import { Button, Input, Select, SearchSelect, type SearchOption } from './ui';
-import { fmtMoney } from '../lib/format';
+import { fmtMoney, fmtDate } from '../lib/format';
 import { shrinkImage } from '../lib/image';
 import { unitOptions, productTypeLabel } from '../pages/Products';
 
@@ -86,6 +86,17 @@ const PIECES_PER_BILLING_UNIT: Record<string, number> = { 'per 1000': 1000, unit
  */
 /** Sentinel value for the product select's "this line is a charge" option. */
 const CHARGE = 'charge';
+
+/**
+ * When this line last went out, as the despatch register reports it.
+ *
+ * It rides on the `despatched` decoration `GET /orders/:id` adds per line, so
+ * it is only ever present on an order — which is why `despatched_on` is one of
+ * `ORDER_ONLY_COLUMNS`. Blank on every other document, and blank on an order
+ * line nothing has shipped against.
+ */
+const despatchedOn = (it: LineItem): string =>
+  (it as { despatched?: { last_date?: string } }).despatched?.last_date ?? '';
 
 const showsPer1000Rate = (unit: string | undefined) => {
   const per = PIECES_PER_BILLING_UNIT[unit ?? ''];
@@ -278,7 +289,8 @@ export default function LineItemsEditor({
 
   // What is left once packing has its own columns: the fields a line rarely
   // carries. When none of them apply the second row holds only the /1000 rate.
-  const extrasVisible = show('code') || show('supplier') || customNames.length > 0;
+  const extrasVisible = show('code') || show('supplier')
+    || show('scheduled_date') || show('despatched_on') || customNames.length > 0;
   // Before Amount rather than after it, so it falls inside spanCols below and
   // the second row's colSpan follows it for free; Amount stays the last figure,
   // which is what a money document wants.
@@ -299,6 +311,10 @@ export default function LineItemsEditor({
     const supplier = (it as { supplier?: string }).supplier;
     if (show('code') && code) parts.push(code);
     if (show('supplier') && supplier) parts.push(supplier);
+    const promised = (it as { scheduled_date?: string }).scheduled_date;
+    if (show('scheduled_date') && promised) parts.push(`due ${fmtDate(promised)}`);
+    const gone = despatchedOn(it);
+    if (show('despatched_on') && gone) parts.push(`sent ${fmtDate(gone)}`);
     customNames.forEach((name, ci) => {
       const v = it[`custom${ci + 1}` as 'custom1'] as string;
       if (v) parts.push(`${name}: ${v}`);
@@ -563,6 +579,38 @@ export default function LineItemsEditor({
                         ))}
                         {show('supplier') && packField('Supplier', (
                           <Input value={(it as { supplier?: string }).supplier ?? ''} onChange={(e) => set(i, { supplier: e.target.value } as Partial<LineItem>)} placeholder="Internal" />
+                        ))}
+                        {/*
+                          * When this line was promised, as against the order's
+                          * own Promised Delivery. Lines on one order genuinely
+                          * fall due on different dates — the desk sheet has a
+                          * column for it — and `order_items.scheduled_date` has
+                          * existed and round-tripped through the API all along
+                          * with nothing on screen able to write it.
+                          */}
+                        {show('scheduled_date') && packField('Promised', (
+                          <Input
+                            type="date"
+                            value={(it as { scheduled_date?: string }).scheduled_date ?? ''}
+                            onChange={(e) => set(i, { scheduled_date: e.target.value } as Partial<LineItem>)}
+                          />
+                        ))}
+                        {/*
+                          * Read-only, and derived from the despatch register
+                          * rather than typed. `order_items.dispatched_date` is
+                          * a real column and is deliberately not what this
+                          * shows: a date somebody types can contradict the
+                          * lorry, which is the failure `services/orderLines.ts`
+                          * describes on the real sheet — rows still marked
+                          * Pending that the Despatch sheet shows went out. The
+                          * stored column keeps round-tripping untouched.
+                          */}
+                        {show('despatched_on') && packField('Despatched', (
+                          <div className="pt-2 text-sm tabular-nums text-slate-600">
+                            {despatchedOn(it)
+                              ? fmtDate(despatchedOn(it))
+                              : <span className="text-slate-300">not yet</span>}
+                          </div>
                         ))}
                         {customNames.map((name, ci) => (
                           <div key={ci}>

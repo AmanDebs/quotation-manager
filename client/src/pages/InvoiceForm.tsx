@@ -12,7 +12,7 @@ import LineItemsEditor from '../components/LineItemsEditor';
 import FollowupButton from '../components/FollowupButton';
 import PaymentsCard from '../components/PaymentsCard';
 import ApprovalStrip from '../components/ApprovalStrip';
-import ColumnsControl, { PACKING_COLUMNS, newColumnConfig, hasColumnPrefs, invoiceColumns, INVOICE_FORCED } from '../components/ColumnsControl';
+import ColumnsControl, { PACKING_COLUMNS, newColumnConfig, hasColumnPrefs, invoiceColumns, INVOICE_OMIT, INVOICE_FORCED } from '../components/ColumnsControl';
 import NotePresetPicker from '../components/NotePresetPicker';
 import { fmtQty, today } from '../lib/format';
 import { useDefaultNotes } from '../lib/useDefaultNotes';
@@ -440,7 +440,7 @@ export default function InvoiceFormPage() {
           title="Line Items (final dispatch quantities)"
           actions={<ColumnsControl config={draft.column_config} onChange={(c) => set({ column_config: c })} columns={invoiceColumns()} />}
         >
-          <LineItemsEditor items={draft.items} onChange={(items) => set({ items })} currency={draft.currency} taxType={draft.tax_type} config={draft.column_config} forced={INVOICE_FORCED} />
+          <LineItemsEditor items={draft.items} onChange={(items) => set({ items })} currency={draft.currency} taxType={draft.tax_type} config={draft.column_config} omit={INVOICE_OMIT} forced={INVOICE_FORCED} />
           <HeaderCharges
             freight={draft.freight}
             insurance={draft.insurance}

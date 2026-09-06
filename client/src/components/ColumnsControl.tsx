@@ -25,8 +25,30 @@ export const ITEM_COLUMNS: ToggleableColumn[] = [
   { key: 'tax', label: 'Tax %' },
   { key: 'code', label: 'Code (size/spec)' },
   { key: 'supplier', label: 'Supplier' },
+  { key: 'scheduled_date', label: 'Promised date (per line)' },
+  { key: 'despatched_on', label: 'Despatched on' },
   { key: 'amount', label: 'Amount / line total' },
 ];
+
+/**
+ * Columns only an order has.
+ *
+ * `order_items` is the only item table carrying `code`, `supplier` and
+ * `scheduled_date`; `quotation_items`, `pi_items` and `invoice_items` have no
+ * such columns, so anything typed into them on those documents is dropped by
+ * the INSERT without a word. Code and Supplier were offered on all four types
+ * from the beginning and did exactly that — measured on a scratch instance,
+ * a quotation line sent with `code: 'PRF-28-SPEC'` came back with `code: null`
+ * while the same line on an order kept it.
+ *
+ * They belong in an `omit` rather than a `FORCED` list because this is the
+ * "never has this column at all" case the note below distinguishes: the
+ * document has nowhere to put the value, so the editor must not draw a box
+ * inviting one.
+ *
+ * `despatched_on` is **derived, never typed** — see `LineItemsEditor`.
+ */
+export const ORDER_ONLY_COLUMNS = ['code', 'supplier', 'scheduled_date', 'despatched_on'];
 
 /**
  * Columns a quotation does not carry — in the editor, in the tick-list, or on
@@ -40,7 +62,7 @@ export const ITEM_COLUMNS: ToggleableColumn[] = [
  * quantity field could only contradict it. See billedQty() in
  * server/src/services/totals.ts.
  */
-export const QUOTATION_OMIT = ['hsn', 'qty'];
+export const QUOTATION_OMIT = ['hsn', 'qty', ...ORDER_ONLY_COLUMNS];
 
 /**
  * Columns a proforma does not carry.
@@ -57,7 +79,7 @@ export const QUOTATION_OMIT = ['hsn', 'qty'];
  * server/src/services/totals.ts, which falls back to Total Qty for exactly
  * this reason.
  */
-export const PROFORMA_OMIT = ['hsn', 'qty'];
+export const PROFORMA_OMIT = ['hsn', 'qty', ...ORDER_ONLY_COLUMNS];
 
 /** Container loadability is meaningless to a domestic GST buyer. */
 export const LOADABILITY_COLUMNS = ['qty_20ft', 'qty_40ft'];
@@ -247,8 +269,14 @@ export function proformaColumns(isExport: boolean): ToggleableColumn[] {
   return columnsFor([...proformaOmit(isExport), ...PROFORMA_FORCED]);
 }
 
+/**
+ * A commercial invoice keeps Qty and the HSN code — it is the document that
+ * prints both — so its only omissions are the order-only columns.
+ */
+export const INVOICE_OMIT = [...ORDER_ONLY_COLUMNS];
+
 export function invoiceColumns(): ToggleableColumn[] {
-  return columnsFor(INVOICE_FORCED);
+  return columnsFor([...INVOICE_OMIT, ...INVOICE_FORCED]);
 }
 
 export function orderColumns(): ToggleableColumn[] {

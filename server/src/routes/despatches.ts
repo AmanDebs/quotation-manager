@@ -80,19 +80,25 @@ function saveItems(despatchId: number, items: ItemInput[]) {
 }
 
 /** Pieces physically sent per order line — the counterpart to the invoice walk. */
-export function despatchedByOrder(orderId: number): Map<number, { qty: number; packs: number; trips: number }> {
+export function despatchedByOrder(orderId: number):
+  Map<number, { qty: number; packs: number; trips: number; last_date: string }> {
   const rows = db.prepare(
     `SELECT di.order_line,
             COALESCE(SUM(di.qty), 0) AS qty,
             COALESCE(SUM(di.packs), 0) AS packs,
-            COUNT(DISTINCT d.id) AS trips
+            COUNT(DISTINCT d.id) AS trips,
+            -- When this line last moved. MAX rather than MIN: a line shipped
+            -- over three trips is best described by the most recent one, which
+            -- is what "has this gone yet" is actually asking.
+            MAX(d.date) AS last_date
      FROM despatch_items di
      JOIN despatches d ON d.id = di.despatch_id
      WHERE d.order_id = ?
      GROUP BY di.order_line`
-  ).all(orderId) as { order_line: number; qty: number; packs: number; trips: number }[];
+  ).all(orderId) as
+    { order_line: number; qty: number; packs: number; trips: number; last_date: string | null }[];
   return new Map(rows.map((r) => [r.order_line, {
-    qty: round2(r.qty), packs: round2(r.packs), trips: r.trips,
+    qty: round2(r.qty), packs: round2(r.packs), trips: r.trips, last_date: r.last_date ?? '',
   }]));
 }
 

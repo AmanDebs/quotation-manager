@@ -867,6 +867,13 @@ export function buildOrderPdf(id: number): TDocumentDefinitions {
     { key: 'qty', label: 'Quantity', width: 58, align: 'right', value: (it) => (!it.is_charge && it.qty != null ? `${fmtNum(it.qty)} ${it.unit}` : '') },
     { key: 'unit_price', label: `Rate ${cur}`, width: 52, align: 'right', value: (it) => (it.is_charge ? '' : fmtNum(it.unit_price, 3)) },
     { key: 'supplier', label: 'Supplier', width: 48, align: 'center', value: (it) => it.supplier || '' },
+    // When this line in particular falls due, as against the order's own
+    // Promised Delivery in the header. `itemsTable` drops a column with no
+    // data anywhere, so an order that does not use per-line dates prints
+    // exactly what it printed before. Despatched-on is deliberately not
+    // here: this document is an instruction going out, not a record of
+    // what came back, and the figure is derived rather than stored.
+    { key: 'scheduled_date', label: 'Promised', width: 52, align: 'center', value: (it) => fmtDate(it.scheduled_date) },
     { key: 'tax', label: 'Tax %', width: 30, align: 'right', value: (it) => (showTax ? `${it.tax_pct ?? 0}%` : '') },
     { key: 'amount', label: `Amount (${cur})`, width: 62, align: 'right', always: true, value: (it) => fmtMoney(it.amount, cur) },
   ];

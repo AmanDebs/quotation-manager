@@ -108,7 +108,7 @@ function getFull(id: number) {
     ...it,
     ...progress.perLine[i],
     production: production.get(i) ?? { planned: 0, produced: 0, rejected: 0, balance: 0, work_orders: 0 },
-    despatched: sent.get(i) ?? { qty: 0, packs: 0, trips: 0 },
+    despatched: sent.get(i) ?? { qty: 0, packs: 0, trips: 0, last_date: '' },
   }));
   order.column_config = JSON.parse(String(order.column_config || '{}'));
   order.dispatched_value = progress.dispatched_value;
