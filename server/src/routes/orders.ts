@@ -137,7 +137,7 @@ function getFull(id: number) {
 const headerFields = [
   'date', 'customer_id', 'quotation_id', 'is_export', 'order_through', 'spoc', 'po_number', 'po_date',
   'currency', 'tax_type', 'payment_terms', 'freight', 'insurance', 'inco_terms', 'container_count',
-  'advance_due', 'advance_amount', 'advance_received_date', 'destination', 'transport', 'freight_terms',
+  'advance_due', 'advance_amount', 'advance_received_date', 'destination', 'port_of_discharge', 'transport', 'freight_terms',
   'promised_date', 'scheduled_date', 'revised_date', 'actual_production_date', 'remarks', 'notes',
 ] as const;
 
@@ -163,6 +163,7 @@ function headerValues(body: Record<string, unknown>, existing?: Record<string, u
     advance_amount: Number(v('advance_amount', 0)),
     advance_received_date: String(v('advance_received_date')),
     destination: String(v('destination')),
+    port_of_discharge: String(v('port_of_discharge')),
     transport: String(v('transport')),
     freight_terms: String(v('freight_terms')),
     promised_date: String(v('promised_date')),
@@ -304,6 +305,8 @@ const lineColumns: Column<OrderLine>[] = [
   { header: 'Date', value: (r) => r.date, type: 'date' },
   { header: 'Customer', value: (r) => r.customer_name },
   { header: 'Issued by', value: (r) => r.company_name },
+  // Blank on a domestic order, which discharges at no port.
+  { header: 'Dest port', value: (r) => r.port_of_discharge },
   { header: 'Item', value: (r) => r.description },
   { header: 'Code', value: (r) => r.code },
   { header: 'Colour', value: (r) => r.color },
@@ -340,6 +343,7 @@ const orderColumns: Column<OrderRow>[] = [
   { header: 'Date', value: (r) => String(r.date ?? ''), type: 'date' },
   { header: 'Customer', value: (r) => String(r.customer_name ?? '') },
   { header: 'Issued by', value: (r) => (r.company_name == null ? '' : String(r.company_name)) },
+  { header: 'Dest port', value: (r) => String(r.port_of_discharge ?? '') },
   { header: 'PO number', value: (r) => String(r.po_number ?? '') },
   { header: 'PO date', value: (r) => String(r.po_date ?? ''), type: 'date' },
   { header: 'Promised', value: (r) => String(r.promised_date ?? ''), type: 'date' },
@@ -482,6 +486,7 @@ ordersRouter.get('/prefill/from-proforma/:piId', (req: AuthedRequest, res) => {
     freight: pi.freight,
     insurance: pi.insurance,
     destination: pi.final_destination,
+    port_of_discharge: pi.port_of_discharge,
     po_number: pi.po_number,
     po_date: pi.po_date,
     spoc: pi.prepared_by,

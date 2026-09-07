@@ -278,6 +278,14 @@ CREATE TABLE IF NOT EXISTS orders (
   advance_amount REAL NOT NULL DEFAULT 0,
   advance_received_date TEXT NOT NULL DEFAULT '',
   destination TEXT NOT NULL DEFAULT '',
+  -- The port the goods are discharged at, on an export order. Named to match
+  -- the proforma and the invoice rather than the export sheet's "Dest Port",
+  -- so one word means one thing along the chain and the prefill can carry it.
+  -- Order-level, not per line: measured across 141 proformas in the desk's own
+  -- export tracker, the port never once differed between lines of the same
+  -- document — it is repeated on every line there because a flat sheet has no
+  -- other way to say it. `destination` above stays the domestic delivery town.
+  port_of_discharge TEXT NOT NULL DEFAULT '',
   transport TEXT NOT NULL DEFAULT '',
   freight_terms TEXT NOT NULL DEFAULT '',
   promised_date TEXT NOT NULL DEFAULT '',

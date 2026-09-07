@@ -39,6 +39,13 @@ export interface OrderLine {
   created_by_name: string | null;
   is_export: number;
   order_status: string;
+  /**
+   * Where the goods are discharged, from the order. Blank on a domestic one.
+   * Read off the order rather than the line: in the desk's own export tracker
+   * it never differs between lines of one document — it is repeated there only
+   * because a flat sheet has no other way to say it.
+   */
+  port_of_discharge: string;
   /** Position of this line within its order — the index the whole chain uses. */
   order_line: number;
   product_id: number | null;
@@ -83,7 +90,7 @@ const SQL = `
     o.id AS order_id, o.number AS order_number, o.date, o.promised_date,
     o.customer_id, c.name AS customer_name, co.company_name,
     u.name AS created_by_name,
-    o.is_export, o.status AS order_status, o.currency,
+    o.is_export, o.status AS order_status, o.currency, o.port_of_discharge,
     l.pos AS order_line, l.product_id, l.description, l.code, l.color, l.unit,
     COALESCE(l.total_pcs, l.qty, 0) AS ordered,
     l.qty AS billing_qty,

@@ -141,6 +141,10 @@ addColumnIfMissing('proforma_invoices', 'notify_party_2', "TEXT NOT NULL DEFAULT
 // Where the goods go when that is not the billing address, and who they go
 // to. Additive, blank everywhere on the way in, so nothing already raised
 // changes what it prints: the ship-to block appears only once one is filled.
+// Where an export order's goods are discharged. Additive and blank on the way
+// in; the field is offered on an export order only.
+addColumnIfMissing('orders', 'port_of_discharge', "TEXT NOT NULL DEFAULT ''");
+
 // The sea leg of a despatch, and whether the documents have reached the buyer.
 // Additive and blank on the way in, so every trip already recorded reads
 // exactly as it did — a domestic lorry simply never fills them.

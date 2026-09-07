@@ -46,6 +46,8 @@ interface Draft {
   advance_amount: number;
   advance_received_date: string;
   destination: string;
+  /** Export only: where the goods discharge. */
+  port_of_discharge: string;
   transport: string;
   freight_terms: string;
   promised_date: string;
@@ -63,7 +65,7 @@ const emptyDraft = (): Draft => ({
   order_through: 'Phone', spoc: '', po_number: '', po_date: '',
   currency: 'INR', tax_type: 'igst', payment_terms: '', freight: 0, insurance: 0,
   inco_terms: '', container_count: '', advance_due: 0, advance_amount: 0, advance_received_date: '',
-  destination: '', transport: '', freight_terms: '', promised_date: '', scheduled_date: '',
+  destination: '', port_of_discharge: '', transport: '', freight_terms: '', promised_date: '', scheduled_date: '',
   revised_date: '', actual_production_date: '', remarks: '', notes: '', column_config: newColumnConfig(), items: [],
 });
 
@@ -365,6 +367,22 @@ export default function OrderFormPage() {
                   <IncoTermsInput isExport={!!draft.is_export} value={draft.inco_terms} onChange={(v) => set({ inco_terms: v })} />
                 </Field>
                 <Field label="Containers"><Input value={draft.container_count} onChange={(e) => set({ container_count: e.target.value })} placeholder="e.g. 2 X 40ft HQ" /></Field>
+                {/*
+                  Named to match the proforma and the invoice, so one word means
+                  one thing along the chain and booking an order carries it
+                  across. Order-level, not per line: in the desk's own export
+                  tracker the port never differs between lines of one document
+                  — 141 proformas, not once — so asking per line would be asking
+                  the same question four times on a four-line order. It shows on
+                  every line in the Order lines view, which is where it is read.
+                */}
+                <Field label="Destination Port">
+                  <Input
+                    value={draft.port_of_discharge}
+                    onChange={(e) => set({ port_of_discharge: e.target.value })}
+                    placeholder="e.g. Mogadishu, Somalia"
+                  />
+                </Field>
               </>
             )}
             {!isNew && existing!.quotation_number && (

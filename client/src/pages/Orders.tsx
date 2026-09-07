@@ -290,6 +290,9 @@ function LinesTable({ lines, showCompany, pager }: {
 }) {
   const navigate = useNavigate();
   const t = today();
+  // A domestic book has no discharge port on any row, and a column that is
+  // empty on every line for ever is worse than no column.
+  const anyPort = lines.some((l) => l.port_of_discharge);
 
   return (
     <Card className="overflow-x-auto">
@@ -304,6 +307,9 @@ function LinesTable({ lines, showCompany, pager }: {
                 <th className="pb-2 pr-3">Date</th>
                 <th className="pb-2 pr-3">Customer</th>
                 {showCompany && <th className="pb-2 pr-3">Issued By</th>}
+                {/* Only where any row has one: a domestic book would carry an
+                    empty column on every line for ever otherwise. */}
+                {anyPort && <th className="pb-2 pr-3">Dest Port</th>}
                 <th className="pb-2 pr-3">Item</th>
                 <th className="pb-2 pr-3">Colour</th>
                 <th className="pb-2 pr-3 text-right">Qty</th>
@@ -343,6 +349,11 @@ function LinesTable({ lines, showCompany, pager }: {
                     </td>
                     {showCompany && (
                       <td className="py-1.5 pr-3 text-xs text-slate-500">{repeat ? '' : l.company_name ?? '—'}</td>
+                    )}
+                    {anyPort && (
+                      <td className={`py-1.5 pr-3 ${repeat ? 'text-slate-300' : 'text-slate-500'}`}>
+                        {repeat ? '' : l.port_of_discharge || '—'}
+                      </td>
                     )}
                     <td className="py-1.5 pr-3">{l.description || '—'}</td>
                     <td className="py-1.5 pr-3 text-slate-500">{l.color || '—'}</td>

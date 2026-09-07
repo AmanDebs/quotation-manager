@@ -578,6 +578,8 @@ export interface OrderLine {
   /** Who booked the order. Null on one whose author has since been removed. */
   created_by_name: string | null;
   is_export: number; order_status: string; currency: string;
+  /** Where the goods discharge, from the order. Blank on a domestic one. */
+  port_of_discharge: string;
   order_line: number;
   product_id: number | null;
   description: string; code: string; color: string; unit: string;
@@ -711,6 +713,8 @@ export interface Order {
     currency_mismatch: { currency: string; amount: number }[];
   };
   destination: string; transport: string; freight_terms: string;
+  /** Export only: where the goods discharge. Named as on the proforma. */
+  port_of_discharge: string;
   promised_date: string; scheduled_date: string; revised_date: string; actual_production_date: string;
   /** Material issued against this order's jobs, at moving average. GET /:id only. */
   material_cost?: number;
