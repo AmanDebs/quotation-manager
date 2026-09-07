@@ -515,7 +515,7 @@ export default function ProformaFormPage() {
           {readOnly ? (
             <ReadOnlyItems items={draft.items} currency={draft.currency} />
           ) : (
-            <LineItemsEditor items={draft.items} onChange={(items) => set({ items })} currency={draft.currency} taxType={draft.tax_type} config={draft.column_config} omit={proformaOmit(!!draft.is_export)} forced={PROFORMA_FORCED} share={shareByLine} />
+            <LineItemsEditor items={draft.items} onChange={(items) => set({ items })} currency={draft.currency} taxType={draft.tax_type} config={draft.column_config} omit={proformaOmit(!!draft.is_export)} forced={PROFORMA_FORCED} share={draft.is_export ? shareByLine : undefined} />
           )}
           <HeaderCharges
             freight={draft.freight}
@@ -527,8 +527,14 @@ export default function ProformaFormPage() {
         </Card>
 
         {/* Working information, deliberately not on the PDF: it answers
-            "does the Container field above say the right thing?" */}
-        <ContainerFitment items={draft.items} plan={fitment} size={containerSize} onSize={setContainerSize} />
+            "does the Container field above say the right thing?" — which is
+            only ever asked on an export. A domestic sale goes on a lorry, and
+            the Containers field it would be checking is not offered there
+            either. The hooks behind it stay above the early returns whatever
+            the answer; only the panel is gated. */}
+        {!!draft.is_export && (
+          <ContainerFitment items={draft.items} plan={fitment} size={containerSize} onSize={setContainerSize} />
+        )}
 
         {/* Saved through its own endpoint, so it needs an id — and so saving a
             note cannot reset an approved proforma the way the form's Save does. */}
