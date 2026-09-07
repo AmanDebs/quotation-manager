@@ -350,6 +350,15 @@ export default function OrderFormPage() {
                 onChange={(v) => set({ payment_terms: v })}
               />
             </Field>
+            {/* Export-only, as they were in the card these came from. */}
+            {!!draft.is_export && (
+              <>
+                <Field label="INCO Terms">
+                  <IncoTermsInput isExport={!!draft.is_export} value={draft.inco_terms} onChange={(v) => set({ inco_terms: v })} />
+                </Field>
+                <Field label="Containers"><Input value={draft.container_count} onChange={(e) => set({ container_count: e.target.value })} placeholder="e.g. 2 X 40ft HQ" /></Field>
+              </>
+            )}
             {!isNew && existing!.quotation_number && (
               <Field label="From Quotation">
                 <Link to={`/quotations/${existing!.quotation_id}`} className="text-sm text-brand-600 hover:underline">{existing!.quotation_number}</Link>
@@ -372,26 +381,32 @@ export default function OrderFormPage() {
           </div>
         </Card>
 
-        <Card title="Production Plan & Delivery">
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <Field label="Promised Despatch"><Input type="date" value={draft.promised_date} onChange={(e) => set({ promised_date: e.target.value })} /></Field>
-            <Field label="Originally Scheduled"><Input type="date" value={draft.scheduled_date} onChange={(e) => set({ scheduled_date: e.target.value })} /></Field>
-            <Field label="Revised Date"><Input type="date" value={draft.revised_date} onChange={(e) => set({ revised_date: e.target.value })} /></Field>
-            <Field label="Actual Production"><Input type="date" value={draft.actual_production_date} onChange={(e) => set({ actual_production_date: e.target.value })} /></Field>
-            <Field label="Destination"><Input value={draft.destination} onChange={(e) => set({ destination: e.target.value })} placeholder={draft.is_export ? 'e.g. Nacala, Mozambique' : 'e.g. Hazipur'} /></Field>
-            <Field label="Transport"><Input value={draft.transport} onChange={(e) => set({ transport: e.target.value })} placeholder="e.g. Self, Rajkamal Transport, By Sea" /></Field>
-            <Field label="Freight Terms"><Input value={draft.freight_terms} onChange={(e) => set({ freight_terms: e.target.value })} placeholder="e.g. Ex-works, To pay" /></Field>
-            {!!draft.is_export && (
-              <>
-                <Field label="INCO Terms">
-                  <IncoTermsInput isExport={!!draft.is_export} value={draft.inco_terms} onChange={(v) => set({ inco_terms: v })} />
-                </Field>
-                <Field label="Containers"><Input value={draft.container_count} onChange={(e) => set({ container_count: e.target.value })} placeholder="e.g. 2 X 40ft HQ" /></Field>
-              </>
-            )}
-          </div>
-        </Card>
+        {/*
+          "Production Plan & Delivery" was removed 2026-09-07 at the client's
+          word — Promised Despatch, Originally Scheduled, Revised Date, Actual
+          Production, Destination, Transport and Freight Terms.
 
+          The **columns stay and the draft still round-trips them**, the rule the
+          header freight fields follow: an order raised before this keeps every
+          value it holds, an ordinary save cannot zero one, and the order PDF,
+          the spreadsheet export and the order book still print what is there.
+          What is gone is the only way to type a new one.
+
+          Two consequences worth knowing rather than discovering. The dashboard's
+          **overdue orders** counts orders past `promised_date`, and the order
+          book's Promised column and `next_due` read the same header field — all
+          three go quiet on orders raised from here on, since nothing can set it.
+          Per-line **Promised** (`order_items.scheduled_date`) is untouched: it is
+          a column in the item editor and prints on the order PDF, so a date per
+          line is still recorded. Destination and Transport are recorded per trip
+          in the despatch register, which is the record the lorry actually leaves
+          against.
+
+          INCO Terms and Containers were in this card too but are not part of
+          that removal — they are export-only and were hidden on the domestic
+          order this was asked about — so they move to Details, which is where
+          the quotation, proforma and invoice keep theirs.
+        */}
         <Card
           title="Order Items"
           actions={<ColumnsControl config={draft.column_config} onChange={(c) => set({ column_config: c })} columns={orderColumns()} />}
