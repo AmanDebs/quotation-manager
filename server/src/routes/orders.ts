@@ -5,7 +5,7 @@ import { computeTotals, round2, type LineItemInput } from '../services/totals.js
 import { productionByOrder } from '../services/production.js';
 import { despatchedByOrder } from './despatches.js';
 import { orderMaterialCost } from '../services/costing.js';
-import { orderAdvance } from '../services/receivables.js';
+import { orderAdvance, advanceForProforma } from '../services/receivables.js';
 import { orderLines, productDemand, countOrderLines, orderSearchClause,
   type Filters, type OrderLine, type ProductDemand } from '../services/orderLines.js';
 import { buildXlsx, attachmentName, type Column } from '../services/xlsx.js';
@@ -469,6 +469,14 @@ ordersRouter.get('/prefill/from-proforma/:piId', (req: AuthedRequest, res) => {
      * an unparseable line leaves the field blank rather than guessing zero.
      */
     advance_due: advanceDueFrom(String(pi.payment_terms ?? ''), Number(pi.grand_total) || 0),
+    /*
+     * What has already been banked, in the same shape `GET /orders/:id`
+     * returns, so the form shows one thing before and after the first save.
+     * Not a draft field: there is nothing to store, and an advance paid
+     * before the order is raised must not read as zero on the screen where
+     * the order is being created.
+     */
+    advance: advanceForProforma(piId),
     inco_terms: pi.inco_terms,
     container_count: pi.container_count,
     freight: pi.freight,

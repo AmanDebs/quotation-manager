@@ -292,9 +292,29 @@ export interface OrderAdvance {
  */
 export function orderAdvance(orderId: number): OrderAdvance {
   const pi = db.prepare(
-    'SELECT id, number FROM proforma_invoices WHERE order_id = ? ORDER BY id LIMIT 1'
-  ).get(orderId) as { id: number; number: string } | undefined;
-  if (!pi) return { pi_id: null, pi_number: '', amount_received: 0, last_date: '', currency_mismatch: [] };
+    'SELECT id FROM proforma_invoices WHERE order_id = ? ORDER BY id LIMIT 1'
+  ).get(orderId) as { id: number } | undefined;
+  return pi ? advanceForProforma(pi.id) : NO_ADVANCE;
+}
+
+const NO_ADVANCE: OrderAdvance = {
+  pi_id: null, pi_number: '', amount_received: 0, last_date: '', currency_mismatch: [],
+};
+
+/**
+ * The same block, asked of a proforma directly.
+ *
+ * Split out for the **order being booked**: the form is filled from
+ * `prefill/from-proforma` before any order row exists, so there is no id for
+ * `orderAdvance` to resolve backwards from — and an advance banked before the
+ * order is raised is exactly the case that must not read as zero on the screen
+ * where the order is being created.
+ */
+export function advanceForProforma(piId: number): OrderAdvance {
+  const pi = db.prepare('SELECT id, number FROM proforma_invoices WHERE id = ?').get(piId) as
+    | { id: number; number: string }
+    | undefined;
+  if (!pi) return NO_ADVANCE;
 
   const advance = proformaAdvance(pi.id);
   // The date of credit is the most recent payment that actually counted. A

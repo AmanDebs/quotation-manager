@@ -90,6 +90,7 @@ export default function OrderFormPage() {
 
   const [draft, setDraft] = useState<Draft>(emptyDraft());
   const [prefilled, setPrefilled] = useState(false);
+  const [prefillAdvance, setPrefillAdvance] = useState<Order['advance']>();
   const [tab, setTab] = useState<'details' | 'production' | 'material' | 'dispatch'>('details');
 
   // Jobs still to finish, shown on the tab so the floor's state is visible
@@ -125,23 +126,32 @@ export default function OrderFormPage() {
       ? `from-quotation/${fromQuotation}`
       : fromProforma ? `from-proforma/${fromProforma}` : null;
     if (isNew && source && !prefilled) {
-      api.get<Partial<Draft>>(`/api/orders/prefill/${source}`).then((p) => {
+      api.get<Partial<Draft> & { advance?: Order['advance'] }>(`/api/orders/prefill/${source}`).then((p) => {
+        // `advance` is not a draft field — there is nothing to store, and the
+        // server derives it on every read once the order exists. Held aside so
+        // it does not ride along in the save payload.
+        const { advance, ...rest } = p;
+        setPrefillAdvance(advance);
         setDraft((d) => ({
-          ...d, ...p,
-          customer_id: (p.customer_id as number) ?? d.customer_id,
+          ...d, ...rest,
+          customer_id: (rest.customer_id as number) ?? d.customer_id,
           // Carry the source's columns forward only when it actually has some. A
           // document saved before these defaults existed carries a blank config,
           // and spreading that over the draft would quietly undo them.
-          column_config: hasColumnPrefs(p.column_config) ? p.column_config : d.column_config,
+          column_config: hasColumnPrefs(rest.column_config) ? rest.column_config : d.column_config,
         }));
         setPrefilled(true);
       });
     }
   }, [isNew, fromQuotation, fromProforma, prefilled]);
 
-  // What the proforma behind this order has taken in. Derived on the server;
-  // absent on a new order, which has no proforma until it is saved.
-  const banked = existing?.advance;
+  /*
+   * What the proforma behind this order has taken in. Derived on the server in
+   * both directions: from the order once it exists, and from the proforma while
+   * one is being booked from it — an advance paid before the order is raised
+   * would otherwise read as zero on the very screen where it is created.
+   */
+  const banked = existing?.advance ?? prefillAdvance;
 
   const { markSaved, isDirty, prompt } = useUnsavedChanges(draft, {
     // Deferred, so the mutation declared just below is initialised by the
