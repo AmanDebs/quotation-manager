@@ -1340,11 +1340,29 @@ function exportDocGrid(s: Row, opts: {
           lv('Country of Origin of Goods', opts.origin || '—'),
           lv('Country of Final Destination', opts.finalDestination || '—'),
         ],
-        [
-          { ...lv('Consignee', opts.consignee || customerAddress(opts.buyer, false)), colSpan: 2, rowSpan: 2 }, {},
-          { ...lv('Notify 1', opts.notify1 || '—'), rowSpan: 2 },
-          { ...lv('Notify 2', opts.notify2 || '—'), rowSpan: 2 },
-        ],
+        /*
+         * Notify parties belong to a shipping document: an export consignment
+         * travelling on a bill of lading is announced to them. A domestic sale
+         * goes on a lorry and has nobody to notify, so those two cells printed
+         * `Notify 1: —  Notify 2: —` for the life of every domestic invoice and
+         * packing list. Dropped there, and the consignee takes the width they
+         * leave — on a domestic document that block is the **ship to**: the
+         * delivery party's name, address and its own GSTIN, which is what GST
+         * wants stated when it differs from the billing address. Hence the
+         * fuller label too; on an export "Consignee" is the term of art.
+         *
+         * Blank consignee still falls back to the buyer's own address, so a
+         * document delivering to the billing address reads exactly as before.
+         */
+        opts.reg.isExport
+          ? [
+              { ...lv('Consignee', opts.consignee || customerAddress(opts.buyer, false)), colSpan: 2, rowSpan: 2 }, {},
+              { ...lv('Notify 1', opts.notify1 || '—'), rowSpan: 2 },
+              { ...lv('Notify 2', opts.notify2 || '—'), rowSpan: 2 },
+            ]
+          : [
+              { ...lv('Consignee (Ship to)', opts.consignee || customerAddress(opts.buyer, false)), colSpan: 4, rowSpan: 2 }, {}, {}, {},
+            ],
         [{}, {}, {}, {}],
         [
           lv('Type of Shipment', opts.shipmentType || opts.despatch || '—'),
