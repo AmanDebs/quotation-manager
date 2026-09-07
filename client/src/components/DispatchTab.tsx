@@ -287,11 +287,41 @@ function DespatchModal({
           </tr>
         </thead>
         <tbody>
-          {rows.map((r, i) => (
+          {rows.map((r, i) => {
+            const line = items[r.order_line];
+            /*
+             * What this line still has to ship, and the most a trip may carry.
+             * The same arithmetic the server refuses on (`despatchLimitError`),
+             * so the form cannot offer a figure the save will reject — and the
+             * ceiling is the outstanding quantity **plus the standard 10%
+             * tolerance**, because a small over-shipment is expected and only a
+             * slipped digit is being caught.
+             *
+             * A line with no piece count of its own — a weight-billed one — has
+             * no ceiling to state, and says nothing rather than guessing.
+             */
+            const ordered = line?.total_pcs ?? null;
+            const left = ordered ? Math.max(0, ordered - (line?.despatched?.qty ?? 0)) : null;
+            const ceiling = left === null ? undefined : Math.round(left * 1.1);
+            const over = ceiling !== undefined && (r.qty ?? 0) > ceiling;
+            return (
             <tr key={i} className="border-b border-slate-100">
-              <td className="py-2 pr-2">{items[r.order_line]?.description || `Line ${r.order_line + 1}`}</td>
               <td className="py-2 pr-2">
-                <Input type="number" min={0} step="any" value={r.qty ?? ''} onChange={(e) => setRow(i, { qty: e.target.value === '' ? null : Number(e.target.value) })} />
+                {line?.description || `Line ${r.order_line + 1}`}
+                {left !== null && (
+                  <div className="text-xs text-slate-400">{fmtQty(left)} left to ship</div>
+                )}
+              </td>
+              <td className="py-2 pr-2">
+                <Input
+                  type="number" min={0} max={ceiling} step="any"
+                  className={`w-full text-right tabular-nums ${over ? 'border-red-400 focus:border-red-500' : ''}`}
+                  value={r.qty ?? ''}
+                  onChange={(e) => setRow(i, { qty: e.target.value === '' ? null : Number(e.target.value) })}
+                />
+                {over && (
+                  <div className="mt-0.5 text-xs text-red-600">at most {fmtQty(ceiling!)}</div>
+                )}
               </td>
               <td className="py-2 pr-2">
                 <Input type="number" min={0} step="any" value={r.packs ?? ''} onChange={(e) => setRow(i, { packs: e.target.value === '' ? null : Number(e.target.value) })} />
@@ -300,7 +330,8 @@ function DespatchModal({
                 <Input value={r.notes ?? ''} onChange={(e) => setRow(i, { notes: e.target.value })} />
               </td>
             </tr>
-          ))}
+            );
+          })}
         </tbody>
       </table>
       <p className="mt-2 text-xs text-slate-400">

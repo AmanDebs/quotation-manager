@@ -4,6 +4,7 @@ import { round2 } from '../services/totals.js';
 import type { AuthedRequest } from '../middleware/auth.js';
 import { scopeClause, canAccessCustomer } from '../middleware/scope.js';
 import { qcBlockError } from '../services/qc.js';
+import { despatchLimitError } from '../services/despatchLimits.js';
 import { syncOrderStatus } from '../services/orderStatus.js';
 import { listBody } from '../services/pagination.js';
 import { buildXlsx, attachmentName, type Column } from '../services/xlsx.js';
@@ -232,6 +233,10 @@ despatchesRouter.post('/', (req: AuthedRequest, res) => {
   // means and for the two things it deliberately does not block.
   const blocked = qcBlockError(order.id, items);
   if (blocked) return res.status(409).json({ error: blocked });
+  // A figure below zero, or far past what the line has left to ship. 400 and
+  // not 409: nothing conflicts, the number itself is wrong.
+  const outOfRange = despatchLimitError(order.id, items);
+  if (outOfRange) return res.status(400).json({ error: outOfRange });
   // An invoice can be named, but only one belonging to the same customer.
   const invoiceId = numOrNull(body.invoice_id);
   if (invoiceId !== null) {
@@ -280,6 +285,11 @@ despatchesRouter.put('/:id', (req: AuthedRequest, res) => {
   if (Array.isArray(body.items)) {
     const stopped = qcBlockError(Number(existing.order_id), body.items as ItemInput[]);
     if (stopped) return res.status(409).json({ error: stopped });
+    // This despatch's own lines are already in the register, so they are left
+    // out of "already sent" — otherwise re-saving an unchanged trip would read
+    // as a second shipment of the same goods and refuse itself.
+    const outOfRange = despatchLimitError(Number(existing.order_id), body.items as ItemInput[], id);
+    if (outOfRange) return res.status(400).json({ error: outOfRange });
   }
   transaction(() => {
     // order_id is not editable: moving a despatch would move goods onto
