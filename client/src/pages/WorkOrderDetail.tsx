@@ -12,6 +12,8 @@ import {
 import { LogOutput } from '../components/LogOutputModal';
 import { IssueModal } from '../components/IssueMaterialModal';
 import QcCheckModal from '../components/QcCheckModal';
+import { PdfLink } from '../components/PdfLink';
+import { useUnsavedChanges } from '../lib/useUnsavedChanges';
 import { useCan } from '../App';
 import { fmtDate, fmtMoney, fmtQty } from '../lib/format';
 
@@ -110,9 +112,24 @@ export default function WorkOrderDetailPage() {
     queryClient.invalidateQueries({ queryKey: ['dashboard'] });
   };
 
+  /*
+   * The same contract every document form has, and it is what a PDF link on
+   * this page needs: `PdfLink` takes `isDirty` as a **required** prop precisely
+   * so a page with an editable form cannot quietly open a document built from
+   * the saved version. This page has one — description, quantity, machine,
+   * dates — so it has to answer the question.
+   *
+   * It closes a second gap while it is here: leaving with the Details form
+   * edited used to lose them without a word.
+   */
+  const { markSaved, isDirty, prompt } = useUnsavedChanges(draft, {
+    run: () => save.mutateAsync(draft!),
+    can: !!draft && draft.qty_planned > 0,
+  });
+
   const save = useMutation({
     mutationFn: (d: Draft) => api.put<WorkOrder>(`/api/work-orders/${id}`, d),
-    onSuccess: refresh,
+    onSuccess: () => { markSaved(); refresh(); },
   });
   const setStatus = useMutation({
     mutationFn: (status: WorkOrderStatus) => api.post(`/api/work-orders/${id}/status`, { status }),
@@ -120,7 +137,8 @@ export default function WorkOrderDetailPage() {
   });
   const remove = useMutation({
     mutationFn: () => api.del(`/api/work-orders/${id}`),
-    onSuccess: () => { refresh(); navigate('/work-orders'); },
+    // The job is gone; there is nothing left to warn about losing.
+    onSuccess: () => { markSaved(); refresh(); navigate('/work-orders'); },
   });
 
   if (loadError) return <ErrorText error={loadError} />;
@@ -150,14 +168,9 @@ export default function WorkOrderDetailPage() {
         actions={
           <div className="flex flex-wrap items-center gap-2">
             {can('qc') && (
-              <a
-                href={`/api/pdf/qc-report/${job.id}`}
-                target="_blank"
-                rel="noreferrer"
-                className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm hover:border-slate-300"
-              >
+              <PdfLink href={`/api/pdf/qc-report/${job.id}`} isDirty={isDirty} title="Every inspection on this job, with the tolerance each reading was judged against">
                 📄 QC Report
-              </a>
+              </PdfLink>
             )}
             {can('output', 'full') && <Button variant="secondary" onClick={() => setLogging(true)}>Log output</Button>}
             {can('qc', 'full') && <Button variant="secondary" onClick={() => setInspecting(true)}>Record QC check</Button>}
@@ -414,7 +427,17 @@ export default function WorkOrderDetailPage() {
       {tab === 'quality' && (
         <Card
           title="Quality"
-          actions={can('qc', 'full') ? <Button variant="secondary" onClick={() => setInspecting(true)}>Record check</Button> : undefined}
+          actions={
+            <div className="flex items-center gap-2">
+              {/* Beside the checks it prints, which is where somebody looking
+                  at them thinks to ask for it — the header carries it too, for
+                  the same reason every document form carries its own. */}
+              <PdfLink href={`/api/pdf/qc-report/${job.id}`} isDirty={isDirty} title="Grouped by date and shift, each reading beside the tolerance it was judged against">
+                📄 QC Report
+              </PdfLink>
+              {can('qc', 'full') && <Button variant="secondary" onClick={() => setInspecting(true)}>Record check</Button>}
+            </div>
+          }
         >
           {/*
             Whose specification applies is part of the answer, not a detail: the
@@ -472,6 +495,8 @@ export default function WorkOrderDetailPage() {
         </Card>
       )}
 
+      {/* Renders nothing until a navigation is actually blocked. */}
+      {prompt}
       {logging && <LogOutput job={job} onClose={() => setLogging(false)} onSaved={refresh} />}
       {issuing && <IssueModal job={job} onClose={() => setIssuing(false)} onSaved={refresh} />}
       {inspecting && <QcCheckModal job={job} onClose={() => setInspecting(false)} onSaved={refresh} />}
