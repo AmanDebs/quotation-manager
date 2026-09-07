@@ -24,6 +24,7 @@ import PackingListsPage from './pages/PackingLists';
 import PackingListFormPage from './pages/PackingListForm';
 import FollowupsPage from './pages/Followups';
 import WorkOrdersPage from './pages/WorkOrders';
+import WorkOrderDetailPage from './pages/WorkOrderDetail';
 import QualityPage from './pages/Quality';
 import DespatchesPage from './pages/Despatches';
 import StockPage from './pages/Stock';
@@ -198,6 +199,7 @@ export const routes: RouteObject[] = [
       { path: '/followups', element: <Needs fn="followup"><FollowupsPage /></Needs> },
       { path: '/payments', element: <Needs fn="payment"><PaymentsPage /></Needs> },
       { path: '/work-orders', element: <Needs fn="work_order"><WorkOrdersPage /></Needs> },
+      { path: '/work-orders/:id', element: <Needs fn="work_order"><WorkOrderDetailPage /></Needs> },
       { path: '/quality', element: <Needs fn="qc"><QualityPage /></Needs> },
       { path: '/despatches', element: <Needs fn="dispatch"><DespatchesPage /></Needs> },
       { path: '/stock', element: <Needs fn="material"><StockPage /></Needs> },

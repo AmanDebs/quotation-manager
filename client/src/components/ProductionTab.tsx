@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Order, WorkOrder, WorkOrderStatus, Location, Machine, Mould, Process } from '../types';
@@ -170,7 +171,12 @@ export default function ProductionTab({ order }: { order: Order }) {
               <tbody>
                 {jobs.map((w) => (
                   <tr key={w.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50">
-                    <td className="py-2 pr-3 font-medium">{w.number}</td>
+                    <td className="py-2 pr-3 font-medium">
+                      {/* The job has its own page now: its output, the material
+                          drawn against it and its inspections, without the
+                          siblings this table shows beside it. */}
+                      <Link to={`/work-orders/${w.id}`} className="text-brand-600 hover:underline">{w.number}</Link>
+                    </td>
                     <td className="py-2 pr-3">
                       <div>{lineLabel(w.order_line)}</div>
                       {w.location_name && <div className="text-xs text-slate-400">{w.location_name}</div>}
@@ -310,7 +316,8 @@ export default function ProductionTab({ order }: { order: Order }) {
 }
 
 /** A day's output on one job, and the entries already booked against it. */
-function LogOutput({ job, onClose, onSaved }: { job: WorkOrder; onClose: () => void; onSaved: () => void }) {
+/** Shared with the work order's own page, which asks the same thing of one job. */
+export function LogOutput({ job, onClose, onSaved }: { job: WorkOrder; onClose: () => void; onSaved: () => void }) {
   const [entry, setEntry] = useState({ date: today(), shift: '', qty_ok: 0, qty_reject: 0, operator: '', notes: '' });
 
   const { data: full } = useQuery({

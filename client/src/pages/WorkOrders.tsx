@@ -110,7 +110,9 @@ export default function WorkOrdersPage() {
                   && !['done', 'cancelled'].includes(w.status);
                 return (
                   <tr key={w.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50">
-                    <td className="py-2 pr-3 font-medium">{w.number}</td>
+                    <td className="py-2 pr-3 font-medium">
+                      <Link to={`/work-orders/${w.id}`} className="text-brand-600 hover:underline">{w.number}</Link>
+                    </td>
                     <td className="py-2 pr-3">
                       <Link to={`/orders/${w.order_id}`} className="text-brand-600 hover:underline">{w.order_number}</Link>
                     </td>

@@ -191,7 +191,8 @@ export default function MaterialTab({ order }: { order: Order }) {
   );
 }
 
-function IssueModal({ job, onClose, onSaved }: { job: WorkOrder; onClose: () => void; onSaved: () => void }) {
+/** Shared with the work order's own page: issuing is a job-level act either way. */
+export function IssueModal({ job, onClose, onSaved }: { job: WorkOrder; onClose: () => void; onSaved: () => void }) {
   const [form, setForm] = useState({
     material_id: '', qty: 0, date: today(), location_id: String(job.location_id ?? ''), note: '',
   });

@@ -571,7 +571,7 @@ export function Card({ title, children, actions, className = '' }: { title?: str
   );
 }
 
-export function PageHeader({ title, subtitle, actions }: { title: string; subtitle?: string; actions?: ReactNode }) {
+export function PageHeader({ title, subtitle, actions }: { title: string; subtitle?: ReactNode; actions?: ReactNode }) {
   return (
     <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
       <div>
