@@ -217,11 +217,29 @@ interface HeaderOpts {
 /**
  * How tall the logo may be, in points.
  *
- * Matched to the right-hand text stack — company name, address, contacts and
- * the registration line, about 52pt — so the letterhead row is as tall as its
- * words and no taller.
+ * Kept **under** the right-hand text stack rather than level with it. That
+ * stack — company name, address, contacts and the registration line — measures
+ * about 52.7pt, and a `columns` row is as tall as its taller side: at 56 a logo
+ * squarer than 2.8:1 hit the cap, became the taller side and pushed the theme
+ * rule down with it (measured: y 86 against 82.67 for a wide one, on the same
+ * quotation). At 44 the text is always the taller side, so the letterhead is
+ * the same height whatever logo a company uploads.
+ *
+ * Asked to be smaller on 2026-09-07. It is the cap that binds on the Aglo mark
+ * — roughly 2.6:1, so the 158pt width never comes into it — which is why the
+ * number to change is this one and not the width.
  */
-const LOGO_MAX_H = 56;
+const LOGO_MAX_H = 44;
+
+/**
+ * How far the logo sits above the text beside it, in points.
+ *
+ * Both columns start at the top margin, which put the image's top edge level
+ * with the cap height of the company name. Lifting it slightly sets the mark
+ * off from the block of type without touching the row height — the row is
+ * measured from the text side now, so this cannot move the rule.
+ */
+const LOGO_LIFT = 4;
 
 function companyHeader(s: Row, opts: HeaderOpts = {}): Content[] {
   const right: any = {
@@ -259,7 +277,13 @@ function companyHeader(s: Row, opts: HeaderOpts = {}): Content[] {
   // rather than costing every document a gap. Re-uploading a tightly cropped
   // logo is the way to get the size back.
   const cols: Content = s.logo
-    ? { columns: [{ image: s.logo, fit: [158, LOGO_MAX_H] as [number, number], width: 158 }, right], columnGap: 8 }
+    ? {
+        columns: [
+          { image: s.logo, fit: [158, LOGO_MAX_H] as [number, number], width: 158, margin: [0, -LOGO_LIFT, 0, 0] },
+          right,
+        ],
+        columnGap: 8,
+      }
     : right;
   return [
     cols,
