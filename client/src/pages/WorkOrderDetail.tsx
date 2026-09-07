@@ -9,8 +9,8 @@ import {
   Button, Card, EmptyState, ErrorText, Field, Input, PageHeader, Select, Tabs, Textarea,
   CAPTION_CLASS, TH_CLASS,
 } from '../components/ui';
-import { LogOutput } from '../components/ProductionTab';
-import { IssueModal } from '../components/MaterialTab';
+import { LogOutput } from '../components/LogOutputModal';
+import { IssueModal } from '../components/IssueMaterialModal';
 import QcCheckModal from '../components/QcCheckModal';
 import { useCan } from '../App';
 import { fmtDate, fmtMoney, fmtQty } from '../lib/format';

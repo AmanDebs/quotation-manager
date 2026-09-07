@@ -1,9 +1,8 @@
-import { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
-import type { Order, WorkOrder, Material, Location, StockRow } from '../types';
-import { Button, Input, Select, Field, Card, EmptyState, ErrorText, Modal, TH_CLASS } from './ui';
-import { fmtQty, fmtMoney, today } from '../lib/format';
+import type { Order, WorkOrder, StockRow } from '../types';
+import { Card, EmptyState, TH_CLASS } from './ui';
+import { fmtQty, fmtMoney } from '../lib/format';
 
 /**
  * What this order needs, and whether it is in the store.
@@ -14,8 +13,6 @@ import { fmtQty, fmtMoney, today } from '../lib/format';
  * shortfall report that silently skips half the floor is worse than none.
  */
 export default function MaterialTab({ order }: { order: Order }) {
-  const queryClient = useQueryClient();
-  const [issuing, setIssuing] = useState<WorkOrder | null>(null);
 
   const { data: jobs = [] } = useQuery({
     queryKey: ['work-orders', String(order.id)],
@@ -152,97 +149,14 @@ export default function MaterialTab({ order }: { order: Order }) {
         )}
       </Card>
 
-      <Card title="Issue material to a job">
-        {open.length === 0 ? (
-          <EmptyState message="Nothing open to issue against." />
-        ) : (
-          <table className="w-full text-sm">
-            <tbody>
-              {open.map((w) => (
-                <tr key={w.id} className="border-b border-slate-100 last:border-0">
-                  <td className="py-2 pr-3 font-medium">{w.number}</td>
-                  <td className="py-2 pr-3">{w.description || w.product_name || '—'}</td>
-                  <td className="py-2 pr-3 text-xs text-slate-500">{w.location_name ?? 'no plant set'}</td>
-                  <td className="py-2 text-right">
-                    <Button variant="ghost" onClick={() => setIssuing(w)}>Issue</Button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-        <p className="mt-2 text-xs text-slate-400">
-          Issuing takes material out of the plant’s stock and records it against the job, so planned
-          consumption can be compared with what was actually drawn.
-        </p>
-      </Card>
-
-      {issuing && (
-        <IssueModal
-          job={issuing}
-          onClose={() => setIssuing(null)}
-          onSaved={() => {
-            queryClient.invalidateQueries({ queryKey: ['stock'] });
-            queryClient.invalidateQueries({ queryKey: ['work-order-details'] });
-          }}
-        />
-      )}
+      {/*
+        The "Issue material to a job" card was here, one row per open job with
+        an Issue button. Issuing is a **job-level** act — `material_moves`
+        carries a `work_order_id` — and the job now has a page that does it in
+        context, beside what that job needs and what it has already drawn. A
+        second door to the same modal, from a list that repeats the Production
+        tab's, was the copy worth losing.
+      */}
     </div>
-  );
-}
-
-/** Shared with the work order's own page: issuing is a job-level act either way. */
-export function IssueModal({ job, onClose, onSaved }: { job: WorkOrder; onClose: () => void; onSaved: () => void }) {
-  const [form, setForm] = useState({
-    material_id: '', qty: 0, date: today(), location_id: String(job.location_id ?? ''), note: '',
-  });
-  const { data: materials = [] } = useQuery({ queryKey: ['master', 'materials', false], queryFn: () => api.get<Material[]>('/api/materials') });
-  const { data: locations = [] } = useQuery({ queryKey: ['master', 'locations', false], queryFn: () => api.get<Location[]>('/api/locations') });
-
-  const issue = useMutation({
-    mutationFn: () => api.post('/api/stock/issue', {
-      work_order_id: job.id,
-      material_id: Number(form.material_id),
-      qty: form.qty,
-      date: form.date,
-      location_id: form.location_id ? Number(form.location_id) : null,
-      note: form.note,
-    }),
-    onSuccess: () => { onSaved(); onClose(); },
-  });
-
-  const unit = materials.find((m) => m.id === Number(form.material_id))?.unit ?? '';
-
-  return (
-    <Modal title={`Issue to ${job.number}`} onClose={onClose}>
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <Field label="Material *" className="col-span-2">
-          <Select value={form.material_id} onChange={(e) => setForm({ ...form, material_id: e.target.value })}>
-            <option value="">— choose —</option>
-            {materials.map((m) => <option key={m.id} value={m.id}>{m.name} ({m.unit})</option>)}
-          </Select>
-        </Field>
-        <Field label={`Quantity ${unit ? `(${unit})` : ''} *`}>
-          <Input type="number" min={0} step="any" value={form.qty || ''} onChange={(e) => setForm({ ...form, qty: Number(e.target.value) })} />
-        </Field>
-        <Field label="Date"><Input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} /></Field>
-        <Field label="Out of which plant *" className="col-span-2">
-          <Select value={form.location_id} onChange={(e) => setForm({ ...form, location_id: e.target.value })}>
-            <option value="">— choose —</option>
-            {locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
-          </Select>
-        </Field>
-        <Field label="Note" className="col-span-2">
-          <Input value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} />
-        </Field>
-      </div>
-      <ErrorText error={issue.error} />
-      <div className="mt-4 flex justify-end gap-2">
-        <Button variant="secondary" onClick={onClose}>Cancel</Button>
-        <Button onClick={() => issue.mutate()} disabled={issue.isPending || !form.material_id || !form.qty}>
-          {issue.isPending ? 'Issuing…' : 'Issue'}
-        </Button>
-      </div>
-    </Modal>
   );
 }
