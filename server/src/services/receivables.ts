@@ -258,3 +258,58 @@ export function receivedByInvoice(): Map<number, number> {
   }
   return received;
 }
+
+/** What an order's proforma has actually taken in. */
+export interface OrderAdvance {
+  /** The proforma the order was booked from, if there is one. */
+  pi_id: number | null;
+  pi_number: string;
+  amount_received: number;
+  /** When the most recent matching payment landed, for "Date of Credit". */
+  last_date: string;
+  /** Payments in another currency, counted by nobody and reported instead. */
+  currency_mismatch: { currency: string; amount: number }[];
+}
+
+/**
+ * The advance behind an order, derived rather than stored.
+ *
+ * An order has no `pi_id` — the link lives on `proforma_invoices.order_id`, the
+ * back-pointer `dispatchProgress` walks — so this resolves it the same way and
+ * then asks `proformaAdvance`, which owns the currency rule. Nothing here is a
+ * second opinion about money: the order page, the proforma page and the order
+ * PDF all end up quoting one figure.
+ *
+ * **Derived, because the timing is against a copy.** The advance is normally
+ * banked against the proforma *after* the order is booked, which is the whole
+ * point of an advance and the reason `lockError` deliberately leaves payments
+ * alone on a locked proforma — so a figure copied onto the order at booking
+ * would be zero on almost every order, and stale on the rest.
+ *
+ * The first proforma wins where two somehow point at one order, the rule
+ * `quotationLockedBy` follows; `POST /orders` refuses to claim a proforma that
+ * already carries an `order_id`, so that is a belt-and-braces case.
+ */
+export function orderAdvance(orderId: number): OrderAdvance {
+  const pi = db.prepare(
+    'SELECT id, number FROM proforma_invoices WHERE order_id = ? ORDER BY id LIMIT 1'
+  ).get(orderId) as { id: number; number: string } | undefined;
+  if (!pi) return { pi_id: null, pi_number: '', amount_received: 0, last_date: '', currency_mismatch: [] };
+
+  const advance = proformaAdvance(pi.id);
+  // The date of credit is the most recent payment that actually counted. A
+  // date drawn from a payment in another currency would name money nothing
+  // was credited with, so the same `sameCurrency` rule decides both figures.
+  const cur = String(
+    (db.prepare('SELECT currency FROM proforma_invoices WHERE id = ?').get(pi.id) as { currency: string }).currency
+  );
+  const counted = advance.payments.filter((p) => sameCurrency(p.currency, cur));
+  const last = counted.length ? String(counted[counted.length - 1].date ?? '') : '';
+  return {
+    pi_id: pi.id,
+    pi_number: pi.number,
+    amount_received: advance.amount_received,
+    last_date: last,
+    currency_mismatch: advance.currency_mismatch,
+  };
+}

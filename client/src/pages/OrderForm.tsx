@@ -14,7 +14,7 @@ import LineItemsEditor from '../components/LineItemsEditor';
 import ColumnsControl, { newColumnConfig, hasColumnPrefs, orderColumns, ORDER_FORCED } from '../components/ColumnsControl';
 import FollowupButton from '../components/FollowupButton';
 import { ORDER_STATUSES, orderStatusLabel } from './Orders';
-import { today } from '../lib/format';
+import { today, fmtMoney, fmtDate } from '../lib/format';
 import { useDefaultNotes } from '../lib/useDefaultNotes';
 import { useUnsavedChanges } from '../lib/useUnsavedChanges';
 import HistoryCard from '../components/HistoryCard';
@@ -138,6 +138,10 @@ export default function OrderFormPage() {
       });
     }
   }, [isNew, fromQuotation, fromProforma, prefilled]);
+
+  // What the proforma behind this order has taken in. Derived on the server;
+  // absent on a new order, which has no proforma until it is saved.
+  const banked = existing?.advance;
 
   const { markSaved, isDirty, prompt } = useUnsavedChanges(draft, {
     // Deferred, so the mutation declared just below is initialised by the
@@ -372,13 +376,47 @@ export default function OrderFormPage() {
             <Field label={`Advance Due (${draft.currency})`}>
               <Input type="number" min={0} step="any" value={draft.advance_due || ''} onChange={(e) => set({ advance_due: Number(e.target.value) })} />
             </Field>
-            <Field label={`Advance Received (${draft.currency})`}>
-              <Input type="number" min={0} step="any" value={draft.advance_amount || ''} onChange={(e) => set({ advance_amount: Number(e.target.value) })} />
-            </Field>
-            <Field label="Date of Credit">
-              <Input type="date" value={draft.advance_received_date} onChange={(e) => set({ advance_received_date: e.target.value })} />
-            </Field>
+            {/*
+              Received and Date of Credit are **read from the proforma** once
+              one is linked, not typed: they are what the bank shows, and a
+              figure somebody types here can contradict the payment record —
+              the same call the per-line Despatched date makes about the
+              despatch register. An order booked without a proforma keeps the
+              boxes, having nothing else to go on.
+            */}
+            {banked?.pi_id ? (
+              <>
+                <Field label={`Advance Received (${draft.currency})`}>
+                  <div className="px-0.5 py-1.5 text-sm text-slate-900 tabular-nums">
+                    {fmtMoney(banked.amount_received, draft.currency)}
+                  </div>
+                </Field>
+                <Field label="Date of Credit">
+                  <div className="px-0.5 py-1.5 text-sm text-slate-900">{fmtDate(banked.last_date) || '—'}</div>
+                </Field>
+              </>
+            ) : (
+              <>
+                <Field label={`Advance Received (${draft.currency})`}>
+                  <Input type="number" min={0} step="any" value={draft.advance_amount || ''} onChange={(e) => set({ advance_amount: Number(e.target.value) })} />
+                </Field>
+                <Field label="Date of Credit">
+                  <Input type="date" value={draft.advance_received_date} onChange={(e) => set({ advance_received_date: e.target.value })} />
+                </Field>
+              </>
+            )}
           </div>
+          {banked?.pi_id && (
+            <p className="mt-1.5 text-xs text-slate-500">
+              Advance received is what has been banked against{' '}
+              <Link to={`/proformas/${banked.pi_id}`} className="text-brand-600 hover:underline">{banked.pi_number}</Link>
+              , so it keeps up as payments are recorded there.
+              {banked.currency_mismatch.length > 0 && (
+                <> Not counted: {banked.currency_mismatch.map((m) => `${m.amount} ${m.currency}`).join(', ')} —
+                  paid in another currency, so it is credited to nothing.</>
+              )}
+            </p>
+          )}
         </Card>
 
         {/*

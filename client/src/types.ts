@@ -686,6 +686,17 @@ export interface Order {
   currency: string; tax_type: TaxType; payment_terms: string;
   freight: number; insurance: number; inco_terms: string; container_count: string;
   advance_due: number; advance_amount: number; advance_received_date: string;
+  /**
+   * What the proforma this order was booked from has actually taken in.
+   * Derived on every read, never stored; absent until the order is saved.
+   */
+  advance?: {
+    pi_id: number | null;
+    pi_number: string;
+    amount_received: number;
+    last_date: string;
+    currency_mismatch: { currency: string; amount: number }[];
+  };
   destination: string; transport: string; freight_terms: string;
   promised_date: string; scheduled_date: string; revised_date: string; actual_production_date: string;
   /** Material issued against this order's jobs, at moving average. GET /:id only. */

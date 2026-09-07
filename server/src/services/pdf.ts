@@ -5,7 +5,7 @@ import { inflateSync } from 'node:zlib';
 import { db } from '../db/connection.js';
 import { amountInWords } from './amountInWords.js';
 import { round2, isPieceBasis, piecesPerBillingUnit } from './totals.js';
-import { invoiceReceivable, proformaAdvance } from './receivables.js';
+import { invoiceReceivable, proformaAdvance, orderAdvance } from './receivables.js';
 import { paramsFor, specOwner, checksForWorkOrder } from './qc.js';
 import { getCompany, defaultCompany } from './companies.js';
 
@@ -974,6 +974,19 @@ export function buildOrderPdf(id: number): TDocumentDefinitions {
     ...(o.payment_terms ? [['Payment Terms', o.payment_terms] as [string, string]] : []),
   ];
 
+  /*
+   * What has been banked against the proforma this order was booked from, so
+   * the printed order agrees with the screen and with the proforma itself.
+   *
+   * The stored column is the fallback, not the answer: it is what somebody
+   * typed before this was derived, and an order with no proforma behind it has
+   * nothing else to go on — so an order already on file prints exactly what it
+   * printed before, and one with a proforma prints what the bank actually shows.
+   */
+  const banked = orderAdvance(Number(o.id));
+  const advanceReceived = banked.amount_received || Number(o.advance_amount) || 0;
+  const advanceDate = banked.amount_received ? banked.last_date : String(o.advance_received_date ?? '');
+
   const deliveryInfo: [string, string][] = [
     ...(o.promised_date ? [['Promised Despatch', fmtDate(o.promised_date)] as [string, string]] : []),
     ...(o.scheduled_date ? [['Production Scheduled', fmtDate(o.scheduled_date)] as [string, string]] : []),
@@ -983,8 +996,8 @@ export function buildOrderPdf(id: number): TDocumentDefinitions {
     ...(o.inco_terms ? [['INCO Terms', o.inco_terms] as [string, string]] : []),
     ...(o.container_count ? [['Containers', o.container_count] as [string, string]] : []),
     ...(Number(o.advance_due) ? [['Advance Due', fmtMoney(o.advance_due, cur)] as [string, string]] : []),
-    ...(Number(o.advance_amount)
-      ? [['Advance Received', `${fmtMoney(o.advance_amount, cur)}${o.advance_received_date ? ` on ${fmtDate(o.advance_received_date)}` : ''}`] as [string, string]]
+    ...(advanceReceived
+      ? [['Advance Received', `${fmtMoney(advanceReceived, cur)}${advanceDate ? ` on ${fmtDate(advanceDate)}` : ''}`] as [string, string]]
       : []),
   ];
 

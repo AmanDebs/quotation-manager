@@ -5,6 +5,7 @@ import { computeTotals, round2, type LineItemInput } from '../services/totals.js
 import { productionByOrder } from '../services/production.js';
 import { despatchedByOrder } from './despatches.js';
 import { orderMaterialCost } from '../services/costing.js';
+import { orderAdvance } from '../services/receivables.js';
 import { orderLines, productDemand, countOrderLines, orderSearchClause,
   type Filters, type OrderLine, type ProductDemand } from '../services/orderLines.js';
 import { buildXlsx, attachmentName, type Column } from '../services/xlsx.js';
@@ -115,6 +116,15 @@ function getFull(id: number) {
   order.pending_value = progress.pending_value;
   order.fully_dispatched = progress.fully_dispatched;
   order.any_dispatched = progress.any_dispatched;
+  /*
+   * What has actually been banked against the proforma this order was booked
+   * from. Derived, never stored: the advance normally arrives *after* the
+   * order exists, so a figure copied at booking would read zero on almost
+   * every order — and `receivables.ts` owns the currency rule, so asking it is
+   * what keeps the order page, the proforma page and the order PDF quoting one
+   * figure instead of three.
+   */
+  order.advance = orderAdvance(id);
   // Downstream documents raised from this order.
   order.proformas = db.prepare('SELECT id, number, date, status, grand_total FROM proforma_invoices WHERE order_id = ? ORDER BY id').all(id);
   order.invoices = db.prepare(
@@ -414,6 +424,17 @@ ordersRouter.get('/prefill/from-quotation/:quotationId', (req: AuthedRequest, re
  * invoices raised from that proforma, and copying the figure onto the order as
  * well would show the same money twice on the dashboard.
  */
+/**
+ * The advance a set of payment terms asks for, in money, or 0 when it asks for
+ * none. Reads the leading percentage of a term like "40% Advance and Balance
+ * against shipping documents"; a credit term names no percentage and gives 0.
+ */
+function advanceDueFrom(terms: string, total: number): number {
+  const m = terms.match(/(\d+(?:\.\d+)?)\s*%\s*advance/i);
+  if (!m || !total) return 0;
+  return round2((Number(m[1]) / 100) * total);
+}
+
 ordersRouter.get('/prefill/from-proforma/:piId', (req: AuthedRequest, res) => {
   const piId = Number(req.params.piId);
   const pi = db.prepare('SELECT * FROM proforma_invoices WHERE id = ?').get(piId) as Record<string, unknown> | undefined;
@@ -435,6 +456,19 @@ ordersRouter.get('/prefill/from-proforma/:piId', (req: AuthedRequest, res) => {
     tax_type: pi.tax_type,
     is_export: pi.is_export,
     payment_terms: pi.payment_terms,
+    /*
+     * What the terms say is due up front, as a starting figure.
+     *
+     * A **prefill, not a derivation** — unlike Advance *Received*, which is a
+     * fact the payment record owns. What is due is a commitment that can be
+     * renegotiated after the order is booked, so it is copied once and stays
+     * editable, in the shape every other carry-forward field uses.
+     *
+     * Gated on the terms actually naming a percentage: "30% Advance and
+     * Balance before Dispatch" gives 30, "30 Days Credit" gives nothing, and
+     * an unparseable line leaves the field blank rather than guessing zero.
+     */
+    advance_due: advanceDueFrom(String(pi.payment_terms ?? ''), Number(pi.grand_total) || 0),
     inco_terms: pi.inco_terms,
     container_count: pi.container_count,
     freight: pi.freight,
