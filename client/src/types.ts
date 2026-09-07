@@ -792,6 +792,17 @@ export interface Proforma {
   checks?: DocumentFinding[];
 }
 
+/** One trip that was billed under an invoice, as its page reports it. */
+export interface InvoiceDespatch {
+  id: number; date: string; destination: string;
+  cn_no: string; vehicle_no: string;
+  bl_no: string; container_no: string; etd: string; eta: string;
+  docs_status: string; docs_method: string;
+  order_id: number; order_number: string;
+  location_name: string | null; transporter_name: string | null;
+  pieces: number; boxes: number;
+}
+
 export interface Invoice {
   id: number; number: string; date: string; pi_id: number | null; customer_id: number; company_id?: number;
   consignee: string; ship_to_name: string; ship_to_gstin: string;
@@ -833,6 +844,13 @@ export interface Invoice {
   packing?: PackingList;
   /** What is still missing before approval — see `DocumentFinding`. */
   checks?: DocumentFinding[];
+  /**
+   * The trips billed under this invoice, newest last. **Absent — not empty —
+   * for a caller who may not read despatches**, which is how Sales (`invoice:
+   * view`, `dispatch: none`) sees an invoice without the despatch register
+   * arriving with it. Render the card only when the key is present.
+   */
+  despatches?: InvoiceDespatch[];
 }
 
 export interface PackingListItem {

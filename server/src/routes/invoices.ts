@@ -3,7 +3,7 @@ import { db, transaction } from '../db/connection.js';
 import { nextNumber, exportChangeError } from '../services/numbering.js';
 import { exportOnlyInvoice } from '../services/permissions.js';
 import { computeTotals, round2, type LineItemInput } from '../services/totals.js';
-import type { AuthedRequest } from '../middleware/auth.js';
+import { allows, type AuthedRequest } from '../middleware/auth.js';
 import { scopeClause, canAccessCustomer, linkError, customerChangeError } from '../middleware/scope.js';
 import { resolveCompanyId } from '../services/companies.js';
 import { syncOrderStatus } from '../services/orderStatus.js';
@@ -68,13 +68,49 @@ const listSql = `
   LEFT JOIN users u ON u.id = i.created_by
   LEFT JOIN users a ON a.id = i.approved_by`;
 
-function getFull(id: number) {
+/**
+ * `req` is optional only so a caller that has none omits the despatch block
+ * rather than leaking it — the safe direction. Every caller here does pass it.
+ */
+function getFull(id: number, req?: AuthedRequest) {
   const inv = db.prepare(`${listSql} WHERE i.id = ?`).get(id) as Record<string, unknown> | undefined;
   if (!inv) return undefined;
   inv.items = db.prepare('SELECT * FROM invoice_items WHERE invoice_id = ? ORDER BY sort_order, id').all(id);
   inv.column_config = JSON.parse(String(inv.column_config || '{}'));
   // See the quotation's own getFull: shown on the form, not sprung on Submit.
   inv.checks = checkDocument('commercial_invoices', id);
+  /*
+   * The trips billed under this invoice. You could always see the invoice from
+   * a despatch; this is the other direction, which only the delete guard used
+   * to know about.
+   *
+   * **Absent, not empty, for a caller who may not read despatches** — the rule
+   * `customerSummary` states. Sales holds `invoice: view` and `dispatch: none`,
+   * so an invoice page mounted on the invoice function must not carry the
+   * despatch register through the back door. Decided here rather than on the
+   * client, because a copy of the access table on the client is a second policy
+   * and it drifts.
+   *
+   * This is a *record of which trip was billed under which document*, not a
+   * second opinion about progress: `dispatchProgress()` still walks the
+   * invoices to the order and never touches this table.
+   */
+  if (req && allows(req, 'dispatch')) {
+    inv.despatches = db.prepare(
+      `SELECT d.id, d.date, d.destination, d.cn_no, d.vehicle_no, d.bl_no, d.container_no,
+              d.etd, d.eta, d.docs_status, d.docs_method,
+              o.id AS order_id, o.number AS order_number,
+              l.name AS location_name, t.name AS transporter_name,
+              COALESCE((SELECT SUM(di.qty) FROM despatch_items di WHERE di.despatch_id = d.id), 0) AS pieces,
+              COALESCE((SELECT SUM(di.packs) FROM despatch_items di WHERE di.despatch_id = d.id), 0) AS boxes
+         FROM despatches d
+         JOIN orders o ON o.id = d.order_id
+         LEFT JOIN locations l ON l.id = d.location_id
+         LEFT JOIN transporters t ON t.id = d.transporter_id
+        WHERE d.invoice_id = ?
+        ORDER BY d.date, d.id`
+    ).all(id);
+  }
   /**
    * Quantity variance against the source proforma — the 10% clause — computed
    * here for the client to show.
@@ -378,7 +414,7 @@ invoicesRouter.get('/export', (req: AuthedRequest, res) => {
 });
 
 invoicesRouter.get('/:id', (req: AuthedRequest, res) => {
-  const inv = getFull(Number(req.params.id));
+  const inv = getFull(Number(req.params.id), req);
   if (!inv || !canAccessCustomer(req, Number(inv.customer_id))) return res.status(404).json({ error: 'Invoice not found' });
   res.json(inv);
 });
@@ -453,7 +489,7 @@ invoicesRouter.post('/', (req: AuthedRequest, res) => {
   ).get(id) as { o: number | null };
   if (orderId?.o) syncOrderStatus(orderId.o);
   syncMoneyStatus(id, h.pi_id);
-  res.status(201).json(getFull(id));
+  res.status(201).json(getFull(id, req));
 });
 
 invoicesRouter.put('/:id', (req: AuthedRequest, res) => {
@@ -497,7 +533,7 @@ invoicesRouter.put('/:id', (req: AuthedRequest, res) => {
   for (const o of orderIdsBehind(id, existing.order_id as number | null, existing.pi_id as number | null)) {
     syncOrderStatus(o);
   }
-  res.json(getFull(id));
+  res.json(getFull(id, req));
 });
 
 invoicesRouter.post('/:id/submit', (req: AuthedRequest, res) => {
@@ -509,7 +545,7 @@ invoicesRouter.post('/:id/submit', (req: AuthedRequest, res) => {
   const incomplete = incompleteError('commercial_invoices', id);
   if (incomplete) return res.status(422).json({ error: incomplete });
   submit('commercial_invoices', id, req.user!);
-  res.json(getFull(id));
+  res.json(getFull(id, req));
 });
 
 invoicesRouter.post('/:id/approve', (req: AuthedRequest, res) => {
@@ -526,7 +562,7 @@ invoicesRouter.post('/:id/approve', (req: AuthedRequest, res) => {
   // Approval can be the last thing standing between an already-settled invoice
   // and 'paid', since an unapproved one is deliberately never promoted.
   syncInvoiceStatus(id);
-  res.json(getFull(id));
+  res.json(getFull(id, req));
 });
 
 invoicesRouter.post('/:id/status', (req: AuthedRequest, res) => {
@@ -551,7 +587,7 @@ invoicesRouter.post('/:id/status', (req: AuthedRequest, res) => {
   // half-paid invoice Paid does not make it paid, and parking a settled one at
   // Dispatched is undone the same way the shop floor undoes an order's status.
   syncInvoiceStatus(id);
-  res.json(getFull(id));
+  res.json(getFull(id, req));
 });
 
 invoicesRouter.delete('/:id', (req: AuthedRequest, res) => {

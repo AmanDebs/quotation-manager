@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import { useCan, useUser } from '../App';
@@ -13,7 +13,7 @@ import FollowupButton from '../components/FollowupButton';
 import PaymentsCard from '../components/PaymentsCard';
 import ApprovalStrip from '../components/ApprovalStrip';
 import ColumnsControl, { PACKING_COLUMNS, newColumnConfig, hasColumnPrefs, invoiceColumns, INVOICE_OMIT, INVOICE_FORCED } from '../components/ColumnsControl';
-import { fmtQty, today } from '../lib/format';
+import { fmtQty, fmtDate, today } from '../lib/format';
 import { useDefaultNotes } from '../lib/useDefaultNotes';
 import { useDefaultOnce } from '../lib/useDefaultOnce';
 import { useUnsavedChanges } from '../lib/useUnsavedChanges';
@@ -577,6 +577,65 @@ export default function InvoiceFormPage() {
             </Button>
           </div>
         </div>
+
+        {/*
+          What physically went out under this invoice. Rendered only when the
+          server sent the key: it withholds it entirely from a caller who may
+          not read despatches, so this asks whether it arrived rather than
+          consulting a copy of the access table.
+
+          Deliberately a record, not a reconciliation — `dispatchProgress()`
+          still walks the invoices to the order for what is billed, and the
+          order's Dispatch tab is where sent and billed are set side by side.
+        */}
+        {existing?.despatches && existing.despatches.length > 0 && (
+          <Card title={`Despatched under this invoice (${existing.despatches.length})`}>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className={TH_CLASS}>
+                    <th className="pb-2 pr-3">Date</th>
+                    <th className="pb-2 pr-3">Order</th>
+                    <th className="pb-2 pr-3">From</th>
+                    <th className="pb-2 pr-3">To</th>
+                    <th className="pb-2 pr-3">Reference</th>
+                    <th className="pb-2 pr-3 text-right">Pieces</th>
+                    <th className="pb-2 pr-3 text-right">Boxes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {existing.despatches.map((d) => (
+                    <tr key={d.id} className="border-b border-slate-100 last:border-0">
+                      <td className="whitespace-nowrap py-2 pr-3">{fmtDate(d.date)}</td>
+                      <td className="py-2 pr-3">
+                        <Link to={`/orders/${d.order_id}`} className="text-brand-600 hover:underline">
+                          {d.order_number}
+                        </Link>
+                      </td>
+                      <td className="py-2 pr-3 text-xs text-slate-500">{d.location_name || '—'}</td>
+                      <td className="py-2 pr-3 text-xs text-slate-500">
+                        {d.destination || '—'}
+                        {d.eta && <div className="text-slate-400">ETA {fmtDate(d.eta)}</div>}
+                      </td>
+                      {/* A lorry is identified by its CN and vehicle, a container
+                          by its BL — whichever this trip actually carries. */}
+                      <td className="py-2 pr-3 text-xs text-slate-500">
+                        {[d.bl_no, d.container_no, d.cn_no, d.vehicle_no].filter(Boolean).join(' · ') || '—'}
+                        {d.transporter_name && <div className="text-slate-400">{d.transporter_name}</div>}
+                      </td>
+                      <td className="py-2 pr-3 text-right tabular-nums">{d.pieces ? fmtQty(d.pieces) : '—'}</td>
+                      <td className="py-2 pr-3 text-right tabular-nums">{d.boxes ? fmtQty(d.boxes) : '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p className="mt-2 text-xs text-slate-400">
+              What left the plant under this invoice. How much of the order is billed is worked out from
+              the invoices themselves, not from here — the order’s Dispatch tab shows the two side by side.
+            </p>
+          </Card>
+        )}
 
         <HistoryCard entity="invoices" id={id ? Number(id) : undefined} />
 
