@@ -412,7 +412,21 @@ export default function ProformaFormPage() {
                 onChange={(v) => set({ payment_terms: v })}
               />
             </Field>
-            <Field label="Delivery Terms"><Input disabled={readOnly} value={draft.delivery_terms} onChange={(e) => set({ delivery_terms: e.target.value })} /></Field>
+            {/*
+              Retired 2026-09-07. It asked the same question as Production Lead
+              Time above it, and both printed on the PI as their own row.
+
+              Shown only when this proforma already carries one, the rule the
+              quotation's Containers field follows: the column stays, the PDF
+              still prints a stored value, and a document raised before this
+              would otherwise have a line on it that nobody could read or
+              clear. Blank — every new one — and there is no field.
+            */}
+            {!!draft.delivery_terms && (
+              <Field label="Delivery Terms">
+                <Input disabled={readOnly} value={draft.delivery_terms} onChange={(e) => set({ delivery_terms: e.target.value })} />
+              </Field>
+            )}
             <Field label="INCO Terms">
               <IncoTermsInput isExport={!!draft.is_export} disabled={readOnly} value={draft.inco_terms} onChange={(v) => set({ inco_terms: v })} />
             </Field>

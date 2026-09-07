@@ -283,7 +283,10 @@ proformasRouter.get('/prefill/from-quotation/:quotationId', (req: AuthedRequest,
     company_id: q.company_id,
     currency: q.currency,
     payment_terms: q.payment_terms,
-    delivery_terms: q.delivery_terms,
+    // `delivery_terms` deliberately not carried: the proforma's own field for
+    // it is retired, and prefilling a column with no box to show it in is how
+    // a line appears on the PDF that nobody put there. Production Lead Time is
+    // the proforma's answer to the same question.
     tax_type: isExport ? 'none' : q.tax_type,
     is_export: isExport ? 1 : 0,
     consignee: customer.consignee || '',
