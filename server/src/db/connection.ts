@@ -141,6 +141,13 @@ addColumnIfMissing('proforma_invoices', 'notify_party_2', "TEXT NOT NULL DEFAULT
 // Where the goods go when that is not the billing address, and who they go
 // to. Additive, blank everywhere on the way in, so nothing already raised
 // changes what it prints: the ship-to block appears only once one is filled.
+// The sea leg of a despatch, and whether the documents have reached the buyer.
+// Additive and blank on the way in, so every trip already recorded reads
+// exactly as it did — a domestic lorry simply never fills them.
+for (const c of ['bl_no', 'container_no', 'etd', 'eta', 'docs_status', 'docs_method', 'docs_date']) {
+  addColumnIfMissing('despatches', c, "TEXT NOT NULL DEFAULT ''");
+}
+
 for (const t of ['proforma_invoices', 'commercial_invoices']) {
   addColumnIfMissing(t, 'ship_to_name', "TEXT NOT NULL DEFAULT ''");
   addColumnIfMissing(t, 'ship_to_gstin', "TEXT NOT NULL DEFAULT ''");

@@ -126,6 +126,30 @@ function despatchSummary(sql: string, params: unknown[]) {
  * worse than no export, which is the rule `routes/orders.ts` states about its
  * own `orderListWhere`.
  */
+/**
+ * Where the shipping documents have got to, and how they travelled.
+ *
+ * Blank is the ordinary state and means *not sent yet* — every despatch already
+ * on file reads that way, and a domestic lorry never leaves it. The buyer
+ * cannot clear the goods without these, which is why it is tracked apart from
+ * the goods themselves: a container can be at the port while the paperwork is
+ * still on somebody's desk, and that is precisely the row worth finding.
+ *
+ * Enforced here rather than by a CHECK, for the reason `products.product_type`
+ * gives: SQLite cannot ALTER one, and a list like this expects to grow.
+ */
+export const DOCS_STATUSES = ['', 'sent', 'received'] as const;
+export const DOCS_METHODS = ['', 'telex', 'courier'] as const;
+
+/** How the two read on a spreadsheet, where a code helps nobody. */
+const DOCS_LABEL: Record<string, string> = { '': 'Not sent', sent: 'Sent', received: 'Received' };
+const DOCS_METHOD_LABEL: Record<string, string> = { '': '', telex: 'Telex release', courier: 'Courier' };
+
+const oneOf = (allowed: readonly string[], v: unknown) => {
+  const s = String(v ?? '').trim().toLowerCase();
+  return allowed.includes(s) ? s : null;
+};
+
 function despatchListWhere(req: AuthedRequest): { where: string[]; params: unknown[] } {
   const scope = scopeClause(req, 'o.customer_id');
   const where: string[] = [];
@@ -137,6 +161,18 @@ function despatchListWhere(req: AuthedRequest): { where: string[]; params: unkno
   if (req.query.to) { where.push('d.date <= ?'); params.push(String(req.query.to)); }
   // Gone but not billed — the reason these rows exist at all.
   if (req.query.uninvoiced === '1') where.push('d.invoice_id IS NULL');
+  /*
+   * Shipments whose documents are still outstanding, which is the question the
+   * export sheet's two "Documents Status" columns exist to answer. `pending`
+   * is deliberately "not received", not "not sent": documents posted a week ago
+   * and still not with the buyer are exactly the case worth chasing.
+   */
+  if (req.query.docs === 'pending') where.push("COALESCE(d.docs_status, '') <> 'received'");
+  else if (req.query.docs === 'sent') where.push("d.docs_status = 'sent'");
+  else if (req.query.docs === 'received') where.push("d.docs_status = 'received'");
+  // Arriving between two dates — an ETA is a real date so it can be asked for.
+  if (req.query.eta_from) { where.push("d.eta <> '' AND d.eta >= ?"); params.push(String(req.query.eta_from)); }
+  if (req.query.eta_to) { where.push("d.eta <> '' AND d.eta <= ?"); params.push(String(req.query.eta_to)); }
   return { where, params };
 }
 
@@ -163,6 +199,18 @@ const despatchColumns: Column<Record<string, unknown>>[] = [
   { header: 'Transporter', value: (r) => String(r.transporter_name ?? '') },
   { header: 'CN no.', value: (r) => String(r.cn_no ?? '') },
   { header: 'Vehicle', value: (r) => String(r.vehicle_no ?? '') },
+  // The sea leg, in the order the export sheet reads them. Blank on a domestic
+  // lorry, and `itemsTable`'s rule does not apply here — a spreadsheet column
+  // that is empty for half the rows is still the column somebody filters on.
+  { header: 'BL no.', value: (r) => String(r.bl_no ?? '') },
+  { header: 'Container no.', value: (r) => String(r.container_no ?? '') },
+  { header: 'ETD', value: (r) => String(r.etd ?? ''), type: 'date' },
+  { header: 'ETA', value: (r) => String(r.eta ?? ''), type: 'date' },
+  // As words, not codes: this is the column somebody reconciling filters on,
+  // the call the QC register's verdict column already makes.
+  { header: 'Documents', value: (r) => DOCS_LABEL[String(r.docs_status ?? '')] ?? '' },
+  { header: 'Sent by', value: (r) => DOCS_METHOD_LABEL[String(r.docs_method ?? '')] ?? '' },
+  { header: 'Documents date', value: (r) => String(r.docs_date ?? ''), type: 'date' },
   { header: 'Pieces', value: (r) => Number(r.pieces ?? 0), type: 'number' },
   { header: 'Boxes', value: (r) => Number(r.boxes ?? 0), type: 'number' },
   { header: 'Invoice', value: (r) => String(r.invoice_number ?? '') },
@@ -237,6 +285,12 @@ despatchesRouter.post('/', (req: AuthedRequest, res) => {
   // not 409: nothing conflicts, the number itself is wrong.
   const outOfRange = despatchLimitError(order.id, items);
   if (outOfRange) return res.status(400).json({ error: outOfRange });
+  // Answered with the accepted list rather than letting a typo become a status
+  // nothing can filter for — the column carries no CHECK to catch it.
+  const docsStatus = oneOf(DOCS_STATUSES, body.docs_status);
+  if (docsStatus === null) return res.status(400).json({ error: 'Documents status must be one of: sent, received' });
+  const docsMethod = oneOf(DOCS_METHODS, body.docs_method);
+  if (docsMethod === null) return res.status(400).json({ error: 'Documents method must be one of: telex, courier' });
   // An invoice can be named, but only one belonging to the same customer.
   const invoiceId = numOrNull(body.invoice_id);
   if (invoiceId !== null) {
@@ -250,13 +304,18 @@ despatchesRouter.post('/', (req: AuthedRequest, res) => {
   const id = transaction(() => {
     const info = db.prepare(
       `INSERT INTO despatches (order_id, location_id, date, destination, transporter_id, cn_no, vehicle_no,
-         tentative_delivery, freight_terms, invoice_id, notes, created_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         tentative_delivery, freight_terms, invoice_id, notes,
+         bl_no, container_no, etd, eta, docs_status, docs_method, docs_date, created_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       order.id, numOrNull(body.location_id), String(body.date), String(body.destination ?? ''),
       numOrNull(body.transporter_id), String(body.cn_no ?? ''), String(body.vehicle_no ?? ''),
       String(body.tentative_delivery ?? ''), String(body.freight_terms ?? ''),
-      invoiceId, String(body.notes ?? ''), req.user!.id
+      invoiceId, String(body.notes ?? ''),
+      String(body.bl_no ?? ''), String(body.container_no ?? ''),
+      String(body.etd ?? ''), String(body.eta ?? ''),
+      docsStatus, docsMethod, String(body.docs_date ?? ''),
+      req.user!.id
     );
     const despatchId = Number(info.lastInsertRowid);
     saveItems(despatchId, items);
@@ -282,6 +341,10 @@ despatchesRouter.put('/:id', (req: AuthedRequest, res) => {
       return res.status(400).json({ error: 'That invoice belongs to another customer' });
     }
   }
+  const docsStatus = oneOf(DOCS_STATUSES, v('docs_status'));
+  if (docsStatus === null) return res.status(400).json({ error: 'Documents status must be one of: sent, received' });
+  const docsMethod = oneOf(DOCS_METHODS, v('docs_method'));
+  if (docsMethod === null) return res.status(400).json({ error: 'Documents method must be one of: telex, courier' });
   if (Array.isArray(body.items)) {
     const stopped = qcBlockError(Number(existing.order_id), body.items as ItemInput[]);
     if (stopped) return res.status(409).json({ error: stopped });
@@ -296,11 +359,15 @@ despatchesRouter.put('/:id', (req: AuthedRequest, res) => {
     // another customer's order.
     db.prepare(
       `UPDATE despatches SET location_id = ?, date = ?, destination = ?, transporter_id = ?, cn_no = ?,
-         vehicle_no = ?, tentative_delivery = ?, freight_terms = ?, invoice_id = ?, notes = ? WHERE id = ?`
+         vehicle_no = ?, tentative_delivery = ?, freight_terms = ?, invoice_id = ?, notes = ?,
+         bl_no = ?, container_no = ?, etd = ?, eta = ?, docs_status = ?, docs_method = ?, docs_date = ?
+       WHERE id = ?`
     ).run(
       numOrNull(v('location_id', null)), String(v('date')), String(v('destination')),
       numOrNull(v('transporter_id', null)), String(v('cn_no')), String(v('vehicle_no')),
-      String(v('tentative_delivery')), String(v('freight_terms')), invoiceId, String(v('notes')), id
+      String(v('tentative_delivery')), String(v('freight_terms')), invoiceId, String(v('notes')),
+      String(v('bl_no')), String(v('container_no')), String(v('etd')), String(v('eta')),
+      docsStatus, docsMethod, String(v('docs_date')), id
     );
     if (Array.isArray(body.items)) saveItems(id, body.items);
   });

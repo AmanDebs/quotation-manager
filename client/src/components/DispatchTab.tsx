@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Order, Despatch, DespatchItem, Location, Transporter } from '../types';
-import { Button, Input, Textarea, Select, Field, Card, EmptyState, ErrorText, Modal, TH_CLASS } from './ui';
+import { Button, Input, Textarea, Select, Field, Card, EmptyState, ErrorText, Modal, TH_CLASS, CAPTION_CLASS } from './ui';
 import { fmtQty, fmtMoney, fmtDate, today } from '../lib/format';
 
 /**
@@ -183,7 +183,20 @@ export default function DispatchTab({ order }: { order: Order }) {
                       <td className="py-2 pr-3">{d.transporter_name ?? '—'}</td>
                       <td className="py-2 pr-3 text-xs text-slate-500">
                         {[d.cn_no, d.vehicle_no].filter(Boolean).join(' · ') || '—'}
-                        {d.tentative_delivery && <div className="text-slate-400">ETA {d.tentative_delivery}</div>}
+                        {/* A real ETA where the shipment has one; the free-text
+                            "5-6 Days" is the domestic lorry's answer. */}
+                        {d.eta
+                          ? <div className="text-slate-400">ETA {fmtDate(d.eta)}</div>
+                          : d.tentative_delivery && <div className="text-slate-400">ETA {d.tentative_delivery}</div>}
+                        {(d.bl_no || d.container_no) && (
+                          <div className="text-slate-400">{[d.bl_no, d.container_no].filter(Boolean).join(' · ')}</div>
+                        )}
+                        {d.docs_status && (
+                          <div className={d.docs_status === 'received' ? 'text-green-700' : 'text-amber-700'}>
+                            Docs {d.docs_status === 'received' ? 'received' : 'sent'}
+                            {d.docs_method ? ` (${d.docs_method === 'telex' ? 'telex' : 'courier'})` : ''}
+                          </div>
+                        )}
                       </td>
                       <td className="py-2 pr-3 text-right tabular-nums">{pieces ? fmtQty(pieces) : '—'}</td>
                       <td className="py-2 pr-3 text-right tabular-nums">{boxes ? fmtQty(boxes) : '—'}</td>
@@ -218,6 +231,7 @@ export default function DispatchTab({ order }: { order: Order }) {
           locations={locations}
           transporters={transporters}
           invoices={invoices}
+          isExport={!!order.is_export}
           error={save.error}
           saving={save.isPending}
           onChange={setEditing}
@@ -230,13 +244,15 @@ export default function DispatchTab({ order }: { order: Order }) {
 }
 
 function DespatchModal({
-  draft, items, locations, transporters, invoices, error, saving, onChange, onClose, onSave,
+  draft, items, locations, transporters, invoices, isExport, error, saving, onChange, onClose, onSave,
 }: {
   draft: Partial<Despatch>;
   items: NonNullable<Order['items']>;
   locations: Location[];
   transporters: Transporter[];
   invoices: NonNullable<Order['invoices']>;
+  /** Whether this order ships in a container, which decides the sea-leg block. */
+  isExport: boolean;
   error: unknown;
   saving: boolean;
   onChange: (d: Partial<Despatch>) => void;
@@ -276,6 +292,44 @@ function DespatchModal({
           </Select>
         </Field>
       </div>
+
+      {/*
+        The sea leg, on an export order only. A domestic lorry states CN/LR and
+        a vehicle above and none of this; a container states these and usually
+        not those. Shown on a domestic order that already carries one, the rule
+        the quotation's Containers field follows — a value entered before this
+        was gated must stay visible and clearable.
+      */}
+      {(isExport || draft.bl_no || draft.container_no || draft.etd || draft.eta || draft.docs_status) && (
+        <>
+          <div className={`${CAPTION_CLASS} mt-4`}>Shipment</div>
+          <div className="mt-1 grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <Field label="BL number"><Input value={draft.bl_no ?? ''} onChange={(e) => set({ bl_no: e.target.value })} placeholder="e.g. Maersk-259385658" /></Field>
+            <Field label="Container number"><Input value={draft.container_no ?? ''} onChange={(e) => set({ container_no: e.target.value })} placeholder="e.g. 262183004" /></Field>
+            <div />
+            {/* Real dates, unlike Tentative delivery above: an arrivals list has
+                to sort and count down, which "5-6 Days" cannot do. */}
+            <Field label="ETD"><Input type="date" value={draft.etd ?? ''} onChange={(e) => set({ etd: e.target.value })} /></Field>
+            <Field label="ETA"><Input type="date" value={draft.eta ?? ''} onChange={(e) => set({ eta: e.target.value })} /></Field>
+            <div />
+            <Field label="Documents">
+              <Select value={draft.docs_status ?? ''} onChange={(e) => set({ docs_status: e.target.value })}>
+                <option value="">Not sent</option>
+                <option value="sent">Sent</option>
+                <option value="received">Received by buyer</option>
+              </Select>
+            </Field>
+            <Field label="Sent by">
+              <Select value={draft.docs_method ?? ''} onChange={(e) => set({ docs_method: e.target.value })}>
+                <option value="">— none —</option>
+                <option value="telex">Telex release</option>
+                <option value="courier">Courier</option>
+              </Select>
+            </Field>
+            <Field label="Documents date"><Input type="date" value={draft.docs_date ?? ''} onChange={(e) => set({ docs_date: e.target.value })} /></Field>
+          </div>
+        </>
+      )}
 
       <table className="mt-4 w-full text-sm">
         <thead>

@@ -545,6 +545,19 @@ export interface Despatch {
   vehicle_no: string;
   tentative_delivery: string;
   freight_terms: string;
+  /**
+   * The sea leg. Blank on a domestic lorry, which states `cn_no` and
+   * `vehicle_no` instead; an export container states these and usually not
+   * those. `etd`/`eta` are real dates, unlike `tentative_delivery`.
+   */
+  bl_no: string;
+  container_no: string;
+  etd: string;
+  eta: string;
+  /** '' (not sent) | 'sent' | 'received', and how it travelled. */
+  docs_status: string;
+  docs_method: string;
+  docs_date: string;
   /** Nullable: goods can leave before the invoice is raised. */
   invoice_id: number | null;
   notes: string;

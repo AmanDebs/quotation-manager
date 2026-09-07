@@ -991,8 +991,26 @@ CREATE TABLE IF NOT EXISTS despatches (
   -- lines, so both are optional by design rather than by omission.
   cn_no TEXT NOT NULL DEFAULT '',
   vehicle_no TEXT NOT NULL DEFAULT '',
-  -- Free text: the real sheet says things like "5-6 Days".
+  -- Free text: the real sheet says things like "5-6 Days". Kept for the
+  -- domestic lorry; a sea shipment states a real `eta` below instead.
   tentative_delivery TEXT NOT NULL DEFAULT '',
+  -- The sea leg. A domestic despatch leaves these blank and states cn_no and
+  -- vehicle_no above; an export states these and usually not those. Modelled
+  -- on the export shipment sheet, which carries one row per container.
+  bl_no TEXT NOT NULL DEFAULT '',
+  container_no TEXT NOT NULL DEFAULT '',
+  -- Real dates, unlike tentative_delivery: an arrivals view has to sort and
+  -- count down, which "5-6 Days" cannot do.
+  etd TEXT NOT NULL DEFAULT '',
+  eta TEXT NOT NULL DEFAULT '',
+  -- Whether the shipping documents have reached the buyer, and how they went.
+  -- The buyer cannot clear the goods without them, which is why this is
+  -- tracked separately from the goods themselves. No CHECK: the vocabulary is
+  -- enforced in the route, for the reason products.product_type gives — SQLite
+  -- cannot ALTER one and a list like this expects to grow.
+  docs_status TEXT NOT NULL DEFAULT '',
+  docs_method TEXT NOT NULL DEFAULT '',
+  docs_date TEXT NOT NULL DEFAULT '',
   freight_terms TEXT NOT NULL DEFAULT '',
   -- Nullable: the goods can go before the paperwork catches up.
   invoice_id INTEGER REFERENCES commercial_invoices(id),
