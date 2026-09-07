@@ -15,7 +15,6 @@ import ColumnsControl, { newColumnConfig, hasColumnPrefs, orderColumns, ORDER_FO
 import FollowupButton from '../components/FollowupButton';
 import { ORDER_STATUSES, orderStatusLabel } from './Orders';
 import { today, fmtMoney, fmtDate } from '../lib/format';
-import { useDefaultNotes } from '../lib/useDefaultNotes';
 import { useUnsavedChanges } from '../lib/useUnsavedChanges';
 import HistoryCard from '../components/HistoryCard';
 
@@ -188,11 +187,6 @@ export default function OrderFormPage() {
       navigate('/orders');
     },
   });
-
-  // The standard clauses, already written in on a new order. Above the early
-  // returns below: a hook after them runs on some renders and not others, which
-  // React treats as a changed hook order and unmounts the whole page for.
-  useDefaultNotes(isNew, draft.notes, (notes) => setDraft((d) => ({ ...d, notes })));
 
   if (loadError) return <ErrorText error={loadError} />;
   if (!isNew && !existing) return <div className="text-slate-400">Loading…</div>;
@@ -473,23 +467,27 @@ export default function OrderFormPage() {
             Dispatch tab, which says the same thing and more — sent as well as
             billed — and keeping a second copy invited the two to disagree. */}
 
-        <Card title="Remarks & Notes">
+        <Card title="Remarks">
           {/*
-            * Both, not just the printed one. They sit side by side, so a tall
-            * box next to a short one reads as a mistake rather than as a
-            * decision — and the internal remarks are where the running
-            * commentary on an order goes, which is the longer text of the two
-            * as often as not. Notes takes clauses from the picker above, so it
-            * fills up the same way the outgoing documents' boxes do.
+            * The printed Notes box was removed 2026-09-07 at the client's word.
+            * An order is the customer's own commitment coming back to us, not
+            * an offer going out, so the standard clauses — price subject to
+            * freight, quantity tolerance — belong on the quotation and the
+            * proforma that carried the terms, and repeating them here said
+            * nothing new.
+            *
+            * `notes` stays a column and the draft still round-trips it, so an
+            * order raised before this keeps what it holds and the PDF prints
+            * it; what is gone is the box. `useDefaultNotes` went with it —
+            * left in place it would write the standard clauses into a field
+            * nobody can see, onto a document that prints them.
+            *
+            * Internal remarks stay: that is where the running commentary on an
+            * order goes, and it is read by nobody outside the office.
             */}
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <Field label="Remarks (internal)">
-              <Textarea rows={NOTES_ROWS} value={draft.remarks} onChange={(e) => set({ remarks: e.target.value })} />
-            </Field>
-            <Field label="Notes (printed on the order confirmation)">
-              <Textarea rows={NOTES_ROWS} value={draft.notes} onChange={(e) => set({ notes: e.target.value })} />
-            </Field>
-          </div>
+          <Field label="Remarks (internal)">
+            <Textarea rows={NOTES_ROWS} value={draft.remarks} onChange={(e) => set({ remarks: e.target.value })} />
+          </Field>
         </Card>
 
         <ErrorText error={save.error ?? setStatus.error ?? remove.error} />
