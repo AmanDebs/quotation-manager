@@ -167,7 +167,12 @@ export default function InvoiceFormPage() {
     }
   }, [isNew, draft.customer_id, customers, prefilled]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const { markSaved, isDirty } = useUnsavedChanges(draft);
+  const { markSaved, isDirty, prompt } = useUnsavedChanges(draft, {
+    // Deferred, so the mutation declared just below is initialised by the
+    // time the dialog can call it. Same condition as the page's Save button.
+    run: () => save.mutateAsync(draft),
+    can: !!draft.customer_id && draft.items.length > 0,
+  });
 
   const save = useMutation({
     mutationFn: (d: Draft) => (isNew ? api.post<Invoice>('/api/invoices', d) : api.put<Invoice>(`/api/invoices/${id}`, d)),
@@ -575,6 +580,10 @@ export default function InvoiceFormPage() {
         </div>
 
         <HistoryCard entity="invoices" id={id ? Number(id) : undefined} />
+
+        {/* The unsaved-changes dialog. Renders nothing until a
+            navigation is actually blocked. */}
+        {prompt}
       </div>
     </div>
   );

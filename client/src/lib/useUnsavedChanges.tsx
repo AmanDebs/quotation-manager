@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { useBlocker, type BlockerFunction } from 'react-router-dom';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useBlocker, useNavigate, type BlockerFunction } from 'react-router-dom';
+import { Button, Modal, ErrorText } from '../components/ui';
 
 /**
  * Warn before leaving a document form with edits that were never saved.
@@ -51,9 +52,27 @@ import { useBlocker, type BlockerFunction } from 'react-router-dom';
  * goes to the customer. `components/PdfLink.tsx` asks this and says so; see
  * there for why the sentence it shows is not the one above.
  */
-export function useUnsavedChanges(draft: unknown): {
+export function useUnsavedChanges(
+  draft: unknown,
+  /**
+   * How this form saves, if it wants the dialog to offer it. Anything `run`
+   * rejects with — a validation refusal, a 409, a dropped connection — keeps
+   * the dialog open with the reason on it, and the navigation stays blocked.
+   * Omitted, the dialog simply has two buttons.
+   *
+   * `can` is the same condition the page's own Save button is disabled on. A
+   * document with no customer or no lines cannot be saved at all, so the
+   * dialog says why rather than offering a button that only produces a 400.
+   */
+  saver?: { run: () => Promise<unknown>; can?: boolean },
+): {
   markSaved: () => void;
   isDirty: () => boolean;
+  /**
+   * The dialog. Renders nothing until a navigation is actually blocked, so a
+   * form can put it anywhere; every one of them puts it last.
+   */
+  prompt: ReactNode;
 } {
   const serialized = JSON.stringify(draft);
 
@@ -121,22 +140,82 @@ export function useUnsavedChanges(draft: unknown): {
     )
   );
 
-  useEffect(() => {
-    if (blocker.state !== 'blocked') return;
-    // `confirm` rather than a Modal, matching the seventeen other confirmations
-    // in this app — and it is the one dialog that has to be answered before the
-    // navigation it is holding up can continue.
-    if (confirm('This form has changes that have not been saved. Leave the page and lose them?')) {
-      blocker.proceed();
-    } else {
-      blocker.reset();
-    }
+  /**
+   * The dialog, and the reason it is not `confirm()`.
+   *
+   * A two-button confirm can only ask "leave and lose them?", which offers the
+   * destructive answer as the positive one and leaves the useful answer —
+   * save, then go — to be done by cancelling, saving by hand and clicking the
+   * link again. Excel's Save / Don't Save / Cancel is the shape that fits, so
+   * this is a real modal: `confirm` cannot show three buttons.
+   *
+   * Only this one. The seventeen other confirmations in the app are all a
+   * single yes-or-no about something that has already been decided.
+   */
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState('');
+
+  const navigate = useNavigate();
+
+  const leave = useCallback(() => { blocker.proceed?.(); }, [blocker]);
+
+  const stay = useCallback(() => {
+    setSaveError('');
+    blocker.reset?.();
   }, [blocker]);
+
+  const saveThenLeave = async () => {
+    if (!saver) return;
+    // Read the destination *before* saving. Saving a new document clears the
+    // dirty flag and then navigates to its own id from the mutation's success
+    // handler — which passes the blocker, because it is no longer dirty — so
+    // by the time the save resolves the block we were holding may be gone and
+    // `proceed` with it. Going to the remembered location covers both cases,
+    // and is what the person asked for either way.
+    const to = blocker.location;
+    setSaving(true);
+    setSaveError('');
+    try {
+      await saver.run();
+    } catch (err) {
+      // Stay exactly where we are, with the reason on screen. Proceeding here
+      // would lose the edits the button exists to keep.
+      setSaveError(err instanceof Error ? err.message : 'Could not save.');
+      return;
+    } finally {
+      setSaving(false);
+    }
+    blocker.reset?.();
+    if (to) setTimeout(() => navigate(to.pathname + to.search + to.hash), 0);
+  };
+
+  const prompt = blocker.state === 'blocked' ? (
+    <Modal title="Save changes?" onClose={stay}>
+      <p className="text-sm text-slate-700">
+        This document has changes that have not been saved.
+      </p>
+      {saver && saver.can === false && (
+        <p className="mt-1 text-sm text-slate-500">
+          It cannot be saved yet — it needs a customer and at least one line.
+        </p>
+      )}
+      {saveError && <ErrorText error={saveError} />}
+      <div className="mt-4 flex justify-end gap-2">
+        {saver && (
+          <Button onClick={saveThenLeave} disabled={saving || saver.can === false}>
+            {saving ? 'Saving…' : 'Save'}
+          </Button>
+        )}
+        <Button variant="secondary" onClick={leave} disabled={saving}>Don&rsquo;t save</Button>
+        <Button variant="secondary" onClick={stay} disabled={saving}>Cancel</Button>
+      </div>
+    </Modal>
+  ) : null;
 
   // The ref, not the state, for the same reason the blocker reads it: this has
   // to be callable from a click handler and be right *now*, and it must stay
   // stable so a link holding it does not re-render on every keystroke.
   const isDirty = useCallback(() => dirtyRef.current, []);
 
-  return { markSaved, isDirty };
+  return { markSaved, isDirty, prompt };
 }
