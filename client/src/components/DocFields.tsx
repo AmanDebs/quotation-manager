@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { LineItem } from '../types';
-import { Button, Input, StaticValue, useReadOnlyFields } from './ui';
+import { Button, Input, Textarea, Field, StaticValue, useReadOnlyFields } from './ui';
 import { fmtMoney } from '../lib/format';
 
 /**
@@ -370,6 +370,133 @@ export function HeaderCharges({
       <Button variant="secondary" className="mt-2" onClick={move}>
         Move into a charge line{rate ? ` at ${rate}%` : ''}
       </Button>
+    </div>
+  );
+}
+
+/** The three columns that say the goods go somewhere other than the billing address. */
+export interface ShipTo {
+  /** The delivery address itself. Shared with the export consignee. */
+  consignee: string;
+  ship_to_name: string;
+  ship_to_gstin: string;
+}
+
+/** All blank means "deliver to the buyer", which is the ordinary case. */
+export const shipsToBuyer = (d: ShipTo) =>
+  !d.consignee.trim() && !d.ship_to_name.trim() && !d.ship_to_gstin.trim();
+
+/** The buyer's own address, for the line that says where it is going instead. */
+const billingAddress = (c?: { name: string; address: string; city: string; gstin: string }) =>
+  c ? [c.name, c.address, c.city, c.gstin && `GSTIN: ${c.gstin}`].filter(Boolean).join(', ') : '';
+
+/**
+ * Where the goods go — asked differently on a domestic sale and an export.
+ *
+ * **Export** keeps what it always had: a consignee and two notify parties, the
+ * parties a consignment on a bill of lading is announced to.
+ *
+ * **Domestic** is the GST bill-to / ship-to question instead, and it is a
+ * *different* question: notify parties mean nothing on a lorry, and when the
+ * delivery address does differ, GST wants that party's **own name and
+ * registration** stated beside the address — a GSTIN this form had nowhere to
+ * put. So the notify boxes are gone there, and in their place a tick that
+ * answers the common case in one click.
+ *
+ * **The tick is derived, never stored.** It is on exactly when all three
+ * columns are blank, which is what every document raised before these columns
+ * existed already looks like — so nothing needed migrating, and there is no
+ * flag that can disagree with the fields underneath it. Ticking clears them;
+ * unticking opens them empty.
+ *
+ * Ticked, the buyer's address is **echoed rather than copied**. The PDF already
+ * falls back to it (`shipToBlock` returns '' and the invoice grid prints the
+ * buyer), so copying it in would store a second version of an address that can
+ * be corrected on the customer record later — and the echo shows the same
+ * thing without the staleness.
+ */
+export function ShipToFields({
+  isExport, value, buyer, notify1, notify2, onChange, disabled, gridClass,
+}: {
+  isExport: boolean;
+  value: ShipTo;
+  buyer?: { name: string; address: string; city: string; gstin: string };
+  notify1: string;
+  notify2: string;
+  onChange: (patch: Partial<ShipTo & { notify_party: string; notify_party_2: string }>) => void;
+  disabled?: boolean;
+  gridClass: string;
+}) {
+  const plain = useReadOnlyFields();
+  /**
+   * Unticked with nothing typed yet is the one state the columns cannot
+   * express, so it lives here rather than in the document: a blank ship-to
+   * *is* "same as billing" as far as anything stored, printed or loaded is
+   * concerned. A document that arrives carrying one needs no effect to open
+   * the boxes — `shipsToBuyer` is already false for it.
+   */
+  const [separate, setSeparate] = useState(false);
+  const same = shipsToBuyer(value) && !separate;
+
+  if (isExport) {
+    return (
+      <div className={gridClass}>
+        <Field label="Consignee (if different from buyer)">
+          <Textarea disabled={disabled} rows={2} value={value.consignee} onChange={(e) => onChange({ consignee: e.target.value })} />
+        </Field>
+        <Field label="Notify Party 1">
+          <Textarea disabled={disabled} rows={2} value={notify1} onChange={(e) => onChange({ notify_party: e.target.value })} />
+        </Field>
+        <Field label="Notify Party 2">
+          <Textarea disabled={disabled} rows={2} value={notify2} onChange={(e) => onChange({ notify_party_2: e.target.value })} />
+        </Field>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      {/* No tick on a read-only document: there is nothing to toggle, and the
+          fields below hide themselves when blank. */}
+      {!plain && (
+        <label className="flex items-center gap-2 text-sm text-slate-700">
+          <input
+            type="checkbox"
+            className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-600/25"
+            disabled={disabled}
+            checked={same}
+            onChange={(e) => {
+              setSeparate(!e.target.checked);
+              // Ticking clears the three columns, which is what makes the tick
+              // derivable. Unticking opens the boxes **empty** rather than
+              // seeding them with the billing address: what goes in is the
+              // *other* address, and a prefilled one is a thing to delete
+              // before typing.
+              if (e.target.checked) onChange({ consignee: '', ship_to_name: '', ship_to_gstin: '' });
+            }}
+          />
+          Delivery address is the same as the billing address
+        </label>
+      )}
+      {same ? (
+        !plain && (
+          <p className="mt-1.5 text-sm text-slate-500">
+            {buyer ? `Delivering to ${billingAddress(buyer)}` : 'Delivering to the buyer.'}
+          </p>
+        )
+      ) : (
+        <div className={`${gridClass} mt-3`}>
+          <Field label="Delivery Name">
+            <Input disabled={disabled} value={value.ship_to_name} onChange={(e) => onChange({ ship_to_name: e.target.value })} placeholder="Who receives the goods" />
+          </Field>
+          <Field label="Delivery Address">
+            <Textarea disabled={disabled} rows={2} value={value.consignee} onChange={(e) => onChange({ consignee: e.target.value })} />
+          </Field>
+          <Field label="Delivery GSTIN">
+            <Input disabled={disabled} value={value.ship_to_gstin} onChange={(e) => onChange({ ship_to_gstin: e.target.value })} placeholder="e.g. 19AAAAA0000A1Z5" />
+          </Field>
+        </div>
+      )}
     </div>
   );
 }

@@ -6,7 +6,7 @@ import type { Proforma, Customer, LineItem, TaxType, Settings, ColumnConfig } fr
 import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, StatusBadge, SettledDocumentType, ReadOnlyFields, FIELD_GRID, FIELD_GRID_PLAIN, NOTES_ROWS } from '../components/ui';
 import { PdfLink } from '../components/PdfLink';
 import CompanySelect from '../components/CompanySelect';
-import { DocNumber, IncoTermsInput, PaymentTermsInput, HeaderCharges } from '../components/DocFields';
+import { DocNumber, IncoTermsInput, PaymentTermsInput, HeaderCharges, ShipToFields } from '../components/DocFields';
 import LineItemsEditor from '../components/LineItemsEditor';
 import ReadOnlyItems from '../components/ReadOnlyItems';
 import ContainerFitment from '../components/ContainerFitment';
@@ -33,6 +33,9 @@ interface Draft {
   date: string;
   currency: string;
   consignee: string;
+  /** Where the goods go, when that is not the billing address. */
+  ship_to_name: string;
+  ship_to_gstin: string;
   notify_party: string;
   freight: number;
   insurance: number;
@@ -63,7 +66,7 @@ interface Draft {
 }
 
 const emptyDraft = (): Draft => ({
-  customer_id: '', quotation_id: null, date: today(), currency: 'INR', consignee: '', notify_party: '',
+  customer_id: '', quotation_id: null, date: today(), currency: 'INR', consignee: '', ship_to_name: '', ship_to_gstin: '', notify_party: '',
   freight: 0, insurance: 0, lead_time: '', bank_account: '', inco_terms: '', payment_terms: '',
   delivery_terms: '',
   // Offered for a week unless somebody says otherwise. Derived from the
@@ -507,19 +510,16 @@ export default function ProformaFormPage() {
             </div>
           )}
 
-          {/* Two rows deep rather than three: these hold an address, and the
-              box scrolls for the rare one that runs longer. */}
-          <div className={gridClass}>
-            <Field label="Consignee (if different from buyer)">
-              <Textarea disabled={readOnly} rows={2} value={draft.consignee} onChange={(e) => set({ consignee: e.target.value })} />
-            </Field>
-            <Field label="Notify Party 1">
-              <Textarea disabled={readOnly} rows={2} value={draft.notify_party} onChange={(e) => set({ notify_party: e.target.value })} />
-            </Field>
-            <Field label="Notify Party 2">
-              <Textarea disabled={readOnly} rows={2} value={draft.notify_party_2} onChange={(e) => set({ notify_party_2: e.target.value })} />
-            </Field>
-          </div>
+          <ShipToFields
+            isExport={!!draft.is_export}
+            value={{ consignee: draft.consignee, ship_to_name: draft.ship_to_name, ship_to_gstin: draft.ship_to_gstin }}
+            buyer={customers.find((x) => x.id === draft.customer_id)}
+            notify1={draft.notify_party}
+            notify2={draft.notify_party_2}
+            onChange={(patch) => set(patch)}
+            disabled={readOnly}
+            gridClass={gridClass}
+          />
         </Card>
 
         <Card

@@ -344,6 +344,12 @@ CREATE TABLE IF NOT EXISTS proforma_invoices (
   -- The group entity issuing this document. Fixed at creation.
   company_id INTEGER NOT NULL DEFAULT 1 REFERENCES companies(id),
   consignee TEXT NOT NULL DEFAULT '',
+  -- Where the goods actually go, when that is not the billing address.
+  -- Blank on all three means "same as the buyer"; the ship-to block is
+  -- printed only when one of them is filled in. GST wants the delivery
+  -- party's own name and registration stated on a domestic document.
+  ship_to_name TEXT NOT NULL DEFAULT '',
+  ship_to_gstin TEXT NOT NULL DEFAULT '',
   notify_party TEXT NOT NULL DEFAULT '',
   currency TEXT NOT NULL DEFAULT 'INR',
   freight REAL NOT NULL DEFAULT 0,
@@ -431,6 +437,12 @@ CREATE TABLE IF NOT EXISTS commercial_invoices (
   -- The group entity issuing this document. Fixed at creation.
   company_id INTEGER NOT NULL DEFAULT 1 REFERENCES companies(id),
   consignee TEXT NOT NULL DEFAULT '',
+  -- Where the goods actually go, when that is not the billing address.
+  -- Blank on all three means "same as the buyer"; the ship-to block is
+  -- printed only when one of them is filled in. GST wants the delivery
+  -- party's own name and registration stated on a domestic document.
+  ship_to_name TEXT NOT NULL DEFAULT '',
+  ship_to_gstin TEXT NOT NULL DEFAULT '',
   notify_party TEXT NOT NULL DEFAULT '',
   currency TEXT NOT NULL DEFAULT 'INR',
   freight REAL NOT NULL DEFAULT 0,

@@ -734,7 +734,8 @@ export interface Proforma {
   id: number; number: string; date: string; quotation_id: number | null; customer_id: number; company_id?: number;
   /** The order this proforma belongs to — set either way round, whichever was raised first. */
   order_id?: number | null; order_number?: string | null;
-  consignee: string; notify_party: string; currency: string; freight: number; insurance: number;
+  consignee: string; ship_to_name: string; ship_to_gstin: string;
+  notify_party: string; currency: string; freight: number; insurance: number;
   lead_time: string; bank_account: string; inco_terms: string; payment_terms: string;
   delivery_terms: string; validity_date: string; is_export: number;
   country_of_origin: string; port_of_loading: string; port_of_discharge: string;
@@ -765,7 +766,8 @@ export interface Proforma {
 
 export interface Invoice {
   id: number; number: string; date: string; pi_id: number | null; customer_id: number; company_id?: number;
-  consignee: string; notify_party: string; currency: string; freight: number; insurance: number;
+  consignee: string; ship_to_name: string; ship_to_gstin: string;
+  notify_party: string; currency: string; freight: number; insurance: number;
   shipping_details: string; bank_account: string; inco_terms: string; payment_terms: string;
   is_export: number; country_of_origin: string; port_of_loading: string; port_of_discharge: string;
   final_destination: string;

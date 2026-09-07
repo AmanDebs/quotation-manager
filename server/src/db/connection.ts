@@ -137,6 +137,14 @@ addColumnIfMissing('quotations', 'prepared_by', "TEXT NOT NULL DEFAULT ''");
 // the point it turned into a document.
 addColumnIfMissing('proforma_invoices', 'internal_notes', "TEXT NOT NULL DEFAULT ''");
 addColumnIfMissing('proforma_invoices', 'notify_party_2', "TEXT NOT NULL DEFAULT ''");
+
+// Where the goods go when that is not the billing address, and who they go
+// to. Additive, blank everywhere on the way in, so nothing already raised
+// changes what it prints: the ship-to block appears only once one is filled.
+for (const t of ['proforma_invoices', 'commercial_invoices']) {
+  addColumnIfMissing(t, 'ship_to_name', "TEXT NOT NULL DEFAULT ''");
+  addColumnIfMissing(t, 'ship_to_gstin', "TEXT NOT NULL DEFAULT ''");
+}
 addColumnIfMissing('proforma_invoices', 'method_of_despatch', "TEXT NOT NULL DEFAULT ''");
 addColumnIfMissing('proforma_invoices', 'quantity_tolerance', "TEXT NOT NULL DEFAULT ''");
 addColumnIfMissing('proforma_invoices', 'hs_code', "TEXT NOT NULL DEFAULT ''");

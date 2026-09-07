@@ -7,7 +7,7 @@ import type { Invoice, Customer, LineItem, TaxType, Settings, ColumnConfig, Pack
 import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, StatusBadge, SettledDocumentType, FIELD_GRID, TH_CLASS, NOTES_ROWS } from '../components/ui';
 import { PdfLink } from '../components/PdfLink';
 import CompanySelect from '../components/CompanySelect';
-import { DocNumber, IncoTermsInput, PaymentTermsInput, HeaderCharges } from '../components/DocFields';
+import { DocNumber, IncoTermsInput, PaymentTermsInput, HeaderCharges, ShipToFields } from '../components/DocFields';
 import LineItemsEditor from '../components/LineItemsEditor';
 import FollowupButton from '../components/FollowupButton';
 import PaymentsCard from '../components/PaymentsCard';
@@ -29,6 +29,9 @@ interface Draft {
   date: string;
   currency: string;
   consignee: string;
+  /** Where the goods go, when that is not the billing address. */
+  ship_to_name: string;
+  ship_to_gstin: string;
   notify_party: string;
   freight: number;
   insurance: number;
@@ -69,7 +72,7 @@ const emptyPackingItem = (): PackingListItem => ({
 });
 
 const emptyDraft = (): Draft => ({
-  customer_id: '', pi_id: null, date: today(), currency: 'INR', consignee: '', notify_party: '',
+  customer_id: '', pi_id: null, date: today(), currency: 'INR', consignee: '', ship_to_name: '', ship_to_gstin: '', notify_party: '',
   freight: 0, insurance: 0, shipping_details: '', bank_account: '', inco_terms: '', payment_terms: '',
   is_export: 0, country_of_origin: '', port_of_loading: '', port_of_discharge: '', final_destination: '',
   notify_party_2: '', method_of_despatch: '', lot_no: '', arn_ref: '', prepared_by: '',
@@ -435,19 +438,15 @@ export default function InvoiceFormPage() {
             </div>
           )}
 
-          {/* Two rows deep rather than three: these hold an address, and the
-              box scrolls for the rare one that runs longer. */}
-          <div className={FIELD_GRID}>
-            <Field label="Consignee">
-              <Textarea rows={2} value={draft.consignee} onChange={(e) => set({ consignee: e.target.value })} />
-            </Field>
-            <Field label="Notify Party 1">
-              <Textarea rows={2} value={draft.notify_party} onChange={(e) => set({ notify_party: e.target.value })} />
-            </Field>
-            <Field label="Notify Party 2">
-              <Textarea rows={2} value={draft.notify_party_2} onChange={(e) => set({ notify_party_2: e.target.value })} />
-            </Field>
-          </div>
+          <ShipToFields
+            isExport={!!draft.is_export}
+            value={{ consignee: draft.consignee, ship_to_name: draft.ship_to_name, ship_to_gstin: draft.ship_to_gstin }}
+            buyer={customers.find((x) => x.id === draft.customer_id)}
+            notify1={draft.notify_party}
+            notify2={draft.notify_party_2}
+            onChange={(patch) => set(patch)}
+            gridClass={FIELD_GRID}
+          />
         </Card>
 
         <Card

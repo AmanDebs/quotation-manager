@@ -128,7 +128,7 @@ function saveItems(piId: number, items: LineItemInput[], taxType: 'none' | 'cgst
 }
 
 const headerFields = [
-  'date', 'customer_id', 'quotation_id', 'order_id', 'consignee', 'notify_party', 'currency', 'freight', 'insurance',
+  'date', 'customer_id', 'quotation_id', 'order_id', 'consignee', 'ship_to_name', 'ship_to_gstin', 'notify_party', 'currency', 'freight', 'insurance',
   'lead_time', 'bank_account', 'inco_terms', 'payment_terms', 'delivery_terms', 'validity_date',
   'is_export', 'country_of_origin', 'port_of_loading', 'port_of_discharge', 'final_destination',
   'container_count', 'partial_shipment', 'po_number', 'po_date',
@@ -144,6 +144,8 @@ function headerValues(body: Record<string, unknown>, existing?: Record<string, u
     quotation_id: v('quotation_id', null) ? Number(v('quotation_id')) : null,
     order_id: v('order_id', null) ? Number(v('order_id')) : null,
     consignee: String(v('consignee')),
+    ship_to_name: String(v('ship_to_name')),
+    ship_to_gstin: String(v('ship_to_gstin')),
     notify_party: String(v('notify_party')),
     currency: String(v('currency', 'INR')),
     freight: Number(v('freight', 0)),
@@ -591,8 +593,8 @@ proformasRouter.post('/:id/duplicate', (req: AuthedRequest, res) => {
       date: today,
     });
     const info = db.prepare(
-      `INSERT INTO proforma_invoices (number, date, customer_id, company_id, consignee, notify_party, currency, freight, insurance, lead_time, bank_account, inco_terms, payment_terms, delivery_terms, validity_date, is_export, country_of_origin, port_of_loading, port_of_discharge, final_destination, container_count, partial_shipment, po_number, po_date, notify_party_2, method_of_despatch, quantity_tolerance, hs_code, prepared_by, remarks, tax_type, column_config, created_by, status, subtotal, tax_total, grand_total)
-       SELECT ?, ?, customer_id, company_id, consignee, notify_party, currency, freight, insurance, lead_time, bank_account, inco_terms, payment_terms, delivery_terms, ?, is_export, country_of_origin, port_of_loading, port_of_discharge, final_destination, container_count, partial_shipment, po_number, po_date, notify_party_2, method_of_despatch, quantity_tolerance, hs_code, prepared_by, remarks, tax_type, column_config, ?, 'draft', subtotal, tax_total, grand_total
+      `INSERT INTO proforma_invoices (number, date, customer_id, company_id, consignee, ship_to_name, ship_to_gstin, notify_party, currency, freight, insurance, lead_time, bank_account, inco_terms, payment_terms, delivery_terms, validity_date, is_export, country_of_origin, port_of_loading, port_of_discharge, final_destination, container_count, partial_shipment, po_number, po_date, notify_party_2, method_of_despatch, quantity_tolerance, hs_code, prepared_by, remarks, tax_type, column_config, created_by, status, subtotal, tax_total, grand_total)
+       SELECT ?, ?, customer_id, company_id, consignee, ship_to_name, ship_to_gstin, notify_party, currency, freight, insurance, lead_time, bank_account, inco_terms, payment_terms, delivery_terms, ?, is_export, country_of_origin, port_of_loading, port_of_discharge, final_destination, container_count, partial_shipment, po_number, po_date, notify_party_2, method_of_despatch, quantity_tolerance, hs_code, prepared_by, remarks, tax_type, column_config, ?, 'draft', subtotal, tax_total, grand_total
        FROM proforma_invoices WHERE id = ?`
     ).run(number, today, validity >= today ? validity : '', req.user!.id, id);
     const newId = Number(info.lastInsertRowid);

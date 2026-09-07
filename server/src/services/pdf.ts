@@ -184,6 +184,28 @@ function lv(label: string, value: string, opts: Cell = {}): Cell {
   };
 }
 
+/**
+ * Where the goods are going, as one block, or '' when that is the buyer.
+ *
+ * A domestic sale states the delivery party's own name and GST registration
+ * beside the address — that is what "bill to / ship to" means on a tax invoice
+ * — while an export names a consignee and nothing else. One composition covers
+ * both, because on an export the two extra columns are simply blank.
+ *
+ * Empty is meaningful and is the ordinary case: every document raised before
+ * these columns existed, and every one delivering to the billing address, has
+ * all three blank, and the callers already know what to do with that — the
+ * invoice grid falls back to the buyer's own address, and the proforma prints
+ * no consignee line at all.
+ */
+function shipToBlock(d: Row): string {
+  return [
+    String(d.ship_to_name ?? '').trim(),
+    String(d.consignee ?? '').trim(),
+    String(d.ship_to_gstin ?? '').trim() && `GSTIN: ${String(d.ship_to_gstin).trim()}`,
+  ].filter(Boolean).join('\n');
+}
+
 /** Aglo-style page header: logo left, company block right in theme color. */
 /**
  * Which registration numbers belong on which document.
@@ -1060,9 +1082,13 @@ export function buildProformaPdf(id: number): TDocumentDefinitions {
     margin: [0, 2, 0, 0] as any,
   });
 
+  // Composed once: the height estimate below has to count the same lines this
+  // prints, or the grid picks its arrangement against a block of another size.
+  const shipTo = shipToBlock(pi);
+
   const buyerStack: Content[] = [
     { text: customerAddress(c), fontSize: 7.5, lineHeight: 1.05 } as Content,
-    ...(pi.consignee ? [party('CONSIGNEE', pi.consignee)] : []),
+    ...(shipTo ? [party('CONSIGNEE', shipTo)] : []),
     ...(pi.notify_party ? [party('NOTIFY PARTY 1', pi.notify_party)] : []),
     ...(pi.notify_party_2 ? [party('NOTIFY PARTY 2', pi.notify_party_2)] : []),
   ];
@@ -1102,7 +1128,7 @@ export function buildProformaPdf(id: number): TDocumentDefinitions {
   // arrangement on exactly the documents that most needed the shorter one.
   const countLines = (t: string) => String(t ?? '').split('\n').filter(Boolean).length;
   const buyerH = (countLines(customerAddress(c))
-    + countLines(pi.consignee) + countLines(pi.notify_party) + countLines(pi.notify_party_2)) * LINE;
+    + countLines(shipTo) + countLines(pi.notify_party) + countLines(pi.notify_party_2)) * LINE;
   const shipH = shipmentInfo.length * ROW;
   const customsH = customsInfo.length * ROW;
   const bankH = hasBank ? (1 + bankLines.length) * LINE : 0;
@@ -1369,7 +1395,9 @@ export function buildInvoicePdf(id: number): TDocumentDefinitions {
     // The one document that carries the IEC, and only when it is an export.
     reg: { isExport: !!inv.is_export, isCommercialInvoice: true },
     refCells,
-    consignee: inv.consignee,
+    // Blank when the goods go to the billing address, which is what makes
+    // `exportDocGrid` fall back to the buyer's own address below.
+    consignee: shipToBlock(inv),
     notify1: inv.notify_party,
     notify2: inv.notify_party_2,
     origin: inv.country_of_origin || (Number(inv.is_export) ? 'INDIA' : s.country?.toUpperCase() || ''),
@@ -1514,7 +1542,9 @@ export function buildPackingListPdf(id: number): TDocumentDefinitions {
 
   const grid = exportDocGrid(s, {
     refCells,
-    consignee: inv?.consignee || c.consignee || '',
+    // Follows its invoice, ship-to and all; the customer's own standing
+    // consignee is the fallback when there is no invoice behind it.
+    consignee: (inv ? shipToBlock(inv) : '') || c.consignee || '',
     notify1: inv?.notify_party || c.notify_party || '',
     notify2: inv?.notify_party_2 || c.notify_party_2 || '',
     // The packing list is not a commercial invoice, so it never carries the IEC.
