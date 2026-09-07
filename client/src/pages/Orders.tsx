@@ -12,7 +12,34 @@ export const ORDER_STATUSES: OrderStatus[] = [
   'pending', 'confirmed', 'scheduled', 'in_production', 'ready', 'partially_dispatched', 'completed', 'cancelled',
 ];
 
-export const orderStatusLabel = (s: string) => s.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
+/**
+ * The order's vocabulary, where it differs from the value that is stored.
+ *
+ * `confirmed` reads **Work Order** (Aglo, 2026-09-07): what the desk means by
+ * that step is that the job has been raised, not merely that the buyer said
+ * yes — the buyer's yes is the proforma's *Order Confirmed*, one document
+ * upstream, and two steps called Confirmed on two documents is how the two get
+ * read for each other.
+ *
+ * A **display layer**, deliberately, and the same call the quotation makes in
+ * labelling `accepted` as *Proforma Generated*. `orders.status` carries a CHECK
+ * constraint listing all eight values, SQLite cannot ALTER one, and renaming
+ * the stored string would mean rebuilding the table and rewriting every live
+ * row — for wording. The string is also load-bearing in `orderStatus.ts`'s
+ * forward-only ladder and in the list filters, none of which changes here.
+ *
+ * One consequence to know: the spreadsheet export writes the **stored** value,
+ * so a downloaded order book says `confirmed` where the screen says Work Order.
+ * That is how the export already reads for every status — it writes
+ * `in_production`, not "In production" — so it stays uniform rather than
+ * gaining one prettified special case.
+ */
+const ORDER_STATUS_LABELS: Record<string, string> = {
+  confirmed: 'Work Order',
+};
+
+export const orderStatusLabel = (s: string) =>
+  ORDER_STATUS_LABELS[s] ?? s.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
 
 const statusTint: Record<string, string> = {
   pending: 'bg-slate-50 text-slate-700 border-slate-200',
