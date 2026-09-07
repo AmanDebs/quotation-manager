@@ -181,8 +181,22 @@ const RULES: Rule[] = [
     check: (d) => (text(d.row.country_of_origin) ? null : 'No country of origin stated.'),
   },
   {
-    // The advance is paid against this document, so it has to say where to.
-    key: 'bank', level: 'warn', tables: ['proforma_invoices'],
+    /*
+     * The advance is paid against this document, so it has to say where to.
+     *
+     * A **block** since 2026-09-07, at the client's word — the first warning
+     * promoted, and the promotion is the one-word `level` change this table was
+     * shaped for. It is the rule with the least room for argument on a
+     * proforma: the document exists to collect money, and one that does not say
+     * which account cannot do the only job it has.
+     *
+     * Note it blocks on the proforma alone. A commercial invoice states an
+     * account too, but it is raised against goods already made and often
+     * settled from the advance banked here, so refusing to approve one over a
+     * blank account would stop a shipment for a field the proforma upstream has
+     * already carried.
+     */
+    key: 'bank', level: 'block', tables: ['proforma_invoices'],
     check: (d) => (text(d.row.bank_account)
       ? null
       : 'No bank account stated, and the advance is paid against this document.'),

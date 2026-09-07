@@ -18,7 +18,12 @@ const line = (over: Partial<CheckedItem> = {}): CheckedItem => ({
 
 const doc = (table: CheckedDoc['table'], row: Record<string, unknown> = {}, items = [line()]): CheckedDoc => ({
   table,
-  row: { date: '2026-09-01', grand_total: 1000, tax_type: 'none', is_export: 0, payment_terms: '30 days', ...row },
+  // A finished document, so each test fails only in the respect it names.
+  // `bank_account` joined this list when it became a blocking rule.
+  row: {
+    date: '2026-09-01', grand_total: 1000, tax_type: 'none', is_export: 0,
+    payment_terms: '30 days', bank_account: 'HDFC 50200012345678', ...row,
+  },
   items,
   customer: { gstin: '19AAAAA0000A1Z5' },
 });
@@ -98,10 +103,22 @@ describe('what deliberately does not stop one', () => {
 });
 
 describe('the warnings each document type carries', () => {
-  test('an export proforma wants its customs header and a bank account', () => {
+  test('an export proforma wants its customs header, and refuses without a bank account', () => {
     const d = doc('proforma_invoices', { is_export: 1, bank_account: '', payment_terms: '' });
-    assert.deepEqual(keys(d, 'warn'), ['bank', 'origin', 'payment_terms', 'ports']);
+    assert.deepEqual(keys(d, 'warn'), ['origin', 'payment_terms', 'ports']);
+    // Promoted from a warning 2026-09-07 at the client's word: a proforma that
+    // does not say which account to pay cannot do the one job it has.
+    assert.deepEqual(keys(d, 'block'), ['bank']);
+  });
+
+  test('and stating one satisfies it, leaving only the warnings', () => {
+    const d = doc('proforma_invoices', { is_export: 1, bank_account: 'HDFC 50200012345678' });
     assert.deepEqual(keys(d, 'block'), []);
+  });
+
+  test('the commercial invoice is deliberately not asked for one', () => {
+    const d = doc('commercial_invoices', { bank_account: '', tax_type: 'igst' });
+    assert.equal(keys(d).includes('bank'), false);
   });
 
   test('and a domestic one is not asked about ports', () => {
