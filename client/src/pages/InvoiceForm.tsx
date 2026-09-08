@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import { useCan, useUser } from '../App';
 import type { Invoice, Customer, LineItem, TaxType, Settings, ColumnConfig, PackingListItem } from '../types';
-import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, StatusBadge, SettledDocumentType, FIELD_GRID, TH_CLASS, NOTES_ROWS } from '../components/ui';
+import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, StatusBadge, SettledDocumentType, FIELD_GRID, TH_CLASS } from '../components/ui';
 import { PdfLink } from '../components/PdfLink';
 import CompanySelect from '../components/CompanySelect';
 import { DocNumber, IncoTermsInput, PaymentTermsInput, HeaderCharges, ShipToFields } from '../components/DocFields';
@@ -14,7 +14,6 @@ import PaymentsCard from '../components/PaymentsCard';
 import ApprovalStrip from '../components/ApprovalStrip';
 import ColumnsControl, { PACKING_COLUMNS, newColumnConfig, hasColumnPrefs, invoiceColumns, INVOICE_OMIT, INVOICE_FORCED } from '../components/ColumnsControl';
 import { fmtQty, fmtDate, today } from '../lib/format';
-import { useDefaultNotes } from '../lib/useDefaultNotes';
 import { useDefaultOnce } from '../lib/useDefaultOnce';
 import { useUnsavedChanges } from '../lib/useUnsavedChanges';
 import HistoryCard from '../components/HistoryCard';
@@ -205,10 +204,6 @@ export default function InvoiceFormPage() {
     },
   });
 
-  // The standard clauses, already written in on a new invoice. Above the early
-  // returns below: a hook after them runs on some renders and not others, which
-  // React treats as a changed hook order and unmounts the whole page for.
-  useDefaultNotes(isNew, draft.remarks, (remarks) => setDraft((d) => ({ ...d, remarks })));
   /*
    * Whoever is signed in prepared it, unless they say otherwise. Filled from
    * the session rather than typed, since the name is already known and getting
@@ -547,9 +542,25 @@ export default function InvoiceFormPage() {
           </Field>
         </Card>
 
-        <Card title="Remarks / Disclaimers">
-          <Textarea rows={NOTES_ROWS} value={draft.remarks} onChange={(e) => set({ remarks: e.target.value })} />
-        </Card>
+        {/*
+          * The Remarks / Disclaimers box was removed 2026-09-08 at the client's
+          * word. The standard clauses — price subject to freight, quantity
+          * tolerance, jurisdiction — belong on the quotation and the proforma
+          * that carried the offer; a commercial invoice bills goods already
+          * agreed, and Aglo's own AP/EX-101 sample carries no such block at
+          * all, its footer being the origin certificate, Incoterms and ARN.
+          *
+          * `remarks` stays a column and the draft still round-trips it, so an
+          * invoice raised before this keeps what it holds and its PDF prints
+          * it unchanged; what is gone is the box. `useDefaultNotes` went with
+          * it — left in place it would write the standard clauses into a field
+          * nobody can see, onto a document that prints them. The company's own
+          * default terms are unaffected: `notesAndTerms` prints those whether
+          * or not the document adds any of its own.
+          *
+          * Packing List Remarks above are a different field on a different
+          * document, and stay.
+          */}
 
         {!isNew && (
           <PaymentsCard
