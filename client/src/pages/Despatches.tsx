@@ -190,7 +190,11 @@ export default function DespatchesPage() {
                 <th className="pb-2 pr-3 text-right">Pieces</th>
                 <th className="pb-2 pr-3 text-right">Boxes</th>
                 <th className="pb-2 pr-3">Invoice</th>
-                <th className="pb-2" />
+                {/* Named rather than left blank. The link under it was a bare
+                    emoji in an unlabelled last column, which is a document
+                    nobody can find — the order tab's copy says "Challan"
+                    beside its icon and that is the half that was missing. */}
+                <th className="pb-2">Challan</th>
               </tr>
             </thead>
             <tbody>
@@ -221,14 +225,14 @@ export default function DespatchesPage() {
                     </td>
                     {/* The document that went with the lorry, reprintable from
                         the register as well as from the order it belongs to. */}
-                    <td className="whitespace-nowrap py-2 text-right">
+                    <td className="whitespace-nowrap py-2">
                       <a
                         href={`/api/pdf/challan/${d.id}`}
                         target="_blank"
                         rel="noreferrer"
-                        className="text-brand-600 hover:underline"
-                        title="Delivery challan"
-                      >📄</a>
+                        className="rounded-lg px-2 py-1 text-brand-600 hover:bg-brand-50 hover:underline"
+                        title="Delivery challan — the document that travelled with this trip"
+                      >📄 Print</a>
                     </td>
                   </tr>
                 );
