@@ -90,6 +90,41 @@ export default function DispatchTab({ order }: { order: Order }) {
     }),
   });
 
+  /**
+   * A saved trip, opened with **every** order line on it.
+   *
+   * `saveItems` stores only the lines that carried a figure — right, since a
+   * line with neither pieces nor boxes did not go on the lorry — but it meant
+   * the edit form could only ever show what the trip already had. A line left
+   * off by mistake, or loaded later and written on the same consignment note,
+   * could not be added at all: the only way to record it was a second trip on
+   * a date no lorry left.
+   *
+   * So the rows come from the **order**, with the saved values merged in by
+   * position — the chain's own index rule, the same one `order_line` is. A
+   * line the trip did not carry opens **blank rather than prefilled**: on a new
+   * despatch "what is still unsent" is a helpful guess, but on a saved one it
+   * would put figures on a trip nobody put them on. Blank rows are dropped
+   * again on save, so opening a despatch and closing it changes nothing.
+   *
+   * A saved row whose line the order no longer has is **kept and labelled**
+   * rather than merged away — an order can be edited after a lorry has left,
+   * and silently dropping such a row on the next save would delete a record of
+   * goods that physically went.
+   */
+  const editTrip = (d: Despatch): Partial<Despatch> => {
+    const saved = new Map((d.items ?? []).map((it) => [it.order_line, it]));
+    const onOrder: DespatchItem[] = items.map((it, i) => ({
+      order_line: i,
+      description: it.description,
+      qty: saved.get(i)?.qty ?? null,
+      packs: saved.get(i)?.packs ?? null,
+      notes: saved.get(i)?.notes ?? '',
+    }));
+    const orphans = (d.items ?? []).filter((it) => it.order_line >= items.length);
+    return { ...d, items: [...onOrder, ...orphans] };
+  };
+
   return (
     <div className="space-y-4">
       <Card title="Made, sent and billed">
@@ -234,7 +269,7 @@ export default function DispatchTab({ order }: { order: Order }) {
                           : <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-700">not billed</span>}
                       </td>
                       <td className="whitespace-nowrap py-2 text-right">
-                        <Button variant="ghost" onClick={() => { save.reset(); setEditing(d); }}>Edit</Button>
+                        <Button variant="ghost" onClick={() => { save.reset(); setEditing(editTrip(d)); }}>Edit</Button>
                         <Button
                           variant="danger"
                           className="ml-1 border-0"
@@ -434,9 +469,16 @@ function DespatchModal({
             return (
             <tr key={i} className="border-b border-slate-100">
               <td className="py-2 pr-2">
-                {line?.description || `Line ${r.order_line + 1}`}
+                {line?.description || r.description || `Line ${r.order_line + 1}`}
                 {left !== null && (
                   <div className="text-xs text-slate-400">{fmtQty(left)} left to ship</div>
+                )}
+                {/* The order has been edited since this lorry left. The row is
+                    kept rather than merged away — dropping it would delete the
+                    record of goods that physically went — but it is said out
+                    loud, because there is nothing left to check it against. */}
+                {!line && (
+                  <div className="text-xs text-amber-700">no longer a line on this order</div>
                 )}
               </td>
               <td className="py-2 pr-2">
