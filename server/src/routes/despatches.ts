@@ -7,6 +7,7 @@ import { qcBlockError } from '../services/qc.js';
 import { despatchLimitError } from '../services/despatchLimits.js';
 import { syncOrderStatus } from '../services/orderStatus.js';
 import { listBody } from '../services/pagination.js';
+import { searchClause } from '../services/search.js';
 import { buildXlsx, attachmentName, type Column } from '../services/xlsx.js';
 
 export const despatchesRouter = Router();
@@ -104,6 +105,30 @@ export function despatchedByOrder(orderId: number):
 }
 
 /**
+ * What makes a trip a *shipment* rather than a lorry.
+ *
+ * The documents question only arises on a sea leg: a container cannot be
+ * cleared without them, while a lorry to Hazipur carries a consignment note
+ * and nothing else. So "documents outstanding" has to be asked of shipments
+ * alone — asked of every despatch it answers *every domestic trip ever made*,
+ * each of which has a blank `docs_status` and always will.
+ *
+ * That was a real defect in the `?docs=pending` filter as first written
+ * (`docs_status <> 'received'` over the whole register). It is corrected here
+ * rather than worked around, and this is the moment to do it: the filter has
+ * had no control on the screen until now, so nothing can have come to rely on
+ * the old reading.
+ *
+ * Written twice rather than derived from one string, because the two contexts
+ * genuinely differ — the WHERE runs against the joined query and needs the
+ * `d.` alias, the summary runs against a CTE of it and must not have one — and
+ * a regex that rewrites SQL is a worse thing to maintain than four repeated
+ * column names. They are asserted equal, column for column, in the tests.
+ */
+export const SEA_LEG = "(bl_no <> '' OR container_no <> '' OR etd <> '' OR eta <> '')";
+export const SEA_LEG_D = "(d.bl_no <> '' OR d.container_no <> '' OR d.etd <> '' OR d.eta <> '')";
+
+/**
  * Pieces, boxes and unbilled trips over every despatch matching the filters —
  * not just the page on screen. Built from the list's own query so the two can
  * never disagree about which despatches they are describing.
@@ -116,8 +141,15 @@ function despatchSummary(sql: string, params: unknown[]) {
             COALESCE((SELECT SUM(di.qty) FROM despatch_items di
                        WHERE di.despatch_id IN (SELECT id FROM f)), 0) AS pieces,
             COALESCE((SELECT SUM(di.packs) FROM despatch_items di
-                       WHERE di.despatch_id IN (SELECT id FROM f)), 0) AS boxes`
-  ).get(...(params as never[])) as { trips: number; unbilled: number; pieces: number; boxes: number };
+                       WHERE di.despatch_id IN (SELECT id FROM f)), 0) AS boxes,
+            (SELECT COUNT(*) FROM f WHERE eta <> '' OR etd <> '') AS with_eta,
+            (SELECT COUNT(*) FROM f WHERE docs_status <> '') AS with_docs,
+            (SELECT COUNT(*) FROM f WHERE ${SEA_LEG} AND COALESCE(docs_status, '') <> 'received')
+              AS docs_pending`
+  ).get(...(params as never[])) as {
+    trips: number; unbilled: number; pieces: number; boxes: number;
+    with_eta: number; with_docs: number; docs_pending: number;
+  };
 }
 
 /**
@@ -139,6 +171,7 @@ function despatchSummary(sql: string, params: unknown[]) {
  * gives: SQLite cannot ALTER one, and a list like this expects to grow.
  */
 export const DOCS_STATUSES = ['', 'sent', 'received'] as const;
+
 export const DOCS_METHODS = ['', 'telex', 'courier'] as const;
 
 /** How the two read on a spreadsheet, where a code helps nobody. */
@@ -157,8 +190,28 @@ function despatchListWhere(req: AuthedRequest): { where: string[]; params: unkno
   if (scope.sql) { where.push(scope.sql); params.push(...scope.params); }
   if (req.query.order_id) { where.push('d.order_id = ?'); params.push(Number(req.query.order_id)); }
   if (req.query.location_id) { where.push('d.location_id = ?'); params.push(Number(req.query.location_id)); }
+  if (req.query.customer_id) { where.push('o.customer_id = ?'); params.push(Number(req.query.customer_id)); }
   if (req.query.from) { where.push('d.date >= ?'); params.push(String(req.query.from)); }
   if (req.query.to) { where.push('d.date <= ?'); params.push(String(req.query.to)); }
+  /*
+   * What somebody actually has in hand when they open this register: a
+   * container or BL number off a forwarder's email, a CN or vehicle number off
+   * a transporter's, or our own order number and the customer's name from
+   * inside. Destination rides along because "everything that went to
+   * Mogadishu" is a real question and this list has no other way to ask it.
+   *
+   * Server-side, like every other register here: the list is paged, so
+   * filtering the rows already fetched would search the page in hand rather
+   * than the book. Through `searchClause`, so `%` and `_` are escaped and the
+   * clause is bracketed — without the brackets `scope AND a LIKE ? OR b LIKE ?`
+   * binds as `(scope AND a) OR b`, and the search becomes a way straight past
+   * data scoping.
+   */
+  const search = searchClause(
+    ['d.container_no', 'd.bl_no', 'd.cn_no', 'd.vehicle_no', 'o.number', 'c.name', 'd.destination'],
+    String(req.query.q ?? ''),
+  );
+  if (search.sql) { where.push(search.sql); params.push(...search.params); }
   // Gone but not billed — the reason these rows exist at all.
   if (req.query.uninvoiced === '1') where.push('d.invoice_id IS NULL');
   /*
@@ -167,8 +220,11 @@ function despatchListWhere(req: AuthedRequest): { where: string[]; params: unkno
    * is deliberately "not received", not "not sent": documents posted a week ago
    * and still not with the buyer are exactly the case worth chasing.
    */
-  if (req.query.docs === 'pending') where.push("COALESCE(d.docs_status, '') <> 'received'");
-  else if (req.query.docs === 'sent') where.push("d.docs_status = 'sent'");
+  if (req.query.docs === 'pending') {
+    // Shipments only — see SEA_LEG above. Asked of the whole register this
+    // would return every domestic lorry ever recorded.
+    where.push(`${SEA_LEG_D} AND COALESCE(d.docs_status, '') <> 'received'`);
+  } else if (req.query.docs === 'sent') where.push("d.docs_status = 'sent'");
   else if (req.query.docs === 'received') where.push("d.docs_status = 'received'");
   // Arriving between two dates — an ETA is a real date so it can be asked for.
   if (req.query.eta_from) { where.push("d.eta <> '' AND d.eta >= ?"); params.push(String(req.query.eta_from)); }
