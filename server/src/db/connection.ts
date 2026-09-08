@@ -104,6 +104,14 @@ addColumnIfMissing('companies', 'po_pattern', "TEXT NOT NULL DEFAULT 'PO/{FY}/{S
 // make the numbers untraceable.
 addColumnIfMissing('settings', 'po_import_pattern', "TEXT NOT NULL DEFAULT 'PO-IMP/{FY}/{SEQ}'");
 addColumnIfMissing('companies', 'po_import_pattern', "TEXT NOT NULL DEFAULT 'PO-IMP/{FY}/{SEQ}'");
+// The delivery challan gained a series of its own (2026-09), because a
+// document that travels with the goods has to be serially numbered to be one.
+addColumnIfMissing('settings', 'challan_pattern', "TEXT NOT NULL DEFAULT 'DC/{FY}/{SEQ}'");
+addColumnIfMissing('companies', 'challan_pattern', "TEXT NOT NULL DEFAULT 'DC/{FY}/{SEQ}'");
+// And the number itself, on the trip. Blank on every despatch recorded before
+// this, which prints its consignment note number instead -- nothing already on
+// file is renumbered, and a number once issued is never reissued.
+addColumnIfMissing('despatches', 'challan_no', "TEXT NOT NULL DEFAULT ''");
 
 /*
  * The purchase order, brought up to the shape of the documents around it

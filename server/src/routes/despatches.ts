@@ -8,6 +8,7 @@ import { despatchLimitError } from '../services/despatchLimits.js';
 import { syncOrderStatus } from '../services/orderStatus.js';
 import { listBody } from '../services/pagination.js';
 import { searchClause } from '../services/search.js';
+import { nextNumber } from '../services/numbering.js';
 import { SEA_LEG, DOCS_OUTSTANDING_D } from '../services/despatch.js';
 import { buildXlsx, attachmentName, type Column } from '../services/xlsx.js';
 
@@ -301,8 +302,8 @@ despatchesRouter.get('/:id', (req: AuthedRequest, res) => {
 
 despatchesRouter.post('/', (req: AuthedRequest, res) => {
   const body = req.body ?? {};
-  const order = db.prepare('SELECT id, customer_id FROM orders WHERE id = ?')
-    .get(Number(body.order_id)) as { id: number; customer_id: number } | undefined;
+  const order = db.prepare('SELECT id, customer_id, company_id FROM orders WHERE id = ?')
+    .get(Number(body.order_id)) as { id: number; customer_id: number; company_id: number } | undefined;
   if (!order || !canAccessCustomer(req, order.customer_id)) {
     return res.status(404).json({ error: 'Order not found' });
   }
@@ -336,11 +337,31 @@ despatchesRouter.post('/', (req: AuthedRequest, res) => {
   }
 
   const id = transaction(() => {
+    /*
+     * The challan's number, claimed here rather than when it is printed.
+     *
+     * A despatch deliberately had no number of its own — the desk sheet
+     * identifies a trip by its consignment note or its invoice, and inventing
+     * a third series would have given the floor one more number to quote
+     * wrongly. The delivery challan changes that, because a document that
+     * travels with the goods has to be serially numbered to be one.
+     *
+     * Claimed on **create**, inside the same transaction as every other
+     * document in this app, and never at print time: `/api/pdf` is a GET, and
+     * a GET that consumes a number from a series would issue one every time
+     * somebody opened the file — the same reason the prefill endpoints refuse
+     * to approve anything.
+     *
+     * The company comes from the order, a despatch having none of its own;
+     * the date is the trip's, so a back-dated movement draws from that fiscal
+     * year's series rather than this one.
+     */
+    const challan = nextNumber('challan', { companyId: order.company_id, date: String(body.date) });
     const info = db.prepare(
       `INSERT INTO despatches (order_id, location_id, date, destination, transporter_id, cn_no, vehicle_no,
          tentative_delivery, freight_terms, invoice_id, notes,
-         bl_no, container_no, etd, eta, docs_status, docs_method, docs_date, created_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         bl_no, container_no, etd, eta, docs_status, docs_method, docs_date, challan_no, created_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       order.id, numOrNull(body.location_id), String(body.date), String(body.destination ?? ''),
       numOrNull(body.transporter_id), String(body.cn_no ?? ''), String(body.vehicle_no ?? ''),
@@ -348,7 +369,7 @@ despatchesRouter.post('/', (req: AuthedRequest, res) => {
       invoiceId, String(body.notes ?? ''),
       String(body.bl_no ?? ''), String(body.container_no ?? ''),
       String(body.etd ?? ''), String(body.eta ?? ''),
-      docsStatus, docsMethod, String(body.docs_date ?? ''),
+      docsStatus, docsMethod, String(body.docs_date ?? ''), challan,
       req.user!.id
     );
     const despatchId = Number(info.lastInsertRowid);

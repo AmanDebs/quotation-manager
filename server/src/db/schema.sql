@@ -74,6 +74,9 @@ CREATE TABLE IF NOT EXISTS companies (
   wo_pattern TEXT NOT NULL DEFAULT 'WO/{FY}/{SEQ}',
   po_pattern TEXT NOT NULL DEFAULT 'PO/{FY}/{SEQ}',
   po_import_pattern TEXT NOT NULL DEFAULT 'PO-IMP/{FY}/{SEQ}',
+  -- The delivery challan that travels with the lorry. One series whatever
+  -- the destination: a challan is issued for a movement, not for a sale.
+  challan_pattern TEXT NOT NULL DEFAULT 'DC/{FY}/{SEQ}',
   -- The one a document falls back to when neither it nor its customer names one.
   is_default INTEGER NOT NULL DEFAULT 0,
   active INTEGER NOT NULL DEFAULT 1,
@@ -117,6 +120,9 @@ CREATE TABLE IF NOT EXISTS settings (
   wo_pattern TEXT NOT NULL DEFAULT 'WO/{FY}/{SEQ}',
   po_pattern TEXT NOT NULL DEFAULT 'PO/{FY}/{SEQ}',
   po_import_pattern TEXT NOT NULL DEFAULT 'PO-IMP/{FY}/{SEQ}',
+  -- The delivery challan that travels with the lorry. One series whatever
+  -- the destination: a challan is issued for a movement, not for a sale.
+  challan_pattern TEXT NOT NULL DEFAULT 'DC/{FY}/{SEQ}',
   note_presets TEXT NOT NULL DEFAULT '[]'
 );
 INSERT OR IGNORE INTO settings (id) VALUES (1);
@@ -1026,6 +1032,12 @@ CREATE TABLE IF NOT EXISTS despatches (
   docs_method TEXT NOT NULL DEFAULT '',
   docs_date TEXT NOT NULL DEFAULT '',
   freight_terms TEXT NOT NULL DEFAULT '',
+  -- The delivery challan's own number, claimed when the trip is recorded.
+  -- Despatches deliberately had no number of their own -- the desk sheet
+  -- identifies a trip by its CN or its invoice -- but a challan is a document
+  -- that travels with the goods and has to be serially numbered to be one.
+  -- Blank on every trip recorded before the challan existed.
+  challan_no TEXT NOT NULL DEFAULT '',
   -- Nullable: the goods can go before the paperwork catches up.
   invoice_id INTEGER REFERENCES commercial_invoices(id),
   notes TEXT NOT NULL DEFAULT '',

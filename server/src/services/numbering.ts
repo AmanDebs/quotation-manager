@@ -2,7 +2,7 @@ import { db } from '../db/connection.js';
 
 export type DocType =
   | 'quotation' | 'order' | 'proforma' | 'invoice' | 'packing_list'
-  | 'work_order' | 'purchase_order';
+  | 'work_order' | 'purchase_order' | 'challan';
 
 /** Indian fiscal year (April–March) as "25-26". */
 export function fiscalYear(date = new Date()): string {
@@ -64,6 +64,11 @@ const patternColumn: Record<DocType, { std: string; export?: string; flag?: stri
   // buyer is, and a second series would only make the numbers harder to trace.
   work_order: { std: 'wo_pattern' },
   purchase_order: { std: 'po_pattern', export: 'po_import_pattern', flag: 'is_import', altWord: 'import' },
+  // The delivery challan travelling with a lorry. One series whatever the
+  // destination: a challan is issued for a *movement*, and an export
+  // consignment leaving the plant for the port is the same kind of movement
+  // as one leaving for Hazipur.
+  challan: { std: 'challan_pattern' },
 };
 
 /**

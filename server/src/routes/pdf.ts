@@ -4,6 +4,7 @@ import {
   buildQuotationPdf, buildOrderPdf, buildProformaPdf, buildInvoicePdf, buildPackingListPdf,
   buildInvoiceWithPackingPdf, buildPurchaseOrderPdf,
   buildQcReportPdf, buildOrderQcReportPdf, buildInvoiceQcReportPdf, buildInvoiceWithQcPdf,
+  buildDeliveryChallanPdf,
   renderPdf,
 } from '../services/pdf.js';
 import { allows, type AuthedRequest } from '../middleware/auth.js';
@@ -73,6 +74,30 @@ const builders = {
   'invoice-with-qc': {
     build: buildInvoiceWithQcPdf, table: 'commercial_invoices', approvable: true, fn: 'invoice',
   },
+  /*
+   * The document that travels with the lorry, and the second entry to need its
+   * own `partySql`: a despatch has no `customer_id`, hanging off the order the
+   * way a work order does.
+   *
+   * `fn: 'dispatch'` is the load-bearing half. `/api/pdf` is mounted with
+   * `requireAuth` alone, so an entry without one would serve every customer's
+   * consignments — with their addresses, registrations and the value of the
+   * goods on board — to Sales, Production and Quality, all of which hold
+   * `dispatch: none` and are refused the register itself.
+   *
+   * `number` is the challan's own where it has one and its consignment note
+   * otherwise, so the filename says something even for a trip recorded before
+   * this document existed.
+   */
+  challan: {
+    build: buildDeliveryChallanPdf, table: 'despatches', approvable: false, fn: 'dispatch',
+    partySql: `SELECT COALESCE(NULLIF(d.challan_no, ''), NULLIF(d.cn_no, ''), 'DC-' || d.id) AS number,
+                      o.customer_id, c.name AS party_name
+                 FROM despatches d
+                 JOIN orders o ON o.id = d.order_id
+                 JOIN customers c ON c.id = o.customer_id
+                WHERE d.id = ?`,
+  },
 } as const;
 
 type DocType = keyof typeof builders;
@@ -98,6 +123,7 @@ const DOC_LABEL: Record<DocType, string> = {
   'order-qc-report': 'Quality Report',
   'invoice-qc-report': 'Quality Report',
   'invoice-with-qc': 'Commercial Invoice & Quality Report',
+  challan: 'Delivery Challan',
 };
 
 /*

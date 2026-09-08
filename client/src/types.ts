@@ -135,7 +135,7 @@ export interface Settings {
    * companies route's field list, so every entity in the group issued
    * WO/26-27/001 with no way to change it.
    */
-  wo_pattern: string; po_pattern: string;
+  wo_pattern: string; po_pattern: string; challan_pattern: string;
   bank_accounts: BankAccount[];
   note_presets: NotePreset[];
 }
@@ -543,6 +543,9 @@ export interface Despatch {
   transporter_id: number | null;
   cn_no: string;
   vehicle_no: string;
+  /** The delivery challan's own number, claimed when the trip is recorded.
+   *  Blank on a trip recorded before the challan existed. */
+  challan_no?: string;
   tentative_delivery: string;
   freight_terms: string;
   /**

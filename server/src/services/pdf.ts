@@ -4,7 +4,7 @@ import type { TDocumentDefinitions, Content } from 'pdfmake/interfaces';
 import { inflateSync } from 'node:zlib';
 import { db } from '../db/connection.js';
 import { amountInWords } from './amountInWords.js';
-import { round2, isPieceBasis, piecesPerBillingUnit } from './totals.js';
+import { round2, isPieceBasis, piecesPerBillingUnit, computeTotals } from './totals.js';
 import { invoiceReceivable, proformaAdvance, orderAdvance } from './receivables.js';
 import { paramsFor, specOwner, checksForWorkOrder } from './qc.js';
 import { getCompany, defaultCompany } from './companies.js';
@@ -2143,4 +2143,215 @@ export function renderPdf(docDefinition: TDocumentDefinitions, watermark?: strin
       reject(err);
     }
   });
+}
+
+/* ------------------------------------------------------------------ */
+/* DELIVERY CHALLAN                                                    */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The document that travels with the lorry.
+ *
+ * Six document types printed and the physical movement printed nothing, though
+ * `despatches.invoice_id` is nullable precisely because the goods regularly go
+ * before the invoice does — and a consignment leaving the gate with no paper
+ * describing it is the one gap in this chain that is not merely inconvenient.
+ * A delivery challan is what covers that movement.
+ *
+ * **The field list follows Rule 55 as it is ordinarily read** — challan number
+ * and date, consigner and consignee with their registrations, description and
+ * HSN, quantity, and the taxable value with its tax where the movement is a
+ * supply to the consignee. It is worth confirming against this desk's own
+ * accountant rather than taking from here; what the code guarantees is that
+ * every field it prints is drawn from a record rather than typed twice.
+ *
+ * **Nothing on it is stored.** The quantities are the despatch's own; the
+ * description, HSN, rate and tax rate come from the order line at the same
+ * position — the chain's index rule — and the money is handed to
+ * `computeTotals`, which owns all of it, rather than multiplied out here. So a
+ * challan reprinted after the order is corrected prints the corrected figures,
+ * and there is no second copy of a price to drift from the first.
+ *
+ * The **GSTIN is printed whatever the destination**, which is the one place
+ * this deliberately departs from `registrationLine`'s rules. Those were written
+ * for an export *sale*, where the buyer is abroad and the supply is zero-rated;
+ * a challan describes a movement that begins in India whether the lorry is
+ * going to Hazipur or to Nhava Sheva, and the consigner's registration belongs
+ * on it either way.
+ */
+export function buildDeliveryChallanPdf(id: number): TDocumentDefinitions {
+  const d = db.prepare(
+    `SELECT d.*, l.name AS location_name, l.address AS location_address, t.name AS transporter_name,
+            i.number AS invoice_number, i.date AS invoice_date
+       FROM despatches d
+       LEFT JOIN locations l ON l.id = d.location_id
+       LEFT JOIN transporters t ON t.id = d.transporter_id
+       LEFT JOIN commercial_invoices i ON i.id = d.invoice_id
+      WHERE d.id = ?`
+  ).get(id) as Row;
+  if (!d) throw new Error('Despatch not found');
+
+  const o = db.prepare('SELECT * FROM orders WHERE id = ?').get(d.order_id) as Row;
+  const s = companyProfile(o.company_id);
+  const c = db.prepare('SELECT * FROM customers WHERE id = ?').get(o.customer_id) as Row;
+  const orderItems = db.prepare(
+    'SELECT * FROM order_items WHERE order_id = ? ORDER BY sort_order, id'
+  ).all(d.order_id) as Row[];
+  const sent = db.prepare(
+    'SELECT * FROM despatch_items WHERE despatch_id = ? ORDER BY sort_order, id'
+  ).all(id) as Row[];
+
+  const cur = String(o.currency || 'INR');
+  const taxType = String(o.tax_type || 'none') as 'none' | 'cgst_sgst' | 'igst';
+  const showTax = taxType !== 'none';
+
+  /*
+   * What went, priced at the order line's own rate.
+   *
+   * `computeTotals` is asked rather than the arithmetic being written here —
+   * all money math lives in `totals.ts`, and a challan that multiplied its own
+   * lines out would be a second opinion about the same goods. Both `qty` and
+   * `total_pcs` carry the despatched figure, so `billedQty` reads it in
+   * whichever basis the order line is priced on: 80,000 against a per-1000
+   * rate bills 80, and 500 against a per-kg rate bills 500.
+   *
+   * A charge line never ships, and a line the order no longer has cannot be
+   * priced — both are dropped. The second is the row `DispatchTab` keeps and
+   * labels, which is right on a screen where it can be explained and wrong on
+   * a document that states a value.
+   */
+  const priced = sent
+    .map((r) => ({ r, line: orderItems[Number(r.order_line)] }))
+    .filter((x) => x.line && !x.line.is_charge && (x.r.qty != null || x.r.packs != null));
+
+  const totals = computeTotals(
+    priced.map(({ r, line }) => ({
+      description: String(line.description ?? ''),
+      hsn_code: String(line.hsn_code ?? ''),
+      qty: r.qty != null ? Number(r.qty) : null,
+      total_pcs: r.qty != null ? Number(r.qty) : null,
+      unit: String(line.unit ?? ''),
+      unit_price: Number(line.unit_price) || 0,
+      tax_pct: Number(line.tax_pct) || 0,
+      packs: r.packs != null ? Number(r.packs) : null,
+      pcs_per_pack: line.pcs_per_pack != null ? Number(line.pcs_per_pack) : null,
+      color: String(line.color ?? ''),
+    })),
+    taxType, 0, 0, cur
+  );
+
+  /** Consignee, with the registration a tax invoice would state for them. */
+  const deliverTo = [
+    c.name,
+    c.address,
+    [c.city, c.state, c.pincode].filter(Boolean).join(' '),
+    c.gstin ? `GSTIN: ${c.gstin}` : '',
+  ].filter(Boolean).join('\n');
+
+  const transport = [
+    d.transporter_name ? `Transporter: ${d.transporter_name}` : '',
+    d.vehicle_no ? `Vehicle: ${d.vehicle_no}` : '',
+    d.cn_no ? `CN / LR No.: ${d.cn_no}` : '',
+    d.container_no ? `Container: ${d.container_no}` : '',
+    d.bl_no ? `B/L: ${d.bl_no}` : '',
+  ].filter(Boolean).join('\n');
+
+  const grid: Content = {
+    table: {
+      widths: ['*', '*', '*'],
+      body: [
+        [
+          // A trip recorded before this document existed carries no challan
+          // number of its own; its consignment note is the reference it does
+          // have, and printing that beats an empty box on a document whose
+          // whole point is to be serially numbered.
+          lv('Challan No.  /  Date',
+            `${d.challan_no || d.cn_no || '—'}   ${fmtDate(String(d.date))}`),
+          lv("Order No.  /  Buyer's PO",
+            `${o.number}${o.po_number ? `\nBUYER PO: ${o.po_number}` : ''}`),
+          lv('Despatched From',
+            [d.location_name, d.location_address].filter(Boolean).join('\n') || String(s.company_name)),
+        ],
+        [
+          { ...lv('Consignee', deliverTo), rowSpan: 2 },
+          lv('Place of Delivery', String(d.destination || '') || '—'),
+          lv('Transport', transport || '—'),
+        ],
+        [
+          {},
+          lv('Invoice Reference',
+            d.invoice_number ? `${d.invoice_number}   ${fmtDate(String(d.invoice_date))}` : 'Not yet billed'),
+          lv('Expected Delivery',
+            (d.eta ? fmtDate(String(d.eta)) : String(d.tentative_delivery || '')) || '—'),
+        ],
+      ],
+    },
+    layout: boxedLayout,
+    margin: [0, 0, 0, 8] as any,
+  };
+
+  const specs: ColumnSpec[] = [
+    { key: 'sl', label: 'SL', width: 16, align: 'center', always: true, value: (_it, i) => String(i + 1) },
+    { key: 'description', label: 'Description of Goods', width: '*', always: true, value: (it) => String(it.description) },
+    { key: 'hsn', label: 'HSN Code', width: 50, align: 'center', value: (it) => String(it.hsn_code || '') },
+    { key: 'color', label: 'Color', width: 46, align: 'center', value: (it) => String(it.color || '') },
+    { key: 'packs', label: 'Boxes', width: 40, align: 'right',
+      value: (it) => (it.packs != null ? fmtNum(it.packs, 0) : ''),
+      sum: (rows) => fmtNum(rows.reduce((t, r) => t + (Number(r.packs) || 0), 0), 0) },
+    /*
+     * **What physically went, not what is billed.** The invoice prints its
+     * quantity in the line's billing unit, because that is what the money is
+     * charged against — but a challan describes goods on a lorry, and "80 per
+     * 1000" is a basis rather than a count of anything. A piece-basis line
+     * therefore states its pieces; a weight-billed one states its own figure
+     * and unit, which is already the physical quantity. The rate legend
+     * (`10/1000`) is what keeps the value beside it checkable.
+     */
+    { key: 'qty', label: 'Quantity', width: 74, align: 'right', always: true,
+      value: (it) => (isPieceBasis(String(it.unit)) && it.total_pcs != null
+        ? `${fmtNum(it.total_pcs, 0)} pcs`
+        : it.qty != null ? `${fmtNum(it.qty)} ${it.unit}` : '—') },
+    { key: 'unit_price', label: 'Rate', width: 52, align: 'right', value: (it) => `${fmtNum(it.unit_price, 3)}/${it.unit === 'per 1000' ? '1000' : it.unit}` },
+    ...(showTax ? [{ key: 'tax', label: 'Tax %', width: 28, align: 'right' as const, value: (it: Row) => `${it.tax_pct ?? 0}%` }] : []),
+    { key: 'amount', label: `Taxable Value ${cur}`, width: 68, align: 'right', always: true, value: (it) => fmtMoney(it.amount, cur) },
+  ];
+
+  const money: MoneyRow[] = [
+    { label: 'TAXABLE VALUE', value: fmtMoney(totals.subtotal, cur), band: showTax },
+  ];
+  if (taxType === 'cgst_sgst') {
+    money.push({ label: 'Add CGST', value: fmtMoney(round2(totals.tax_total / 2), cur) });
+    money.push({ label: 'Add SGST', value: fmtMoney(round2(totals.tax_total / 2), cur) });
+  } else if (taxType === 'igst') {
+    money.push({ label: 'Add IGST', value: fmtMoney(totals.tax_total, cur) });
+  }
+  /*
+   * `computeTotals` rounds an INR grand total to the whole rupee, the practice
+   * every other document here follows — so without this row 480.00 + 86.40
+   * prints as 566.00 and reads as an arithmetic error rather than as rounding.
+   * Derived from the components rather than stored, exactly as the invoice's
+   * own round-off line is.
+   */
+  const roundOff = round2(totals.grand_total - (totals.subtotal + totals.tax_total));
+  if (roundOff !== 0) money.push({ label: 'Round off', value: fmtMoney(roundOff, cur) });
+  // The sums ride on the closing row, as they do on every other items table
+  // here — boxes despatched belong beside the value of what went out.
+  money.push({ label: 'TOTAL VALUE OF GOODS', value: fmtMoney(totals.grand_total, cur), band: true, sums: true });
+
+  const content: Content[] = [
+    // A movement that begins in India carries the consigner's GSTIN whatever
+    // its destination, so this is deliberately not gated on `is_export`.
+    ...companyHeader(s, { isExport: false }),
+    docTitle(s, 'DELIVERY CHALLAN'),
+    grid,
+    itemsTable(s, totals.items as unknown as Row[], specs, {}, money),
+    amountWords({ grand_total: totals.grand_total } as unknown as Row, cur),
+    ...(d.notes ? [{ text: String(d.notes), fontSize: 8, margin: [0, 8, 0, 0] as any }] : []),
+    {
+      text: 'Goods despatched under this challan. Received in good order and condition.',
+      fontSize: 8, margin: [0, 10, 0, 0] as any,
+    },
+    signatureBlock(s, { buyerSide: true }),
+  ];
+  return baseDoc(content);
 }

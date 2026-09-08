@@ -269,6 +269,17 @@ export default function DispatchTab({ order }: { order: Order }) {
                           : <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-700">not billed</span>}
                       </td>
                       <td className="whitespace-nowrap py-2 text-right">
+                        {/* The document that travels with the lorry. A plain
+                            anchor rather than `PdfLink`: this prints the trip
+                            as the server holds it, and nothing on this tab is
+                            an unsaved draft that could be ahead of it. */}
+                        <a
+                          href={`/api/pdf/challan/${d.id}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="mr-1 rounded-lg px-2 py-1 text-sm text-brand-600 hover:bg-brand-50"
+                          title="Delivery challan"
+                        >📄 Challan</a>
                         <Button variant="ghost" onClick={() => { save.reset(); setEditing(editTrip(d)); }}>Edit</Button>
                         <Button
                           variant="danger"

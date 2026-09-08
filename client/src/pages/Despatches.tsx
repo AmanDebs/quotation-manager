@@ -190,6 +190,7 @@ export default function DespatchesPage() {
                 <th className="pb-2 pr-3 text-right">Pieces</th>
                 <th className="pb-2 pr-3 text-right">Boxes</th>
                 <th className="pb-2 pr-3">Invoice</th>
+                <th className="pb-2" />
               </tr>
             </thead>
             <tbody>
@@ -217,6 +218,17 @@ export default function DespatchesPage() {
                       {d.invoice_number
                         ? <span className="text-slate-600">{d.invoice_number}</span>
                         : <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-700">not billed</span>}
+                    </td>
+                    {/* The document that went with the lorry, reprintable from
+                        the register as well as from the order it belongs to. */}
+                    <td className="whitespace-nowrap py-2 text-right">
+                      <a
+                        href={`/api/pdf/challan/${d.id}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-brand-600 hover:underline"
+                        title="Delivery challan"
+                      >📄</a>
                     </td>
                   </tr>
                 );
