@@ -1,10 +1,11 @@
 import { Router } from 'express';
 import { db } from '../db/connection.js';
-import type { AuthedRequest } from '../middleware/auth.js';
+import { allows, type AuthedRequest } from '../middleware/auth.js';
 import { scopeClause } from '../middleware/scope.js';
 import { receivedByInvoice } from '../services/receivables.js';
 import { defaultCompanyId } from '../services/companies.js';
 import { shortfall, onHandAll } from '../services/stock.js';
+import { DOCS_OUTSTANDING_D, SEA_LEG_D } from '../services/despatch.js';
 
 export const dashboardRouter = Router();
 
@@ -448,6 +449,66 @@ dashboardRouter.get('/', (req: AuthedRequest, res) => {
     return level > 0 && r.qty < level;
   });
 
+  /**
+   * The despatch chips, or nothing at all.
+   *
+   * **A figure the caller may not read is absent, not zero** — the rule
+   * `services/customerSummary.ts` states, applied to a strip rather than a
+   * page, and it matters here specifically. Sales holds `dispatch: none` and
+   * so do Production and Quality, yet the dashboard is mounted on the
+   * `dashboard` function: without this, all three were told how many
+   * despatches were unbilled and then answered **404 on clicking the chip**.
+   * Measured before the gate — a Production login, which sees every order,
+   * was handed the whole group's despatch counts for a function it holds
+   * `none` on. That was a pre-existing hole under `unbilledDespatches` alone;
+   * adding two more chips would have made it three times the size, so it is
+   * closed here rather than widened.
+   *
+   * Decided on the server against `allows()`, never by `useCan()` on the
+   * client — a copy of the access table on the client is a second policy, and
+   * it drifts. The keys are already optional on the client (a server not yet
+   * redeployed omits them), so an absent key renders no chip with no client
+   * change at all.
+   *
+   * The two sea-leg figures are the questions an export desk asks every
+   * morning and the dashboard could not answer, though the register has held
+   * the columns since they were added.
+   *
+   * **Whose papers are still out.** The buyer cannot clear the goods without
+   * them, so a container at the port with its documents on somebody's desk is
+   * the most expensive row in the book. Asked of shipments alone through
+   * `DOCS_OUTSTANDING_D` — over the whole register it would count every
+   * domestic lorry ever recorded, each with a blank status for ever.
+   *
+   * **What lands next.** Seven days, matching `expiringQuotations` beside it:
+   * far enough ahead to be ready for, near enough to be actionable. An ETA
+   * already past is deliberately included — a shipment that should have landed
+   * and has not is exactly what this ought to surface, and nothing records an
+   * actual arrival to close it off. A blank ETA never counts, the rule the
+   * register's own filter follows.
+   *
+   * All three are scoped and company-filtered through the order, a despatch
+   * having neither of its own.
+   */
+  const despatchAttention = () => {
+    if (!allows(req, 'dispatch')) return {};
+    const tail = `${scope.sql ? ` AND o.${scope.sql}` : ''}${companyId ? ' AND o.company_id = ?' : ''}`;
+    const args = [...scope.params, ...(companyId ? [companyId] : [])];
+    const count = (where: string, lead: unknown[] = []) => one(
+      `SELECT COUNT(*) AS c FROM despatches d
+       JOIN orders o ON o.id = d.order_id
+       WHERE ${where}${tail}`,
+      ...lead, ...args
+    );
+    return {
+      // Goods that left the plant with no invoice against them yet — the
+      // reason despatch is recorded separately from billing in the first place.
+      unbilledDespatches: count('d.invoice_id IS NULL'),
+      documentsOutstanding: count(DOCS_OUTSTANDING_D),
+      arrivingSoon: count(`${SEA_LEG_D} AND d.eta <> '' AND d.eta <= date(?, '+7 days')`, [today]),
+    };
+  };
+
   const attention = {
     overdueFollowups: followups.overdue.length,
     followupsToday: followups.today.length,
@@ -482,15 +543,7 @@ dashboardRouter.get('/', (req: AuthedRequest, res) => {
          ${scope.sql ? ` AND o.${scope.sql}` : ''}${companyId ? ' AND o.company_id = ?' : ''}`,
       today, ...scope.params, ...(companyId ? [companyId] : [])
     ),
-    // Goods that left the plant with no invoice against them yet — the reason
-    // despatch is recorded separately from billing in the first place.
-    unbilledDespatches: one(
-      `SELECT COUNT(*) AS c FROM despatches d
-       JOIN orders o ON o.id = d.order_id
-       WHERE d.invoice_id IS NULL
-         ${scope.sql ? ` AND o.${scope.sql}` : ''}${companyId ? ' AND o.company_id = ?' : ''}`,
-      ...scope.params, ...(companyId ? [companyId] : [])
-    ),
+    ...despatchAttention(),
     // Material short across the open order book. Group-wide and unscoped by
     // design: the store is not the customer's, and a buyer needs the whole
     // picture to raise one purchase order rather than several.

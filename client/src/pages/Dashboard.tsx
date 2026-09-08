@@ -12,7 +12,7 @@ import { Icon } from '../components/icons';
 import { useCompanies } from '../components/CompanySelect';
 import { ORDER_STATUSES, orderStatusLabel } from './Orders';
 import { STATUSES as QUOTATION_STATUSES, quotationStatusLabel } from './Quotations';
-import { fmtDate, fmtMoney, fmtQty, today } from '../lib/format';
+import { addDays, fmtDate, fmtMoney, fmtQty, today } from '../lib/format';
 
 /* ------------------------------------------------------------------ *
  * Palette
@@ -125,6 +125,8 @@ interface DashboardData {
     // customer's, and a buyer needs the whole picture.
     overdueWorkOrders?: number; unbilledDespatches?: number;
     materialShort?: number; materialBelowReorder?: number;
+    // The sea leg: papers still with us, and what lands inside a week.
+    documentsOutstanding?: number; arrivingSoon?: number;
   };
   /**
    * The same figures over the window immediately before this one, so a tile
@@ -578,10 +580,13 @@ export default function DashboardPage() {
     unbilledDespatches: raw.unbilledDespatches ?? 0,
     materialShort: raw.materialShort ?? 0,
     materialBelowReorder: raw.materialBelowReorder ?? 0,
+    documentsOutstanding: raw.documentsOutstanding ?? 0,
+    arrivingSoon: raw.arrivingSoon ?? 0,
   };
   const attentionTotal = a.overdueFollowups + a.followupsToday + a.overdueOrders + a.overdueInvoices
     + a.expiringQuotations + a.overdueWorkOrders + a.unbilledDespatches + a.materialShort
-    + a.materialBelowReorder + (isManager ? a.pendingApprovals : 0);
+    + a.materialBelowReorder + a.documentsOutstanding + a.arrivingSoon
+    + (isManager ? a.pendingApprovals : 0);
 
   // Headline money, all in the selected currency.
   const cur = activeCurrency;
@@ -655,6 +660,13 @@ export default function DashboardPage() {
               <AttentionChip to="/stock" count={a.materialShort} label="materials short for open jobs" tone="red" />
               <AttentionChip to="/stock" count={a.materialBelowReorder} label="materials below reorder level" tone="amber" />
               <AttentionChip to="/despatches" count={a.unbilledDespatches} label="despatches not yet billed" tone="amber" />
+              {/* The sea leg. Papers outstanding is red because the buyer
+                  cannot clear the goods without them — a container sitting at
+                  the port is the most expensive row in the book. An arrival is
+                  not a fault, so it is amber, and both go straight to the
+                  register filtered the way the chip counted. */}
+              <AttentionChip to={listUrl('/despatches', { docs: 'pending' })} count={a.documentsOutstanding} label="shipments awaiting documents" tone="red" />
+              <AttentionChip to={listUrl('/despatches', { eta_to: addDays(today(), 7) })} count={a.arrivingSoon} label="shipments arriving this week" tone="amber" />
             </div>
           )}
         </Card>

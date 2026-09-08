@@ -8,6 +8,7 @@ import { despatchLimitError } from '../services/despatchLimits.js';
 import { syncOrderStatus } from '../services/orderStatus.js';
 import { listBody } from '../services/pagination.js';
 import { searchClause } from '../services/search.js';
+import { SEA_LEG, DOCS_OUTSTANDING_D } from '../services/despatch.js';
 import { buildXlsx, attachmentName, type Column } from '../services/xlsx.js';
 
 export const despatchesRouter = Router();
@@ -104,29 +105,6 @@ export function despatchedByOrder(orderId: number):
   }]));
 }
 
-/**
- * What makes a trip a *shipment* rather than a lorry.
- *
- * The documents question only arises on a sea leg: a container cannot be
- * cleared without them, while a lorry to Hazipur carries a consignment note
- * and nothing else. So "documents outstanding" has to be asked of shipments
- * alone — asked of every despatch it answers *every domestic trip ever made*,
- * each of which has a blank `docs_status` and always will.
- *
- * That was a real defect in the `?docs=pending` filter as first written
- * (`docs_status <> 'received'` over the whole register). It is corrected here
- * rather than worked around, and this is the moment to do it: the filter has
- * had no control on the screen until now, so nothing can have come to rely on
- * the old reading.
- *
- * Written twice rather than derived from one string, because the two contexts
- * genuinely differ — the WHERE runs against the joined query and needs the
- * `d.` alias, the summary runs against a CTE of it and must not have one — and
- * a regex that rewrites SQL is a worse thing to maintain than four repeated
- * column names. They are asserted equal, column for column, in the tests.
- */
-export const SEA_LEG = "(bl_no <> '' OR container_no <> '' OR etd <> '' OR eta <> '')";
-export const SEA_LEG_D = "(d.bl_no <> '' OR d.container_no <> '' OR d.etd <> '' OR d.eta <> '')";
 
 /**
  * Pieces, boxes and unbilled trips over every despatch matching the filters —
@@ -221,9 +199,9 @@ function despatchListWhere(req: AuthedRequest): { where: string[]; params: unkno
    * and still not with the buyer are exactly the case worth chasing.
    */
   if (req.query.docs === 'pending') {
-    // Shipments only — see SEA_LEG above. Asked of the whole register this
-    // would return every domestic lorry ever recorded.
-    where.push(`${SEA_LEG_D} AND COALESCE(d.docs_status, '') <> 'received'`);
+    // Shipments only — see `services/despatch.ts`. Asked of the whole register
+    // this would return every domestic lorry ever recorded.
+    where.push(DOCS_OUTSTANDING_D);
   } else if (req.query.docs === 'sent') where.push("d.docs_status = 'sent'");
   else if (req.query.docs === 'received') where.push("d.docs_status = 'received'");
   // Arriving between two dates — an ETA is a real date so it can be asked for.

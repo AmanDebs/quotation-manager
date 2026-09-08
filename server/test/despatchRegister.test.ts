@@ -2,7 +2,7 @@ import './helpers/scratch.js';
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { db } from '../src/db/connection.js';
-import { SEA_LEG, SEA_LEG_D } from '../src/routes/despatches.js';
+import { SEA_LEG, SEA_LEG_D } from '../src/services/despatch.js';
 import { searchClause } from '../src/services/search.js';
 import { makeCustomer } from './helpers/factory.js';
 
