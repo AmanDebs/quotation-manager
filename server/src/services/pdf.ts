@@ -1553,11 +1553,25 @@ export function buildInvoicePdf(id: number): TDocumentDefinitions {
     grid,
     itemsTable(s, items, specs, cfg, money),
     amountWords(inv, cur),
-    // One block of prose, as on the proforma: the invoice's own remarks lead
-    // the list and the company's default terms follow. The AP/EX-101 sample
-    // has no such block — its footer is only the origin certificate, Incoterms
-    // and ARN — so this is a deliberate departure from it.
-    ...notesAndTerms(s, inv.remarks, 'TERMS & CONDITIONS:'),
+    /*
+     * No TERMS & CONDITIONS block — removed 2026-09-08 at the client's word,
+     * and this is the document going back to its own spec rather than away
+     * from it. The AP/EX-101 sample in `D:\Quotation Doc\` carries no such
+     * block: its footer is the origin certificate, Incoterms and ARN, which
+     * is exactly what `certFooter` below prints. Printing the clauses here was
+     * a deliberate departure, recorded as one, and it has now been withdrawn.
+     *
+     * The reason it reads correctly rather than as a document losing its
+     * terms: those clauses — price subject to freight, quantity tolerance,
+     * force majeure, jurisdiction — are the terms of the **offer**, and the
+     * quotation and the proforma that carried it print them. An invoice bills
+     * goods already agreed on those terms; restating them alongside a demand
+     * for payment said nothing new. The form stopped asking for them first.
+     *
+     * `commercial_invoices.remarks` is untouched and still stored — nothing
+     * is destroyed — but nothing prints it now, which is the point.
+     * `notesAndTerms` keeps its four other callers.
+     */
     certFooter,
   ];
   return baseDoc(content);

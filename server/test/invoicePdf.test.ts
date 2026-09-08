@@ -1,7 +1,7 @@
 import './helpers/scratch.js';
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildInvoicePdf } from '../src/services/pdf.js';
+import { buildInvoicePdf, buildProformaPdf } from '../src/services/pdf.js';
 import { db } from '../src/db/connection.js';
 import { makeCustomer, makeInvoice, makePayment, makeProforma } from './helpers/factory.js';
 
@@ -248,5 +248,51 @@ describe('the advance carried from the proforma', () => {
     assert.equal(after[2][0], 'Balance Due', shown);
     // Each is a label and one figure — nothing in the columns between them.
     for (const r of after) assert.equal(r.length, 2, `${r.join(' | ')} carried extra cells`);
+  });
+});
+
+/**
+ * The commercial invoice prints no TERMS & CONDITIONS block.
+ *
+ * Removed 2026-09-08: those clauses are the terms of the *offer*, which the
+ * quotation and the proforma print, and Aglo's own AP/EX-101 sample carries
+ * no such block — its footer is the origin certificate, Incoterms and ARN.
+ * Two ways it could come back without anyone noticing, so both are asserted:
+ * from the document's own remarks, and from the company's default terms.
+ */
+describe('the invoice prints no terms block', () => {
+  const bothSources = () => {
+    db.prepare("UPDATE companies SET default_terms = ? WHERE id = 1")
+      .run('1. Prices are ex-works. 2. Subject to Kolkata jurisdiction.');
+    const id = exportInvoice();
+    db.prepare("UPDATE commercial_invoices SET remarks = ? WHERE id = ?")
+      .run('Quantity Tolerance: 10% in value and quantity.', id);
+    return id;
+  };
+
+  test('neither the document remarks nor the company defaults reach it', () => {
+    const joined = JSON.stringify(buildInvoicePdf(bothSources()).content);
+    assert.ok(!joined.includes('TERMS & CONDITIONS'), 'the terms heading is back');
+    assert.ok(!joined.includes('Quantity Tolerance'), "the document's own remarks printed");
+    assert.ok(!joined.includes('Kolkata jurisdiction'), "the company's default terms printed");
+  });
+
+  /** What the footer keeps: the AP/EX-101 sample's own three facts. */
+  test('the certifications below it are untouched', () => {
+    const joined = JSON.stringify(buildInvoicePdf(bothSources()).content);
+    assert.ok(joined.includes('is of Indian Origin'), 'the origin certificate went with it');
+    assert.ok(joined.includes('Incoterms'), 'the Incoterms line went with it');
+  });
+
+  /** The proforma still carries them — it is the document that made the offer. */
+  test('but the proforma still does', () => {
+    db.prepare("UPDATE companies SET default_terms = 'Subject to Kolkata jurisdiction.' WHERE id = 1").run();
+    const pi = makeProforma({ customerId: cust, currency: 'USD', total: 1000 });
+    db.prepare(
+      `INSERT INTO pi_items (pi_id, description, qty, unit, unit_price, amount, total_pcs, sort_order)
+       VALUES (?, 'Cap', 100, 'per 1000', 10, 1000, 100000, 0)`
+    ).run(pi);
+    const joined = JSON.stringify(buildProformaPdf(pi).content);
+    assert.ok(joined.includes('TERMS & CONDITIONS'), 'the proforma lost its terms too');
   });
 });
