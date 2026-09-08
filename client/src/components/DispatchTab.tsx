@@ -15,6 +15,30 @@ import { fmtQty, fmtMoney, fmtDate, today } from '../lib/format';
  * the paperwork, and a gap between the two columns is information, not an
  * error to be smoothed over.
  */
+/**
+ * Boxes for a number of pieces, from the line's own pcs-per-box.
+ *
+ * The catalogue records `pcs_per_pack` and every order line carries it, so
+ * asking somebody to divide 176,000 by 800 in their head — on the form where
+ * the lorry is being recorded, at the end of a loading day — was work the app
+ * already had the numbers to do.
+ *
+ * `null` rather than 0 when the line states no pcs-per-box: nobody has said
+ * what fits in a carton, and 0 boxes is a claim where silence is the truth —
+ * the rule `hasRecipe: false` and `has_spec: false` both follow.
+ *
+ * Not rounded to a whole box. A part box is a real thing (a short-filled
+ * carton at the end of a run), and rounding up would put a figure on the
+ * paperwork that the lorry does not carry; where the division is not exact it
+ * is usually the piece count that wants a second look, which a 17.6 says and a
+ * silent 18 hides.
+ */
+function boxesFor(pieces: number | null | undefined, pcsPerPack: number | null | undefined): number | null {
+  const per = Number(pcsPerPack) || 0;
+  if (!per || pieces == null || !Number.isFinite(Number(pieces))) return null;
+  return Math.round((Number(pieces) / per) * 100) / 100;
+}
+
 export default function DispatchTab({ order }: { order: Order }) {
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState<Partial<Despatch> | null>(null);
@@ -44,6 +68,12 @@ export default function DispatchTab({ order }: { order: Order }) {
 
   const items = order.items ?? [];
   const invoices = order.invoices ?? [];
+  // Pieces this despatch itself has recorded, per order line — see the note
+  // where it is passed down. Empty for a new trip, which has nothing on file.
+  const ownSent = new Map<number, number>();
+  for (const it of (editing?.id ? trips.find((t) => t.id === editing.id)?.items ?? [] : [])) {
+    ownSent.set(it.order_line, (ownSent.get(it.order_line) ?? 0) + (it.qty ?? 0));
+  }
   const proformas = order.proformas ?? [];
 
   const newTrip = (): Partial<Despatch> => ({
@@ -54,12 +84,10 @@ export default function DispatchTab({ order }: { order: Order }) {
     destination: order.destination ?? '',
     cn_no: '', vehicle_no: '', tentative_delivery: '', freight_terms: '', invoice_id: null, notes: '',
     // Every line, defaulted to what is still unsent.
-    items: items.map((it, i) => ({
-      order_line: i,
-      description: it.description,
-      qty: Math.max(0, (it.total_pcs ?? 0) - (it.despatched?.qty ?? 0)) || null,
-      packs: null,
-    })),
+    items: items.map((it, i) => {
+      const qty = Math.max(0, (it.total_pcs ?? 0) - (it.despatched?.qty ?? 0)) || null;
+      return { order_line: i, description: it.description, qty, packs: boxesFor(qty, it.pcs_per_pack) };
+    }),
   });
 
   return (
@@ -226,8 +254,27 @@ export default function DispatchTab({ order }: { order: Order }) {
 
       {editing && (
         <DespatchModal
+          // Remount per trip, so the "which boxes were typed" set inside is
+          // never carried from one despatch to the next.
+          key={editing.id ?? 'new'}
           draft={editing}
           items={items}
+          /*
+           * What this trip itself already has on file, per line.
+           *
+           * `items[i].despatched.qty` sums *every* despatch on the order,
+           * including the one being edited — so on an edit the form counted a
+           * trip against itself, showed "0 left to ship" on every line and
+           * capped each input at 0 in red. The server has never done that
+           * (`despatchLimitError` takes an `exceptDespatchId` for exactly this
+           * reason), so the form was refusing a save the API would have
+           * accepted, which is the worst way round for a warning to be wrong.
+           *
+           * Read from the saved list rather than from `editing`, which is
+           * being typed into: the figure to exclude is what is on file, not
+           * what is on screen.
+           */
+          ownSent={ownSent}
           locations={locations}
           transporters={transporters}
           invoices={invoices}
@@ -244,10 +291,12 @@ export default function DispatchTab({ order }: { order: Order }) {
 }
 
 function DespatchModal({
-  draft, items, locations, transporters, invoices, isExport, error, saving, onChange, onClose, onSave,
+  draft, items, ownSent, locations, transporters, invoices, isExport, error, saving, onChange, onClose, onSave,
 }: {
   draft: Partial<Despatch>;
   items: NonNullable<Order['items']>;
+  /** Pieces already on file for *this* despatch, per line, to be excluded. */
+  ownSent: Map<number, number>;
   locations: Location[];
   transporters: Transporter[];
   invoices: NonNullable<Order['invoices']>;
@@ -263,6 +312,26 @@ function DespatchModal({
   const rows: DespatchItem[] = draft.items ?? [];
   const setRow = (i: number, patch: Partial<DespatchItem>) =>
     set({ items: rows.map((r, idx) => (idx === i ? { ...r, ...patch } : r)) });
+
+  /*
+   * Which rows have had their box count typed into.
+   *
+   * Boxes follow the pieces — that is the point — but a **default, not a
+   * rule**: the figure that matters is what actually went on the lorry, and
+   * once somebody has counted it the app must not quietly recompute it from a
+   * pcs-per-box the catalogue happens to hold. A row that arrives already
+   * carrying a count is treated as touched for the same reason: on an edit
+   * those numbers were recorded off the real trip.
+   */
+  const [typedBoxes, setTypedBoxes] = useState<Set<number>>(
+    () => new Set(rows.map((r, i) => (r.packs != null ? i : -1)).filter((i) => i >= 0)),
+  );
+
+  /** Pieces changed: carry the box count with it, unless it has been typed. */
+  const setPieces = (i: number, qty: number | null) => {
+    const derived = typedBoxes.has(i) ? undefined : boxesFor(qty, items[rows[i].order_line]?.pcs_per_pack);
+    setRow(i, derived === undefined ? { qty } : { qty, packs: derived });
+  };
 
   return (
     <Modal title={draft.id ? 'Edit despatch' : 'Record a despatch'} onClose={onClose} wide>
@@ -355,7 +424,11 @@ function DespatchModal({
              * no ceiling to state, and says nothing rather than guessing.
              */
             const ordered = line?.total_pcs ?? null;
-            const left = ordered ? Math.max(0, ordered - (line?.despatched?.qty ?? 0)) : null;
+            // Everything sent on this order *except* what this despatch itself
+            // already has on file — the server's own `exceptDespatchId` rule,
+            // without which an edit counts a trip against itself.
+            const sentElsewhere = (line?.despatched?.qty ?? 0) - (ownSent.get(r.order_line) ?? 0);
+            const left = ordered ? Math.max(0, ordered - sentElsewhere) : null;
             const ceiling = left === null ? undefined : Math.round(left * 1.1);
             const over = ceiling !== undefined && (r.qty ?? 0) > ceiling;
             return (
@@ -371,14 +444,26 @@ function DespatchModal({
                   type="number" min={0} max={ceiling} step="any"
                   className={`w-full text-right tabular-nums ${over ? 'border-red-400 focus:border-red-500' : ''}`}
                   value={r.qty ?? ''}
-                  onChange={(e) => setRow(i, { qty: e.target.value === '' ? null : Number(e.target.value) })}
+                  onChange={(e) => setPieces(i, e.target.value === '' ? null : Number(e.target.value))}
                 />
                 {over && (
                   <div className="mt-0.5 text-xs text-red-600">at most {fmtQty(ceiling!)}</div>
                 )}
               </td>
               <td className="py-2 pr-2">
-                <Input type="number" min={0} step="any" value={r.packs ?? ''} onChange={(e) => setRow(i, { packs: e.target.value === '' ? null : Number(e.target.value) })} />
+                <Input
+                  type="number" min={0} step="any"
+                  className="w-full text-right tabular-nums"
+                  value={r.packs ?? ''}
+                  placeholder={line?.pcs_per_pack ? '' : '—'}
+                  onChange={(e) => {
+                    setTypedBoxes((prev) => new Set(prev).add(i));
+                    setRow(i, { packs: e.target.value === '' ? null : Number(e.target.value) });
+                  }}
+                />
+                {!!line?.pcs_per_pack && !typedBoxes.has(i) && (
+                  <div className="mt-0.5 text-xs text-slate-400">{fmtQty(line.pcs_per_pack)}/box</div>
+                )}
               </td>
               <td className="py-2 pr-2">
                 <Input value={r.notes ?? ''} onChange={(e) => setRow(i, { notes: e.target.value })} />
