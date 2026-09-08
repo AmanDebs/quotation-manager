@@ -398,7 +398,11 @@ workOrdersRouter.delete('/:id', requirePermission('work_order', 'full'), (req: A
       error: 'Material has been issued to this job — cancel it instead of deleting',
     });
   }
+  const job = db.prepare('SELECT order_id FROM work_orders WHERE id = ?').get(id) as { order_id: number };
   db.prepare('DELETE FROM work_orders WHERE id = ?').run(id);
+  // Raising the job advanced the order, so deleting it has to be able to undo
+  // that — never below whatever status a person set themselves.
+  syncOrderStatus(job.order_id);
   res.json({ ok: true });
 });
 
@@ -513,5 +517,10 @@ workOrdersRouter.delete('/entries/:entryId', requirePermission('output', 'full')
     return res.status(404).json({ error: 'Entry not found' });
   }
   db.prepare('DELETE FROM production_entries WHERE id = ?').run(entryId);
+  // A mis-keyed shift is corrected by deleting it, which is exactly why the
+  // order's status must be able to follow it back down.
+  const owner = db.prepare('SELECT order_id FROM work_orders WHERE id = ?')
+    .get(entry.work_order_id) as { order_id: number };
+  syncOrderStatus(owner.order_id);
   res.json(getFull(req, entry.work_order_id));
 });

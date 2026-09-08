@@ -9,34 +9,40 @@ import { productionByOrder } from './production.js';
  * actually shipped. Now that production, despatch and invoicing are all
  * recorded, the status can follow them.
  *
- * Two rules keep this safe:
+ * **A person's status is a floor; the facts own everything above it.**
  *
- * - **It only ever moves forward.** A manager who sets `ready` early is not
- *   dragged back to `in_production` by the absence of a work order. The facts
- *   can only ever say "at least this far".
+ * That is one rule where there used to be two, and the second one was wrong.
+ * The ladder was forward-only, on the reasoning that "a shift booked cannot be
+ * un-booked, a lorry cannot un-leave" — true of the world, and false of the
+ * record. A despatch, a work order and a production entry can all be deleted,
+ * which is exactly how a mis-keyed one is corrected (`services/production.ts`
+ * says so about its own figures: "deleting a mis-keyed shift corrects the
+ * figure by construction"). Forward-only meant the status remembered a fact
+ * the register no longer contained: delete the only despatch on an order and
+ * it sat at *Partially dispatched* over an empty register, which is precisely
+ * the status-contradicting-the-shipping-record this file exists to prevent.
+ *
+ * `completed` had already met this and been given `status_before_completed` —
+ * a special case for one rung, when the same hole ran the length of the
+ * ladder. `status_before_auto` replaces it and generalises it: it holds the
+ * status that was in place **before this code first raised the order above
+ * it**, and is empty whenever the current status is a person's own. So:
+ *
+ * - **A status a person set is never lowered**, which is the useful half of
+ *   forward-only. Set `ready` early and no absence of a work order drags it
+ *   back; it stays the floor even after a despatch raises the order above it
+ *   and that despatch is then deleted.
+ * - **A status this code set is exactly what the facts imply**, up or down,
+ *   never below the floor.
  * - **`cancelled` is never touched, in or out.** It is a decision, not an
- *   observation, and nothing on the floor should be able to un-cancel an order
- *   or cancel one.
+ *   observation, and nothing on the floor may un-cancel an order or cancel one.
  *
- * The consequence worth knowing: if someone deliberately sets a status *below*
- * what the facts imply, the next production entry or despatch will advance it
- * again. That is intended — the alternative is a status that quietly contradicts
- * the shipping record.
- *
- * **`completed` is the one status that also moves back**, and it is worth being
- * clear why it is special. Everything below it is an observation that only
- * accumulates: a shift booked cannot be un-booked, a lorry cannot un-leave. But
- * an order is complete only while every line stays fully billed, and an invoice
- * can be deleted or an ordered quantity raised. Leaving a re-opened order shut
- * would hide work still to do, on the one status people use to stop looking.
- *
- * Which leaves the question the original design was right to worry about:
- * closing an order is often a commercial decision, taken when a short shipment
- * is accepted rather than when the last piece ships. That is why `orders`
- * remembers `status_before_completed`. It is filled only when *this* code
- * closes an order, so only an order closed by the shipping record is ever
- * re-opened by it. An order a human closed has nothing remembered, and stays
- * closed no matter what the invoices later say.
+ * Two consequences worth knowing. Setting a status *below* what the facts
+ * imply still gets advanced by the next entry — intended, and unchanged.
+ * And an order a person closed by hand stays closed however the invoices later
+ * add up, because setting the status by hand clears the memory: that is the
+ * commercial decision the original design was right to protect, taken when a
+ * short shipment is accepted rather than when the last piece ships.
  */
 
 /** Forward order of the ladder. `cancelled` is deliberately absent. */
@@ -58,8 +64,16 @@ export interface StatusFacts {
 }
 
 /**
- * The furthest stage the recorded facts support, or null when they support
- * nothing beyond what a human would have set anyway.
+ * The furthest stage the recorded facts support — **raw**, without comparing
+ * it to what the order currently says.
+ *
+ * It used to answer null unless the facts were *ahead* of the stored status,
+ * which folded the "never move back" rule into the measurement. Keeping the
+ * measurement and the policy apart is what lets the status come down when a
+ * record is withdrawn: `syncOrderStatus` decides how far down, against the
+ * floor a person set.
+ *
+ * Null only for an order that does not exist or is cancelled.
  */
 export function impliedStatus(orderId: number): StatusFacts {
   const order = db.prepare('SELECT status FROM orders WHERE id = ?').get(orderId) as
@@ -107,7 +121,7 @@ export function impliedStatus(orderId: number): StatusFacts {
     reason = 'every line has been billed in full';
   }
 
-  return rank(implied) > rank(order.status) ? { implied, reason } : { implied: null, reason: '' };
+  return { implied, reason };
 }
 
 /**
@@ -154,35 +168,35 @@ function fullyBilled(orderId: number): boolean {
 }
 
 /**
- * Advance the order if the facts have moved past its recorded status.
- * Returns the status now on the row.
+ * Put the order where the facts and the floor say it belongs.
  *
- * Called after anything that changes the facts — a production entry, a
- * despatch, an invoice — rather than on read, so the status the list shows is
- * the status stored.
+ * Called after anything that changes the facts — a work order raised or
+ * deleted, a production entry booked or removed, a despatch, an invoice —
+ * rather than on read, so the status the list shows is the status stored.
+ *
+ * The whole rule is three lines: the floor is whatever a person last chose,
+ * the facts say how far the order has actually got, and the order sits at
+ * whichever is higher. `status_before_auto` is written only while the second
+ * is winning, and cleared the moment the order comes back down to the floor —
+ * so "is this status ours or theirs?" is answerable from the row itself,
+ * without a flag that could disagree with it.
  */
 export function syncOrderStatus(orderId: number): string | null {
-  const row = db.prepare('SELECT status, status_before_completed FROM orders WHERE id = ?').get(orderId) as
-    | { status: string; status_before_completed: string } | undefined;
+  const row = db.prepare('SELECT status, status_before_auto FROM orders WHERE id = ?').get(orderId) as
+    | { status: string; status_before_auto: string } | undefined;
   if (!row) return null;
+  // A decision, not an observation. Nothing here may un-cancel an order.
   if (row.status === 'cancelled') return row.status;
 
-  // Re-opening: the order was closed by the shipping record, and the shipping
-  // record no longer says so — an invoice was deleted, or a quantity raised.
-  // Only ever undone if this code closed it; `status_before_completed` is empty
-  // when a human did, and a deliberate close stays closed.
-  if (row.status === 'completed' && !fullyBilled(orderId)) {
-    if (!row.status_before_completed) return row.status;
-    const back = row.status_before_completed;
-    db.prepare("UPDATE orders SET status = ?, status_before_completed = '' WHERE id = ?").run(back, orderId);
-    return back;
-  }
-
+  // What a person last chose. While this code is holding the order above it
+  // the floor is remembered; otherwise the status on the row *is* the floor.
+  const floor = row.status_before_auto || row.status;
   const { implied } = impliedStatus(orderId);
-  if (!implied) return row.status;
-  // Remember what to re-open to, but only when closing the order automatically.
-  const before = implied === 'completed' ? row.status : row.status_before_completed;
-  db.prepare('UPDATE orders SET status = ?, status_before_completed = ? WHERE id = ?')
-    .run(implied, before, orderId);
-  return implied;
+  const next: string = implied && rank(implied) > rank(floor) ? implied : floor;
+  const memory = next === floor ? '' : floor;
+  if (next === row.status && memory === row.status_before_auto) return row.status;
+
+  db.prepare('UPDATE orders SET status = ?, status_before_auto = ? WHERE id = ?')
+    .run(next, memory, orderId);
+  return next;
 }

@@ -293,11 +293,17 @@ CREATE TABLE IF NOT EXISTS orders (
   revised_date TEXT NOT NULL DEFAULT '',
   actual_production_date TEXT NOT NULL DEFAULT '',
   status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','confirmed','scheduled','in_production','ready','partially_dispatched','completed','cancelled')),
-  -- What the status was when the shipping record closed the order, so that
-  -- deleting an invoice re-opens it to where it was. Empty when a human closed
-  -- it, which is what keeps a deliberately short-shipped order closed.
-  -- See services/orderStatus.ts.
+  -- Superseded by status_before_auto below, and kept only because dropping a
+  -- column is not an additive change. It held the status from before the
+  -- shipping record closed the order; the replacement holds the same thing for
+  -- every rung of the ladder rather than for `completed` alone.
   status_before_completed TEXT NOT NULL DEFAULT '',
+  -- The status a person last chose, remembered while the recorded facts are
+  -- holding the order above it. Empty means the status on this row is their
+  -- own — which is what keeps a deliberately short-shipped order closed, and
+  -- what stops an early `ready` being dragged back down. See
+  -- services/orderStatus.ts.
+  status_before_auto TEXT NOT NULL DEFAULT '',
   remarks TEXT NOT NULL DEFAULT '',
   notes TEXT NOT NULL DEFAULT '',
   column_config TEXT NOT NULL DEFAULT '{}',

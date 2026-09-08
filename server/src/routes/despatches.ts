@@ -432,10 +432,15 @@ despatchesRouter.put('/:id', (req: AuthedRequest, res) => {
 
 despatchesRouter.delete('/:id', (req: AuthedRequest, res) => {
   const id = Number(req.params.id);
-  if (!accessible(req, id)) return res.status(404).json({ error: 'Despatch not found' });
+  const existing = accessible(req, id);
+  if (!existing) return res.status(404).json({ error: 'Despatch not found' });
   transaction(() => {
     db.prepare('DELETE FROM despatch_items WHERE despatch_id = ?').run(id);
     db.prepare('DELETE FROM despatches WHERE id = ?').run(id);
   });
+  // Goods leaving advanced the order; the trip being withdrawn has to be able
+  // to take that back, or deleting the only despatch leaves the order reading
+  // *Partially dispatched* over an empty register.
+  syncOrderStatus(Number(existing.order_id));
   res.json({ ok: true });
 });

@@ -65,6 +65,23 @@ addColumnIfMissing('commercial_invoices', 'status_before_paid', "TEXT NOT NULL D
 // so that re-opening one puts back what was there. Empty means a human closed
 // it, which is deliberately never undone.
 addColumnIfMissing('orders', 'status_before_completed', "TEXT NOT NULL DEFAULT ''");
+/*
+ * That memory now covers the whole ladder rather than `completed` alone
+ * (2026-09), because the same hole ran the length of it: a despatch, a work
+ * order and a production entry can all be deleted, and a forward-only status
+ * went on claiming a fact the record no longer held.
+ *
+ * Seeded from the column it supersedes, which is exactly what it meant on the
+ * rows that carry one: the status from before this code raised the order.
+ * Everything else starts empty, so an order already on file is treated as
+ * standing where a person put it and is never silently lowered — the
+ * conservative direction, and the same rule every other `status_before_*`
+ * follows. Orders raised from here on come down the ladder when a record is
+ * withdrawn. Idempotent: the seed only fills rows that are still empty.
+ */
+addColumnIfMissing('orders', 'status_before_auto', "TEXT NOT NULL DEFAULT ''");
+db.exec(`UPDATE orders SET status_before_auto = status_before_completed
+          WHERE status_before_auto = '' AND status_before_completed <> ''`);
 // Where to put a lapsed quotation back if its validity is extended (2026-08).
 // Only an automatic expiry is automatically undone, so an empty value means
 // "somebody set this by hand" and the row stays where they put it.

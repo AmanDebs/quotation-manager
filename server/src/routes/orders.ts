@@ -599,10 +599,14 @@ ordersRouter.post('/:id/status', (req: AuthedRequest, res) => {
   if (!allowed.includes(status)) return res.status(400).json({ error: 'Invalid status' });
   const existing = db.prepare('SELECT customer_id FROM orders WHERE id = ?').get(id) as { customer_id: number } | undefined;
   if (!existing || !canAccessCustomer(req, existing.customer_id)) return res.status(404).json({ error: 'Order not found' });
-  // Clearing the memory is what makes a hand-closed order stay closed: with
-  // nothing remembered, syncOrderStatus will never re-open it, which is right
-  // when a short shipment has been accepted and the invoices will never add up.
-  db.prepare("UPDATE orders SET status = ?, status_before_completed = '' WHERE id = ?").run(String(status), id);
+  // Clearing the memory is what makes this a person's choice rather than an
+  // observation: with nothing remembered the status on the row *is* the floor,
+  // so a hand-closed order stays closed however the invoices later add up, and
+  // an early `ready` is never dragged back down. The superseded column is
+  // cleared alongside it so a stale value cannot resurrect.
+  db.prepare(
+    "UPDATE orders SET status = ?, status_before_auto = '', status_before_completed = '' WHERE id = ?"
+  ).run(String(status), id);
   res.json(getFull(id));
 });
 
