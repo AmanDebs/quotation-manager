@@ -831,6 +831,12 @@ export interface Invoice {
   amount_received?: number;
   balance_due?: number;
   /**
+   * How much of `amount_received` came from the advance on the source proforma
+   * — see `services/receivables.ts`, which allocates one advance across the
+   * invoices raised from that PI.
+   */
+  advance_applied?: number;
+  /**
    * Money recorded against this invoice or its proforma in a currency it is not
    * billed in, so credited to nothing. Optional: a server that has not been
    * redeployed yet simply omits it.

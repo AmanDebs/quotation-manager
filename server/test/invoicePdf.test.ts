@@ -3,7 +3,7 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildInvoicePdf } from '../src/services/pdf.js';
 import { db } from '../src/db/connection.js';
-import { makeCustomer, makeInvoice, makePayment } from './helpers/factory.js';
+import { makeCustomer, makeInvoice, makePayment, makeProforma } from './helpers/factory.js';
 
 /**
  * The invoice's money rides *inside* the items table, as it does on the
@@ -138,5 +138,115 @@ describe('a domestic invoice, which carries the most lines', () => {
 
   test('and nothing floats beside the table here either', () => {
     assert.equal(floatingBands(domestic()), 0);
+  });
+});
+
+/**
+ * The advance is adjusted on the invoice, and named.
+ *
+ * `invoiceReceivable` has always credited this invoice's share of the source
+ * proforma's advance, so the balance was right — but it printed as one
+ * "Amount Received" line, which left the buyer no way to see that the money
+ * they paid against the proforma had been set against this bill. These assert
+ * the split, and — the half that matters more — that an invoice with no
+ * advance still prints exactly what it always did.
+ */
+describe('the advance carried from the proforma', () => {
+  /** An invoice raised from a proforma carrying `advance`, plus `own` paid here. */
+  function billedFromProforma(total: number, advance: number, own = 0, cur = 'USD'): number {
+    const pi = makeProforma({ customerId: cust, currency: cur, total });
+    const id = makeInvoice({ customerId: cust, currency: cur, total, piId: pi });
+    db.prepare('UPDATE commercial_invoices SET is_export = 1, subtotal = ?, tax_total = 0 WHERE id = ?')
+      .run(total, id);
+    addItem(id, { description: '28mm PCO 1810', qty: 1650000, unit: 'per 1000', unit_price: 6, amount: total, packs: 300, total_pcs: 1650000 });
+    if (advance) makePayment({ customerId: cust, piId: pi, amount: advance, currency: cur });
+    if (own) makePayment({ customerId: cust, invoiceId: id, amount: own, currency: cur });
+    return id;
+  }
+
+  const joinRows = (id: number) => itemsTableRows(id).map((r) => r.join(' | ')).join('\n');
+
+  test('is stated as its own line, above the payments made on this invoice', () => {
+    const rows = itemsTableRows(billedFromProforma(10000, 3000, 2000)).map((r) => r.join(' | '));
+    const advance = rows.findIndex((r) => r.includes('Advance Received'));
+    const received = rows.findIndex((r) => r.includes('Amount Received'));
+    const balance = rows.findIndex((r) => r.includes('Balance Due'));
+    const joined = rows.join('\n');
+    assert.ok(advance >= 0 && received > advance && balance > received,
+      `expected advance -> received -> balance, got:\n${joined}`);
+    // 3,000 advance + 2,000 paid here = 5,000 received, so 5,000 is still due.
+    assert.ok(/Advance Received[^\n]*3,000/.test(joined), joined);
+    assert.ok(/Amount Received[^\n]*2,000/.test(joined), joined);
+    assert.ok(/Balance Due[^\n]*5,000/.test(joined), joined);
+  });
+
+  test('names the proforma it was banked against', () => {
+    const id = billedFromProforma(10000, 3000);
+    const number = String((db.prepare(
+      'SELECT p.number FROM proforma_invoices p JOIN commercial_invoices i ON i.pi_id = p.id WHERE i.id = ?'
+    ).get(id) as { number: string }).number);
+    const joined = joinRows(id);
+    assert.ok(joined.includes(`Advance Received (${number})`), `${number} not named:\n${joined}`);
+  });
+
+  /** Settled entirely by advance: no "Amount Received" line rather than a zero. */
+  test('an invoice with no payment of its own shows no second line', () => {
+    const joined = joinRows(billedFromProforma(10000, 4000));
+    assert.ok(joined.includes('Advance Received'), joined);
+    assert.ok(!joined.includes('Amount Received'), `a zero line was printed:\n${joined}`);
+    assert.ok(/Balance Due[^\n]*6,000/.test(joined), joined);
+  });
+
+  /**
+   * The half that protects every invoice already raised: with no advance the
+   * document is what it was — one "Amount Received" line and no mention of a
+   * proforma.
+   */
+  test('an invoice with no advance prints what it always did', () => {
+    const id = exportInvoice();
+    makePayment({ customerId: cust, invoiceId: id, amount: 13500, currency: 'USD' });
+    const joined = joinRows(id);
+    assert.ok(joined.includes('Amount Received'), joined);
+    assert.ok(!joined.includes('Advance Received'), `an advance row appeared from nowhere:\n${joined}`);
+  });
+
+  /**
+   * Money only adds up within one currency, the rule `receivables.ts` owns —
+   * so an advance in another currency is credited to nothing and there is
+   * nothing to adjust for.
+   */
+  test('an advance in another currency is not adjusted for', () => {
+    const pi = makeProforma({ customerId: cust, currency: 'USD', total: 10000 });
+    const id = makeInvoice({ customerId: cust, currency: 'USD', total: 10000, piId: pi });
+    db.prepare('UPDATE commercial_invoices SET is_export = 1, subtotal = 10000 WHERE id = ?').run(id);
+    addItem(id, { description: '28mm PCO 1810', qty: 1650000, unit: 'per 1000', unit_price: 6, amount: 10000, packs: 300, total_pcs: 1650000 });
+    makePayment({ customerId: cust, piId: pi, amount: 3000, currency: 'INR' });
+    const joined = joinRows(id);
+    assert.ok(!joined.includes('Advance Received'), `an INR advance was credited to a USD invoice:\n${joined}`);
+  });
+
+  /**
+   * The payment rows close the table and carry nothing but their own figure.
+   *
+   * `itemsTable` puts the column totals on the row marked `sums`, and inserting
+   * a row between the grand total and the balance is exactly the change that
+   * would slide them down onto it — the boxes shipped have nothing to do with
+   * the advance banked. The commercial invoice happens to sum no column today,
+   * so this asserts the shape rather than a figure: the money rows sit after
+   * the total, in order, each holding one value.
+   */
+  test('the payment rows close the table and carry no column totals', () => {
+    const rows = itemsTableRows(billedFromProforma(10000, 3000, 2000));
+    const at = (label: string) => rows.findIndex((r) => r.some((c) => c.startsWith(label)));
+    const total = Math.max(at('AMOUNT IN'), at('GRAND TOTAL'));
+    assert.ok(total >= 0, 'no grand total row');
+    const after = rows.slice(total + 1);
+    const shown = after.map((r) => r.join(' | ')).join('\n');
+    assert.equal(after.length, 3, `unexpected rows after the total:\n${shown}`);
+    assert.match(after[0][0], /^Advance Received \(/, shown);
+    assert.equal(after[1][0], 'Amount Received', shown);
+    assert.equal(after[2][0], 'Balance Due', shown);
+    // Each is a label and one figure — nothing in the columns between them.
+    for (const r of after) assert.equal(r.length, 2, `${r.join(' | ')} carried extra cells`);
   });
 });

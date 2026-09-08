@@ -1411,7 +1411,10 @@ export function buildInvoicePdf(id: number): TDocumentDefinitions {
   const cfg = forceColumns(JSON.parse(String(inv.column_config || '{}')) as ColumnConfig, INVOICE_FORCED);
 
   // Own payments plus this invoice's share of any advance on the source PI.
-  const received = invoiceReceivable(id).amount_received;
+  const banked = invoiceReceivable(id);
+  const received = banked.amount_received;
+  // What came in against the proforma, and what came in against this invoice.
+  const direct = round2(received - banked.advance_applied);
 
   const refCells: Cell[] = [
     lv('Invoice No.  /  Date', `${inv.number}   ${fmtDate(inv.date)}`),
@@ -1479,7 +1482,29 @@ export function buildInvoicePdf(id: number): TDocumentDefinitions {
     r.label === grandLabel ? { ...r, sums: true } : r
   ));
   if (received > 0) {
-    money.push({ label: 'Amount Received', value: fmtMoney(received, cur) });
+    /*
+     * The advance is named rather than folded into one figure.
+     *
+     * It was a single "Amount Received" line, which is arithmetically right —
+     * `invoiceReceivable` has always credited this invoice's share of the
+     * proforma's advance — but it left the buyer no way to see that the money
+     * they paid against the proforma had been set against this bill. The
+     * proforma states "Advance Received"; the invoice now adjusts for the same
+     * money under the same words, so the two documents can be read together.
+     *
+     * It names the proforma because an advance is banked against *a* proforma
+     * and a buyer may hold several. The rows appear only when there is
+     * something to say: an invoice with no advance prints exactly what it
+     * always did, and one settled entirely by advance shows no "Amount
+     * Received" line rather than a zero.
+     */
+    if (banked.advance_applied > 0) {
+      money.push({
+        label: `Advance Received${pi ? ` (${pi.number})` : ''}`,
+        value: fmtMoney(banked.advance_applied, cur),
+      });
+    }
+    if (direct > 0) money.push({ label: 'Amount Received', value: fmtMoney(direct, cur) });
     money.push({
       label: 'Balance Due',
       value: fmtMoney(Math.max(0, round2(inv.grand_total - received)), cur),

@@ -12,7 +12,7 @@ const METHODS = ['Bank Transfer', 'Letter of Credit', 'Cheque', 'Cash', 'Other']
  * The linked document's detail query is invalidated so received/balance figures refresh.
  */
 export default function PaymentsCard({
-  docType, docId, currency, payments, received, total, balanceDue, currencyMismatch,
+  docType, docId, currency, payments, received, total, balanceDue, advanceApplied, currencyMismatch,
 }: {
   docType: 'proforma' | 'invoice';
   docId: number;
@@ -21,6 +21,12 @@ export default function PaymentsCard({
   received: number;
   total: number;
   balanceDue?: number;
+  /**
+   * How much of `received` came from the advance on the source proforma rather
+   * than from a payment on this document. Invoice only — on a proforma every
+   * payment *is* the advance, so the split would say nothing.
+   */
+  advanceApplied?: number;
   /** Money against this document in another currency, credited to nothing. */
   currencyMismatch?: { currency: string; amount: number }[];
 }) {
@@ -168,6 +174,15 @@ export default function PaymentsCard({
       <div className="flex flex-wrap gap-x-6 gap-y-1 border-t border-slate-100 pt-2 text-sm">
         <span>Document Total: <span className="font-semibold tabular-nums">{fmtMoney(total, currency)}</span></span>
         <span>Received: <span className="font-semibold tabular-nums text-green-700">{fmtMoney(received, currency)}</span></span>
+        {/* The advance is credited to this invoice by `receivables.ts` and is
+            named here for the same reason the PDF names it: a total that
+            silently includes money banked against another document reads as a
+            payment nobody can find. */}
+        {!!advanceApplied && advanceApplied > 0 && (
+          <span className="text-slate-500">
+            of which advance: <span className="font-semibold tabular-nums">{fmtMoney(advanceApplied, currency)}</span>
+          </span>
+        )}
         <span>Balance: <span className={`font-semibold tabular-nums ${outstanding > 0 ? 'text-red-600' : 'text-green-700'}`}>{fmtMoney(outstanding, currency)}</span></span>
       </div>
     </Card>

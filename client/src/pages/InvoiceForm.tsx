@@ -108,7 +108,7 @@ export default function InvoiceFormPage() {
     if (existing) {
       const {
         id: _id, number: _n, status: _s, subtotal: _st, tax_total: _tt, grand_total: _gt,
-        customer_name: _cn, pi_number: _pn, variance: _v, payments: _p, amount_received: _ar, balance_due: _bd,
+        customer_name: _cn, pi_number: _pn, variance: _v, payments: _p, amount_received: _ar, balance_due: _bd, advance_applied: _av,
         approval_status: _as, approved_at: _aa, approval_note: _an, approved_by_name: _ab, created_by_name: _cb,
         packing: _pk,
         ...rest
@@ -560,6 +560,7 @@ export default function InvoiceFormPage() {
             received={existing!.amount_received ?? 0}
             total={existing!.grand_total}
             balanceDue={existing!.balance_due}
+            advanceApplied={existing!.advance_applied}
             currencyMismatch={existing!.currency_mismatch}
           />
         )}
