@@ -274,8 +274,8 @@ despatchesRouter.get('/export', (req: AuthedRequest, res) => {
   ).all(...(params as never[])) as Record<string, unknown>[];
 
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-  res.setHeader('Content-Disposition', `attachment; filename="${attachmentName('Despatches')}"`);
-  res.send(buildXlsx('Despatches', despatchColumns, rows));
+  res.setHeader('Content-Disposition', `attachment; filename="${attachmentName('Dispatches')}"`);
+  res.send(buildXlsx('Dispatches', despatchColumns, rows));
 });
 
 despatchesRouter.get('/', (req: AuthedRequest, res) => {
@@ -296,7 +296,7 @@ despatchesRouter.get('/', (req: AuthedRequest, res) => {
 
 despatchesRouter.get('/:id', (req: AuthedRequest, res) => {
   const row = accessible(req, Number(req.params.id));
-  if (!row) return res.status(404).json({ error: 'Despatch not found' });
+  if (!row) return res.status(404).json({ error: 'Dispatch not found' });
   res.json(withItems(row));
 });
 
@@ -385,7 +385,7 @@ despatchesRouter.post('/', (req: AuthedRequest, res) => {
 despatchesRouter.put('/:id', (req: AuthedRequest, res) => {
   const id = Number(req.params.id);
   const existing = accessible(req, id);
-  if (!existing) return res.status(404).json({ error: 'Despatch not found' });
+  if (!existing) return res.status(404).json({ error: 'Dispatch not found' });
   const body = req.body ?? {};
   const v = (f: string, def: unknown = '') => body[f] ?? existing[f] ?? def;
   const invoiceId = numOrNull(v('invoice_id', null));
@@ -432,7 +432,7 @@ despatchesRouter.put('/:id', (req: AuthedRequest, res) => {
 despatchesRouter.delete('/:id', (req: AuthedRequest, res) => {
   const id = Number(req.params.id);
   const existing = accessible(req, id);
-  if (!existing) return res.status(404).json({ error: 'Despatch not found' });
+  if (!existing) return res.status(404).json({ error: 'Dispatch not found' });
   transaction(() => {
     db.prepare('DELETE FROM despatch_items WHERE despatch_id = ?').run(id);
     db.prepare('DELETE FROM despatches WHERE id = ?').run(id);

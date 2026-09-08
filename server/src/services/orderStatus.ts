@@ -114,7 +114,7 @@ export function impliedStatus(orderId: number): StatusFacts {
   if (allMade) { implied = 'ready'; reason = 'every line has been made in full'; }
   if (despatched.c > 0 || invoiced.c > 0) {
     implied = 'partially_dispatched';
-    reason = despatched.c > 0 ? 'goods have been despatched' : 'an invoice has been raised';
+    reason = despatched.c > 0 ? 'goods have been dispatched' : 'an invoice has been raised';
   }
   if (fullyBilled(orderId)) {
     implied = 'completed';

@@ -2189,7 +2189,7 @@ export function buildDeliveryChallanPdf(id: number): TDocumentDefinitions {
        LEFT JOIN commercial_invoices i ON i.id = d.invoice_id
       WHERE d.id = ?`
   ).get(id) as Row;
-  if (!d) throw new Error('Despatch not found');
+  if (!d) throw new Error('Dispatch not found');
 
   const o = db.prepare('SELECT * FROM orders WHERE id = ?').get(d.order_id) as Row;
   const s = companyProfile(o.company_id);
@@ -2269,7 +2269,7 @@ export function buildDeliveryChallanPdf(id: number): TDocumentDefinitions {
             `${d.challan_no || d.cn_no || '—'}   ${fmtDate(String(d.date))}`),
           lv("Order No.  /  Buyer's PO",
             `${o.number}${o.po_number ? `\nBUYER PO: ${o.po_number}` : ''}`),
-          lv('Despatched From',
+          lv('Dispatched From',
             [d.location_name, d.location_address].filter(Boolean).join('\n') || String(s.company_name)),
         ],
         [
@@ -2348,7 +2348,7 @@ export function buildDeliveryChallanPdf(id: number): TDocumentDefinitions {
     amountWords({ grand_total: totals.grand_total } as unknown as Row, cur),
     ...(d.notes ? [{ text: String(d.notes), fontSize: 8, margin: [0, 8, 0, 0] as any }] : []),
     {
-      text: 'Goods despatched under this challan. Received in good order and condition.',
+      text: 'Goods dispatched under this challan. Received in good order and condition.',
       fontSize: 8, margin: [0, 10, 0, 0] as any,
     },
     signatureBlock(s, { buyerSide: true }),

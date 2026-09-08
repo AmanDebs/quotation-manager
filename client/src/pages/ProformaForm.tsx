@@ -433,7 +433,7 @@ export default function ProformaFormPage() {
             <Field label="INCO Terms">
               <IncoTermsInput isExport={!!draft.is_export} disabled={readOnly} value={draft.inco_terms} onChange={(v) => set({ inco_terms: v })} />
             </Field>
-            <Field label="Method of Despatch">
+            <Field label="Method of Dispatch">
               <Select disabled={readOnly} value={draft.method_of_despatch} onChange={(e) => set({ method_of_despatch: e.target.value })}>
                 <option value="">— select —</option>
                 <option>By Sea</option>

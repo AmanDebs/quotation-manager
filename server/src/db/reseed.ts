@@ -525,7 +525,7 @@ const followup = insert(
 );
 followup.run('general', orderGayatri.id, customers.gayatri, day(-3), 'Confirm artwork for the purple cap before scheduling');
 followup.run('quotation', 0, customers.sanya, day(0), 'Sanya to revert on the 12.90 price');
-followup.run('general', orderBisleri.id, customers.bisleri, day(4), 'Chase despatch instruction for the Chennai plant');
+followup.run('general', orderBisleri.id, customers.bisleri, day(4), 'Chase dispatch instruction for the Chennai plant');
 
 /* ------------------------------------------------------------------ */
 

@@ -256,7 +256,7 @@ export function qcBlockError(orderId: number, lines: { order_line?: unknown }[])
   const wanted = new Set<number>();
   for (const l of lines) {
     const pos = Number(l.order_line);
-    if (!Number.isInteger(pos) || pos < 0) return 'Every despatch line must say which order line it is against';
+    if (!Number.isInteger(pos) || pos < 0) return 'Every dispatch line must say which order line it is against';
     if (!items.some((it) => Number(it.pos) === pos)) {
       return `Line ${pos + 1} is not on this order — it may have been edited since`;
     }
@@ -278,7 +278,7 @@ export function qcBlockError(orderId: number, lines: { order_line?: unknown }[])
       .filter((j) => Number(j.order_line) === pos)
       .some((j) => (checks.get(Number(j.id)) ?? []).some((c) => c.passed === true));
     if (!passed) {
-      return `${line.description || `Line ${pos + 1}`} has not passed QC yet, so it cannot be despatched. ` +
+      return `${line.description || `Line ${pos + 1}`} has not passed QC yet, so it cannot be dispatched. ` +
         'Record a passing quality check against its work order first.';
     }
   }

@@ -605,7 +605,7 @@ invoicesRouter.delete('/:id', (req: AuthedRequest, res) => {
   ).get(id) as { c: number };
   if (trips.c > 0) {
     return res.status(409).json({
-      error: `This invoice is on ${trips.c} despatch record${trips.c === 1 ? '' : 's'}. Clear the invoice from ${trips.c === 1 ? 'it' : 'them'} first, or keep the invoice.`,
+      error: `This invoice is on ${trips.c} dispatch record${trips.c === 1 ? '' : 's'}. Clear the invoice from ${trips.c === 1 ? 'it' : 'them'} first, or keep the invoice.`,
     });
   }
   // Read the links before the row is gone.

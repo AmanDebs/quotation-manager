@@ -93,7 +93,7 @@ export default function DespatchesPage() {
   return (
     <div>
       <PageHeader
-        title="Despatches"
+        title="Dispatches"
         subtitle="What has left the plants, what is still at sea, and what has not been billed yet"
         // The desk reconciles this sheet in Excel, so the register it is
         // compared against has to come out of here — through the same filters,
@@ -146,7 +146,7 @@ export default function DespatchesPage() {
         <Input type="date" className="w-40" value={etaTo} onChange={(e) => setEtaTo(e.target.value)} />
         <span className="ml-auto flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-slate-500">
           <span>
-            {totals.trips} despatch{totals.trips === 1 ? '' : 'es'} · {fmtQty(totals.pieces)} pcs · {fmtQty(totals.boxes)} boxes
+            {totals.trips} dispatch{totals.trips === 1 ? '' : 'es'} · {fmtQty(totals.pieces)} pcs · {fmtQty(totals.boxes)} boxes
           </span>
           {totals.docs_pending > 0 && (
             <button
@@ -173,7 +173,7 @@ export default function DespatchesPage() {
         {trips.length === 0 ? (
           <EmptyState message={filtered
             ? 'Nothing matches those filters'
-            : 'Nothing recorded. Despatches are entered from an order’s Dispatch tab.'} />
+            : 'Nothing recorded. Dispatches are entered from an order’s Dispatch tab.'} />
         ) : (
           <table className="w-full text-sm">
             <thead>
@@ -242,7 +242,7 @@ export default function DespatchesPage() {
         )}
         <Pagination
           page={list.page} pages={list.pages} total={list.total} limit={PAGE_SIZE}
-          onPage={list.setPage} noun="despatches"
+          onPage={list.setPage} noun="dispatches"
         />
       </Card>
     </div>

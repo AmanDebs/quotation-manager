@@ -22,7 +22,7 @@ import { describeChange, splitChanges, ACTION_LABEL, type AuditEntry } from '../
 const ENTITY_LABEL: Record<string, string> = {
   quotations: 'Quotation', proformas: 'Proforma', invoices: 'Invoice', orders: 'Order',
   'packing-lists': 'Packing list', customers: 'Customer', products: 'Product',
-  enquiries: 'Enquiry', despatches: 'Despatch', 'work-orders': 'Work order',
+  enquiries: 'Enquiry', despatches: 'Dispatch', 'work-orders': 'Work order',
   'purchase-orders': 'Purchase order', followups: 'Follow-up', payments: 'Payment',
   users: 'User', companies: 'Company', auth: 'Sign-in', stock: 'Stock',
   locations: 'Location', suppliers: 'Supplier', transporters: 'Transporter',

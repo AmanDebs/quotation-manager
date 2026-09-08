@@ -370,7 +370,7 @@ export default function InvoiceFormPage() {
                 onChange={(v) => set({ payment_terms: v })}
               />
             </Field>
-            <Field label="Method of Despatch">
+            <Field label="Method of Dispatch">
               <Select value={draft.method_of_despatch} onChange={(e) => set({ method_of_despatch: e.target.value })}>
                 <option value="">— select —</option>
                 <option>By Sea</option>
@@ -601,7 +601,7 @@ export default function InvoiceFormPage() {
           order's Dispatch tab is where sent and billed are set side by side.
         */}
         {existing?.despatches && existing.despatches.length > 0 && (
-          <Card title={`Despatched under this invoice (${existing.despatches.length})`}>
+          <Card title={`Dispatched under this invoice (${existing.despatches.length})`}>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>

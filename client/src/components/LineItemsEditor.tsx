@@ -636,7 +636,7 @@ export default function LineItemsEditor({
                           * Pending that the Despatch sheet shows went out. The
                           * stored column keeps round-tripping untouched.
                           */}
-                        {show('despatched_on') && packField('Despatched', (
+                        {show('despatched_on') && packField('Dispatched', (
                           <div className="pt-2 text-sm tabular-nums text-slate-600">
                             {despatchedOn(it)
                               ? fmtDate(despatchedOn(it))

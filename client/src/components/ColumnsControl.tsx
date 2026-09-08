@@ -26,7 +26,7 @@ export const ITEM_COLUMNS: ToggleableColumn[] = [
   { key: 'code', label: 'Code (size/spec)' },
   { key: 'supplier', label: 'Supplier' },
   { key: 'scheduled_date', label: 'Promised date (per line)' },
-  { key: 'despatched_on', label: 'Despatched on' },
+  { key: 'despatched_on', label: 'Dispatched on' },
   { key: 'amount', label: 'Amount / line total' },
 ];
 

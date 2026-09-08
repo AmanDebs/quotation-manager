@@ -638,7 +638,7 @@ ordersRouter.delete('/:id', (req: AuthedRequest, res) => {
   // goods that physically left the plant.
   const trips = db.prepare('SELECT COUNT(*) AS c FROM despatches WHERE order_id = ?').get(id) as { c: number };
   if (trips.c > 0) {
-    return res.status(409).json({ error: `This order has ${trips.c} despatch${trips.c === 1 ? '' : 'es'} recorded against it and cannot be deleted` });
+    return res.status(409).json({ error: `This order has ${trips.c} dispatch${trips.c === 1 ? '' : 'es'} recorded against it and cannot be deleted` });
   }
   transaction(() => {
     // Release the proforma that pointed at this order, the way deleting a

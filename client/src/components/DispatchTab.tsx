@@ -157,7 +157,7 @@ export default function DispatchTab({ order }: { order: Order }) {
                       <div className="font-medium">{it.description || `Line ${i + 1}`}</div>
                       {it.despatched && it.despatched.trips > 0 && (
                         <div className="text-xs text-slate-400">
-                          {it.despatched.trips} despatch{it.despatched.trips === 1 ? '' : 'es'}
+                          {it.despatched.trips} dispatch{it.despatched.trips === 1 ? '' : 'es'}
                         </div>
                       )}
                     </td>
@@ -213,8 +213,8 @@ export default function DispatchTab({ order }: { order: Order }) {
       <ErrorText error={remove.error} />
 
       <Card
-        title={`Despatches (${trips.length})`}
-        actions={<Button onClick={() => { save.reset(); setEditing(newTrip()); }}>+ Record despatch</Button>}
+        title={`Dispatches (${trips.length})`}
+        actions={<Button onClick={() => { save.reset(); setEditing(newTrip()); }}>+ Record dispatch</Button>}
       >
         {trips.length === 0 ? (
           <EmptyState message="Nothing recorded as sent yet." />
@@ -284,7 +284,7 @@ export default function DispatchTab({ order }: { order: Order }) {
                         <Button
                           variant="danger"
                           className="ml-1 border-0"
-                          onClick={() => { if (confirm('Delete this despatch record?')) remove.mutate(d.id); }}
+                          onClick={() => { if (confirm('Delete this dispatch record?')) remove.mutate(d.id); }}
                         >
                           Delete
                         </Button>
@@ -380,7 +380,7 @@ function DespatchModal({
   };
 
   return (
-    <Modal title={draft.id ? 'Edit despatch' : 'Record a despatch'} onClose={onClose} wide>
+    <Modal title={draft.id ? 'Edit dispatch' : 'Record a dispatch'} onClose={onClose} wide>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <Field label="Date *"><Input type="date" value={draft.date ?? ''} onChange={(e) => set({ date: e.target.value })} /></Field>
         <Field label="Out of which plant">
@@ -537,7 +537,7 @@ function DespatchModal({
       <ErrorText error={error} />
       <div className="mt-4 flex justify-end gap-2">
         <Button variant="secondary" onClick={onClose}>Cancel</Button>
-        <Button onClick={onSave} disabled={saving}>{saving ? 'Saving…' : 'Save despatch'}</Button>
+        <Button onClick={onSave} disabled={saving}>{saving ? 'Saving…' : 'Save dispatch'}</Button>
       </div>
     </Modal>
   );

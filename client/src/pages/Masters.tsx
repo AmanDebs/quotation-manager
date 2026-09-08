@@ -20,7 +20,7 @@ const locations: MasterSpec<Location> = {
   path: 'locations',
   title: 'Locations',
   singular: 'Location',
-  blurb: 'Plants and godowns. Stock is held per location, never pooled — the order desk despatches from more than one.',
+  blurb: 'Plants and godowns. Stock is held per location, never pooled — the order desk dispatches from more than one.',
   columns: [
     { key: 'name', label: 'Name', render: (r) => <span className="font-medium">{r.name}</span> },
     { key: 'code', label: 'Code', render: (r) => dash(r.code) },

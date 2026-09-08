@@ -55,7 +55,7 @@ const NAV: { heading: string; items: NavItem[] }[] = [
     items: [
       { to: '/work-orders', label: 'Work Orders', icon: 'wrench', needs: 'work_order' },
       { to: '/quality', label: 'Quality', icon: 'gauge', needs: 'qc' },
-      { to: '/despatches', label: 'Despatches', icon: 'truck', needs: 'dispatch' },
+      { to: '/despatches', label: 'Dispatches', icon: 'truck', needs: 'dispatch' },
       { to: '/stock', label: 'Stock', icon: 'box', needs: 'material' },
       // Supplier rates are not everyone's business, and committing a spend is
       // not a shop-floor action — so purchasing is the super admin's, front and back.

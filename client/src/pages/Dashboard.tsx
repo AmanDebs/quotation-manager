@@ -659,7 +659,7 @@ export default function DashboardPage() {
               <AttentionChip to="/work-orders" count={a.overdueWorkOrders} label="jobs past planned finish" tone="red" />
               <AttentionChip to="/stock" count={a.materialShort} label="materials short for open jobs" tone="red" />
               <AttentionChip to="/stock" count={a.materialBelowReorder} label="materials below reorder level" tone="amber" />
-              <AttentionChip to="/despatches" count={a.unbilledDespatches} label="despatches not yet billed" tone="amber" />
+              <AttentionChip to="/despatches" count={a.unbilledDespatches} label="dispatches not yet billed" tone="amber" />
               {/* The sea leg. Papers outstanding is red because the buyer
                   cannot clear the goods without them — a container sitting at
                   the port is the most expensive row in the book. An arrival is
@@ -992,7 +992,7 @@ export default function DashboardPage() {
                   </div>
                 </div>
                 <div>
-                  <div className={CAPTION}>Despatched</div>
+                  <div className={CAPTION}>Dispatched</div>
                   <div className="font-semibold tabular-nums">
                     {fmtQty(floor.piecesDespatched)}
                     <span className="ml-1 text-xs font-normal text-slate-400">

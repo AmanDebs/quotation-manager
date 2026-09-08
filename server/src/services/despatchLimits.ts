@@ -89,7 +89,7 @@ export function despatchLimitError(
 
     // Below zero on either figure, whatever the line is.
     if ((qty !== null && qty < 0) || (packs !== null && packs < 0)) {
-      return 'A despatch cannot record a negative quantity.';
+      return 'A dispatch cannot record a negative quantity.';
     }
     if (qty === null) continue;
 
