@@ -1,5 +1,6 @@
 import { db } from '../db/connection.js';
 import { billedQty } from './totals.js';
+import { qcBlockError } from './qc.js';
 import type { DocTable } from './approval.js';
 
 /**
@@ -147,6 +148,70 @@ const RULES: Rule[] = [
     check: (d) => (Number(d.row.grand_total) > 0
       ? null
       : `The ${NOUN[d.table]} total is zero — there is nothing to pay.`),
+  },
+  {
+    /*
+     * **Nothing may be invoiced until it has passed QC.**
+     *
+     * The Hard Stop in the client's ERP specification of 2026-09-10: *"prevent
+     * the issuance of a Commercial Invoice or Gate Pass unless the
+     * corresponding batch status is marked as QC_PASSED"*. The gate-pass half
+     * was already covered, and transitively rather than by a second guard — a
+     * challan prints for a despatch, and `POST`/`PUT /despatches` have carried
+     * `qcBlockError` since they were written. The invoice half was not covered
+     * at all: one could be raised, approved and sent for goods nobody had
+     * inspected.
+     *
+     * **It gates approval, not the save**, which is what *issuance* means here
+     * and is the whole reason this table exists. Refusing to create the row
+     * would stop the office drafting an invoice while the floor finishes
+     * inspecting, which is ordinary work; refusing to *approve* it stops the
+     * document going out, `approval.ts` guarding every outgoing status behind
+     * exactly that. So it reaches all four routes into `approved` for free,
+     * and shows on the form as a finding above a disabled button rather than
+     * springing a 422 on a press.
+     *
+     * `qcBlockError` is **asked** rather than restated — it owns what a pass
+     * means, and it is the same rule that already refuses the lorry.
+     *
+     * Three cases it deliberately does not block, each of which would
+     * otherwise refuse a legitimate invoice on the day this shipped.
+     *
+     * **An invoice with no order behind it.** Nothing was produced against it,
+     * so there is no work order to have inspected — the same silence-is-not-
+     * failure rule `has_spec: false` states. The order is reached the way
+     * `dispatchProgress()` reaches it: the invoice's own `order_id`, or
+     * backwards through the proforma's.
+     *
+     * **A line past the end of the order.** The chain matches by position, and
+     * an invoice line with no counterpart has nothing to check — the rule the
+     * 10% variance report already follows about the same mismatch.
+     *
+     * **A product with no specification, and a charge line** — both inside
+     * `qcBlockError`, which is the point of asking it rather than rewriting it.
+     */
+    key: 'qc', level: 'block', tables: ['commercial_invoices'],
+    check: (d) => {
+      // The invoice's own order, or the one its proforma was booked from —
+      // resolved in two steps rather than one COALESCE, because `row` is
+      // `Record<string, unknown>` and a bare `?? null` on it is not an
+      // `SQLInputValue`.
+      let orderId = Number(d.row.order_id) || 0;
+      if (!orderId && d.row.pi_id) {
+        const pi = db.prepare('SELECT order_id FROM proforma_invoices WHERE id = ?')
+          .get(Number(d.row.pi_id)) as { order_id: number | null } | undefined;
+        orderId = Number(pi?.order_id) || 0;
+      }
+      if (!orderId) return null;
+      const onOrder = Number(
+        (db.prepare('SELECT COUNT(*) AS c FROM order_items WHERE order_id = ?')
+          .get(orderId) as { c: number }).c
+      );
+      const lines = d.items
+        .map((_, i) => ({ order_line: i }))
+        .filter((l) => l.order_line < onOrder);
+      return lines.length ? qcBlockError(orderId, lines, 'invoice') : null;
+    },
   },
 
   /* ------------------------------------------------------------- warnings */

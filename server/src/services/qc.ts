@@ -240,8 +240,29 @@ export function summaryForWorkOrder(workOrderId: number, productId: number | nul
  *
  * A spec'd line with **no work order at all** is blocked: not raising a job
  * would otherwise be the way around the gate entirely.
+ *
+ * **Two callers now, and one definition of a pass.** The despatch register
+ * asks it before goods may leave, and `documentChecks.ts` asks it before a
+ * commercial invoice may be approved — the client's ERP specification of
+ * 2026-09-10 naming both as its Hard Stop. `context` supplies the two words
+ * the sentence needs and nothing else: writing the rule a second time for
+ * the invoice is exactly how the two would come to disagree about what
+ * passing means, which is the thing this module says twice about itself.
  */
-export function qcBlockError(orderId: number, lines: { order_line?: unknown }[]): string | null {
+export type QcContext = 'dispatch' | 'invoice';
+
+/** The two words the refusal needs, so a caller cannot pass them inconsistently. */
+const CONTEXT: Record<QcContext, { noun: string; verb: string }> = {
+  dispatch: { noun: 'dispatch', verb: 'dispatched' },
+  invoice: { noun: 'invoice', verb: 'invoiced' },
+};
+
+export function qcBlockError(
+  orderId: number,
+  lines: { order_line?: unknown }[],
+  context: QcContext = 'dispatch',
+): string | null {
+  const { noun, verb } = CONTEXT[context];
   // Every line of the order, numbered exactly as orderLines.ts numbers them —
   // charge lines included, because they take a position too.
   const items = db.prepare(
@@ -256,7 +277,7 @@ export function qcBlockError(orderId: number, lines: { order_line?: unknown }[])
   const wanted = new Set<number>();
   for (const l of lines) {
     const pos = Number(l.order_line);
-    if (!Number.isInteger(pos) || pos < 0) return 'Every dispatch line must say which order line it is against';
+    if (!Number.isInteger(pos) || pos < 0) return `Every ${noun} line must say which order line it is against`;
     if (!items.some((it) => Number(it.pos) === pos)) {
       return `Line ${pos + 1} is not on this order — it may have been edited since`;
     }
@@ -278,7 +299,7 @@ export function qcBlockError(orderId: number, lines: { order_line?: unknown }[])
       .filter((j) => Number(j.order_line) === pos)
       .some((j) => (checks.get(Number(j.id)) ?? []).some((c) => c.passed === true));
     if (!passed) {
-      return `${line.description || `Line ${pos + 1}`} has not passed QC yet, so it cannot be dispatched. ` +
+      return `${line.description || `Line ${pos + 1}`} has not passed QC yet, so it cannot be ${verb}. ` +
         'Record a passing quality check against its work order first.';
     }
   }

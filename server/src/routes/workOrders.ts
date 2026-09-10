@@ -289,6 +289,17 @@ workOrdersRouter.get('/:id', requirePermission('work_order'), (req: AuthedReques
   res.json(wo);
 });
 
+/** The product on an order line, by the position rule the whole chain uses. */
+function productOfLine(orderId: number, pos: number): number | null {
+  const row = db.prepare(
+    `SELECT product_id FROM (
+       SELECT product_id, ROW_NUMBER() OVER (ORDER BY sort_order, id) - 1 AS p
+         FROM order_items WHERE order_id = ?
+     ) WHERE p = ?`
+  ).get(orderId, pos) as { product_id: number | null } | undefined;
+  return row?.product_id ?? null;
+}
+
 workOrdersRouter.post('/', requirePermission('work_order', 'full'), (req: AuthedRequest, res) => {
   const body = req.body ?? {};
   const order = db.prepare('SELECT id, customer_id, company_id FROM orders WHERE id = ?')
@@ -302,6 +313,21 @@ workOrdersRouter.post('/', requirePermission('work_order', 'full'), (req: Authed
     return res.status(400).json({ error: 'Planned quantity must be more than zero' });
   }
 
+  /*
+   * A job inherits its order line's product when the caller does not name one.
+   *
+   * `product_id` came from the body alone, and the two readers of it disagree:
+   * `qcBlockError` asks whether the **order line's** product carries a
+   * specification, while `POST /:id/qc-checks` builds the allowed parameters
+   * from the **job's**. A job raised without one against a spec'd line was
+   * therefore blocked with no way out — the gate said a check was needed and
+   * the check route answered "not on the specification for this product".
+   *
+   * Latent while only the despatch register asked, and reachable the moment
+   * the commercial invoice began asking too, so it is closed here. Strictly a
+   * fallback: a body naming a product still wins, and the order page has
+   * always sent one.
+   */
   const id = transaction(() => {
     // The job is numbered by the company that sold the order, so one series
     // covers everything that entity does.
@@ -314,7 +340,7 @@ workOrdersRouter.post('/', requirePermission('work_order', 'full'), (req: Authed
       number, companyId,
       order.id,
       Number(body.order_line) || 0,
-      numOrNull(body.product_id),
+      numOrNull(body.product_id) ?? productOfLine(order.id as number, Number(body.order_line) || 0),
       String(body.description ?? ''),
       Number(body.qty_planned) || 0,
       numOrNull(body.location_id),

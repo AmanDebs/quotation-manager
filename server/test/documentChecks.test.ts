@@ -165,3 +165,131 @@ describe('the refusal itself', () => {
     assert.equal(incompleteError('quotations', 999_999), null);
   });
 });
+
+/**
+ * The Hard Stop: no commercial invoice for goods nobody inspected.
+ *
+ * The only rule in this table that reaches outside the document it is checking
+ * — everything else reads the row and its lines, while this walks back to the
+ * order and asks `qcBlockError` what it already tells the despatch register.
+ * So these build real orders, jobs and checks rather than a synthetic
+ * `CheckedDoc`, and most of them assert what is **not** blocked: this is a
+ * blocking rule, and a blocking rule that fires wrongly stops a shipment.
+ */
+describe('nothing is invoiced until it has passed QC', () => {
+  let seq = 0;
+
+  const product = (spec: boolean) => {
+    const id = Number((db.prepare(
+      "INSERT INTO products (name, unit, unit_price) VALUES (?, 'per 1000', 10) RETURNING id"
+    ).get(`28mm PCO ${++seq}`) as { id: number }).id);
+    if (spec) {
+      db.prepare(
+        `INSERT INTO product_qc_params (product_id, name, kind, unit, min_value, max_value)
+         VALUES (?, 'Neck diameter', 'numeric', 'mm', 27.9, 28.1)`
+      ).run(id);
+    }
+    return id;
+  };
+
+  /** An order whose lines are the products given, in that order. */
+  const order = (productIds: (number | null)[], charge = false) => {
+    const id = Number((db.prepare(
+      `INSERT INTO orders (number, date, customer_id, company_id, currency, tax_type, status)
+       VALUES (?, '2026-09-01', ?, 1, 'INR', 'igst', 'confirmed') RETURNING id`
+    ).get(`SO/QC-${++seq}`, makeCustomer()) as { id: number }).id);
+    productIds.forEach((pid, i) => db.prepare(
+      `INSERT INTO order_items (order_id, product_id, description, qty, unit, unit_price, amount,
+                                total_pcs, is_charge, sort_order)
+       VALUES (?, ?, ?, 100, 'per 1000', 10, 1000, 100000, ?, ?)`
+    ).run(id, pid, pid ? 'Preform' : 'Freight', charge && i === 0 ? 1 : 0, i));
+    return id;
+  };
+
+  const job = (orderId: number, pos = 0) => Number((db.prepare(
+    `INSERT INTO work_orders (number, order_id, order_line, qty_planned, status)
+     VALUES (?, ?, ?, 100000, 'released') RETURNING id`
+  ).get(`WO/QC-${++seq}`, orderId, pos) as { id: number }).id);
+
+  /** A check whose single reading is inside the tolerance, or outside it. */
+  const check = (jobId: number, reading: number) => {
+    const cid = Number((db.prepare(
+      "INSERT INTO qc_checks (work_order_id, date) VALUES (?, '2026-09-02') RETURNING id"
+    ).get(jobId) as { id: number }).id);
+    db.prepare(
+      `INSERT INTO qc_results (check_id, name, kind, unit, value, min_value, max_value)
+       VALUES (?, 'Neck diameter', 'numeric', 'mm', ?, 27.9, 28.1)`
+    ).run(cid, reading);
+    return cid;
+  };
+
+  /** The invoice as this table sees it, pointing at an order. */
+  const invoiceFor = (orderId: number, lines = 1) =>
+    doc('commercial_invoices', { order_id: orderId },
+      Array.from({ length: lines }, () => line({ description: 'Preform' })));
+
+  const blocked = (d: CheckedDoc) => keys(d, 'block').includes('qc');
+
+  test('a spec-carrying line with no work order at all is blocked', () => {
+    assert.ok(blocked(invoiceFor(order([product(true)]))));
+  });
+
+  test('and a job that has been inspected and failed is still blocked', () => {
+    const o = order([product(true)]);
+    check(job(o), 30.5);   // outside 27.9–28.1
+    assert.ok(blocked(invoiceFor(o)));
+  });
+
+  test('a passing check opens it', () => {
+    const o = order([product(true)]);
+    check(job(o), 28.0);
+    assert.ok(!blocked(invoiceFor(o)));
+  });
+
+  /** The refusal names the line and says what to do, not merely that it failed. */
+  test('the refusal says which line and what to record', () => {
+    const o = order([product(true)]);
+    const msg = incompleteError('commercial_invoices', 0);
+    assert.equal(msg, null, 'an invoice that does not exist has nothing to refuse');
+    const found = evaluate(invoiceFor(o)).find((f) => f.key === 'qc');
+    assert.ok(found, 'no finding at all');
+    assert.match(found.message, /has not passed QC yet, so it cannot be invoiced/);
+    assert.match(found.message, /Record a passing quality check/);
+  });
+
+  /* ------------------------------------------------- what is NOT blocked */
+
+  test('a product nobody has written a specification for', () => {
+    assert.ok(!blocked(invoiceFor(order([product(false)]))));
+  });
+
+  test('an invoice with no order behind it', () => {
+    const d = doc('commercial_invoices', {}, [line()]);
+    assert.ok(!blocked(d), 'an invoice outside the order flow was refused');
+  });
+
+  test('a line past the end of the order, which has no counterpart to check', () => {
+    const o = order([product(true)]);
+    check(job(o), 28.0);
+    // Two invoice lines against a one-line order: the second matches nothing,
+    // and the chain skips such a line rather than refusing it.
+    assert.ok(!blocked(invoiceFor(o, 2)));
+  });
+
+  test('a charge line, which is a fee and not goods', () => {
+    // Freight first, so the goods line sits at position 1 — the index rule
+    // counts charges, and numbering after filtering would gate the wrong line.
+    const o = order([null, product(true)], true);
+    check(job(o, 1), 28.0);
+    assert.ok(!blocked(invoiceFor(o, 2)));
+  });
+
+  /**
+   * The proforma is raised before anything is made, so gating it on QC would
+   * refuse every advance this business collects.
+   */
+  test('and a proforma is never asked the question at all', () => {
+    const o = order([product(true)]);
+    assert.ok(!keys(doc('proforma_invoices', { order_id: o }), 'block').includes('qc'));
+  });
+});
