@@ -278,7 +278,31 @@ proformasRouter.get('/prefill/from-quotation/:quotationId', (req: AuthedRequest,
   if (unapproved) return res.status(409).json({ error: unapproved });
   const customer = db.prepare('SELECT * FROM customers WHERE id = ?').get(Number(q.customer_id)) as Record<string, unknown>;
   const items = db.prepare('SELECT * FROM quotation_items WHERE quotation_id = ? ORDER BY sort_order, id').all(qid);
-  const isExport = String(customer.country ?? 'India').trim().toLowerCase() !== 'india';
+  /*
+   * The quotation's own flag decides, not the customer's address.
+   *
+   * This guessed from `customers.country` and ignored `q.is_export` entirely,
+   * so an **export quotation raised for a customer recorded in India came back
+   * as a domestic proforma** — which is not a corner case here: Aglo exports to
+   * Africa through Dubai and Mauritius intermediaries, and a merchant exporter
+   * or an Indian-registered buying house is an ordinary customer on that book.
+   *
+   * It is expensive because it cannot be undone. The proforma draws its number
+   * from whichever series the flag names, and `exportChangeError` then refuses
+   * to flip it — rightly, the number may already be with the customer. Measured
+   * before the fix: an export quotation for an India-registered buyer produced
+   * `AGLO/PI/26-27/001` out of the **domestic** series, carrying no tax, no
+   * country of origin and no quantity tolerance, and the PUT that would have
+   * corrected it answered 409.
+   *
+   * A stated fact beats a derivation: somebody chose export in
+   * `NewDocumentDialog` before the quotation existed, and that choice already
+   * decided the quotation's own tax treatment and export fields. The country is
+   * at best a hint, and it is the hint `fromCustomer()` on the client uses when
+   * there is nothing better — there is something better here.
+   * `prefill/from-order` has always read the order's own flag this way.
+   */
+  const isExport = Number(q.is_export) === 1;
   res.json({
     quotation_id: qid,
     customer_id: q.customer_id,
