@@ -64,9 +64,9 @@ const LINE_STATE: Record<LineState, { label: string; className: string }> = {
 type View = 'lines' | 'products' | 'orders';
 
 const VIEWS: { key: View; label: string }[] = [
-  { key: 'lines', label: 'Order lines' },
+  { key: 'lines', label: 'Sales order lines' },
   { key: 'products', label: 'By product' },
-  { key: 'orders', label: 'Orders' },
+  { key: 'orders', label: 'Sales orders' },
 ];
 
 /**
@@ -152,12 +152,12 @@ export default function OrdersPage() {
   return (
     <div>
       <PageHeader
-        title="Orders"
-        subtitle="The order book — what's sold, what's in production, what's still to ship"
+        title="Sales Orders"
+        subtitle="The sales order book — what's sold, what's in production, what's still to ship"
         actions={
           <div className="flex items-center gap-2">
             <DownloadButton href={`/api/orders/export?view=${view}${query ? `&${query}` : ''}`} />
-            <Button onClick={() => navigate('/orders/new')}>+ New Order</Button>
+            <Button onClick={() => navigate('/orders/new')}>+ New Sales Order</Button>
           </div>
         }
       />
@@ -179,7 +179,7 @@ export default function OrdersPage() {
         </Select>
         <label className="flex items-center gap-1.5 text-sm text-slate-600">
           <input type="checkbox" checked={openOnly} onChange={(e) => setOpenOnly(e.target.checked)} />
-          Open orders only
+          Open sales orders only
         </label>
         {/*
           * Shown on all three views. It used to be hidden on Orders, because
@@ -190,7 +190,7 @@ export default function OrdersPage() {
           */}
         <Input
           className="max-w-64"
-          placeholder="Search order no., PO no., customer or item…"
+          placeholder="Search sales order no., PO no., customer or item…"
           value={q}
           onChange={(e) => setQ(e.target.value)}
         />
@@ -213,12 +213,12 @@ export default function OrdersPage() {
           {orders.length === 0 ? (
             <EmptyState message={statusFilter || exportFilter || companyFilter || openOnly
               ? 'Nothing matches those filters.'
-              : 'No orders yet. Book one from an accepted quotation, or create it directly.'} />
+              : 'No sales orders yet. Book one from an accepted quotation, or create it directly.'} />
           ) : (
             <table className="w-full text-sm">
               <thead>
                 <tr className={TH_CLASS}>
-                  <th className="pb-2 pr-3">Order No.</th>
+                  <th className="pb-2 pr-3">Sales Order No.</th>
                   <th className="pb-2 pr-3">Date</th>
                   <th className="pb-2 pr-3">Customer</th>
                   {showCompany && <th className="pb-2 pr-3">Issued By</th>}
@@ -303,7 +303,7 @@ function LinesTable({ lines, showCompany, pager }: {
           <table className="w-full text-sm">
             <thead>
               <tr className={TH_CLASS}>
-                <th className="pb-2 pr-3">Order</th>
+                <th className="pb-2 pr-3">Sales Order</th>
                 <th className="pb-2 pr-3">Date</th>
                 <th className="pb-2 pr-3">Customer</th>
                 {showCompany && <th className="pb-2 pr-3">Issued By</th>}
@@ -414,7 +414,7 @@ function DemandTable({ rows, onPick }: { rows: ProductDemand[]; onPick: (row: Pr
                 <th className="pb-2 pr-3 text-right">Made</th>
                 <th className="pb-2 pr-3 text-right">Shipped</th>
                 <th className="pb-2 pr-3 text-right">To ship</th>
-                <th className="pb-2 pr-3 text-right">Orders</th>
+                <th className="pb-2 pr-3 text-right">Sales orders</th>
                 <th className="pb-2 pr-3">Next due</th>
               </tr>
             </thead>

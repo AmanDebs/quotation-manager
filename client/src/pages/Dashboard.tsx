@@ -533,7 +533,7 @@ export default function DashboardPage() {
   const funnelStages = [
     { label: 'Quoted', value: data.funnel.quoted, to: listUrl('/quotations') },
     { label: 'Accepted', value: data.funnel.accepted, to: listUrl('/quotations', { status: 'accepted' }) },
-    { label: 'Orders', value: data.funnel.orders, to: listUrl('/orders') },
+    { label: 'Sales orders', value: data.funnel.orders, to: listUrl('/orders') },
     { label: 'Invoiced', value: data.funnel.invoiced, to: listUrl('/invoices') },
   ];
   const funnelMax = Math.max(1, ...funnelStages.map((s) => s.value));
@@ -649,7 +649,7 @@ export default function DashboardPage() {
           ) : (
             <div className="flex flex-wrap gap-2">
               <AttentionChip to="/followups" count={a.overdueFollowups} label="follow-ups overdue" tone="red" />
-              <AttentionChip to={listUrl('/orders', { open: '1' })} count={a.overdueOrders} label="orders past promised date" tone="red" />
+              <AttentionChip to={listUrl('/orders', { open: '1' })} count={a.overdueOrders} label="sales orders past promised date" tone="red" />
               <AttentionChip to={listUrl('/invoices')} count={a.overdueInvoices} label="invoices unpaid over 60 days" tone="red" />
               <AttentionChip to="/followups" count={a.followupsToday} label="follow-ups due today" tone="amber" />
               <AttentionChip to={listUrl('/quotations', { status: 'sent' })} count={a.expiringQuotations} label="quotations expiring this week" tone="amber" />
@@ -754,7 +754,7 @@ export default function DashboardPage() {
           actions={<Link to={listUrl('/orders')} className="text-xs text-brand-600 hover:underline">View orders</Link>}
         >
           {pipeline.every((s) => s.count === 0) ? (
-            <p className={EMPTY}>No orders in this period. Book one from an accepted quotation.</p>
+            <p className={EMPTY}>No sales orders in this period. Book one from an accepted quotation.</p>
           ) : (
             <div className="space-y-1">
               {pipeline.map((s) => (
@@ -833,7 +833,7 @@ export default function DashboardPage() {
       span: 2,
       body: (
         <Card
-          title="Order book & receivables"
+          title="Sales order book & receivables"
           actions={<Link to={listUrl('/invoices')} className="text-xs text-brand-600 hover:underline">View invoices</Link>}
         >
           <div className="space-y-4">

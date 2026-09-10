@@ -104,7 +104,7 @@ interface SeriesState {
 
 const SERIES_LABEL: Record<string, string> = {
   quotation: 'Quotation',
-  order: 'Order',
+  order: 'Sales Order',
   proforma: 'Proforma Invoice',
   invoice: 'Commercial Invoice',
   packing_list: 'Packing List',
@@ -460,8 +460,8 @@ export default function SettingsPage() {
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <Field label="Quotation"><Input value={form.quote_pattern} onChange={(e) => set({ quote_pattern: e.target.value })} /></Field>
             <Field label="Packing List"><Input value={form.pl_pattern} onChange={(e) => set({ pl_pattern: e.target.value })} /></Field>
-            <Field label="Order (domestic)"><Input value={form.order_pattern} onChange={(e) => set({ order_pattern: e.target.value })} /></Field>
-            <Field label="Order (export)"><Input value={form.order_export_pattern} onChange={(e) => set({ order_export_pattern: e.target.value })} /></Field>
+            <Field label="Sales Order (domestic)"><Input value={form.order_pattern} onChange={(e) => set({ order_pattern: e.target.value })} /></Field>
+            <Field label="Sales Order (export)"><Input value={form.order_export_pattern} onChange={(e) => set({ order_export_pattern: e.target.value })} /></Field>
             <Field label="Proforma Invoice (domestic)"><Input value={form.pi_pattern} onChange={(e) => set({ pi_pattern: e.target.value })} /></Field>
             <Field label="Proforma Invoice (export)"><Input value={form.pi_export_pattern} onChange={(e) => set({ pi_export_pattern: e.target.value })} /></Field>
             <Field label="Commercial Invoice (domestic)"><Input value={form.inv_pattern} onChange={(e) => set({ inv_pattern: e.target.value })} /></Field>

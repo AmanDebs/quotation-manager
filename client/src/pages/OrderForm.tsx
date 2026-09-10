@@ -213,7 +213,7 @@ export default function OrderFormPage() {
   return (
     <div className="mx-auto max-w-7xl">
       <PageHeader
-        title={isNew ? 'New Order' : existing!.number}
+        title={isNew ? 'New Sales Order' : existing!.number}
         subtitle={isNew ? (fromQuotation ? 'Booked from quotation — confirm the details' : undefined) : existing!.customer_name}
         actions={
           <div className="flex flex-wrap items-center gap-2">
@@ -273,7 +273,7 @@ export default function OrderFormPage() {
 
       <div className={`space-y-4 ${tab === 'details' ? '' : 'hidden'}`}>
         <Card
-          title="Order Details"
+          title="Sales Order Details"
           actions={
             isNew ? (
               <Select
@@ -468,7 +468,7 @@ export default function OrderFormPage() {
           the quotation, proforma and invoice keep theirs.
         */}
         <Card
-          title="Order Items"
+          title="Sales Order Items"
           actions={<ColumnsControl config={draft.column_config} onChange={(c) => set({ column_config: c })} columns={orderColumns()} />}
         >
           <LineItemsEditor items={draft.items} onChange={(items) => set({ items })} currency={draft.currency} taxType={draft.tax_type} config={draft.column_config} forced={ORDER_FORCED} />

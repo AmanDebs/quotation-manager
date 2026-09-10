@@ -118,7 +118,7 @@ export default function QualityPage() {
                 <th className="pb-2 pr-3">Job</th>
                 <th className="pb-2 pr-3">Product</th>
                 <th className="pb-2 pr-3">Customer</th>
-                <th className="pb-2 pr-3">Order</th>
+                <th className="pb-2 pr-3">Sales Order</th>
                 <th className="pb-2 pr-3">Process</th>
                 <th className="pb-2 pr-3">Inspector</th>
                 <th className="pb-2 pr-3 text-right">Readings</th>

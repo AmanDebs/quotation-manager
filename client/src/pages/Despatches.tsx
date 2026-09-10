@@ -180,7 +180,7 @@ export default function DespatchesPage() {
               <tr className={TH_CLASS}>
                 <th className="pb-2 pr-3">Date</th>
                 <th className="pb-2 pr-3">From</th>
-                <th className="pb-2 pr-3">Order</th>
+                <th className="pb-2 pr-3">Sales Order</th>
                 <th className="pb-2 pr-3">Customer</th>
                 <th className="pb-2 pr-3">Destination</th>
                 <th className="pb-2 pr-3">Transporter</th>

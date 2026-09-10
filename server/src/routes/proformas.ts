@@ -333,7 +333,7 @@ proformasRouter.get('/prefill/from-quotation/:quotationId', (req: AuthedRequest,
 proformasRouter.get('/prefill/from-order/:orderId', (req: AuthedRequest, res) => {
   const oid = Number(req.params.orderId);
   const o = db.prepare('SELECT * FROM orders WHERE id = ?').get(oid) as Record<string, unknown> | undefined;
-  if (!o || !canAccessCustomer(req, Number(o.customer_id))) return res.status(404).json({ error: 'Order not found' });
+  if (!o || !canAccessCustomer(req, Number(o.customer_id))) return res.status(404).json({ error: 'Sales order not found' });
   const customer = db.prepare('SELECT * FROM customers WHERE id = ?').get(Number(o.customer_id)) as Record<string, unknown>;
   const items = db.prepare('SELECT * FROM order_items WHERE order_id = ? ORDER BY sort_order, id').all(oid);
   const isExport = Number(o.is_export) === 1;

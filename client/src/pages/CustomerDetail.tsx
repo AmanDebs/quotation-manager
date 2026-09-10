@@ -254,8 +254,8 @@ export default function CustomerDetailPage() {
         )}
 
         {summary?.orders && (
-          <ListCard title="Orders" total={summary.orders.total} shown={summary.orders.rows.length}
-            empty="No orders booked.">
+          <ListCard title="Sales Orders" total={summary.orders.total} shown={summary.orders.rows.length}
+            empty="No sales orders booked.">
             <DocRows rows={summary.orders.rows} path="/orders" />
           </ListCard>
         )}

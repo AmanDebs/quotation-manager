@@ -317,7 +317,7 @@ despatchesRouter.post('/', (req: AuthedRequest, res) => {
   const order = db.prepare('SELECT id, customer_id, company_id FROM orders WHERE id = ?')
     .get(Number(body.order_id)) as { id: number; customer_id: number; company_id: number } | undefined;
   if (!order || !canAccessCustomer(req, order.customer_id)) {
-    return res.status(404).json({ error: 'Order not found' });
+    return res.status(404).json({ error: 'Sales order not found' });
   }
   if (!String(body.date ?? '').trim()) return res.status(400).json({ error: 'Date is required' });
   const items = Array.isArray(body.items) ? (body.items as ItemInput[]) : [];

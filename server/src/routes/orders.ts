@@ -393,7 +393,7 @@ ordersRouter.get('/export', (req: AuthedRequest, res) => {
     sheet = 'By product';
     book = buildXlsx(sheet, productColumns, productDemand(lineFilters(req)));
   } else if (view === 'orders') {
-    sheet = 'Orders';
+    sheet = 'Sales orders';
     const { where, params } = orderListWhere(req);
     const rows = db
       .prepare(`${listSql}${where.length ? ' WHERE ' + where.join(' AND ') : ''} ORDER BY o.date DESC, o.id DESC`)
@@ -409,7 +409,7 @@ ordersRouter.get('/export', (req: AuthedRequest, res) => {
     }
     book = buildXlsx(sheet, orderColumns, rows);
   } else {
-    sheet = 'Order lines';
+    sheet = 'Sales order lines';
     // No page argument: the whole filtered set.
     book = buildXlsx(sheet, lineColumns, orderLines(lineFilters(req)));
   }
@@ -421,7 +421,7 @@ ordersRouter.get('/export', (req: AuthedRequest, res) => {
 
 ordersRouter.get('/:id', (req: AuthedRequest, res) => {
   const o = getFull(Number(req.params.id), req);
-  if (!o || !canAccessCustomer(req, Number(o.customer_id))) return res.status(404).json({ error: 'Order not found' });
+  if (!o || !canAccessCustomer(req, Number(o.customer_id))) return res.status(404).json({ error: 'Sales order not found' });
   res.json(o);
 });
 
@@ -593,7 +593,7 @@ ordersRouter.put('/:id', (req: AuthedRequest, res) => {
   const id = Number(req.params.id);
   const body = req.body ?? {};
   const existing = db.prepare('SELECT * FROM orders WHERE id = ?').get(id) as Record<string, unknown> | undefined;
-  if (!existing || !canAccessCustomer(req, Number(existing.customer_id))) return res.status(404).json({ error: 'Order not found' });
+  if (!existing || !canAccessCustomer(req, Number(existing.customer_id))) return res.status(404).json({ error: 'Sales order not found' });
   const h = headerValues(body, existing);
   const moved = customerChangeError(req, existing.customer_id as number, h.customer_id);
   if (moved) return res.status(403).json({ error: moved });
@@ -627,7 +627,7 @@ ordersRouter.post('/:id/status', (req: AuthedRequest, res) => {
   const allowed = ['pending', 'confirmed', 'scheduled', 'in_production', 'ready', 'partially_dispatched', 'completed', 'cancelled'];
   if (!allowed.includes(status)) return res.status(400).json({ error: 'Invalid status' });
   const existing = db.prepare('SELECT customer_id FROM orders WHERE id = ?').get(id) as { customer_id: number } | undefined;
-  if (!existing || !canAccessCustomer(req, existing.customer_id)) return res.status(404).json({ error: 'Order not found' });
+  if (!existing || !canAccessCustomer(req, existing.customer_id)) return res.status(404).json({ error: 'Sales order not found' });
   // Clearing the memory is what makes this a person's choice rather than an
   // observation: with nothing remembered the status on the row *is* the floor,
   // so a hand-closed order stays closed however the invoices later add up, and
@@ -642,7 +642,7 @@ ordersRouter.post('/:id/status', (req: AuthedRequest, res) => {
 ordersRouter.delete('/:id', (req: AuthedRequest, res) => {
   const id = Number(req.params.id);
   const existing = db.prepare('SELECT customer_id FROM orders WHERE id = ?').get(id) as { customer_id: number } | undefined;
-  if (!existing || !canAccessCustomer(req, existing.customer_id)) return res.status(404).json({ error: 'Order not found' });
+  if (!existing || !canAccessCustomer(req, existing.customer_id)) return res.status(404).json({ error: 'Sales order not found' });
   /**
    * A commercial invoice is genuinely downstream of the order and blocks the
    * delete. **A proforma is not**, and used to be counted here.

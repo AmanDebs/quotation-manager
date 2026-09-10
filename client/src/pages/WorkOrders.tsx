@@ -93,7 +93,7 @@ export default function WorkOrdersPage() {
             <thead>
               <tr className={TH_CLASS}>
                 <th className="pb-2 pr-3">Job</th>
-                <th className="pb-2 pr-3">Order</th>
+                <th className="pb-2 pr-3">Sales Order</th>
                 <th className="pb-2 pr-3">Customer</th>
                 <th className="pb-2 pr-3">Item</th>
                 <th className="pb-2 pr-3">Machine</th>

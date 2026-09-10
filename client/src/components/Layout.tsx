@@ -39,7 +39,7 @@ const NAV: { heading: string; items: NavItem[] }[] = [
       { to: '/enquiries', label: 'Enquiries', icon: 'enquiry', needs: 'enquiry' },
       { to: '/quotations', label: 'Quotations', icon: 'document', needs: 'quotation' },
       { to: '/proformas', label: 'Proforma Invoices', icon: 'receipt', needs: 'proforma' },
-      { to: '/orders', label: 'Orders', icon: 'clipboard', needs: 'order' },
+      { to: '/orders', label: 'Sales Orders', icon: 'clipboard', needs: 'order' },
       // No Packing Lists entry: the commercial invoice owns its packing list,
       // so it is created and edited on the invoice. The pages remain routed for
       // any bookmarked link, but they are no longer a place you navigate to.

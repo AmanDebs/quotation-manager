@@ -133,7 +133,7 @@ type DocType = keyof typeof builders;
  */
 const DOC_LABEL: Record<DocType, string> = {
   quotation: 'Quotation',
-  order: 'Order',
+  order: 'Sales Order',
   proforma: 'Proforma Invoice',
   invoice: 'Commercial Invoice',
   'packing-list': 'Packing List',

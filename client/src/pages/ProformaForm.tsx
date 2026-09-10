@@ -303,7 +303,7 @@ export default function ProformaFormPage() {
                     Order {existing!.order_number ?? existing!.order_id}
                   </Link>
                 ) : ['sent', 'order_confirmed', 'advance_received', 'in_production'].includes(existing!.status) && (
-                  <Button variant="secondary" onClick={() => navigate(`/orders/new?from_proforma=${id}`)}>→ Book Order</Button>
+                  <Button variant="secondary" onClick={() => navigate(`/orders/new?from_proforma=${id}`)}>→ Book Sales Order</Button>
                 )}
                 {/* No route to a commercial invoice from here. The chain runs
                     proforma → order → invoice, and the order is the document

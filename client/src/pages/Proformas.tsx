@@ -179,7 +179,7 @@ export default function ProformasPage() {
                 <th className="pb-2 pr-3 text-right">Balance</th>
                 <th className="pb-2 pr-3">Payment Terms</th>
                 <th className="pb-2 pr-3">Issued By</th>
-                <th className="pb-2 pr-3">Order</th>
+                <th className="pb-2 pr-3">Sales Order</th>
                 <th className="pb-2 pr-3">Status</th>
                 <th className="w-8 pb-2" />
               </tr>
