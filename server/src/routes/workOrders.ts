@@ -481,6 +481,16 @@ workOrdersRouter.put('/:id', requirePermission('work_order', 'full'), (req: Auth
     String(v('notes')),
     id
   );
+  /*
+   * A start date is one of the two things that schedule an order, so editing
+   * one moves a rung and the order has to be asked again.
+   *
+   * Unlike the despatch PUT, which deliberately calls nothing: that one edits
+   * a trip's lines, dates and references, and `impliedStatus` reads only the
+   * despatch *count* — so a call there would be symmetry rather than
+   * correctness. Here it is correctness, because `planned_start` is an input.
+   */
+  syncOrderStatus(Number(existing.order_id));
   res.json(getFull(req, id));
 });
 
@@ -490,6 +500,15 @@ workOrdersRouter.post('/:id/status', requirePermission('work_order', 'full'), (r
   const status = String(req.body?.status ?? '');
   if (!STATUSES.includes(status)) return res.status(400).json({ error: 'Unknown status' });
   db.prepare('UPDATE work_orders SET status = ? WHERE id = ?').run(status, id);
+  /*
+   * Releasing a job schedules the order, and **cancelling one un-does
+   * whatever it had raised** — `impliedStatus` counts only live jobs, so
+   * without this the last job on an order could be cancelled while the order
+   * went on claiming Scheduled over an empty floor. That half was wrong before
+   * the release rung existed: the ladder rework of 2026-09-10 found the three
+   * *delete* routes that never synced and missed this one, which cancels.
+   */
+  syncOrderStatus(Number(accessible(req, id)!.order_id));
   res.json(getFull(req, id));
 });
 

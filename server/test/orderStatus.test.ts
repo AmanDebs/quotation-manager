@@ -41,9 +41,16 @@ const memoryOf = (id: number) =>
 const setByHand = (id: number, status: string) =>
   db.prepare("UPDATE orders SET status = ?, status_before_auto = '' WHERE id = ?").run(status, id);
 
+/** A job released to the floor — which is one of the two things that schedules it. */
 const job = (orderId: number) => (db.prepare(
   `INSERT INTO work_orders (number, order_id, order_line, qty_planned, status)
    VALUES (?, ?, 0, 100000, 'released') RETURNING id`
+).get(`WO/OS-${++seq}`, orderId) as { id: number }).id;
+
+/** A job merely **raised**: sitting at `planned`, with no date and no slot. */
+const rawJob = (orderId: number) => (db.prepare(
+  `INSERT INTO work_orders (number, order_id, order_line, qty_planned, status)
+   VALUES (?, ?, 0, 100000, 'planned') RETURNING id`
 ).get(`WO/OS-${++seq}`, orderId) as { id: number }).id;
 
 const shift = (jobId: number, ok = 5000) => (db.prepare(
@@ -55,12 +62,62 @@ const despatch = (orderId: number) => (db.prepare(
   `INSERT INTO despatches (order_id, date) VALUES (?, '2026-09-04') RETURNING id`
 ).get(orderId) as { id: number }).id;
 
+/**
+ * The two rungs between Pending and In production, which the ladder used to
+ * collapse into one.
+ *
+ * `confirmed` reads **Work Order** on screen because the client's word is that
+ * the step means the job has been raised — and until 2026-09-10 the ladder
+ * disagreed with its own label, jumping a raised job straight to `scheduled`.
+ * It was the only one of the seven rungs nothing could reach.
+ */
+describe('raising a job and scheduling it are different steps', () => {
+  test('a job merely raised reaches Work Order and stops there', () => {
+    const o = order();
+    rawJob(o);
+    assert.equal(syncOrderStatus(o), 'confirmed');
+  });
+
+  test('a start date on it schedules the order', () => {
+    const o = order();
+    const j = rawJob(o);
+    assert.equal(syncOrderStatus(o), 'confirmed');
+    db.prepare("UPDATE work_orders SET planned_start = '2026-09-20' WHERE id = ?").run(j);
+    assert.equal(syncOrderStatus(o), 'scheduled');
+  });
+
+  test('and so does releasing it, which is the other way a desk says so', () => {
+    const o = order();
+    const j = rawJob(o);
+    db.prepare("UPDATE work_orders SET status = 'released' WHERE id = ?").run(j);
+    assert.equal(syncOrderStatus(o), 'scheduled');
+  });
+
+  /** The ladder moves both ways, so withdrawing the commitment withdraws the rung. */
+  test('putting it back to planned puts the order back to Work Order', () => {
+    const o = order();
+    const j = job(o);
+    assert.equal(syncOrderStatus(o), 'scheduled');
+    db.prepare("UPDATE work_orders SET status = 'planned' WHERE id = ?").run(j);
+    assert.equal(syncOrderStatus(o), 'confirmed');
+    db.prepare('DELETE FROM work_orders WHERE id = ?').run(j);
+    assert.equal(syncOrderStatus(o), 'pending', 'no job at all is not a work order');
+  });
+
+  test('a cancelled job schedules nothing', () => {
+    const o = order();
+    const j = rawJob(o);
+    db.prepare("UPDATE work_orders SET status = 'cancelled', planned_start = '2026-09-20' WHERE id = ?").run(j);
+    assert.equal(syncOrderStatus(o), 'pending');
+  });
+});
+
 describe('the facts push the order up the ladder', () => {
   test('a job, a shift and a lorry each move it on', () => {
     const o = order();
     const j = job(o);
     syncOrderStatus(o);
-    assert.equal(statusOf(o), 'scheduled', 'raising a job should schedule the order');
+    assert.equal(statusOf(o), 'scheduled', 'a released job should schedule the order');
 
     shift(j);
     syncOrderStatus(o);

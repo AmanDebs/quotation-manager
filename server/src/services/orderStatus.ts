@@ -98,6 +98,24 @@ export function impliedStatus(orderId: number): StatusFacts {
   const anyProduction = [...production.values()].some((p) => p.produced > 0);
   const anyJob = production.size > 0;
 
+  /*
+   * A job that is actually going to run, which is what separates the two rungs
+   * between Pending and In production.
+   *
+   * Either explicit act counts: a job **released** to the floor, or one given
+   * a **start date**. Both say somebody has committed it to a slot, and which
+   * of the two a desk uses varies — the dates are often left blank here, and
+   * releasing three jobs at once is a normal order-level act.
+   *
+   * A job merely *raised* is not this. It sits at `planned` with no dates, and
+   * the rung for that is `confirmed`.
+   */
+  const anyScheduled = (db.prepare(
+    `SELECT COUNT(*) AS c FROM work_orders
+      WHERE order_id = ? AND status <> 'cancelled'
+        AND (status <> 'planned' OR planned_start <> '')`
+  ).get(orderId) as { c: number }).c > 0;
+
   // Everything ordered has been made — only answerable when every goods line
   // states a quantity. A price-only line cannot be "complete".
   const allMade = goods.length > 0
@@ -107,9 +125,27 @@ export function impliedStatus(orderId: number): StatusFacts {
       return (production.get(it.line)?.produced ?? 0) >= target;
     });
 
+  /*
+   * **`confirmed` is the rung a raised job reaches, and it used to be skipped.**
+   *
+   * The client's word (2026-09-07) is that `confirmed` reads *Work Order*
+   * because what the desk means by that step is that the job has been raised —
+   * not merely that the buyer said yes, which is the proforma's
+   * `order_confirmed` one document upstream. The ladder disagreed with its own
+   * label: raising a job jumped straight to `scheduled`, so the rung named
+   * after the act was the only one of the seven nothing could ever reach, and
+   * an order the floor had jobs for read *Scheduled* before anything was.
+   *
+   * Fixing it by moving the label instead was the other option and is the
+   * worse one: it would have overruled what the client said `confirmed` means
+   * to them, in order to match code that was wrong. So the ladder moved, and
+   * `scheduled` gained the derivation it never had — otherwise the hole is not
+   * closed, only slid one rung along.
+   */
   let implied: OrderStatus = 'pending';
   let reason = '';
-  if (anyJob) { implied = 'scheduled'; reason = 'a work order exists'; }
+  if (anyJob) { implied = 'confirmed'; reason = 'a work order has been raised'; }
+  if (anyScheduled) { implied = 'scheduled'; reason = 'a work order has been released or dated'; }
   if (anyProduction) { implied = 'in_production'; reason = 'production has been booked'; }
   if (allMade) { implied = 'ready'; reason = 'every line has been made in full'; }
   if (despatched.c > 0 || invoiced.c > 0) {
