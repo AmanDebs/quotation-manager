@@ -2,10 +2,11 @@
 export type Role = 'manager' | 'employee';
 
 /** The five teams. Mirrors `services/permissions.ts` on the server. */
-export type TeamRole = 'super_admin' | 'sales' | 'logistics' | 'production' | 'quality';
+export type TeamRole = 'super_admin' | 'sys_admin' | 'sales' | 'logistics' | 'production' | 'quality';
 
 export const TEAM_ROLES: { value: TeamRole; label: string }[] = [
   { value: 'super_admin', label: 'Super Admin' },
+  { value: 'sys_admin', label: 'System Administrator' },
   { value: 'sales', label: 'Sales' },
   { value: 'logistics', label: 'Logistics' },
   { value: 'production', label: 'Production' },

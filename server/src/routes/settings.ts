@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { db } from '../db/connection.js';
 import { defaultCompany, defaultCompanyId } from '../services/companies.js';
 import { listSeries, setNextNumber } from '../services/numbering.js';
-import { requireManager } from '../middleware/auth.js';
+import { requirePermission } from '../middleware/auth.js';
 import { record } from '../services/audit.js';
 import type { AuthedRequest } from '../middleware/auth.js';
 
@@ -20,7 +20,10 @@ export const settingsRouter = Router();
  * administrative, and an employee who can see two customers should not learn
  * the whole book's volume from it.
  */
-settingsRouter.get('/sequences', requireManager, (req, res) => {
+// `settings: full` rather than `requireManager`: the PUT beside this is gated
+// by the mount on exactly that, and a System Administrator able to set a
+// counter but not read it is incoherent. Still refused to every other role.
+settingsRouter.get('/sequences', requirePermission('settings', 'full'), (req, res) => {
   const companyId = Number(req.query.company) > 0 ? Number(req.query.company) : defaultCompanyId();
   if (!db.prepare('SELECT id FROM companies WHERE id = ?').get(companyId)) {
     return res.status(404).json({ error: 'Company not found' });

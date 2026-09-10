@@ -1,8 +1,22 @@
 /**
  * Who may do what.
  *
- * Five roles, from the access matrix the client supplied on 2026-09-05, each
- * with full / view / no access per function. Before this the whole of
+ * Six roles, from the RBAC matrix in the client's ERP specification of
+ * 2026-09-10, each with full / view / no access per function. That document
+ * supersedes the access matrix of 2026-09-05 — the two disagree, and the
+ * client chose this one.
+ *
+ * Its four columns are *modules*, and each cell carries a parenthetical
+ * naming what to read: *Read Only (View SO Demand)*, *(Verify COA
+ * Clearance)*, *(View WO Status)*. **The parenthetical is the
+ * specification, not the module header** — so Production reading the Sales
+ * module means the order, not the price that was quoted for it. The
+ * conservative reading, and the one that keeps a quotation off the floor.
+ *
+ * Functions the spec's four columns do not cover — `customer`, `product`,
+ * `master`, `dashboard`, `followup`, `payment`, `purchasing` — are
+ * **reachability**, kept at whatever lets each role work its own module.
+ * Silence about a function is not an instruction to refuse it. Before this the whole of
  * authorisation was one boolean — `role === 'manager'` — plus row scoping on
  * `customers.owner_id`.
  *
@@ -18,12 +32,13 @@
  * enum is enforced in `routes/users.ts` instead, answering 400 with the list.
  */
 
-export const TEAM_ROLES = ['super_admin', 'sales', 'logistics', 'production', 'quality'] as const;
+export const TEAM_ROLES = ['super_admin', 'sys_admin', 'sales', 'logistics', 'production', 'quality'] as const;
 
 export type TeamRole = (typeof TEAM_ROLES)[number];
 
 export const TEAM_ROLE_LABEL: Record<TeamRole, string> = {
   super_admin: 'Super Admin',
+  sys_admin: 'System Administrator',
   sales: 'Sales',
   logistics: 'Logistics',
   production: 'Production',
@@ -76,6 +91,12 @@ const RANK: Record<Level, number> = { none: 0, view: 1, full: 2 };
  * first if somebody cannot see something they need.
  */
 export const ACCESS: Record<TeamRole, Record<Fn, Level>> = {
+  /**
+   * The owner's account. Deliberately **not** the spec's administrator row:
+   * that row is written for somebody whose job is the system rather than the
+   * business, and this app is run by the people whose orders it holds.
+   * `sys_admin` below is the spec's row, for whoever should be held to it.
+   */
   super_admin: {
     enquiry: 'full', quotation: 'full', proforma: 'full', order: 'full', dashboard: 'full',
     work_order: 'full', output: 'full', qc: 'full', material: 'full', dispatch: 'full',
@@ -83,42 +104,107 @@ export const ACCESS: Record<TeamRole, Record<Fn, Level>> = {
     customer: 'full', product: 'full', master: 'full', followup: 'full', payment: 'full',
     purchasing: 'full', approval: 'full', audit: 'full', team: 'full', settings: 'full', backup: 'full',
   },
-  sales: {
-    enquiry: 'full', quotation: 'full', proforma: 'full', order: 'full', dashboard: 'view', // matrix
+  /**
+   * **ERP System Administrator** — "User Management Only" on all four business
+   * modules, "Full Access (System Config)" on its own.
+   *
+   * The whole point of the row is what it cannot read, so every business
+   * function is `none` and stays that way. Two judgements the spec does not
+   * make for us. `master` is granted because locations, machines, moulds and
+   * processes are plant *configuration*, which is what System Config names,
+   * and nothing priced is reachable through it. `product` is **refused**,
+   * because the catalogue carries `unit_price` — it looks like reference data
+   * and is business data.
+   *
+   * `legacyRole` maps this to `employee`, so any guard still written as
+   * `requireManager` fails closed for it rather than open.
+   */
+  sys_admin: {
+    enquiry: 'none', quotation: 'none', proforma: 'none', order: 'none', dashboard: 'none',
     work_order: 'none', output: 'none', qc: 'none', material: 'none', dispatch: 'none',
-    invoice: 'view', packing_list: 'view', // matrix: VIEW / Download
-    // `master` is reference data — plant names, transporters, the material
-    // list. Sales reaches it through the recipe panel on the Products page, so
-    // reading it is granted; the matrix does not mention masters at all.
-    customer: 'full', product: 'full', master: 'view', followup: 'full', payment: 'full',
-    purchasing: 'none', approval: 'none', audit: 'none', team: 'none', settings: 'none', backup: 'none',
+    invoice: 'none', packing_list: 'none',
+    customer: 'none', product: 'none', master: 'full', followup: 'none', payment: 'none',
+    purchasing: 'none', approval: 'none', audit: 'full', team: 'full', settings: 'full', backup: 'full',
   },
-  logistics: {
-    enquiry: 'none', quotation: 'none', proforma: 'none', order: 'view', dashboard: 'view', // matrix
-    work_order: 'none', output: 'none', qc: 'none', material: 'none', dispatch: 'full', // matrix
-    // Full, but only on an export shipment — see `exportOnlyInvoice`. A level
-    // cannot say "only these rows", so the row rule lives beside it.
+  /**
+   * **Sales Manager** — Full on Sales (Create/Approve Quotes, SO, Invoice),
+   * Read Only on Production (View WO Status), QC (View COA Status) and
+   * Logistics (Tracking Status).
+   *
+   * `approval: 'full'` is the spec's word *Approve*, and it is a real change:
+   * this role could approve nothing before, so every document waited on the
+   * owner. `mayApprove` reads exactly this cell.
+   */
+  sales: {
+    enquiry: 'full', quotation: 'full', proforma: 'full', order: 'full', dashboard: 'view',
+    // Read Only (View WO Status). Output and material are the shop log and the
+    // store, neither of which that parenthetical names.
+    work_order: 'view', output: 'none', material: 'none',
+    qc: 'view',        // Read Only (View COA Status)
+    dispatch: 'view',  // Read Only (Tracking Status)
     invoice: 'full', packing_list: 'full',
+    customer: 'full', product: 'full', master: 'view', followup: 'full', payment: 'full',
+    purchasing: 'none', approval: 'full', audit: 'none', team: 'none', settings: 'none', backup: 'none',
+  },
+  /**
+   * **Dispatch Lead / Warehouse Manager** — Full on Logistics (Pick, Pack,
+   * Gate Pass), Read Only on Sales (View Confirmed SOs), Production (View FG
+   * Inventory) and QC (Verify COA Clearance).
+   *
+   * Two cells worth reading twice. `invoice` drops from `full` to `view`: the
+   * 2026-09-05 matrix gave this role export invoicing, and the 2026-09-10 spec
+   * makes the whole Sales module read-only for it. `exportOnlyInvoice` stays
+   * in the code but can no longer fire, there being no write left to narrow.
+   *
+   * And *View FG Inventory* has **nothing to grant**: there is no
+   * finished-goods ledger in this app — `material_moves` is raw material — so
+   * the production functions stay `none` until one exists. Granting `material`
+   * would be granting a different thing from the one that was asked for.
+   */
+  logistics: {
+    enquiry: 'none', quotation: 'none', proforma: 'none', order: 'view', dashboard: 'view',
+    work_order: 'none', output: 'none', material: 'none',
+    qc: 'view',        // Read Only (Verify COA Clearance) — the spec's pre-dispatch step
+    dispatch: 'full',  // Full (Pick, Pack, Gate Pass, Logistics)
+    invoice: 'view', packing_list: 'full',
     customer: 'view', product: 'view', master: 'view', followup: 'none', payment: 'none',
     purchasing: 'none', approval: 'none', audit: 'none', team: 'none', settings: 'none', backup: 'none',
   },
+  /**
+   * **Production Supervisor** — Full on Production (Create WO, Material Issue,
+   * Shop Log), Read Only on Sales (View SO Demand) and QC (View QC Logs), no
+   * access to Logistics.
+   *
+   * *View SO Demand* is read as the parenthetical writes it: the **order**,
+   * not the quotation or the proforma. A price is not demand, and a quotation
+   * readable from the shop floor is the leak `routes/audit.ts` records closing.
+   */
   production: {
-    enquiry: 'none', quotation: 'none', proforma: 'none', order: 'none', dashboard: 'view', // matrix
-    work_order: 'full', output: 'full', material: 'full', // matrix
-    // Not in the matrix: the floor should see whether its own job passed.
-    qc: 'view',
-    dispatch: 'none',
+    enquiry: 'none', quotation: 'none', proforma: 'none', order: 'view', dashboard: 'view',
+    work_order: 'full', output: 'full', material: 'full',
+    qc: 'view',        // Read Only (View QC Logs)
+    dispatch: 'none',  // No Access
     invoice: 'none', packing_list: 'none',
     customer: 'view', product: 'view', master: 'view', followup: 'none', payment: 'none',
     purchasing: 'none', approval: 'none', audit: 'none', team: 'none', settings: 'none', backup: 'none',
   },
+  /**
+   * **QC Inspector / Auditor** — Full on QC (Shift QC, Final COA Approval),
+   * Read Only on Production (View Batch Logs) and Logistics (Pre-Dispatch
+   * Verification), **No Access** to Sales.
+   *
+   * `customer`, `product` and `master` are reference data the spec's four
+   * modules do not cover, and they are what a check is recorded *against* — a
+   * QC check hangs off a work order, which hangs off an order, which names a
+   * customer, and a customer may hold tolerances of its own. Refusing them
+   * would refuse the role its own module.
+   */
   quality: {
     enquiry: 'none', quotation: 'none', proforma: 'none', order: 'none', dashboard: 'none',
-    // Not in the matrix: a QC check hangs off a work order, so Quality has to
-    // be able to reach one to record against it.
-    work_order: 'view',
-    output: 'none', qc: 'full', // matrix
-    material: 'none', dispatch: 'none',
+    work_order: 'view', output: 'view',   // Read Only (View Batch Logs)
+    qc: 'full',                           // Full (Shift QC, Final COA Approval)
+    material: 'none',
+    dispatch: 'view',                     // Read Only (Pre-Dispatch Verification)
     invoice: 'none', packing_list: 'none',
     customer: 'view', product: 'view', master: 'view', followup: 'none', payment: 'none',
     purchasing: 'none', approval: 'none', audit: 'none', team: 'none', settings: 'none', backup: 'none',

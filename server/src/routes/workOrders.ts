@@ -123,7 +123,7 @@ function jobSummary(sql: string, params: unknown[]) {
   ).get(...(params as never[])) as { jobs: number; planned: number; made: number };
 }
 
-workOrdersRouter.get('/', (req: AuthedRequest, res) => {
+workOrdersRouter.get('/', requirePermission('work_order'), (req: AuthedRequest, res) => {
   const scope = scopeClause(req, 'o.customer_id');
   const where: string[] = [];
   const params: unknown[] = [];
@@ -283,7 +283,7 @@ workOrdersRouter.get('/qc-checks/export', requirePermission('qc'), (req: AuthedR
   res.send(buildXlsx('QC checks', qcColumns, rows));
 });
 
-workOrdersRouter.get('/:id', (req: AuthedRequest, res) => {
+workOrdersRouter.get('/:id', requirePermission('work_order'), (req: AuthedRequest, res) => {
   const wo = getFull(req, Number(req.params.id));
   if (!wo) return res.status(404).json({ error: 'Work order not found' });
   res.json(wo);

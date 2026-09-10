@@ -85,7 +85,19 @@ app.use('/api/orders', requireAuth, requireFunction('order'), ordersRouter);
 // against it and the QC check on it — so the mount only asks for the loosest
 // of them and each route asks for its own. Quality reaches it on `work_order:
 // view` and may write nothing but a QC check.
-app.use('/api/work-orders', requireAuth, requirePermission('work_order'), workOrdersRouter);
+/*
+ * Mounted on `requireAuth` alone, and **every route inside carries its own
+ * guard** — this router serves three functions (`work_order`, `output`, `qc`)
+ * and a mount guard on one of them silently pre-empts the other two.
+ *
+ * Measured: with `requirePermission('work_order')` here, a Dispatch Lead
+ * holding `qc: view` was refused the QC register 403 — the route's own
+ * `requirePermission('qc')` never ran — which blocked the *Verify COA
+ * Clearance* step the client's 2026-09-10 spec puts before dispatch. The two
+ * reads that had been leaning on this mount (`GET /` and `GET /:id`) now name
+ * `work_order` themselves, so nothing is opened by removing it.
+ */
+app.use('/api/work-orders', requireAuth, workOrdersRouter);
 // Purchasing is manager-only in full: supplier rates are not everyone's
 // business, and committing a spend is not a shop-floor action.
 app.use('/api/purchase-orders', requireAuth, requirePermission('purchasing', 'full'), purchaseOrdersRouter);

@@ -42,35 +42,104 @@ describe('the access table', () => {
 
   /**
    * Asserted by enumeration rather than by rule, so that widening any of these
-   * trips a test and somebody has to decide it on purpose. Each one hands over
+   * trips a test and somebody has to decide it on purpose. Each hands over
    * something that is not a job function: the whole database file, every
    * account, every supplier rate, the numbering, the whole activity log.
+   *
+   * Two of these are no longer super-admin-only, and both are deliberate.
+   * **`approval` is the Sales Manager's**, the ERP spec of 2026-09-10 reading
+   * "Full Access (Create/Approve Quotes, SO, Invoice)". And the four system
+   * functions are shared with **`sys_admin`**, which is that spec's own
+   * administrator row and exists to hold exactly them.
    */
-  test('the administrative functions belong to the super admin alone', () => {
-    const adminOnly: Fn[] = ['backup', 'team', 'settings', 'purchasing', 'audit', 'approval'];
-    for (const fn of adminOnly) {
+  test('the administrative functions stay with the two roles that own them', () => {
+    const systemOnly: Fn[] = ['backup', 'team', 'settings', 'audit'];
+    for (const fn of systemOnly) {
       for (const role of TEAM_ROLES) {
-        if (role === 'super_admin') continue;
+        if (role === 'super_admin' || role === 'sys_admin') continue;
         assert.equal(levelFor(role, fn), 'none', `${role} should not reach ${fn}`);
       }
     }
+    // Procurement is named by no row of the spec, so it stays where it was.
+    for (const role of TEAM_ROLES) {
+      if (role === 'super_admin') continue;
+      assert.equal(levelFor(role, 'purchasing'), 'none', `${role} reached purchasing`);
+    }
+    // Approving is a Sales act now, and nobody else's.
+    for (const role of TEAM_ROLES) {
+      const expected = role === 'super_admin' || role === 'sales' ? 'full' : 'none';
+      assert.equal(levelFor(role, 'approval'), expected, `${role}/approval`);
+    }
+  });
+
+  /**
+   * The System Administrator is defined by what it cannot read: "User
+   * Management Only" on all four business modules. This is the row where a
+   * single wrong cell would undo the separation of duties it exists for.
+   */
+  test('the system administrator reaches no business data at all', () => {
+    const business: Fn[] = [
+      'enquiry', 'quotation', 'proforma', 'order', 'invoice', 'packing_list',
+      'work_order', 'output', 'qc', 'material', 'dispatch',
+      'customer', 'product', 'followup', 'payment', 'purchasing', 'approval', 'dashboard',
+    ];
+    for (const fn of business) {
+      assert.equal(levelFor('sys_admin', fn), 'none', `sys_admin reached ${fn}`);
+    }
+    // What it does hold: the system, and the plant configuration inside it.
+    for (const fn of ['team', 'settings', 'backup', 'audit', 'master'] as Fn[]) {
+      assert.equal(levelFor('sys_admin', fn), 'full', `sys_admin should hold ${fn}`);
+    }
+    // `product` looks like reference data and carries `unit_price`, so it is
+    // refused where `master` is granted — the one cell that distinguishes the
+    // two, and the reason they are asserted apart.
+    assert.equal(levelFor('sys_admin', 'product'), 'none');
   });
 
   /** The matrix, cell for cell, on the rows the client wrote out. */
   test('says what the client’s matrix says', () => {
     const expected: [TeamRole, Fn, 'none' | 'view' | 'full'][] = [
+      // Sales Manager — Full on Sales, Read Only on the other three modules.
       ['sales', 'enquiry', 'full'], ['sales', 'quotation', 'full'], ['sales', 'proforma', 'full'],
-      ['sales', 'order', 'full'], ['sales', 'dashboard', 'view'], ['sales', 'invoice', 'view'],
-      ['logistics', 'order', 'view'], ['logistics', 'dashboard', 'view'], ['logistics', 'dispatch', 'full'],
-      ['logistics', 'invoice', 'full'], ['logistics', 'quotation', 'none'],
+      ['sales', 'order', 'full'], ['sales', 'invoice', 'full'], ['sales', 'approval', 'full'],
+      ['sales', 'work_order', 'view'], ['sales', 'qc', 'view'], ['sales', 'dispatch', 'view'],
+      ['sales', 'output', 'none'], ['sales', 'material', 'none'], ['sales', 'dashboard', 'view'],
+      // Dispatch Lead — Full on Logistics, Read Only on Sales and QC.
+      ['logistics', 'dispatch', 'full'], ['logistics', 'packing_list', 'full'],
+      ['logistics', 'order', 'view'], ['logistics', 'qc', 'view'],
+      ['logistics', 'invoice', 'view'], ['logistics', 'quotation', 'none'],
+      ['logistics', 'work_order', 'none'], ['logistics', 'dashboard', 'view'],
+      // Production Supervisor — Full on Production, the order but not the price.
       ['production', 'work_order', 'full'], ['production', 'output', 'full'],
-      ['production', 'material', 'full'], ['production', 'dashboard', 'view'],
-      ['production', 'dispatch', 'none'], ['production', 'quotation', 'none'],
-      ['quality', 'qc', 'full'], ['quality', 'dispatch', 'none'], ['quality', 'quotation', 'none'],
+      ['production', 'material', 'full'], ['production', 'order', 'view'],
+      ['production', 'qc', 'view'], ['production', 'dispatch', 'none'],
+      ['production', 'quotation', 'none'], ['production', 'proforma', 'none'],
+      ['production', 'dashboard', 'view'],
+      // QC Inspector — Full on QC, no access to Sales at all.
+      ['quality', 'qc', 'full'], ['quality', 'work_order', 'view'], ['quality', 'output', 'view'],
+      ['quality', 'dispatch', 'view'], ['quality', 'order', 'none'],
+      ['quality', 'quotation', 'none'], ['quality', 'invoice', 'none'],
     ];
     for (const [role, fn, level] of expected) {
       assert.equal(levelFor(role, fn), level, `${role}/${fn}`);
     }
+  });
+
+  /**
+   * *View SO Demand* and *No Access* are the two cells that keep a price off
+   * the shop floor, and they are what the 2026-09-05 matrix and the 2026-09-10
+   * spec most nearly disagree about — the module header says Sales, the
+   * parenthetical says the order. Asserted on its own so that reading the
+   * header instead of the parenthetical trips a test with the reason on it.
+   */
+  test('the floor sees demand, never a price', () => {
+    for (const role of ['production', 'quality'] as TeamRole[]) {
+      for (const fn of ['quotation', 'proforma', 'invoice', 'payment'] as Fn[]) {
+        assert.equal(levelFor(role, fn), 'none', `${role} can read ${fn}`);
+      }
+    }
+    assert.equal(levelFor('production', 'order'), 'view', 'Production must see SO demand');
+    assert.equal(levelFor('quality', 'order'), 'none', 'QC has No Access to the Sales module');
   });
 
   /**

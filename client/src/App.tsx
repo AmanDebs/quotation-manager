@@ -157,6 +157,10 @@ const LANDING: [string, string][] = [
   ['order', '/orders'],
   ['material', '/stock'],
   ['customer', '/customers'],
+  // Last, so it can never pre-empt a business team: the System Administrator
+  // reaches none of the screens above, and without an entry here would land on
+  // the dashboard it holds `none` on — the very failure this list prevents.
+  ['team', '/team'],
 ];
 
 function Home() {
