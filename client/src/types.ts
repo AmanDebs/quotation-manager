@@ -266,6 +266,43 @@ export interface Batch {
   final_checks: QcCheck[];
   qc: 'none' | 'passed' | 'failed';
   cleared: boolean;
+  /**
+   * The trips this lot travelled on. Empty means only that nobody has named it
+   * on one — naming lots on a dispatch is optional, so it can never be read as
+   * *this lot has not shipped*.
+   */
+  trips: BatchTrip[];
+}
+
+/** A lot named on one trip. Everything but the ids is read back through the job. */
+export interface DespatchBatch {
+  id: number;
+  number: string;
+  date: string;
+  coa_no: string;
+  coa_date: string;
+  order_line: number;
+  work_order_id: number;
+  work_order_number: string;
+  product_name: string;
+}
+
+/** A lot on the order, as the dispatch form's picker needs it. */
+export interface OrderBatch extends DespatchBatch {
+  /** A certificate has been issued, so this lot may actually go. */
+  cleared: boolean;
+}
+
+/** One trip a lot travelled on — the reverse question, which a recall asks. */
+export interface BatchTrip {
+  despatch_id: number;
+  order_id: number;
+  order_number: string;
+  customer_name: string;
+  date: string;
+  destination: string;
+  /** The challan number, or the consignment note on a trip that predates it. */
+  reference: string;
 }
 
 export interface WorkOrder {
@@ -597,6 +634,15 @@ export interface Despatch {
   location_name?: string | null; transporter_name?: string | null;
   invoice_number?: string | null; created_by_name?: string | null;
   items?: DespatchItem[];
+  /** Which identified lots went — read back on every despatch. */
+  batches?: DespatchBatch[];
+  /**
+   * What to save. Sent separately from `batches` because the two are different
+   * things: one is the resolved rows, the other the caller's choice — and a
+   * PUT that omits this leaves the lots on file alone, the rule `items`
+   * follows.
+   */
+  batch_ids?: number[];
 }
 
 /* ---------------- The order book, per line ---------------- */
@@ -758,6 +804,13 @@ export interface Order {
   items?: OrderItem[];
   dispatched_value?: number; pending_value?: number;
   fully_dispatched?: boolean; any_dispatched?: boolean;
+  /**
+   * The lots made against this order, for the dispatch form's picker.
+   * **Absent, not empty, for a caller who may not read them** — the server
+   * decides against the access table, so the client renders what it was handed
+   * rather than keeping a second copy of the policy.
+   */
+  batches?: OrderBatch[];
   proformas?: { id: number; number: string; date: string; status: string; grand_total: number }[];
   invoices?: { id: number; number: string; date: string; status: string; grand_total: number }[];
 }

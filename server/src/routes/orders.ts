@@ -9,13 +9,15 @@ import { orderAdvance, advanceForProforma } from '../services/receivables.js';
 import { orderLines, productDemand, countOrderLines, orderSearchClause,
   type Filters, type OrderLine, type ProductDemand } from '../services/orderLines.js';
 import { buildXlsx, attachmentName, type Column } from '../services/xlsx.js';
-import type { AuthedRequest } from '../middleware/auth.js';
+import { allows, type AuthedRequest } from '../middleware/auth.js';
 import { scopeClause, canAccessCustomer, linkError, customerChangeError } from '../middleware/scope.js';
 import { syncOrderStatus } from '../services/orderStatus.js';
 import { resolveCompanyId } from '../services/companies.js';
 import { listBody, pageRequest } from '../services/pagination.js';
 import { syncProformaOrdered, syncProformaUnordered, alreadyOrderedError } from '../services/documentChain.js';
 import { blockUnapprovedConversion } from '../services/approval.js';
+import { batchesForOrder } from '../services/batch.js';
+
 
 export const ordersRouter = Router();
 
@@ -85,7 +87,12 @@ function dispatchProgress(orderId: number, items: { qty: number | null; unit_pri
   };
 }
 
-function getFull(id: number) {
+/*
+ * `req` is optional, and that is the safe direction: a caller without one
+ * omits the batch block rather than leaking it. Same shape and same reason as
+ * the commercial invoice's `despatches` key.
+ */
+function getFull(id: number, req?: AuthedRequest) {
   const order = db.prepare(`${listSql} WHERE o.id = ?`).get(id) as Record<string, unknown> | undefined;
   if (!order) return undefined;
   const items = db.prepare('SELECT * FROM order_items WHERE order_id = ? ORDER BY sort_order, id').all(id) as
@@ -125,6 +132,28 @@ function getFull(id: number) {
    * figure instead of three.
    */
   order.advance = orderAdvance(id);
+  /*
+   * The identified lots made against this order, for the dispatch form's
+   * picker — and **absent, not empty, for a caller who may not read them**,
+   * the rule `customerSummary.ts` states.
+   *
+   * Gated on `qc` rather than on `output`: a lot and its certificate are
+   * quality facts, and `qc: view` is precisely the *Verify COA Clearance*
+   * permission the spec gives the Dispatch Lead, who is the person recording
+   * the trip.
+   *
+   * **The gate binds on nobody under the current matrix, and is kept anyway.**
+   * Measured across all five logins: every role that can read an order at all
+   * — super admin, Sales, Logistics, Production — holds `qc: view`, and
+   * Quality, which holds `qc: full`, holds `order: none` and never reaches
+   * this route. So it is stated the way `exportOnlyInvoice` is stated: the
+   * rule is written where the answer is decided, so that narrowing a cell
+   * later narrows this with it rather than leaving a block nobody re-checked.
+   * Decided here against `allows()` and never by `useCan()` on the client,
+   * because a copy of the access table on the client is a second policy and
+   * it drifts.
+   */
+  if (req && allows(req, 'qc')) order.batches = batchesForOrder(id);
   // Downstream documents raised from this order.
   order.proformas = db.prepare('SELECT id, number, date, status, grand_total FROM proforma_invoices WHERE order_id = ? ORDER BY id').all(id);
   order.invoices = db.prepare(
@@ -391,7 +420,7 @@ ordersRouter.get('/export', (req: AuthedRequest, res) => {
 });
 
 ordersRouter.get('/:id', (req: AuthedRequest, res) => {
-  const o = getFull(Number(req.params.id));
+  const o = getFull(Number(req.params.id), req);
   if (!o || !canAccessCustomer(req, Number(o.customer_id))) return res.status(404).json({ error: 'Order not found' });
   res.json(o);
 });
@@ -557,7 +586,7 @@ ordersRouter.post('/', (req: AuthedRequest, res) => {
     }
     return id;
   });
-  res.status(201).json(getFull(id));
+  res.status(201).json(getFull(id, req));
 });
 
 ordersRouter.put('/:id', (req: AuthedRequest, res) => {
@@ -589,7 +618,7 @@ ordersRouter.put('/:id', (req: AuthedRequest, res) => {
   // Changing what was ordered changes whether it has all been billed: asking
   // for more than has shipped re-opens an order the invoices had closed.
   syncOrderStatus(id);
-  res.json(getFull(id));
+  res.json(getFull(id, req));
 });
 
 ordersRouter.post('/:id/status', (req: AuthedRequest, res) => {
@@ -607,7 +636,7 @@ ordersRouter.post('/:id/status', (req: AuthedRequest, res) => {
   db.prepare(
     "UPDATE orders SET status = ?, status_before_auto = '', status_before_completed = '' WHERE id = ?"
   ).run(String(status), id);
-  res.json(getFull(id));
+  res.json(getFull(id, req));
 });
 
 ordersRouter.delete('/:id', (req: AuthedRequest, res) => {

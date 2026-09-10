@@ -7,7 +7,7 @@ import { amountInWords } from './amountInWords.js';
 import { round2, isPieceBasis, piecesPerBillingUnit, computeTotals } from './totals.js';
 import { invoiceReceivable, proformaAdvance, orderAdvance } from './receivables.js';
 import { paramsFor, specOwner, checksForWorkOrder } from './qc.js';
-import { batchById } from './batch.js';
+import { batchById, batchesOnDespatch } from './batch.js';
 import { getCompany, defaultCompany } from './companies.js';
 
 // The npm package ships fonts only as base64 vfs; decode them for the server printer.
@@ -2339,6 +2339,37 @@ export function buildDeliveryChallanPdf(id: number): TDocumentDefinitions {
   // here — boxes despatched belong beside the value of what went out.
   money.push({ label: 'TOTAL VALUE OF GOODS', value: fmtMoney(totals.grand_total, cur), band: true, sums: true });
 
+  /*
+   * Which identified lots are in this consignment — §3's traceability chain,
+   * printed on the one document that travels with the goods.
+   *
+   * This is where the chain is actually consumed: the buyer needs to know
+   * which certificates cover the boxes in front of them, and a COA states a
+   * batch number that has to appear on something they receive or it identifies
+   * nothing. The invoice deliberately does not carry it — an invoice can be
+   * raised for goods that went on three different lorries, so a batch list
+   * there would describe no single delivery.
+   *
+   * **Silent where there is nothing to say.** A trip that names no lot prints
+   * exactly what it printed before, which is every challan already issued —
+   * naming lots is optional, and an empty box headed *Batch* would read as a
+   * fault rather than as an absence.
+   */
+  const lots = batchesOnDespatch(id);
+  const lotBlock: Content[] = lots.length ? [{
+    table: {
+      widths: ['*', '*', '*'],
+      body: lots.map((b) => [
+        lv('Batch', b.number),
+        lv('Certificate of Analysis',
+          b.coa_no ? `${b.coa_no}${b.coa_date ? `   ${fmtDate(b.coa_date)}` : ''}` : '—'),
+        lv('Goods', b.product_name || String(orderItems[b.order_line]?.description ?? '')),
+      ]),
+    },
+    layout: boxedLayout,
+    margin: [0, 8, 0, 0] as any,
+  }] : [];
+
   const content: Content[] = [
     // A movement that begins in India carries the consigner's GSTIN whatever
     // its destination, so this is deliberately not gated on `is_export`.
@@ -2347,6 +2378,7 @@ export function buildDeliveryChallanPdf(id: number): TDocumentDefinitions {
     grid,
     itemsTable(s, totals.items as unknown as Row[], specs, {}, money),
     amountWords({ grand_total: totals.grand_total } as unknown as Row, cur),
+    ...lotBlock,
     ...(d.notes ? [{ text: String(d.notes), fontSize: 8, margin: [0, 8, 0, 0] as any }] : []),
     {
       text: 'Goods dispatched under this challan. Received in good order and condition.',

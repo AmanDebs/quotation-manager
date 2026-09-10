@@ -543,6 +543,22 @@ workOrdersRouter.delete('/batches/:batchId', requirePermission('output', 'full')
     return res.status(404).json({ error: 'Batch not found' });
   }
   const full = batchById(batchId)!;
+  /*
+   * A lot that has left the plant is the least deletable of the three, so it
+   * is asked first — the most specific refusal is the one worth reading.
+   *
+   * In practice a shipped lot is always a certified one, since a trip may only
+   * name a lot that carries a COA — but this is stated rather than left to
+   * that implication, because a delete guard that covers a foreign key only by
+   * transitivity is one that stops covering it the moment the other rule
+   * moves, and a missed reference reaches the user as "Internal server error".
+   */
+  if (full.trips.length) {
+    const where = full.trips.map((t) => t.reference || t.order_number).filter(Boolean).join(', ');
+    return res.status(409).json({
+      error: `Batch ${full.number} has been dispatched${where ? ` on ${where}` : ''} and cannot be deleted.`,
+    });
+  }
   // A certified lot is on paper with the customer; a lot with output behind it
   // is a day's production. Neither is deleted to tidy up — the entries are
   // moved off it first, which is a decision somebody makes on purpose.

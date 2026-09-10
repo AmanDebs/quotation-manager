@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
-import type { Order, Despatch, DespatchItem, Location, Transporter } from '../types';
+import type { Order, Despatch, DespatchItem, Location, Transporter, OrderBatch } from '../types';
 import { Button, Input, Textarea, Select, Field, Card, EmptyState, ErrorText, Modal, TH_CLASS, CAPTION_CLASS } from './ui';
 import { fmtQty, fmtMoney, fmtDate, today } from '../lib/format';
 
@@ -83,6 +83,11 @@ export default function DispatchTab({ order }: { order: Order }) {
     transporter_id: transporters.find((t) => t.name === 'Self')?.id ?? transporters[0]?.id ?? null,
     destination: order.destination ?? '',
     cn_no: '', vehicle_no: '', tentative_delivery: '', freight_terms: '', invoice_id: null, notes: '',
+    // Deliberately not prefilled with "every certified lot". Which lots went on
+    // this lorry is a fact about the loading, and a guess at it would put lot
+    // numbers on a challan nobody checked — the rule the box counts follow in
+    // reverse, where a guess is safe because the piece count is beside it.
+    batch_ids: [],
     // Every line, defaulted to what is still unsent.
     items: items.map((it, i) => {
       const qty = Math.max(0, (it.total_pcs ?? 0) - (it.despatched?.qty ?? 0)) || null;
@@ -122,7 +127,7 @@ export default function DispatchTab({ order }: { order: Order }) {
       notes: saved.get(i)?.notes ?? '',
     }));
     const orphans = (d.items ?? []).filter((it) => it.order_line >= items.length);
-    return { ...d, items: [...onOrder, ...orphans] };
+    return { ...d, items: [...onOrder, ...orphans], batch_ids: (d.batches ?? []).map((b) => b.id) };
   };
 
   return (
@@ -254,6 +259,12 @@ export default function DispatchTab({ order }: { order: Order }) {
                         {(d.bl_no || d.container_no) && (
                           <div className="text-slate-400">{[d.bl_no, d.container_no].filter(Boolean).join(' · ')}</div>
                         )}
+                        {/* Which lots travelled, where anyone recorded them. */}
+                        {!!d.batches?.length && (
+                          <div className="text-slate-500">
+                            {d.batches.map((b) => b.number).join(' · ')}
+                          </div>
+                        )}
                         {d.docs_status && (
                           <div className={d.docs_status === 'received' ? 'text-green-700' : 'text-amber-700'}>
                             Docs {d.docs_status === 'received' ? 'received' : 'sent'}
@@ -325,6 +336,12 @@ export default function DispatchTab({ order }: { order: Order }) {
           transporters={transporters}
           invoices={invoices}
           isExport={!!order.is_export}
+          /*
+           * Absent for a caller the server did not hand them to — Sales holds
+           * `qc: none`, so the picker simply is not there rather than being an
+           * empty box that looks broken.
+           */
+          orderBatches={order.batches ?? []}
           error={save.error}
           saving={save.isPending}
           onChange={setEditing}
@@ -337,12 +354,14 @@ export default function DispatchTab({ order }: { order: Order }) {
 }
 
 function DespatchModal({
-  draft, items, ownSent, locations, transporters, invoices, isExport, error, saving, onChange, onClose, onSave,
+  draft, items, ownSent, locations, transporters, invoices, isExport, orderBatches,
+  error, saving, onChange, onClose, onSave,
 }: {
   draft: Partial<Despatch>;
   items: NonNullable<Order['items']>;
   /** Pieces already on file for *this* despatch, per line, to be excluded. */
   ownSent: Map<number, number>;
+  orderBatches: OrderBatch[];
   locations: Location[];
   transporters: Transporter[];
   invoices: NonNullable<Order['invoices']>;
@@ -529,6 +548,60 @@ function DespatchModal({
       <p className="mt-2 text-xs text-slate-400">
         Leave a line blank if none of it went on this lorry — only lines with a figure are recorded.
       </p>
+
+      {/*
+        Which identified lots are on the lorry — the last leg of the
+        traceability chain, and the only part of it somebody has to type.
+
+        The whole block is absent unless the order has lots, so an order nobody
+        has batched shows exactly the form it always did. An uncertified lot is
+        **shown and disabled rather than hidden**, with the reason beside it: a
+        picker that silently omits the batch somebody is looking for reads as a
+        fault, where one that says *no COA yet* says what to do next. The
+        server refuses the same lot with the same reason, so the screen is
+        explaining that rule rather than keeping a second copy of it.
+      */}
+      {orderBatches.length > 0 && (
+        <>
+          <div className={`${CAPTION_CLASS} mt-4`}>Batches on this trip</div>
+          <div className="mt-1 grid grid-cols-1 gap-1 sm:grid-cols-2">
+            {orderBatches.map((b) => {
+              const on = (draft.batch_ids ?? []).includes(b.id);
+              return (
+                <label
+                  key={b.id}
+                  className={`flex items-start gap-2 rounded-lg px-2 py-1.5 text-sm ring-1 ${
+                    on ? 'bg-brand-50 ring-brand-200' : 'ring-slate-200'
+                  } ${b.cleared ? 'cursor-pointer hover:bg-slate-50' : 'opacity-60'}`}
+                >
+                  <input
+                    type="checkbox"
+                    className="mt-0.5"
+                    checked={on}
+                    disabled={!b.cleared}
+                    onChange={(e) => set({
+                      batch_ids: e.target.checked
+                        ? [...(draft.batch_ids ?? []), b.id]
+                        : (draft.batch_ids ?? []).filter((x) => x !== b.id),
+                    })}
+                  />
+                  <span className="min-w-0">
+                    <span className="font-medium">{b.number}</span>
+                    <span className="ml-1 text-slate-500">
+                      {b.product_name || items[b.order_line]?.description || `Line ${b.order_line + 1}`}
+                    </span>
+                    <span className="block text-xs">
+                      {b.cleared
+                        ? <span className="text-green-700">{b.coa_no}</span>
+                        : <span className="text-amber-700">no COA yet — cannot be dispatched</span>}
+                    </span>
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+        </>
+      )}
 
       <Field label="Notes" className="mt-3">
         <Textarea rows={2} value={draft.notes ?? ''} onChange={(e) => set({ notes: e.target.value })} />

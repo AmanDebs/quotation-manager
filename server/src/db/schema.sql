@@ -1110,6 +1110,35 @@ CREATE TABLE IF NOT EXISTS despatch_items (
 
 CREATE INDEX IF NOT EXISTS idx_despatch_items_despatch ON despatch_items(despatch_id);
 
+-- Which identified lots physically went on this trip — the last leg of the
+-- traceability chain, and the one fact along it that cannot be derived. Where
+-- a batch came from is already answerable (batch -> work order -> order line
+-- -> order -> customer -> product); which of them somebody actually put on
+-- the lorry is known only to whoever loaded it.
+--
+-- **A link and nothing else.** No order line, because a batch names a work
+-- order which names the line, so storing it again would be a second copy that
+-- could disagree. And no quantity: the despatch line already records the
+-- pieces sent for that line, and splitting them across lots would be a second
+-- set of figures with nothing to reconcile them against — the "how much of
+-- this lot is left" question belongs to a finished-goods ledger, which this
+-- app does not have and does not pretend to.
+--
+-- Hangs off the despatch rather than the despatch *item* because
+-- `despatch_items` is deleted and reinserted on every save, so a child of a
+-- row that does not survive a save is a link that does not either.
+CREATE TABLE IF NOT EXISTS despatch_batches (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  despatch_id INTEGER NOT NULL REFERENCES despatches(id) ON DELETE CASCADE,
+  batch_id INTEGER NOT NULL REFERENCES batches(id),
+  -- One lot is named once on one trip; naming it twice says nothing further.
+  UNIQUE (despatch_id, batch_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_despatch_batches_despatch ON despatch_batches(despatch_id);
+-- The reverse question — where did this lot go — is the one a recall asks.
+CREATE INDEX IF NOT EXISTS idx_despatch_batches_batch ON despatch_batches(batch_id);
+
 CREATE INDEX IF NOT EXISTS idx_material_moves_material ON material_moves(material_id, location_id);
 CREATE INDEX IF NOT EXISTS idx_material_moves_po ON material_moves(po_id);
 CREATE INDEX IF NOT EXISTS idx_material_moves_wo ON material_moves(work_order_id);

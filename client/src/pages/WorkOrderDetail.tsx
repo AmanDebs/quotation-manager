@@ -398,6 +398,7 @@ export default function WorkOrderDetailPage() {
                     <th className="pb-2 pr-3 text-right">Rejected</th>
                     <th className="pb-2 pr-3">Final check</th>
                     <th className="pb-2 pr-3">Certificate</th>
+                    <th className="pb-2 pr-3">Dispatched</th>
                     <th className="pb-2" />
                   </tr>
                 </thead>
@@ -420,6 +421,21 @@ export default function WorkOrderDetailPage() {
                         {b.cleared
                           ? <span className="text-slate-700">{b.coa_no} <span className="text-xs text-slate-400">{fmtDate(b.coa_date)}</span></span>
                           : <span className="text-slate-300">—</span>}
+                      </td>
+                      {/*
+                        Where this lot went — the traceability chain read
+                        backwards, which is the direction a recall reads it.
+                        Nothing recorded is **not** the same as "still here":
+                        naming lots on a trip is optional, so this says only
+                        that nobody has named it on one.
+                      */}
+                      <td className="py-2 pr-3 text-xs">
+                        {b.trips?.length ? b.trips.map((t) => (
+                          <div key={t.despatch_id} className="whitespace-nowrap">
+                            <span className="text-slate-700">{t.reference || fmtDate(t.date)}</span>
+                            {t.destination && <span className="text-slate-400"> · {t.destination}</span>}
+                          </div>
+                        )) : <span className="text-slate-300">—</span>}
                       </td>
                       <td className="whitespace-nowrap py-2 text-right">
                         {b.cleared ? (

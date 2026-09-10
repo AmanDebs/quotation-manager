@@ -10,6 +10,7 @@ import { listBody } from '../services/pagination.js';
 import { searchClause } from '../services/search.js';
 import { nextNumber } from '../services/numbering.js';
 import { SEA_LEG, DOCS_OUTSTANDING_D } from '../services/despatch.js';
+import { batchesOnDespatch, setDespatchBatches, despatchBatchError } from '../services/batch.js';
 import { buildXlsx, attachmentName, type Column } from '../services/xlsx.js';
 
 export const despatchesRouter = Router();
@@ -58,6 +59,17 @@ function accessible(req: AuthedRequest, id: number) {
 function withItems(row: Record<string, unknown>) {
   row.items = db.prepare('SELECT * FROM despatch_items WHERE despatch_id = ? ORDER BY sort_order, id')
     .all(Number(row.id));
+  /*
+   * Which identified lots went on this trip — §3's last leg.
+   *
+   * Not gated on `qc` the way the invoice page's despatch card is gated on
+   * `dispatch`: this router is already mounted on `dispatch`, and the two
+   * roles holding that (Logistics and the super admin) both hold `qc: view`
+   * as well, the spec giving the Dispatch Lead exactly the *Verify COA
+   * Clearance* step this answers. So there is no reader here who may see the
+   * trip and not its certificates.
+   */
+  row.batches = batchesOnDespatch(Number(row.id));
   return row;
 }
 
@@ -320,6 +332,20 @@ despatchesRouter.post('/', (req: AuthedRequest, res) => {
   // not 409: nothing conflicts, the number itself is wrong.
   const outOfRange = despatchLimitError(order.id, items);
   if (outOfRange) return res.status(400).json({ error: outOfRange });
+  /*
+   * And which lots are on the lorry, where somebody says so.
+   *
+   * The line-level gate above asks whether *some* lot of each line is
+   * certified, because until this link existed nothing could ask which one
+   * was actually loaded. Naming a lot answers that exactly, so a named lot is
+   * held to exactly the specification's Hard Stop — a COA, on this order.
+   *
+   * 409 for all three of its refusals, like the QC gate it extends: each is
+   * the record not supporting the claim rather than a malformed figure, which
+   * is what `despatchLimitError` answers 400 for.
+   */
+  const badLot = despatchBatchError(order.id, body.batch_ids ?? []);
+  if (badLot) return res.status(409).json({ error: badLot });
   // Answered with the accepted list rather than letting a typo become a status
   // nothing can filter for — the column carries no CHECK to catch it.
   const docsStatus = oneOf(DOCS_STATUSES, body.docs_status);
@@ -374,6 +400,7 @@ despatchesRouter.post('/', (req: AuthedRequest, res) => {
     );
     const despatchId = Number(info.lastInsertRowid);
     saveItems(despatchId, items);
+    setDespatchBatches(despatchId, Array.isArray(body.batch_ids) ? body.batch_ids : []);
     return despatchId;
   });
 
@@ -409,6 +436,12 @@ despatchesRouter.put('/:id', (req: AuthedRequest, res) => {
     const outOfRange = despatchLimitError(Number(existing.order_id), body.items as ItemInput[], id);
     if (outOfRange) return res.status(400).json({ error: outOfRange });
   }
+  // Checked whenever the key is sent, independently of the lines — the lots on
+  // a trip are regularly corrected without a piece count moving.
+  if (Array.isArray(body.batch_ids)) {
+    const badLot = despatchBatchError(Number(existing.order_id), body.batch_ids);
+    if (badLot) return res.status(409).json({ error: badLot });
+  }
   transaction(() => {
     // order_id is not editable: moving a despatch would move goods onto
     // another customer's order.
@@ -425,6 +458,9 @@ despatchesRouter.put('/:id', (req: AuthedRequest, res) => {
       docsStatus, docsMethod, String(v('docs_date')), id
     );
     if (Array.isArray(body.items)) saveItems(id, body.items);
+    // Absent means unchanged, the rule the lines follow: a PUT that says
+    // nothing about lots must not clear the ones already recorded.
+    if (Array.isArray(body.batch_ids)) setDespatchBatches(id, body.batch_ids);
   });
   res.json(withItems(accessible(req, id)!));
 });
@@ -435,6 +471,8 @@ despatchesRouter.delete('/:id', (req: AuthedRequest, res) => {
   if (!existing) return res.status(404).json({ error: 'Dispatch not found' });
   transaction(() => {
     db.prepare('DELETE FROM despatch_items WHERE despatch_id = ?').run(id);
+    // Stated rather than left to the cascade, like the lines above it.
+    db.prepare('DELETE FROM despatch_batches WHERE despatch_id = ?').run(id);
     db.prepare('DELETE FROM despatches WHERE id = ?').run(id);
   });
   // Goods leaving advanced the order; the trip being withdrawn has to be able

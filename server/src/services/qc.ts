@@ -327,9 +327,10 @@ export function qcBlockError(
      * batches and shipped in parts would otherwise be blocked by the batch
      * still on the machine, which is the ordinary case here — partial
      * shipments are why the whole dispatch register exists. The exact
-     * question, *which* lot went on this lorry, needs a batch on the dispatch
-     * line and there is not one yet; that is the missing leg of §3's chain and
-     * it is named as missing rather than guessed at.
+     * question — *which* lot went on this lorry — is now answerable, and is
+     * answered where it is asked: a trip may name its lots, and
+     * `despatchBatchError` holds each named one to a COA of its own. This
+     * stays the line-level rule it always was, for the trips that name none.
      *
      * A line with **no lots at all** falls through to the job-level rule, so
      * every order already on file behaves exactly as it did — batching is
