@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
-import type { WorkOrder } from '../types';
+import type { Batch, WorkOrder } from '../types';
 import { Button, Input, Select, Field, Modal, ErrorText, EmptyState, TH_CLASS } from './ui';
 import { fmtDate, today } from '../lib/format';
 
@@ -17,8 +17,18 @@ import { fmtDate, today } from '../lib/format';
  * Pass and fail are never sent from here or stored anywhere: the server keeps
  * the reading and the tolerance it was taken against, and derives the rest.
  */
-export default function QcCheckModal({ job, onClose, onSaved }: {
-  job: WorkOrder; onClose: () => void; onSaved: () => void;
+export default function QcCheckModal({ job, batch, onClose, onSaved }: {
+  job: WorkOrder;
+  /**
+   * The lot this check finalises, if it is a final one.
+   *
+   * Naming a batch is the whole difference between the specification's two QC
+   * levels: without it this is an in-process check against the job, with it
+   * this is the final check a certificate may be issued on. One prop, because
+   * the server draws the same distinction over one column.
+   */
+  batch?: Batch;
+  onClose: () => void; onSaved: () => void;
 }) {
   const [head, setHead] = useState({ date: today(), shift: '', sample_size: '', inspector: '', notes: '' });
   const [values, setValues] = useState<Record<number, string>>({});
@@ -36,6 +46,7 @@ export default function QcCheckModal({ job, onClose, onSaved }: {
   const add = useMutation({
     mutationFn: () => api.post(`/api/work-orders/${job.id}/qc-checks`, {
       ...head,
+      batch_id: batch?.id ?? null,
       sample_size: head.sample_size === '' ? null : Number(head.sample_size),
       results: (full?.qc?.params ?? []).map((p) => ({
         param_id: p.id,

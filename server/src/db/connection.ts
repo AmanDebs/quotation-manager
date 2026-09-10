@@ -112,6 +112,20 @@ addColumnIfMissing('companies', 'challan_pattern', "TEXT NOT NULL DEFAULT 'DC/{F
 // this, which prints its consignment note number instead -- nothing already on
 // file is renumbered, and a number once issued is never reissued.
 addColumnIfMissing('despatches', 'challan_no', "TEXT NOT NULL DEFAULT ''");
+/*
+ * Production batches and their certificates (2026-09-10), from the client's
+ * ERP specification: a lot is what an invoice line traces back to, and a COA
+ * is what clears it. `batches` itself needs no migration — `schema.sql` runs
+ * on every boot and creates it — but the two back-links onto tables that
+ * already exist do. Both nullable, so every shift entry and every check
+ * recorded before this keeps working and simply belongs to no lot.
+ */
+addColumnIfMissing('production_entries', 'batch_id', 'INTEGER REFERENCES batches(id)');
+addColumnIfMissing('qc_checks', 'batch_id', 'INTEGER REFERENCES batches(id)');
+for (const t of ['settings', 'companies']) {
+  addColumnIfMissing(t, 'batch_pattern', "TEXT NOT NULL DEFAULT 'B/{FY}/{SEQ}'");
+  addColumnIfMissing(t, 'coa_pattern', "TEXT NOT NULL DEFAULT 'COA/{FY}/{SEQ}'");
+}
 
 /*
  * The purchase order, brought up to the shape of the documents around it

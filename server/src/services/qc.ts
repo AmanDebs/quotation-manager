@@ -249,6 +249,26 @@ export function summaryForWorkOrder(workOrderId: number, productId: number | nul
  * the invoice is exactly how the two would come to disagree about what
  * passing means, which is the thing this module says twice about itself.
  */
+/**
+ * The identified lots on one order line, and how many carry a certificate.
+ *
+ * Lives here rather than in `services/batch.ts` so that nothing closes a
+ * circle: that file imports `checksForWorkOrder` from this one, and this is
+ * the only batch fact the gate below needs. It is one statement over
+ * `batches`, no QC arithmetic — whether a lot *passed* is `batch.ts`'s
+ * question, and a COA is only ever issued on a pass.
+ */
+function lotsForLine(orderId: number, pos: number): { total: number; cleared: number } {
+  const r = db.prepare(
+    `SELECT COUNT(*) AS total,
+            COALESCE(SUM(CASE WHEN b.coa_no <> '' THEN 1 ELSE 0 END), 0) AS cleared
+       FROM batches b
+       JOIN work_orders w ON w.id = b.work_order_id
+      WHERE w.order_id = ? AND w.order_line = ? AND w.status <> 'cancelled'`
+  ).get(orderId, pos) as { total: number; cleared: number };
+  return { total: Number(r.total), cleared: Number(r.cleared) };
+}
+
 export type QcContext = 'dispatch' | 'invoice';
 
 /** The two words the refusal needs, so a caller cannot pass them inconsistently. */
@@ -295,12 +315,40 @@ export function qcBlockError(
     // A charge is a fee, not goods: there is nothing to inspect.
     if (Number(line.is_charge)) continue;
     if (paramsFor(line.product_id, owner?.customer_id).length === 0) continue;
+    const name = line.description || `Line ${pos + 1}`;
+    /*
+     * Once a line is being made in **identified lots, the certificate is the
+     * evidence** — the specification's *"QC_PASSED with a valid COA attached"*.
+     * A COA is only ever issued against a passing final check, so a cleared
+     * lot is strictly stronger than the job-level pass below and stands in its
+     * place rather than being demanded on top of it.
+     *
+     * **One cleared lot is enough, not all of them.** A line made in three
+     * batches and shipped in parts would otherwise be blocked by the batch
+     * still on the machine, which is the ordinary case here — partial
+     * shipments are why the whole dispatch register exists. The exact
+     * question, *which* lot went on this lorry, needs a batch on the dispatch
+     * line and there is not one yet; that is the missing leg of §3's chain and
+     * it is named as missing rather than guessed at.
+     *
+     * A line with **no lots at all** falls through to the job-level rule, so
+     * every order already on file behaves exactly as it did — batching is
+     * something you start doing, not something this imposes retroactively.
+     */
+    const lots = lotsForLine(orderId, pos);
+    if (lots.total > 0) {
+      if (lots.cleared === 0) {
+        return `${name}: no batch of it carries a Certificate of Analysis, so it cannot be ${verb}. `
+          + 'Issue a COA against a batch that has passed its final check.';
+      }
+      continue;
+    }
     const passed = jobs
       .filter((j) => Number(j.order_line) === pos)
       .some((j) => (checks.get(Number(j.id)) ?? []).some((c) => c.passed === true));
     if (!passed) {
-      return `${line.description || `Line ${pos + 1}`} has not passed QC yet, so it cannot be ${verb}. ` +
-        'Record a passing quality check against its work order first.';
+      return `${name} has not passed QC yet, so it cannot be ${verb}. `
+        + 'Record a passing quality check against its work order first.';
     }
   }
   return null;

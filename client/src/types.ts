@@ -242,6 +242,32 @@ export interface ProductionEntry {
   created_by_name?: string | null;
 }
 
+/**
+ * A production run, and the certificate that clears it.
+ *
+ * Everything but the certificate is derived on the server: `made` and
+ * `rejected` are the shift entries booked into the lot, and `qc` is the latest
+ * *final* check's verdict — `none` meaning nobody has finalised it, which is
+ * not the same as a failure. `cleared` is the specification's *QC_PASSED with
+ * a valid COA attached*, and it is what the invoice gate looks for.
+ */
+export interface Batch {
+  id: number;
+  number: string;
+  work_order_id: number;
+  date: string;
+  notes: string;
+  coa_no: string;
+  coa_date: string;
+  coa_issued_by_name?: string | null;
+  made: number;
+  rejected: number;
+  entries: number;
+  final_checks: QcCheck[];
+  qc: 'none' | 'passed' | 'failed';
+  cleared: boolean;
+}
+
 export interface WorkOrder {
   id: number; number: string; company_id?: number;
   order_id: number;
@@ -272,6 +298,8 @@ export interface WorkOrder {
     checks: QcCheck[];
     summary: QcSummary;
   };
+  /** The lots this job has made — see `Batch`. Optional: an older server omits it. */
+  batches?: Batch[];
   notes: string;
   order_number?: string; customer_id?: number; customer_name?: string;
   product_name?: string | null;

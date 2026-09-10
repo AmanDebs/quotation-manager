@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { db, transaction } from '../db/connection.js';
 import { nextNumber } from '../services/numbering.js';
+import { batchesFor, batchById, coaBlockError } from '../services/batch.js';
 import { progressFor, progressForMany } from '../services/production.js';
 import { materialCostByWorkOrder } from '../services/costing.js';
 import { paramsFor, checksForWorkOrder, summaryForWorkOrder, specOwner, RESULT_FAILED_SQL } from '../services/qc.js';
@@ -69,6 +70,9 @@ function getFull(req: AuthedRequest, id: number) {
      WHERE e.work_order_id = ? ORDER BY e.date, e.id`
   ).all(id);
   wo.progress = progressFor(id, Number(wo.qty_planned) || 0);
+  // The lots this job has made, each with what was booked into it, its final
+  // check and its certificate. Derived on read like the progress above it.
+  wo.batches = batchesFor(id);
   // What the material issued to this job has cost, at the moving average in
   // force when each issue was made. Zero means nothing has been issued yet,
   // which is a real answer — unlike an uncosted product, whose need is
@@ -443,11 +447,19 @@ workOrdersRouter.post('/:id/entries', requirePermission('output', 'full'), (req:
   if (ok < 0 || reject < 0) return res.status(400).json({ error: 'Quantities cannot be negative' });
   if (ok === 0 && reject === 0) return res.status(400).json({ error: 'Record some output — good or rejected' });
   if (!String(body.date ?? '').trim()) return res.status(400).json({ error: 'Date is required' });
+  // Which lot this shift's output went into, when the job is being batched.
+  // Nullable, so a job that is not batched records exactly as it always did.
+  const entryBatch = numOrNull(body.batch_id);
+  if (entryBatch !== null) {
+    const owned = db.prepare('SELECT id FROM batches WHERE id = ? AND work_order_id = ?')
+      .get(entryBatch, id) as { id: number } | undefined;
+    if (!owned) return res.status(400).json({ error: 'That batch is not on this work order' });
+  }
 
   db.prepare(
-    `INSERT INTO production_entries (work_order_id, date, shift, qty_ok, qty_reject, operator, notes, created_by)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(id, String(body.date), String(body.shift ?? ''), ok, reject,
+    `INSERT INTO production_entries (work_order_id, batch_id, date, shift, qty_ok, qty_reject, operator, notes, created_by)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(id, entryBatch, String(body.date), String(body.shift ?? ''), ok, reject,
     String(body.operator ?? ''), String(body.notes ?? ''), req.user!.id);
 
   const job = db.prepare('SELECT order_id FROM work_orders WHERE id = ?').get(id) as { order_id: number };
@@ -468,6 +480,120 @@ workOrdersRouter.post('/:id/entries', requirePermission('output', 'full'), (req:
  *
  * Scoped through the job's own order, like every other floor action.
  */
+/* ---------------- batches and their certificates ---------------- */
+
+/**
+ * A lot on this job.
+ *
+ * `output: full` rather than `qc`: opening a batch is a statement about what
+ * the floor is making, and it is Production that makes it. Issuing the
+ * certificate below is the Quality act, and the two are deliberately held by
+ * different roles — the client's ERP specification gives *Final COA Approval*
+ * to the QC Inspector and no access to the shop log at all.
+ *
+ * Declared **above `/:id`** like every sub-resource here, or Express reads
+ * "batches" as a work order id.
+ */
+workOrdersRouter.post('/:id/batches', requirePermission('output', 'full'), (req: AuthedRequest, res) => {
+  const id = Number(req.params.id);
+  const wo = accessible(req, id);
+  if (!wo) return res.status(404).json({ error: 'Work order not found' });
+  const body = req.body ?? {};
+  const date = String(body.date ?? '').trim();
+  if (!date) return res.status(400).json({ error: 'Date is required' });
+
+  // Numbered by the company that sold the order, like the job itself — one
+  // series covers everything that entity makes.
+  const order = db.prepare('SELECT company_id, customer_id FROM orders WHERE id = ?')
+    .get(Number(wo.order_id)) as { company_id: number; customer_id: number };
+  const companyId = resolveCompanyId(order.company_id, order.customer_id);
+  const number = String(body.number ?? '').trim() || nextNumber('batch', { companyId, date });
+
+  const info = db.prepare(
+    `INSERT INTO batches (number, work_order_id, date, notes, created_by) VALUES (?, ?, ?, ?, ?)`
+  ).run(number, id, date, String(body.notes ?? ''), req.user!.id);
+  res.status(201).json(batchById(Number(info.lastInsertRowid)));
+});
+
+workOrdersRouter.put('/batches/:batchId', requirePermission('output', 'full'), (req: AuthedRequest, res) => {
+  const batchId = Number(req.params.batchId);
+  const b = db.prepare('SELECT work_order_id FROM batches WHERE id = ?').get(batchId) as
+    { work_order_id: number } | undefined;
+  // Reached through the parent job, so nobody edits another owner's lot by
+  // guessing an id — the rule the shift entries follow.
+  if (!b || !accessible(req, Number(b.work_order_id))) {
+    return res.status(404).json({ error: 'Batch not found' });
+  }
+  const body = req.body ?? {};
+  const existing = batchById(batchId)!;
+  db.prepare('UPDATE batches SET number = ?, date = ?, notes = ? WHERE id = ?').run(
+    String(body.number ?? existing.number).trim() || existing.number,
+    String(body.date ?? existing.date).trim() || existing.date,
+    String(body.notes ?? existing.notes),
+    batchId
+  );
+  res.json(batchById(batchId));
+});
+
+workOrdersRouter.delete('/batches/:batchId', requirePermission('output', 'full'), (req: AuthedRequest, res) => {
+  const batchId = Number(req.params.batchId);
+  const b = db.prepare('SELECT work_order_id FROM batches WHERE id = ?').get(batchId) as
+    { work_order_id: number } | undefined;
+  if (!b || !accessible(req, Number(b.work_order_id))) {
+    return res.status(404).json({ error: 'Batch not found' });
+  }
+  const full = batchById(batchId)!;
+  // A certified lot is on paper with the customer; a lot with output behind it
+  // is a day's production. Neither is deleted to tidy up — the entries are
+  // moved off it first, which is a decision somebody makes on purpose.
+  if (full.cleared) {
+    return res.status(409).json({ error: `Batch ${full.number} has been certified as ${full.coa_no} and cannot be deleted.` });
+  }
+  if (full.entries > 0) {
+    return res.status(409).json({
+      error: `Batch ${full.number} has ${full.entries} production ${full.entries === 1 ? 'entry' : 'entries'} against it — move those off it first.`,
+    });
+  }
+  db.prepare('DELETE FROM batches WHERE id = ?').run(batchId);
+  res.json({ ok: true });
+});
+
+/**
+ * Issue the Certificate of Analysis.
+ *
+ * **`qc: full`, which is the whole point of the endpoint**: the specification
+ * gives *Final COA Approval* to the QC Inspector, and Production — which
+ * opened the batch and booked its output — holds no `qc` at all. So the lot is
+ * made by one team and cleared by another, which is what a certificate is for.
+ *
+ * `coaBlockError` owns why it may be refused. The number is claimed **here**,
+ * inside the same statement that records the issue, and never at print time:
+ * `/api/pdf` is a GET, and a GET that consumed a number would issue a fresh
+ * certificate every time somebody opened the file.
+ */
+workOrdersRouter.post('/batches/:batchId/coa', requirePermission('qc', 'full'), (req: AuthedRequest, res) => {
+  const batchId = Number(req.params.batchId);
+  const b = db.prepare('SELECT work_order_id FROM batches WHERE id = ?').get(batchId) as
+    { work_order_id: number } | undefined;
+  if (!b || !accessible(req, Number(b.work_order_id))) {
+    return res.status(404).json({ error: 'Batch not found' });
+  }
+  const refused = coaBlockError(batchId);
+  if (refused) return res.status(409).json({ error: refused });
+
+  const wo = accessible(req, Number(b.work_order_id))!;
+  const order = db.prepare('SELECT company_id, customer_id FROM orders WHERE id = ?')
+    .get(Number(wo.order_id)) as { company_id: number; customer_id: number };
+  const companyId = resolveCompanyId(order.company_id, order.customer_id);
+  const date = String(req.body?.date ?? '').trim() || new Date().toISOString().slice(0, 10);
+
+  transaction(() => {
+    db.prepare('UPDATE batches SET coa_no = ?, coa_date = ?, coa_issued_by = ? WHERE id = ?')
+      .run(nextNumber('coa', { companyId, date }), date, req.user!.id, batchId);
+  });
+  res.status(201).json(batchById(batchId));
+});
+
 workOrdersRouter.post('/:id/qc-checks', requirePermission('qc', 'full'), (req: AuthedRequest, res) => {
   const id = Number(req.params.id);
   const wo = accessible(req, id);
@@ -491,12 +617,25 @@ workOrdersRouter.post('/:id/qc-checks', requirePermission('qc', 'full'), (req: A
   const stray = measured.find((r) => !spec.has(Number(r.param_id)));
   if (stray) return res.status(400).json({ error: 'That check is not on the specification for this product' });
 
+  /*
+   * Naming a batch is what makes this a **final** check rather than an
+   * in-process one — the specification's two QC levels over one column. The
+   * lot must be on *this* job: a certificate is issued against the check, and
+   * one filed against somebody else's lot would clear goods nobody inspected.
+   */
+  const batchId = numOrNull(body.batch_id);
+  if (batchId !== null) {
+    const owned = db.prepare('SELECT id FROM batches WHERE id = ? AND work_order_id = ?')
+      .get(batchId, id) as { id: number } | undefined;
+    if (!owned) return res.status(400).json({ error: 'That batch is not on this work order' });
+  }
+
   let checkId = 0;
   transaction(() => {
     const info = db.prepare(
-      `INSERT INTO qc_checks (work_order_id, date, shift, sample_size, inspector, notes, created_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
-    ).run(id, date, String(body.shift ?? ''), numOrNull(body.sample_size),
+      `INSERT INTO qc_checks (work_order_id, batch_id, date, shift, sample_size, inspector, notes, created_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(id, batchId, date, String(body.shift ?? ''), numOrNull(body.sample_size),
       String(body.inspector ?? ''), String(body.notes ?? ''), req.user!.id);
     checkId = Number(info.lastInsertRowid);
 

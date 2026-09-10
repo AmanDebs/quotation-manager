@@ -77,6 +77,9 @@ CREATE TABLE IF NOT EXISTS companies (
   -- The delivery challan that travels with the lorry. One series whatever
   -- the destination: a challan is issued for a movement, not for a sale.
   challan_pattern TEXT NOT NULL DEFAULT 'DC/{FY}/{SEQ}',
+  -- The lot on the box, and the certificate that clears it.
+  batch_pattern TEXT NOT NULL DEFAULT 'B/{FY}/{SEQ}',
+  coa_pattern TEXT NOT NULL DEFAULT 'COA/{FY}/{SEQ}',
   -- The one a document falls back to when neither it nor its customer names one.
   is_default INTEGER NOT NULL DEFAULT 0,
   active INTEGER NOT NULL DEFAULT 1,
@@ -123,6 +126,9 @@ CREATE TABLE IF NOT EXISTS settings (
   -- The delivery challan that travels with the lorry. One series whatever
   -- the destination: a challan is issued for a movement, not for a sale.
   challan_pattern TEXT NOT NULL DEFAULT 'DC/{FY}/{SEQ}',
+  -- The lot on the box, and the certificate that clears it.
+  batch_pattern TEXT NOT NULL DEFAULT 'B/{FY}/{SEQ}',
+  coa_pattern TEXT NOT NULL DEFAULT 'COA/{FY}/{SEQ}',
   note_presets TEXT NOT NULL DEFAULT '[]'
 );
 INSERT OR IGNORE INTO settings (id) VALUES (1);
@@ -760,6 +766,11 @@ CREATE INDEX IF NOT EXISTS idx_product_qc_params_product ON product_qc_params(pr
 CREATE TABLE IF NOT EXISTS qc_checks (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   work_order_id INTEGER NOT NULL REFERENCES work_orders(id) ON DELETE CASCADE,
+  -- Naming a batch is what makes a check a **final** one: the spec's two
+  -- levels are in-process (shift-wise, against the job) and final (against a
+  -- completed lot, the check a COA is issued on). One nullable column carries
+  -- both rather than a second vocabulary that could disagree with it.
+  batch_id INTEGER REFERENCES batches(id) ON DELETE CASCADE,
   date TEXT NOT NULL,
   shift TEXT NOT NULL DEFAULT '',
   -- How many pieces were looked at. Not a quantity of production; a sample.
@@ -839,9 +850,46 @@ CREATE INDEX IF NOT EXISTS idx_work_orders_order ON work_orders(order_id);
 
 -- One shift's output. Several rows a day is normal, and deleting one has to
 -- reduce the progress — which it does, because progress is only ever a sum.
+-- A production run: what one job made, in one identifiable lot.
+--
+-- The spec calls this a "Finished Goods Batch" and asks that an invoice line
+-- trace back to one. It hangs off the **work order** rather than standing on
+-- its own, because that is the only batch this app can honestly hold: there is
+-- no finished-goods ledger to pick a free-standing lot out of, and a batch
+-- whose quantity nothing produced would be a number with no facts under it.
+-- Through the job it reaches the order line, the order, the customer and the
+-- product, which is the whole of the traceability chain §3 asks for.
+--
+-- **Almost nothing here is stored.** The quantity is the sum of the shift
+-- entries filed against it, and whether it passed is read from its final
+-- check's own readings — the rule `production.ts` and `qc.ts` both state. What
+-- is stored is the COA, because issuing one is an act rather than an
+-- observation: somebody cleared this lot on a date under a number.
+CREATE TABLE IF NOT EXISTS batches (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  number TEXT NOT NULL,
+  work_order_id INTEGER NOT NULL REFERENCES work_orders(id) ON DELETE CASCADE,
+  -- When the run started. Its output is dated per shift entry.
+  date TEXT NOT NULL,
+  notes TEXT NOT NULL DEFAULT '',
+  -- The Certificate of Analysis. Blank until a final check has passed and
+  -- somebody issues one; never re-issued, the rule every document number in
+  -- this app follows, since the certificate may already be with the customer.
+  coa_no TEXT NOT NULL DEFAULT '',
+  coa_date TEXT NOT NULL DEFAULT '',
+  coa_issued_by INTEGER REFERENCES users(id),
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_batches_work_order ON batches(work_order_id);
+
 CREATE TABLE IF NOT EXISTS production_entries (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   work_order_id INTEGER NOT NULL REFERENCES work_orders(id) ON DELETE CASCADE,
+  -- Which lot this shift's output went into. Nullable: every entry booked
+  -- before batches existed has none, and a job need not be batched at all.
+  batch_id INTEGER REFERENCES batches(id) ON DELETE SET NULL,
   date TEXT NOT NULL,
   shift TEXT NOT NULL DEFAULT '',
   qty_ok REAL NOT NULL DEFAULT 0,

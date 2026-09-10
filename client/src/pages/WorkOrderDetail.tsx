@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type {
-  Location, Machine, Mould, Process, WorkOrder, WorkOrderStatus,
+  Batch, Location, Machine, Mould, Process, WorkOrder, WorkOrderStatus,
 } from '../types';
 import {
   Button, Card, EmptyState, ErrorText, Field, Input, PageHeader, Select, Tabs, Textarea,
@@ -12,6 +12,7 @@ import {
 import { LogOutput } from '../components/LogOutputModal';
 import { IssueModal } from '../components/IssueMaterialModal';
 import QcCheckModal from '../components/QcCheckModal';
+import OpenBatchModal from '../components/OpenBatchModal';
 import { PdfLink } from '../components/PdfLink';
 import { useUnsavedChanges } from '../lib/useUnsavedChanges';
 import { useCan } from '../App';
@@ -44,7 +45,7 @@ import { fmtDate, fmtMoney, fmtQty } from '../lib/format';
  * order's Production tab about the same job.
  */
 
-type Tab = 'details' | 'production' | 'material' | 'quality';
+type Tab = 'details' | 'production' | 'batches' | 'material' | 'quality';
 
 /** The job's own fields, minus the order line — which is fixed once it exists. */
 interface Draft {
@@ -79,6 +80,9 @@ export default function WorkOrderDetailPage() {
   const [logging, setLogging] = useState(false);
   const [issuing, setIssuing] = useState(false);
   const [inspecting, setInspecting] = useState(false);
+  const [openingBatch, setOpeningBatch] = useState(false);
+  // The lot a final check is being recorded against, if any.
+  const [finalising, setFinalising] = useState<Batch | null>(null);
 
   const { data: job, error: loadError } = useQuery({
     queryKey: ['work-order', id],
@@ -133,6 +137,16 @@ export default function WorkOrderDetailPage() {
   });
   const setStatus = useMutation({
     mutationFn: (status: WorkOrderStatus) => api.post(`/api/work-orders/${id}/status`, { status }),
+    onSuccess: refresh,
+  });
+  /*
+   * Issuing the certificate is a **Quality** act, and the button is only drawn
+   * for a lot whose final check passed — but the refusal is the server's:
+   * `coaBlockError` owns why one may not be issued, and a disabled button that
+   * merely hides the reason teaches nobody anything, so its sentence is shown.
+   */
+  const issueCoa = useMutation({
+    mutationFn: (batchId: number) => api.post(`/api/work-orders/batches/${batchId}/coa`, {}),
     onSuccess: refresh,
   });
   const remove = useMutation({
@@ -203,6 +217,7 @@ export default function WorkOrderDetailPage() {
         tabs={[
           { key: 'details', label: 'Details' },
           { key: 'production', label: 'Production', badge: job.entries?.length || undefined },
+          { key: 'batches', label: 'Batches', badge: job.batches?.length || undefined },
           { key: 'material', label: 'Material' },
           { key: 'quality', label: 'Quality', badge: job.qc?.checks.length || undefined },
         ]}
@@ -348,6 +363,93 @@ export default function WorkOrderDetailPage() {
               </table>
             </div>
           )}
+        </Card>
+      )}
+
+      {tab === 'batches' && (
+        <Card
+          title="Batches"
+          actions={can('output', 'full')
+            ? <Button variant="secondary" onClick={() => setOpeningBatch(true)}>Open a batch</Button>
+            : undefined}
+        >
+          {/*
+            The lot is where the two halves of this page meet: Production opens
+            it and books shifts into it, Quality finalises it and issues the
+            certificate. Neither team can do the other's part, which is what a
+            certificate is for.
+          */}
+          <p className="mb-3 text-xs text-slate-500">
+            A batch is what an invoice line traces back to. Its quantity is the output booked
+            into it, and it is cleared by a <em>final</em> check — one recorded against the batch
+            itself, rather than the shift-wise checks on the Quality tab.
+          </p>
+
+          {(job.batches ?? []).length === 0 ? (
+            <EmptyState message="No batches on this job. Output booked without one still counts towards the job — a batch is how a lot is identified and certified, not how it is counted." />
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className={TH_CLASS}>
+                    <th className="pb-2 pr-3">Batch</th>
+                    <th className="pb-2 pr-3">Started</th>
+                    <th className="pb-2 pr-3 text-right">Made</th>
+                    <th className="pb-2 pr-3 text-right">Rejected</th>
+                    <th className="pb-2 pr-3">Final check</th>
+                    <th className="pb-2 pr-3">Certificate</th>
+                    <th className="pb-2" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {(job.batches ?? []).map((b) => (
+                    <tr key={b.id} className="border-b border-slate-100 last:border-0">
+                      <td className="py-2 pr-3 font-medium">{b.number}</td>
+                      <td className="py-2 pr-3 whitespace-nowrap">{fmtDate(b.date)}</td>
+                      <td className="py-2 pr-3 text-right tabular-nums">{fmtQty(b.made)}</td>
+                      <td className="py-2 pr-3 text-right tabular-nums">
+                        {b.rejected ? fmtQty(b.rejected) : <span className="text-slate-300">—</span>}
+                      </td>
+                      <td className="py-2 pr-3">
+                        {/* Not inspected is neither a pass nor a failure, and says so. */}
+                        {b.qc === 'passed' ? <span className="text-green-700">Passed</span>
+                          : b.qc === 'failed' ? <span className="text-rose-700">Failed</span>
+                            : <span className="text-slate-400">Not inspected</span>}
+                      </td>
+                      <td className="py-2 pr-3">
+                        {b.cleared
+                          ? <span className="text-slate-700">{b.coa_no} <span className="text-xs text-slate-400">{fmtDate(b.coa_date)}</span></span>
+                          : <span className="text-slate-300">—</span>}
+                      </td>
+                      <td className="whitespace-nowrap py-2 text-right">
+                        {b.cleared ? (
+                          <PdfLink href={`/api/pdf/coa/${b.id}`} isDirty={isDirty} title="Certificate of Analysis">
+                            📄 COA
+                          </PdfLink>
+                        ) : can('qc', 'full') ? (
+                          <>
+                            <Button variant="ghost" onClick={() => setFinalising(b)}>Final check</Button>
+                            <Button
+                              variant="secondary"
+                              className="ml-1"
+                              disabled={b.qc !== 'passed' || issueCoa.isPending}
+                              title={b.qc === 'passed'
+                                ? 'Issue the Certificate of Analysis for this batch'
+                                : 'A batch is certified on a passing final check'}
+                              onClick={() => issueCoa.mutate(b.id)}
+                            >
+                              Issue COA
+                            </Button>
+                          </>
+                        ) : null}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <ErrorText error={issueCoa.error} />
         </Card>
       )}
 
@@ -498,6 +600,10 @@ export default function WorkOrderDetailPage() {
       {/* Renders nothing until a navigation is actually blocked. */}
       {prompt}
       {logging && <LogOutput job={job} onClose={() => setLogging(false)} onSaved={refresh} />}
+      {openingBatch && <OpenBatchModal job={job} onClose={() => setOpeningBatch(false)} onSaved={refresh} />}
+      {finalising && (
+        <QcCheckModal job={job} batch={finalising} onClose={() => setFinalising(null)} onSaved={refresh} />
+      )}
       {issuing && <IssueModal job={job} onClose={() => setIssuing(false)} onSaved={refresh} />}
       {inspecting && <QcCheckModal job={job} onClose={() => setInspecting(false)} onSaved={refresh} />}
     </div>

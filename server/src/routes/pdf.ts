@@ -4,7 +4,7 @@ import {
   buildQuotationPdf, buildOrderPdf, buildProformaPdf, buildInvoicePdf, buildPackingListPdf,
   buildInvoiceWithPackingPdf, buildPurchaseOrderPdf,
   buildQcReportPdf, buildOrderQcReportPdf, buildInvoiceQcReportPdf, buildInvoiceWithQcPdf,
-  buildDeliveryChallanPdf,
+  buildDeliveryChallanPdf, buildCoaPdf,
   renderPdf,
 } from '../services/pdf.js';
 import { allows, type AuthedRequest } from '../middleware/auth.js';
@@ -89,6 +89,26 @@ const builders = {
    * otherwise, so the filename says something even for a trip recorded before
    * this document existed.
    */
+  /*
+   * The certificate that clears a lot, and the third entry to need its own
+   * `partySql`: a batch has no `customer_id`, reaching one through its work
+   * order the way the quality report does.
+   *
+   * `fn: 'qc'` — the same function that issues it. It is a quality document
+   * about goods, not a commercial one: Production and Quality read it, Sales
+   * and Logistics are refused, which is what the access matrix says about
+   * every other QC report. `number` is the certificate's, so the filename is
+   * the number the customer will quote.
+   */
+  coa: {
+    build: buildCoaPdf, table: 'batches', approvable: false, fn: 'qc',
+    partySql: `SELECT b.coa_no AS number, o.customer_id, c.name AS party_name
+                 FROM batches b
+                 JOIN work_orders w ON w.id = b.work_order_id
+                 JOIN orders o ON o.id = w.order_id
+                 JOIN customers c ON c.id = o.customer_id
+                WHERE b.id = ?`,
+  },
   challan: {
     build: buildDeliveryChallanPdf, table: 'despatches', approvable: false, fn: 'dispatch',
     partySql: `SELECT COALESCE(NULLIF(d.challan_no, ''), NULLIF(d.cn_no, ''), 'DC-' || d.id) AS number,
@@ -124,6 +144,7 @@ const DOC_LABEL: Record<DocType, string> = {
   'invoice-qc-report': 'Quality Report',
   'invoice-with-qc': 'Commercial Invoice & Quality Report',
   challan: 'Delivery Challan',
+  coa: 'Certificate of Analysis',
 };
 
 /*

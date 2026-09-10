@@ -7,6 +7,7 @@ import { amountInWords } from './amountInWords.js';
 import { round2, isPieceBasis, piecesPerBillingUnit, computeTotals } from './totals.js';
 import { invoiceReceivable, proformaAdvance, orderAdvance } from './receivables.js';
 import { paramsFor, specOwner, checksForWorkOrder } from './qc.js';
+import { batchById } from './batch.js';
 import { getCompany, defaultCompany } from './companies.js';
 
 // The npm package ships fonts only as base64 vfs; decode them for the server printer.
@@ -2352,6 +2353,146 @@ export function buildDeliveryChallanPdf(id: number): TDocumentDefinitions {
       fontSize: 8, margin: [0, 10, 0, 0] as any,
     },
     signatureBlock(s, { buyerSide: true }),
+  ];
+  return baseDoc(content);
+}
+
+/* ------------------------------------------------------------------ */
+/* CERTIFICATE OF ANALYSIS                                             */
+/* ------------------------------------------------------------------ */
+
+/** A tolerance as somebody reads it, with either end allowed to be open. */
+function toleranceText(r: { kind?: unknown; min_value?: unknown; max_value?: unknown; unit?: unknown }): string {
+  if (String(r.kind) === 'boolean') return 'Pass';
+  const u = String(r.unit ?? '').trim();
+  const lo = r.min_value == null ? null : Number(r.min_value);
+  const hi = r.max_value == null ? null : Number(r.max_value);
+  const with_ = (n: number) => `${fmtNum(n, 3)}${u ? ` ${u}` : ''}`;
+  if (lo !== null && hi !== null) return `${fmtNum(lo, 3)} – ${with_(hi)}`;
+  if (lo !== null) return `min ${with_(lo)}`;
+  if (hi !== null) return `max ${with_(hi)}`;
+  return '—';
+}
+
+/** What was read, in the same units the tolerance is stated in. */
+function readingText(r: { kind?: unknown; value?: unknown; unit?: unknown }): string {
+  if (r.value == null) return '—';
+  if (String(r.kind) === 'boolean') return Number(r.value) ? 'Pass' : 'Fail';
+  const u = String(r.unit ?? '').trim();
+  return `${fmtNum(Number(r.value), 3)}${u ? ` ${u}` : ''}`;
+}
+
+/**
+ * The certificate that clears a lot.
+ *
+ * Asked for on 2026-09-10, from the client's ERP specification: *"Passing
+ * batches are issued a Certificate of Analysis (COA) and cleared in the
+ * system, unlocking the dispatch and invoicing steps."* It is the document
+ * `qcBlockError` now looks for, so it is the one piece of paper standing
+ * between a finished lot and an invoice.
+ *
+ * **It prints the readings, not a verdict.** Every row carries the tolerance
+ * it was judged against — the copy stamped onto `qc_results` when the check
+ * was saved, never today's specification — so a certificate reprinted after
+ * the spec moves still states what the batch was actually measured against.
+ * That is the same rule the quality report follows and the reason the
+ * tolerance is copied at all.
+ *
+ * **Nothing on it is stored** beyond the number and the date of issue. The
+ * quantity is the sum of the shift entries booked into the lot, the verdict is
+ * `resultOk`'s arithmetic over the readings, and the parties come from the
+ * order — so a certificate reprinted after a correction prints the correction.
+ *
+ * It refuses to build for an uncertified lot. A COA is issued by
+ * `POST /work-orders/batches/:id/coa`, which is where `coaBlockError` decides
+ * whether it may be; rendering one for a batch that has none would put an
+ * unnumbered certificate on a customer's desk.
+ */
+export function buildCoaPdf(batchId: number): TDocumentDefinitions {
+  const b = batchById(batchId);
+  if (!b) throw new Error('Batch not found');
+  if (!b.cleared) throw new Error('No certificate has been issued for this batch');
+
+  const wo = db.prepare(
+    `SELECT w.*, o.number AS order_number, o.customer_id, o.company_id, o.po_number,
+            p.name AS product_name, p.unit AS product_unit
+       FROM work_orders w
+       JOIN orders o ON o.id = w.order_id
+       LEFT JOIN products p ON p.id = w.product_id
+      WHERE w.id = ?`
+  ).get(b.work_order_id) as Row;
+  const s = companyProfile(wo.company_id);
+  const c = db.prepare('SELECT * FROM customers WHERE id = ?').get(wo.customer_id) as Row;
+
+  // The check the certificate is issued on: the latest one that reached a
+  // verdict. An earlier failed check is part of the lot's history and is not
+  // what was certified, so it is not what is printed.
+  const decided = b.final_checks.filter((ch) => ch.passed !== null);
+  const check = decided[decided.length - 1];
+  const results = (check?.results ?? []) as unknown as Row[];
+
+  const grid: Content = {
+    table: {
+      widths: ['*', '*', '*'],
+      body: [
+        [
+          lv('Certificate No.  /  Date', `${b.coa_no}   ${fmtDate(b.coa_date)}`),
+          lv('Batch No.  /  Date', `${b.number}   ${fmtDate(b.date)}`),
+          lv('Work Order', String(wo.number ?? '')),
+        ],
+        [
+          lv('Product', String(wo.product_name || wo.description || '—')),
+          lv('Quantity Certified', `${fmtNum(b.made, 0)} pcs`),
+          lv('Inspected On', check ? `${fmtDate(String(check.date))}${check.shift ? `   Shift ${check.shift}` : ''}` : '—'),
+        ],
+        [
+          { ...lv('Customer', [c?.name, c?.address].filter(Boolean).join('\n')), colSpan: 2 },
+          {},
+          lv("Buyer's Order", [String(wo.order_number ?? ''), wo.po_number ? `PO: ${wo.po_number}` : '']
+            .filter(Boolean).join('\n')),
+        ],
+      ],
+    },
+    layout: boxedLayout,
+    margin: [0, 0, 0, 8] as any,
+  };
+
+  const specs: ColumnSpec[] = [
+    { key: 'sl', label: 'SL', width: 16, align: 'center', always: true, value: (_it, i) => String(i + 1) },
+    { key: 'name', label: 'Characteristic', width: '*', always: true, value: (it) => String(it.name ?? '') },
+    { key: 'method', label: 'Specification', width: 130, align: 'center', always: true, value: (it) => toleranceText(it) },
+    { key: 'reading', label: 'Result', width: 96, align: 'center', always: true, value: (it) => readingText(it) },
+    {
+      key: 'verdict', label: 'Verdict', width: 62, align: 'center', always: true,
+      // Not measured is neither a pass nor a failure, and says so — the one
+      // distinction this whole module exists to keep.
+      value: (it) => (it.ok === null || it.ok === undefined ? 'Not measured' : it.ok ? 'Pass' : 'Fail'),
+    },
+  ];
+
+  const content: Content[] = [
+    // A movement and a certificate both begin at the plant, so the GSTIN
+    // prints whatever the destination — the departure `buildDeliveryChallanPdf`
+    // records, for the same reason.
+    ...companyHeader(s, { isExport: false }),
+    docTitle(s, 'CERTIFICATE OF ANALYSIS'),
+    grid,
+    itemsTable(s, results, specs, {}),
+    {
+      text: results.length
+        ? 'We certify that the batch described above has been inspected against the specification '
+          + 'stated and conforms to it in every characteristic measured.'
+        : 'No measurements are recorded against this batch.',
+      fontSize: 8.5, bold: true, margin: [0, 10, 0, 0] as any,
+    },
+    ...(check?.inspector
+      ? [{ text: `Inspected by: ${check.inspector}`, fontSize: 8, margin: [0, 4, 0, 0] as any }]
+      : []),
+    ...(b.notes ? [{ text: String(b.notes), fontSize: 8, margin: [0, 4, 0, 0] as any }] : []),
+    ...(b.coa_issued_by_name
+      ? [{ text: `Certificate issued by: ${b.coa_issued_by_name}`, fontSize: 7.5, color: '#666666', margin: [0, 4, 0, 0] as any }]
+      : []),
+    signatureBlock(s, {}),
   ];
   return baseDoc(content);
 }

@@ -2,7 +2,7 @@ import { db } from '../db/connection.js';
 
 export type DocType =
   | 'quotation' | 'order' | 'proforma' | 'invoice' | 'packing_list'
-  | 'work_order' | 'purchase_order' | 'challan';
+  | 'work_order' | 'purchase_order' | 'challan' | 'batch' | 'coa';
 
 /** Indian fiscal year (April–March) as "25-26". */
 export function fiscalYear(date = new Date()): string {
@@ -69,6 +69,13 @@ const patternColumn: Record<DocType, { std: string; export?: string; flag?: stri
   // consignment leaving the plant for the port is the same kind of movement
   // as one leaving for Hazipur.
   challan: { std: 'challan_pattern' },
+  // The lot itself and the certificate that clears it. Two series rather
+  // than one because two different people quote them to two different
+  // audiences: a batch id goes on the box and into the shift log, a COA
+  // number goes to the buyer. Neither splits export from domestic — a lot
+  // is made before anybody knows which container it leaves in.
+  batch: { std: 'batch_pattern' },
+  coa: { std: 'coa_pattern' },
 };
 
 /**
