@@ -5,6 +5,7 @@ import { api } from '../api/client';
 import type { Order, WorkOrder, WorkOrderStatus, Location, Machine, Mould, Process } from '../types';
 import { Button, Input, Textarea, Select, Field, Card, EmptyState, ErrorText, Modal, TH_CLASS } from './ui';
 import { fmtQty } from '../lib/format';
+import { useCan } from '../App';
 
 /**
  * What the floor is doing about this order.
@@ -28,9 +29,38 @@ const statusStyle: Record<WorkOrderStatus, string> = {
 
 type Draft = Partial<WorkOrder>;
 
+/** One line offered by the bulk raise: what to make, how much, and whether to. */
+interface BulkRow {
+  order_line: number;
+  description: string;
+  qty_planned: number;
+  on: boolean;
+}
+
+/**
+ * Pieces on this line that no job covers yet.
+ *
+ * Ordered less **planned**, not ordered less *made* — which is the figure the
+ * single raise used to prefill, and it over-planned every line that already
+ * had a job: a line ordered at 120,000 with a job for 50,000 and 30,000 made
+ * prefilled 90,000, when 50,000 of that is already somebody's instruction.
+ * The two agree exactly where they used to be asked — a line with no job has
+ * nothing planned — so nothing about the common case changes.
+ *
+ * One function rather than one per caller: the single **+ Job** and the bulk
+ * raise answer the same question, and two copies of it is how the two come to
+ * disagree on the screen they share.
+ */
+function stillToPlan(it: { total_pcs?: number | null; production?: { planned: number } | null }): number {
+  return Math.max(0, (it.total_pcs ?? 0) - (it.production?.planned ?? 0));
+}
+
 export default function ProductionTab({ order }: { order: Order }) {
   const queryClient = useQueryClient();
+  const can = useCan();
   const [editing, setEditing] = useState<Draft | null>(null);
+  // The lines chosen for a bulk raise, or null when the dialog is closed.
+  const [raising, setRaising] = useState<BulkRow[] | null>(null);
 
   const key = ['work-orders', String(order.id)];
   const { data: jobs = [] } = useQuery({
@@ -53,6 +83,20 @@ export default function ProductionTab({ order }: { order: Order }) {
       d.id ? api.put<WorkOrder>(`/api/work-orders/${d.id}`, d) : api.post<WorkOrder>('/api/work-orders', d),
     onSuccess: () => { refresh(); setEditing(null); },
   });
+  /*
+   * Every chosen line in one request, so it is one transaction on the server:
+   * six jobs are one act, and six separate posts would leave an order half
+   * planned when the fourth failed.
+   */
+  const raiseAll = useMutation({
+    mutationFn: (rows: BulkRow[]) => api.post('/api/work-orders/bulk', {
+      order_id: order.id,
+      lines: rows.map((r) => ({
+        order_line: r.order_line, description: r.description, qty_planned: r.qty_planned,
+      })),
+    }),
+    onSuccess: () => { refresh(); setRaising(null); },
+  });
   const setStatus = useMutation({
     mutationFn: ({ id, status }: { id: number; status: WorkOrderStatus }) =>
       api.post(`/api/work-orders/${id}/status`, { status }),
@@ -69,9 +113,8 @@ export default function ProductionTab({ order }: { order: Order }) {
       order_line: lineIndex,
       product_id: line?.product_id ?? null,
       description: line?.description ?? '',
-      // Default to what is still unmade on that line, which is the job you
-      // almost always want to raise.
-      qty_planned: Math.max(0, (line?.total_pcs ?? 0) - (line?.production?.produced ?? 0)),
+      // What no job covers yet, which is the job you almost always want.
+      qty_planned: line ? stillToPlan(line) : 0,
       location_id: locations[0]?.id ?? null,
       machine_id: null,
       mould_id: null,
@@ -84,9 +127,45 @@ export default function ProductionTab({ order }: { order: Order }) {
 
   const set = (patch: Draft) => setEditing((prev) => (prev ? { ...prev, ...patch } : prev));
 
+  /**
+   * The lines a bulk raise would offer: goods with something no job covers.
+   *
+   * A line that **already has a job** is offered but starts unticked — raising
+   * a second one against it is a real thing to do (a partial run, or a line
+   * the first job under-planned) but it is a decision, not the default. A line
+   * with nothing planned starts ticked, which is the ordinary case and the
+   * whole point of the button.
+   */
+  const bulkRows = (): BulkRow[] => items
+    .map((it, i) => ({ it, i }))
+    .filter(({ it }) => !it.is_charge && stillToPlan(it) > 0)
+    .map(({ it, i }) => ({
+      order_line: i,
+      description: it.description || `Line ${i + 1}`,
+      qty_planned: stillToPlan(it),
+      on: (it.production?.work_orders ?? 0) === 0,
+    }));
+
+  const canRaise = can('work_order', 'full');
+  const eligible = canRaise ? bulkRows().length : 0;
+
   return (
     <div className="space-y-4">
-      <Card title="Sold vs made">
+      <Card
+        title="Sold vs made"
+        actions={canRaise && items.some((it) => !it.is_charge) ? (
+          <Button
+            variant="secondary"
+            disabled={eligible === 0}
+            title={eligible
+              ? 'Raise a job on every line that still needs one'
+              : 'Every line already has a job covering what was ordered'}
+            onClick={() => { raiseAll.reset(); setRaising(bulkRows()); }}
+          >
+            Raise jobs
+          </Button>
+        ) : undefined}
+      >
         {items.length === 0 ? (
           <EmptyState message="This order has no lines yet." />
         ) : (
@@ -122,7 +201,11 @@ export default function ProductionTab({ order }: { order: Order }) {
                       {ordered != null && p ? fmtQty(Math.max(0, ordered - p.produced)) : '—'}
                     </td>
                     <td className="py-2 text-right">
-                      {!it.is_charge && (
+                      {/* Gated like the bulk button beside it: raising a job is
+                          `work_order: full`, so Sales — which holds `view` —
+                          was being offered a button that only ever answered
+                          403. */}
+                      {!it.is_charge && canRaise && (
                         <Button variant="ghost" onClick={() => { save.reset(); setEditing(newJob(i)); }}>
                           + Job
                         </Button>
@@ -140,11 +223,24 @@ export default function ProductionTab({ order }: { order: Order }) {
         </p>
       </Card>
 
+      {raising && (
+        <BulkRaiseModal
+          rows={raising}
+          onChange={setRaising}
+          saving={raiseAll.isPending}
+          error={raiseAll.error}
+          onClose={() => setRaising(null)}
+          onSave={(rows) => raiseAll.mutate(rows)}
+        />
+      )}
+
       <ErrorText error={setStatus.error} />
 
       <Card title={`Work orders (${jobs.length})`}>
         {jobs.length === 0 ? (
-          <EmptyState message="No jobs raised yet. Use “+ Job” on a line above." />
+          <EmptyState message={canRaise
+            ? 'No jobs raised yet. Use “Raise jobs” above for all of them at once, or “+ Job” on one line.'
+            : 'No jobs raised yet.'} />
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -294,3 +390,77 @@ export default function ProductionTab({ order }: { order: Order }) {
 }
 
 /** A day's output on one job, and the entries already booked against it. */
+
+/**
+ * Raise a job on several lines at once.
+ *
+ * A list rather than a confirm, because the two things somebody wants to
+ * change before pressing are **which** lines and **how many** pieces — and a
+ * yes-or-no about a figure nobody can see or correct is how these get pressed
+ * blindly. Every quantity is editable, so a partial run is typed here rather
+ * than being a reason not to use the button.
+ *
+ * The jobs it raises are ordinary ones: status `planned`, no machine, mould,
+ * process or dates. This saves the presses, not the judgement — what to run
+ * where is still opened on each job afterwards.
+ */
+function BulkRaiseModal({ rows, onChange, saving, error, onClose, onSave }: {
+  rows: BulkRow[];
+  onChange: (rows: BulkRow[]) => void;
+  saving: boolean;
+  error: unknown;
+  onClose: () => void;
+  onSave: (rows: BulkRow[]) => void;
+}) {
+  const set = (i: number, patch: Partial<BulkRow>) =>
+    onChange(rows.map((r, j) => (j === i ? { ...r, ...patch } : r)));
+  const chosen = rows.filter((r) => r.on && r.qty_planned > 0);
+
+  return (
+    <Modal title="Raise jobs" onClose={onClose} wide>
+      <p className="text-sm text-slate-600">
+        One job per line, planned for what no existing job covers yet. Untick a line to leave it,
+        or change a figure to plan a partial run.
+      </p>
+      <table className="mt-3 w-full text-sm">
+        <thead>
+          <tr className={TH_CLASS}>
+            <th className="w-8 pb-2" />
+            <th className="pb-2 pr-3">Line</th>
+            <th className="w-40 pb-2 pr-3 text-right">Pieces to plan</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r, i) => (
+            <tr key={r.order_line} className="border-b border-slate-100 last:border-0">
+              <td className="py-2">
+                <input type="checkbox" checked={r.on} onChange={(e) => set(i, { on: e.target.checked })} />
+              </td>
+              <td className={`py-2 pr-3 ${r.on ? '' : 'text-slate-400'}`}>{r.description}</td>
+              <td className="py-2 pr-3">
+                <Input
+                  type="number" min={0} step="any"
+                  className="w-full text-right tabular-nums"
+                  value={r.qty_planned || ''}
+                  disabled={!r.on}
+                  onChange={(e) => set(i, { qty_planned: e.target.value === '' ? 0 : Number(e.target.value) })}
+                />
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <p className="mt-2 text-xs text-slate-400">
+        Each job takes the next number in the series. Machine, mould, process and dates are set on the job
+        afterwards.
+      </p>
+      <ErrorText error={error} />
+      <div className="mt-4 flex justify-end gap-2">
+        <Button variant="secondary" onClick={onClose}>Cancel</Button>
+        <Button onClick={() => onSave(chosen)} disabled={saving || chosen.length === 0}>
+          {saving ? 'Raising…' : `Raise ${chosen.length} ${chosen.length === 1 ? 'job' : 'jobs'}`}
+        </Button>
+      </div>
+    </Modal>
+  );
+}
