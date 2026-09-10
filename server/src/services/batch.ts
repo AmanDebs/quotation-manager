@@ -35,6 +35,29 @@ import { checksForWorkOrder, type QcCheck } from './qc.js';
 
 export type BatchQc = 'none' | 'passed' | 'failed';
 
+/**
+ * What may be decided about a lot that failed.
+ *
+ * The specification's own two words — *"initiating rework or scrap
+ * procedures"* — and deliberately no third. A *quarantined* value was the
+ * obvious addition and would have stored something already derivable: a lot
+ * that failed and carries no disposition **is** the held one, and `held` says
+ * so without a second copy that could drift from it.
+ *
+ * **Rework needs no machinery of its own.** A lot's verdict is its latest
+ * decided final check, so putting a lot back and re-inspecting it already
+ * clears it — the loop was closed in `batchesFor` before this existed. What
+ * was missing was the *record*: why a failed lot is still open, and who said
+ * so. **Scrap is the half that moves figures**, because condemned goods stop
+ * existing and everything that counts what a job has made has to agree.
+ */
+export const DISPOSITIONS = ['rework', 'scrapped'] as const;
+export type Disposition = '' | (typeof DISPOSITIONS)[number];
+
+export function isDisposition(v: unknown): v is Disposition {
+  return v === '' || (DISPOSITIONS as readonly unknown[]).includes(v);
+}
+
 export interface Batch {
   id: number;
   number: string;
@@ -65,6 +88,27 @@ export interface Batch {
   /** A COA has been issued. The spec's *QC_PASSED with a valid COA attached*. */
   cleared: boolean;
   /**
+   * What was decided about a lot that failed: '' , 'rework' or 'scrapped'.
+   * Blank on every lot that never failed, and on one that failed and is still
+   * waiting for somebody to decide — which is what `held` reports.
+   */
+  disposition: Disposition;
+  disposition_date: string;
+  disposition_by_name: string | null;
+  disposition_note: string;
+  /**
+   * Failed its final check, and nobody has said what to do about it.
+   *
+   * Derived rather than a fourth stored value: a "quarantined" state would be
+   * a second name for the absence of a decision, and two ways of saying one
+   * thing is how the two come to disagree. This is the figure the dashboard
+   * counts, because a condemned lot nobody has ruled on is exactly the row
+   * that sits for a month.
+   */
+  held: boolean;
+  /** Condemned. The goods no longer exist, so no roll-up counts them. */
+  scrapped: boolean;
+  /**
    * The trips this lot travelled on — §3's last leg, read backwards.
    *
    * Empty is the ordinary state and means nothing beyond "not named on a trip
@@ -79,9 +123,10 @@ const num = (v: unknown) => round2(Number(v) || 0);
 /** Every lot on one job, oldest first, each with its own figures. */
 export function batchesFor(workOrderId: number): Batch[] {
   const rows = db.prepare(
-    `SELECT b.*, u.name AS coa_issued_by_name
+    `SELECT b.*, u.name AS coa_issued_by_name, du.name AS disposition_by_name
        FROM batches b
        LEFT JOIN users u ON u.id = b.coa_issued_by
+       LEFT JOIN users du ON du.id = b.disposition_by
       WHERE b.work_order_id = ?
       ORDER BY b.date, b.id`
   ).all(workOrderId) as Record<string, unknown>[];
@@ -110,6 +155,8 @@ export function batchesFor(workOrderId: number): Batch[] {
     const mine = checks.filter((c) => Number((c as unknown as { batch_id: unknown }).batch_id) === id);
     const decided = mine.filter((c) => c.passed !== null);
     const last = decided[decided.length - 1];
+    const qc: BatchQc = !last ? 'none' : last.passed ? 'passed' : 'failed';
+    const disposition = (isDisposition(r.disposition) ? r.disposition : '') as Disposition;
     return {
       id,
       number: String(r.number ?? ''),
@@ -124,8 +171,14 @@ export function batchesFor(workOrderId: number): Batch[] {
       rejected: num(made.rej),
       entries: made.n,
       final_checks: mine,
-      qc: (!last ? 'none' : last.passed ? 'passed' : 'failed') as BatchQc,
+      qc: qc as BatchQc,
       cleared: String(r.coa_no ?? '') !== '',
+      disposition,
+      disposition_date: String(r.disposition_date ?? ''),
+      disposition_by_name: r.disposition_by_name == null ? null : String(r.disposition_by_name),
+      disposition_note: String(r.disposition_note ?? ''),
+      held: qc === 'failed' && disposition === '',
+      scrapped: disposition === 'scrapped',
       trips: trips.get(id) ?? [],
     };
   });
@@ -162,6 +215,18 @@ export function coaBlockError(id: number): string | null {
   if (!b) return 'Batch not found.';
   if (b.cleared) {
     return `Batch ${b.number} was already certified as ${b.coa_no}. A certificate is issued once.`;
+  }
+  /*
+   * **Condemned is final while it stands.** A scrapped lot may not be
+   * certified however its checks later read — which matters, because a lot's
+   * verdict is its *latest decided* check, so re-inspecting a scrapped lot
+   * would otherwise walk it straight back to a certificate. The way out is to
+   * withdraw the scrap decision, which is a thing somebody does on purpose and
+   * which the trail records, not a thing a fresh reading does silently.
+   */
+  if (b.scrapped) {
+    return `Batch ${b.number} was scrapped, so it cannot be certified. `
+      + 'Withdraw the scrap decision first if that was recorded in error.';
   }
   if (b.entries === 0) {
     return `Nothing has been booked into batch ${b.number} yet, so there is nothing to certify.`;
@@ -313,18 +378,60 @@ export function despatchBatchError(orderId: number, batchIds: unknown[]): string
   }
   for (const id of uniqueIds(raw)) {
     const row = db.prepare(
-      `SELECT b.number, b.coa_no, w.order_id
+      `SELECT b.number, b.coa_no, b.disposition, w.order_id
          FROM batches b JOIN work_orders w ON w.id = b.work_order_id
         WHERE b.id = ?`
-    ).get(id) as { number: string; coa_no: string; order_id: number } | undefined;
+    ).get(id) as { number: string; coa_no: string; disposition: string; order_id: number } | undefined;
     if (!row) return 'One of the batches named is not on file — it may have been deleted since.';
     if (Number(row.order_id) !== Number(orderId)) {
       return `Batch ${row.number} was made against another order, so it cannot be dispatched on this one.`;
+    }
+    /*
+     * Asked **before** the certificate, because a lot can be certified and
+     * then condemned — dropped in the yard, or found bad after clearance — and
+     * it would otherwise walk through on the COA it still holds. That is the
+     * one case where a scrapped lot passes every other test here.
+     */
+    if (String(row.disposition) === 'scrapped') {
+      return `Batch ${row.number} was scrapped, so it cannot be dispatched.`;
     }
     if (!String(row.coa_no)) {
       return `Batch ${row.number} has no Certificate of Analysis, so it cannot be dispatched. `
         + 'Issue one against it first.';
     }
+  }
+  return null;
+}
+
+/**
+ * Why this lot may not be given this disposition, or null.
+ *
+ * Deliberately short. Deciding what to do with a failed lot is a judgement
+ * somebody on the floor makes, and a guard that second-guesses it would be
+ * refusing the very thing this exists to record — so only two things are
+ * refused, and both are about goods that are no longer here to decide about.
+ *
+ * **A lot that has gone to the customer cannot be reworked or scrapped**: the
+ * pieces are on their premises, and condemning them here would drop the
+ * order's made-figure for goods that physically shipped, which is the reverse
+ * of the defect scrap exists to fix. What happens to bad goods already
+ * delivered is a return, and this app has no shape for one — so it says so
+ * rather than lending the wrong word to it.
+ *
+ * **Withdrawing a decision is always allowed**, which is what `''` is. Scrap
+ * has no artefact out in the world the way an issued COA has, so the rule that
+ * makes a certificate final does not apply to it — and a lot condemned by
+ * mistake with no way back would be a trap with no way out, which this
+ * codebase has built once already and does not intend to build again.
+ */
+export function dispositionError(id: number, disposition: Disposition): string | null {
+  const b = batchById(id);
+  if (!b) return 'Batch not found.';
+  if (disposition === '') return null;
+  if (b.trips.length) {
+    const where = b.trips.map((t) => t.reference || t.order_number).filter(Boolean).join(', ');
+    return `Batch ${b.number} has already been dispatched${where ? ` on ${where}` : ''}, `
+      + 'so it cannot be reworked or scrapped here.';
   }
   return null;
 }

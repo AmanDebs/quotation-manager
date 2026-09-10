@@ -2,6 +2,7 @@ import { db } from '../db/connection.js';
 import { searchClause } from './search.js';
 import { countOf } from './pagination.js';
 import { round2 } from './totals.js';
+import { LIVE_OK } from './production.js';
 
 /**
  * The order book read one item at a time.
@@ -96,7 +97,7 @@ const SQL = `
     l.qty AS billing_qty,
     l.amount,
     COALESCE((
-      SELECT SUM(e.qty_ok) FROM production_entries e
+      SELECT SUM(${LIVE_OK('e')}) FROM production_entries e
       JOIN work_orders w ON w.id = e.work_order_id
       WHERE w.order_id = o.id AND w.order_line = l.pos AND w.status <> 'cancelled'
     ), 0) AS made,

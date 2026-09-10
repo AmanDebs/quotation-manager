@@ -878,11 +878,30 @@ CREATE TABLE IF NOT EXISTS batches (
   coa_no TEXT NOT NULL DEFAULT '',
   coa_date TEXT NOT NULL DEFAULT '',
   coa_issued_by INTEGER REFERENCES users(id),
+  -- What was decided about a lot that failed its final check: '' (nothing yet),
+  -- 'rework' or 'scrapped'. The specification's own two words -- *"initiating
+  -- rework or scrap procedures"* -- and no third, because the state a third
+  -- would name is already what '' means: failed, and nobody has decided. There
+  -- is no CHECK for the reason `products.product_type` has none, SQLite being
+  -- unable to ALTER one; the route holds the vocabulary instead.
+  --
+  -- A decision, so it is stored, and stored the way the COA beside it is --
+  -- who, when, and why. Whether a lot *passed* stays derived from its checks;
+  -- what somebody chose to do about it could never be.
+  disposition TEXT NOT NULL DEFAULT '',
+  disposition_date TEXT NOT NULL DEFAULT '',
+  disposition_by INTEGER REFERENCES users(id),
+  disposition_note TEXT NOT NULL DEFAULT '',
   created_by INTEGER REFERENCES users(id),
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_batches_work_order ON batches(work_order_id);
+-- The index on `disposition` is created in `connection.ts`, not here, for the
+-- reason the unique document-number indexes are: this file runs FIRST on every
+-- boot, before any `addColumnIfMissing` has run, so indexing a column that a
+-- database migrated from an earlier version does not have yet refuses to start
+-- the app at all. Measured -- it did, with "no such column: disposition".
 
 CREATE TABLE IF NOT EXISTS production_entries (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

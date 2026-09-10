@@ -15,6 +15,40 @@ import { round2 } from './totals.js';
  * than borrowing the order line's billing quantity.
  */
 
+/**
+ * Output whose lot was condemned after inspection.
+ *
+ * A scrapped batch is goods that were made and then destroyed, so every
+ * roll-up of what a job or an order **has** must stop counting it — otherwise
+ * the floor reads as further ahead than it is, the material shortfall thinks
+ * the resin for those pieces is spoken for, and the buyer is short by exactly
+ * the quantity nobody re-made.
+ *
+ * **Condemned output becomes rejected output rather than vanishing.** Dropping
+ * it from both columns was the first cut and it is perverse: `reject_pct`
+ * improves when a whole lot is condemned, which is the worst quality outcome
+ * there is. Nothing was un-moulded, so `qty_ok + qty_reject` is unchanged and
+ * only which side of it the pieces sit on moves.
+ *
+ * Written as a fragment shared by all five roll-ups rather than restated in
+ * each — the reason `despatch.ts` owns `SEA_LEG` and `receivables.ts` owns
+ * credit. The **sixth** reader, `batchesFor`, deliberately does *not* use it:
+ * the lot itself goes on reporting what it made, because "what did we scrap"
+ * has to stay answerable. The job stops counting it; the lot remembers it.
+ *
+ * `sb` is an alias nothing else here uses, so the fragment can be pasted into
+ * a query that already has its own.
+ */
+const CONDEMNED = (e: string) =>
+  `EXISTS (SELECT 1 FROM batches sb WHERE sb.id = ${e}.batch_id AND sb.disposition = 'scrapped')`;
+
+/** Good output that still exists. */
+export const LIVE_OK = (e: string) => `CASE WHEN ${CONDEMNED(e)} THEN 0 ELSE ${e}.qty_ok END`;
+
+/** Rejected at the machine, plus everything a later decision condemned. */
+export const LIVE_REJECT = (e: string) =>
+  `(${e}.qty_reject + CASE WHEN ${CONDEMNED(e)} THEN ${e}.qty_ok ELSE 0 END)`;
+
 export interface Progress {
   produced: number;
   rejected: number;
@@ -43,8 +77,9 @@ function build(planned: number, ok: number, reject: number, entries: number): Pr
 /** Progress for one work order. */
 export function progressFor(workOrderId: number, qtyPlanned: number): Progress {
   const row = db.prepare(
-    `SELECT COALESCE(SUM(qty_ok), 0) AS ok, COALESCE(SUM(qty_reject), 0) AS rej, COUNT(*) AS n
-     FROM production_entries WHERE work_order_id = ?`
+    `SELECT COALESCE(SUM(${LIVE_OK('e')}), 0) AS ok, COALESCE(SUM(${LIVE_REJECT('e')}), 0) AS rej,
+            COUNT(*) AS n
+     FROM production_entries e WHERE e.work_order_id = ?`
   ).get(workOrderId) as { ok: number; rej: number; n: number };
   return build(qtyPlanned, row.ok, row.rej, row.n);
 }
@@ -57,9 +92,10 @@ export function progressForMany(
   if (!workOrders.length) return out;
   const ids = workOrders.map((w) => w.id);
   const rows = db.prepare(
-    `SELECT work_order_id, COALESCE(SUM(qty_ok), 0) AS ok, COALESCE(SUM(qty_reject), 0) AS rej, COUNT(*) AS n
-     FROM production_entries WHERE work_order_id IN (${ids.map(() => '?').join(',')})
-     GROUP BY work_order_id`
+    `SELECT e.work_order_id, COALESCE(SUM(${LIVE_OK('e')}), 0) AS ok,
+            COALESCE(SUM(${LIVE_REJECT('e')}), 0) AS rej, COUNT(*) AS n
+     FROM production_entries e WHERE e.work_order_id IN (${ids.map(() => '?').join(',')})
+     GROUP BY e.work_order_id`
   ).all(...ids) as { work_order_id: number; ok: number; rej: number; n: number }[];
   const byId = new Map(rows.map((r) => [r.work_order_id, r]));
   for (const wo of workOrders) {
@@ -91,11 +127,11 @@ export function productionByOrder(orderId: number): Map<number, LineProduction> 
     `SELECT w.order_line,
             COALESCE(SUM(w.qty_planned), 0) AS planned,
             COUNT(DISTINCT w.id) AS wo_count,
-            COALESCE((SELECT SUM(e.qty_ok) FROM production_entries e
+            COALESCE((SELECT SUM(${LIVE_OK('e')}) FROM production_entries e
                       JOIN work_orders w2 ON w2.id = e.work_order_id
                       WHERE w2.order_id = w.order_id AND w2.order_line = w.order_line
                         AND w2.status <> 'cancelled'), 0) AS ok,
-            COALESCE((SELECT SUM(e.qty_reject) FROM production_entries e
+            COALESCE((SELECT SUM(${LIVE_REJECT('e')}) FROM production_entries e
                       JOIN work_orders w2 ON w2.id = e.work_order_id
                       WHERE w2.order_id = w.order_id AND w2.order_line = w.order_line
                         AND w2.status <> 'cancelled'), 0) AS rej

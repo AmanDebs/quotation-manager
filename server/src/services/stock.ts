@@ -4,6 +4,7 @@ import { requirementFor } from './recipe.js';
 // The only place allowed to answer how far along an order line is, so the
 // order-book basis asks it rather than walking the same tables again.
 import { orderLines } from './orderLines.js';
+import { LIVE_OK } from './production.js';
 
 /**
  * How much material there is, and how much is short.
@@ -191,7 +192,7 @@ export function shortfall(locationId?: number | null, basis: ShortfallBasis = 'j
 function fromJobs(locationId?: number | null): Shortfall {
   const jobs = db.prepare(
     `SELECT w.id, w.number, w.description, w.product_id, w.qty_planned,
-            COALESCE((SELECT SUM(e.qty_ok) FROM production_entries e WHERE e.work_order_id = w.id), 0) AS made
+            COALESCE((SELECT SUM(${LIVE_OK('e')}) FROM production_entries e WHERE e.work_order_id = w.id), 0) AS made
      FROM work_orders w
      WHERE w.status NOT IN ('done','cancelled')
        ${locationId ? 'AND w.location_id = ?' : ''}`

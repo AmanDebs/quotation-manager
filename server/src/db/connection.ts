@@ -122,6 +122,29 @@ addColumnIfMissing('despatches', 'challan_no', "TEXT NOT NULL DEFAULT ''");
  */
 addColumnIfMissing('production_entries', 'batch_id', 'INTEGER REFERENCES batches(id)');
 addColumnIfMissing('qc_checks', 'batch_id', 'INTEGER REFERENCES batches(id)');
+/*
+ * What was decided about a lot that failed (2026-09-10) -- the specification's
+ * *"initiating rework or scrap procedures"*. Additive and blank on every row,
+ * so nothing already on file is condemned by the migration and every figure
+ * these columns can move stays exactly where it was until somebody decides
+ * something.
+ */
+addColumnIfMissing('batches', 'disposition', "TEXT NOT NULL DEFAULT ''");
+addColumnIfMissing('batches', 'disposition_date', "TEXT NOT NULL DEFAULT ''");
+addColumnIfMissing('batches', 'disposition_by', 'INTEGER');
+addColumnIfMissing('batches', 'disposition_note', "TEXT NOT NULL DEFAULT ''");
+/*
+ * And its index, here rather than in `schema.sql` -- that file runs first on
+ * every boot, so a CREATE INDEX on a column the migration above has not added
+ * yet refuses to open the database and the app does not start. Measured on a
+ * scratch instance planted with a pre-migration `batches` table: boot failed
+ * with *no such column: disposition* until this moved. The same reason the
+ * unique document-number indexes live here.
+ *
+ * Worth the index: every roll-up of shift output asks whether the entry's lot
+ * was condemned, across five queries.
+ */
+db.exec('CREATE INDEX IF NOT EXISTS idx_batches_disposition ON batches(disposition)');
 for (const t of ['settings', 'companies']) {
   addColumnIfMissing(t, 'batch_pattern', "TEXT NOT NULL DEFAULT 'B/{FY}/{SEQ}'");
   addColumnIfMissing(t, 'coa_pattern', "TEXT NOT NULL DEFAULT 'COA/{FY}/{SEQ}'");

@@ -6,6 +6,7 @@ import { receivedByInvoice } from '../services/receivables.js';
 import { defaultCompanyId } from '../services/companies.js';
 import { shortfall, onHandAll } from '../services/stock.js';
 import { DOCS_OUTSTANDING_D, SEA_LEG_D } from '../services/despatch.js';
+import { LIVE_OK, LIVE_REJECT } from '../services/production.js';
 
 export const dashboardRouter = Router();
 
@@ -575,7 +576,7 @@ dashboardRouter.get('/', (req: AuthedRequest, res) => {
   );
 
   const made = db.prepare(
-    `SELECT COALESCE(SUM(pe.qty_ok), 0) AS ok, COALESCE(SUM(pe.qty_reject), 0) AS reject
+    `SELECT COALESCE(SUM(${LIVE_OK('pe')}), 0) AS ok, COALESCE(SUM(${LIVE_REJECT('pe')}), 0) AS reject
      FROM production_entries pe
      JOIN work_orders w ON w.id = pe.work_order_id
      JOIN orders o ON o.id = w.order_id

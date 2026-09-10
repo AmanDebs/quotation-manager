@@ -1,8 +1,9 @@
 import { Router } from 'express';
 import { db, transaction } from '../db/connection.js';
 import { nextNumber } from '../services/numbering.js';
-import { batchesFor, batchById, coaBlockError } from '../services/batch.js';
-import { progressFor, progressForMany } from '../services/production.js';
+import { batchesFor, batchById, coaBlockError, dispositionError, isDisposition, DISPOSITIONS }
+  from '../services/batch.js';
+import { progressFor, progressForMany, LIVE_OK } from '../services/production.js';
 import { materialCostByWorkOrder } from '../services/costing.js';
 import { paramsFor, checksForWorkOrder, summaryForWorkOrder, specOwner, RESULT_FAILED_SQL } from '../services/qc.js';
 import { requirementFor } from '../services/recipe.js';
@@ -122,7 +123,7 @@ function jobSummary(sql: string, params: unknown[]) {
     `WITH f AS (${sql})
      SELECT (SELECT COUNT(*) FROM f) AS jobs,
             COALESCE((SELECT SUM(qty_planned) FROM f), 0) AS planned,
-            COALESCE((SELECT SUM(e.qty_ok) FROM production_entries e
+            COALESCE((SELECT SUM(${LIVE_OK('e')}) FROM production_entries e
                        WHERE e.work_order_id IN (SELECT id FROM f)), 0) AS made`
   ).get(...(params as never[])) as { jobs: number; planned: number; made: number };
 }
@@ -608,6 +609,60 @@ workOrdersRouter.post('/batches/:batchId/coa', requirePermission('qc', 'full'), 
       .run(nextNumber('coa', { companyId, date }), date, req.user!.id, batchId);
   });
   res.status(201).json(batchById(batchId));
+});
+
+/**
+ * What to do with a lot that failed — the specification's *"initiating rework
+ * or scrap procedures"*.
+ *
+ * **`qc: full`, like the certificate**, and for the same reason: the spec has
+ * QC initiate this, it follows directly from a failed final check, and it is
+ * the one act that can condemn a day's output. Production, which opened the
+ * lot and booked its shifts, holds no `qc` and cannot.
+ *
+ * Recorded the way the COA is — who, when, and why — with the note kept
+ * because *why* is the only part of a scrap decision nobody can reconstruct
+ * afterwards. The vocabulary is checked here rather than by a CHECK constraint,
+ * the rule `products.product_type` states: SQLite cannot ALTER one, and the
+ * answer names the accepted values so a typo cannot become a state nothing
+ * filters for.
+ */
+workOrdersRouter.post('/batches/:batchId/disposition', requirePermission('qc', 'full'), (req: AuthedRequest, res) => {
+  const batchId = Number(req.params.batchId);
+  const b = db.prepare('SELECT work_order_id FROM batches WHERE id = ?').get(batchId) as
+    { work_order_id: number } | undefined;
+  if (!b || !accessible(req, Number(b.work_order_id))) {
+    return res.status(404).json({ error: 'Batch not found' });
+  }
+  const wanted = req.body?.disposition ?? '';
+  if (!isDisposition(wanted)) {
+    return res.status(400).json({ error: `Disposition must be one of: ${DISPOSITIONS.join(', ')} — or blank to withdraw one.` });
+  }
+  const refused = dispositionError(batchId, wanted);
+  if (refused) return res.status(409).json({ error: refused });
+
+  const date = String(req.body?.date ?? '').trim() || new Date().toISOString().slice(0, 10);
+  // Withdrawing clears the whole record rather than leaving a date and an
+  // author attached to a decision that no longer stands.
+  db.prepare(
+    `UPDATE batches SET disposition = ?, disposition_date = ?, disposition_by = ?, disposition_note = ?
+      WHERE id = ?`
+  ).run(
+    wanted,
+    wanted ? date : '',
+    wanted ? req.user!.id : null,
+    wanted ? String(req.body?.note ?? '') : '',
+    batchId
+  );
+  /*
+   * Condemned output stops counting as made, so the order's own status has to
+   * be asked again — a line that read *made* on the strength of a lot that has
+   * just been scrapped is exactly the status-contradicting-the-record failure
+   * `orderStatus.ts` exists to prevent.
+   */
+  const wo = accessible(req, Number(b.work_order_id))!;
+  syncOrderStatus(Number(wo.order_id));
+  res.json(batchById(batchId));
 });
 
 workOrdersRouter.post('/:id/qc-checks', requirePermission('qc', 'full'), (req: AuthedRequest, res) => {

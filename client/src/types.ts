@@ -266,6 +266,19 @@ export interface Batch {
   final_checks: QcCheck[];
   qc: 'none' | 'passed' | 'failed';
   cleared: boolean;
+  /** '' | 'rework' | 'scrapped' — the spec's two words, and nothing decided yet. */
+  disposition: '' | 'rework' | 'scrapped';
+  disposition_date: string;
+  disposition_by_name?: string | null;
+  disposition_note: string;
+  /**
+   * Failed its final check and nobody has said what to do about it. Derived,
+   * not a third stored value — a "quarantined" state would be a second name
+   * for the absence of a decision.
+   */
+  held: boolean;
+  /** Condemned: the goods no longer exist, so no roll-up counts them. */
+  scrapped: boolean;
   /**
    * The trips this lot travelled on. Empty means only that nobody has named it
    * on one — naming lots on a dispatch is optional, so it can never be read as

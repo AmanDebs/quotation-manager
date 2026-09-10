@@ -12,6 +12,7 @@ import {
 import { LogOutput } from '../components/LogOutputModal';
 import { IssueModal } from '../components/IssueMaterialModal';
 import QcCheckModal from '../components/QcCheckModal';
+import BatchDispositionModal from '../components/BatchDispositionModal';
 import OpenBatchModal from '../components/OpenBatchModal';
 import { PdfLink } from '../components/PdfLink';
 import { useUnsavedChanges } from '../lib/useUnsavedChanges';
@@ -83,6 +84,8 @@ export default function WorkOrderDetailPage() {
   const [openingBatch, setOpeningBatch] = useState(false);
   // The lot a final check is being recorded against, if any.
   const [finalising, setFinalising] = useState<Batch | null>(null);
+  // The lot being ruled on, and which way — see BatchDispositionModal.
+  const [deciding, setDeciding] = useState<{ batch: Batch; disposition: 'rework' | 'scrapped' } | null>(null);
 
   const { data: job, error: loadError } = useQuery({
     queryKey: ['work-order', id],
@@ -148,6 +151,16 @@ export default function WorkOrderDetailPage() {
   const issueCoa = useMutation({
     mutationFn: (batchId: number) => api.post(`/api/work-orders/batches/${batchId}/coa`, {}),
     onSuccess: refresh,
+  });
+  /*
+   * What to do with a lot that failed. The note is asked for on the way, and
+   * only for a decision being *made* — withdrawing one asks nothing, because
+   * there is nothing to explain about undoing a mistake.
+   */
+  const decide = useMutation({
+    mutationFn: ({ batchId, disposition, note }: { batchId: number; disposition: string; note: string }) =>
+      api.post(`/api/work-orders/batches/${batchId}/disposition`, { disposition, note }),
+    onSuccess: () => { refresh(); setDeciding(null); },
   });
   const remove = useMutation({
     mutationFn: () => api.del(`/api/work-orders/${id}`),
@@ -398,6 +411,7 @@ export default function WorkOrderDetailPage() {
                     <th className="pb-2 pr-3 text-right">Rejected</th>
                     <th className="pb-2 pr-3">Final check</th>
                     <th className="pb-2 pr-3">Certificate</th>
+                    <th className="pb-2 pr-3">Outcome</th>
                     <th className="pb-2 pr-3">Dispatched</th>
                     <th className="pb-2" />
                   </tr>
@@ -423,6 +437,26 @@ export default function WorkOrderDetailPage() {
                           : <span className="text-slate-300">—</span>}
                       </td>
                       {/*
+                        What was decided about a lot that failed. A lot nobody
+                        has ruled on says so in amber rather than sitting blank
+                        — a failed lot with an empty cell beside it is exactly
+                        the row that goes unnoticed for a month, which is the
+                        whole reason the loop is worth recording.
+                      */}
+                      <td className="py-2 pr-3 text-xs">
+                        {b.disposition ? (
+                          <>
+                            <span className={b.scrapped ? 'text-rose-700' : 'text-slate-700'}>
+                              {b.scrapped ? 'Scrapped' : 'Rework'}
+                            </span>
+                            {b.disposition_date && <span className="text-slate-400"> · {fmtDate(b.disposition_date)}</span>}
+                            {b.disposition_note && <div className="text-slate-400">{b.disposition_note}</div>}
+                          </>
+                        ) : b.held ? (
+                          <span className="text-amber-700">Awaiting a decision</span>
+                        ) : <span className="text-slate-300">—</span>}
+                      </td>
+                      {/*
                         Where this lot went — the traceability chain read
                         backwards, which is the direction a recall reads it.
                         Nothing recorded is **not** the same as "still here":
@@ -445,17 +479,43 @@ export default function WorkOrderDetailPage() {
                         ) : can('qc', 'full') ? (
                           <>
                             <Button variant="ghost" onClick={() => setFinalising(b)}>Final check</Button>
-                            <Button
-                              variant="secondary"
-                              className="ml-1"
-                              disabled={b.qc !== 'passed' || issueCoa.isPending}
-                              title={b.qc === 'passed'
-                                ? 'Issue the Certificate of Analysis for this batch'
-                                : 'A batch is certified on a passing final check'}
-                              onClick={() => issueCoa.mutate(b.id)}
-                            >
-                              Issue COA
-                            </Button>
+                            {/*
+                              Rework and scrap are offered on a lot that has
+                              actually failed — they are what a failed check
+                              initiates, and offering them beside a passing one
+                              would invite condemning good goods by misclick.
+                              A decision already made offers only its undo.
+                            */}
+                            {b.disposition ? (
+                              <Button
+                                variant="ghost"
+                                className="ml-1"
+                                disabled={decide.isPending}
+                                title="Withdraw this decision"
+                                onClick={() => decide.mutate({ batchId: b.id, disposition: '', note: '' })}
+                              >
+                                Withdraw
+                              </Button>
+                            ) : b.qc === 'failed' ? (
+                              <>
+                                <Button variant="ghost" className="ml-1" disabled={decide.isPending}
+                                  onClick={() => { decide.reset(); setDeciding({ batch: b, disposition: 'rework' }); }}>Rework</Button>
+                                <Button variant="danger" className="ml-1 border-0" disabled={decide.isPending}
+                                  onClick={() => { decide.reset(); setDeciding({ batch: b, disposition: 'scrapped' }); }}>Scrap</Button>
+                              </>
+                            ) : (
+                              <Button
+                                variant="secondary"
+                                className="ml-1"
+                                disabled={b.qc !== 'passed' || issueCoa.isPending}
+                                title={b.qc === 'passed'
+                                  ? 'Issue the Certificate of Analysis for this batch'
+                                  : 'A batch is certified on a passing final check'}
+                                onClick={() => issueCoa.mutate(b.id)}
+                              >
+                                Issue COA
+                              </Button>
+                            )}
                           </>
                         ) : null}
                       </td>
@@ -465,7 +525,7 @@ export default function WorkOrderDetailPage() {
               </table>
             </div>
           )}
-          <ErrorText error={issueCoa.error} />
+          <ErrorText error={issueCoa.error || decide.error} />
         </Card>
       )}
 
@@ -617,6 +677,17 @@ export default function WorkOrderDetailPage() {
       {prompt}
       {logging && <LogOutput job={job} onClose={() => setLogging(false)} onSaved={refresh} />}
       {openingBatch && <OpenBatchModal job={job} onClose={() => setOpeningBatch(false)} onSaved={refresh} />}
+      {deciding && (
+        <BatchDispositionModal
+          batch={deciding.batch}
+          disposition={deciding.disposition}
+          saving={decide.isPending}
+          error={decide.error}
+          onClose={() => setDeciding(null)}
+          onSave={(note) => decide.mutate({ batchId: deciding.batch.id, disposition: deciding.disposition, note })}
+        />
+      )}
+
       {finalising && (
         <QcCheckModal job={job} batch={finalising} onClose={() => setFinalising(null)} onSaved={refresh} />
       )}
