@@ -361,6 +361,15 @@ export interface WorkOrder {
   /** `has_recipe: false` means unanswerable — show "not costed", never zero. */
   material?: {
     has_recipe: boolean;
+    /**
+     * The figures came from the recipe stamped on this job when it was raised,
+     * rather than from the product's live one. False means the job never had
+     * one taken — which is not staleness, it is every job raised before
+     * snapshots existed and every job whose product had no recipe at the time.
+     */
+    snapshot?: boolean;
+    /** Stamped, and the product's recipe has moved since. */
+    recipe_differs?: boolean;
     lines: { material_id: number; name: string; unit: string; qty: number; issued: number }[];
     /** Issued but not in the recipe — still has to be visible. */
     extra: { material_id: number; issued: number }[];

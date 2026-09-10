@@ -735,6 +735,36 @@ CREATE TABLE IF NOT EXISTS product_materials (
 
 CREATE INDEX IF NOT EXISTS idx_product_materials_product ON product_materials(product_id);
 
+-- The recipe as it stood when the job was raised.
+--
+-- `product_materials` is live and editable, so a job read through it is costed
+-- against whatever the recipe says *today* — correct a resin quantity in March
+-- and every open job silently restates what it needs. That is production
+-- drift, and the fix is the one this codebase already applies twice: copy the
+-- numbers onto the record at the moment it is made. `qc_results` copies the
+-- tolerance so tightening a spec cannot retroactively fail a batch, and
+-- `material_moves.rate` stamps what a unit cost on arrival so editing a
+-- purchase order cannot rewrite what the stock in the shed cost.
+--
+-- Only the figures are copied, not the material's name or unit: those live on
+-- `materials`, which is a master that gets corrected rather than revised, and
+-- a job wanting the old spelling of a material is nobody's requirement.
+--
+-- **No rows is not "needs nothing".** A job raised before this existed has
+-- none, and so does one raised for a product that had no recipe at the time —
+-- both fall back to the live recipe, so nothing already on file changes its
+-- answer and a recipe added later still reaches the jobs that had none.
+CREATE TABLE IF NOT EXISTS work_order_materials (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  work_order_id INTEGER NOT NULL REFERENCES work_orders(id) ON DELETE CASCADE,
+  material_id INTEGER NOT NULL REFERENCES materials(id),
+  qty_per_1000 REAL NOT NULL DEFAULT 0,
+  wastage_pct REAL NOT NULL DEFAULT 0,
+  sort_order INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_work_order_materials_wo ON work_order_materials(work_order_id);
+
 /* What to measure on this product, and what counts as good. The QC spec the
    demo made the case for: dimensions per SKU, plus the visual checks a
    multicolour range needs. Like the recipe, it is a short list rewritten

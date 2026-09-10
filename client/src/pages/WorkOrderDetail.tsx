@@ -162,6 +162,19 @@ export default function WorkOrderDetailPage() {
       api.post(`/api/work-orders/batches/${batchId}/disposition`, { disposition, note }),
     onSuccess: () => { refresh(); setDeciding(null); },
   });
+  /*
+   * Pull the product's current recipe onto this job.
+   *
+   * The escape from what would otherwise be a trap: the job is costed against
+   * the recipe it was raised on, which is the point — but a recipe entered
+   * wrongly would then be stuck on it, and a job with output cannot be deleted
+   * and re-raised. Deliberately a press rather than something a recipe edit
+   * does by itself, which would be the drift this exists to stop.
+   */
+  const reSnapshot = useMutation({
+    mutationFn: () => api.post(`/api/work-orders/${id}/recipe-snapshot`, {}),
+    onSuccess: refresh,
+  });
   const remove = useMutation({
     mutationFn: () => api.del(`/api/work-orders/${id}`),
     // The job is gone; there is nothing left to warn about losing.
@@ -539,6 +552,27 @@ export default function WorkOrderDetailPage() {
             unanswerable, not a requirement of nothing. Saying "0 kg required"
             would make a job that has never been costed look fully covered.
           */}
+          {/*
+            Which recipe these figures came from. Only worth saying when the
+            two have actually parted: a job costed against a stamped recipe
+            that still matches the product's has nothing to explain, and a
+            line of reassurance on every screen is how people stop reading
+            the ones that matter.
+          */}
+          {job.material?.recipe_differs && (
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800 ring-1 ring-amber-200">
+              <span>
+                Costed against the recipe as it stood when this job was raised. The product’s recipe has
+                changed since.
+              </span>
+              {can('work_order', 'full') && (
+                <Button variant="secondary" disabled={reSnapshot.isPending} onClick={() => reSnapshot.mutate()}>
+                  {reSnapshot.isPending ? 'Updating…' : 'Use the current recipe'}
+                </Button>
+              )}
+            </div>
+          )}
+          <ErrorText error={reSnapshot.error} />
           {!job.material?.has_recipe ? (
             <EmptyState message="Not costed — this product has no recipe, so how much material the job needs is unknown, not nil. Add one on the product to see required against issued." />
           ) : (

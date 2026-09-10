@@ -1,6 +1,6 @@
 import { db } from '../db/connection.js';
 import { round2 } from './totals.js';
-import { requirementFor } from './recipe.js';
+import { requirementFor, requirementForJob } from './recipe.js';
 // The only place allowed to answer how far along an order line is, so the
 // order-book basis asks it rather than walking the same tables again.
 import { orderLines } from './orderLines.js';
@@ -204,7 +204,10 @@ function fromJobs(locationId?: number | null): Shortfall {
 
   for (const job of jobs) {
     const remaining = Math.max(0, job.qty_planned - job.made);
-    const { hasRecipe, lines } = requirementFor(job.product_id, remaining);
+    // Against the recipe the job was raised on. The order-book basis below
+    // deliberately still asks `requirementFor`: it counts lines nobody has
+    // raised a job for, so there is no snapshot to read.
+    const { hasRecipe, lines } = requirementForJob(job.id, job.product_id, remaining);
     if (!hasRecipe) {
       uncosted.push({ id: job.id, number: job.number, description: job.description });
       continue;

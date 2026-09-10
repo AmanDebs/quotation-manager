@@ -6,7 +6,7 @@ import { batchesFor, batchById, coaBlockError, dispositionError, isDisposition, 
 import { progressFor, progressForMany, LIVE_OK } from '../services/production.js';
 import { materialCostByWorkOrder } from '../services/costing.js';
 import { paramsFor, checksForWorkOrder, summaryForWorkOrder, specOwner, RESULT_FAILED_SQL } from '../services/qc.js';
-import { requirementFor } from '../services/recipe.js';
+import { requirementForJob, snapshotRecipe, recipeDiffers } from '../services/recipe.js';
 import { syncOrderStatus } from '../services/orderStatus.js';
 import { requirePermission, type AuthedRequest } from '../middleware/auth.js';
 import { scopeClause, canAccessCustomer } from '../middleware/scope.js';
@@ -94,7 +94,7 @@ function getFull(req: AuthedRequest, id: number) {
   // What this job will eat, if the product has a recipe at all. `has_recipe`
   // false means unanswerable, which the screen shows as "not costed" — never
   // as a requirement of zero.
-  const req_ = requirementFor(wo.product_id as number | null, Number(wo.qty_planned) || 0);
+  const req_ = requirementForJob(id, wo.product_id as number | null, Number(wo.qty_planned) || 0);
   // Issued so far, so the screen can show planned against actual consumption —
   // the point of having a recipe at all.
   const issued = db.prepare(
@@ -104,6 +104,11 @@ function getFull(req: AuthedRequest, id: number) {
   const byMaterial = new Map(issued.map((r) => [r.material_id, r.q]));
   wo.material = {
     has_recipe: req_.hasRecipe,
+    // Which recipe answered, and whether the product's has moved since — so
+    // the screen can say the job is costed against an older one rather than
+    // letting the two quietly disagree.
+    snapshot: req_.snapshot,
+    recipe_differs: recipeDiffers(id, wo.product_id as number | null),
     lines: req_.lines.map((l) => ({ ...l, issued: byMaterial.get(l.material_id) ?? 0 })),
     // Anything issued that the recipe never mentioned still has to show up.
     extra: issued
@@ -322,6 +327,7 @@ function insertJob(order: OrderRef, body: Record<string, unknown>, userId: numbe
   const companyId = resolveCompanyId(order.company_id, order.customer_id);
   const number = String(body.number ?? '').trim() || nextNumber('work_order', { companyId });
   const line = Number(body.order_line) || 0;
+  const productId = numOrNull(body.product_id) ?? productOfLine(order.id, line);
   const info = db.prepare(
     `INSERT INTO work_orders (number, company_id, ${fields.join(', ')}, status, created_by)
      VALUES (?, ?, ${fields.map(() => '?').join(', ')}, ?, ?)`
@@ -329,7 +335,7 @@ function insertJob(order: OrderRef, body: Record<string, unknown>, userId: numbe
     number, companyId,
     order.id,
     line,
-    numOrNull(body.product_id) ?? productOfLine(order.id, line),
+    productId,
     String(body.description ?? ''),
     Number(body.qty_planned) || 0,
     numOrNull(body.location_id),
@@ -342,7 +348,15 @@ function insertJob(order: OrderRef, body: Record<string, unknown>, userId: numbe
     STATUSES.includes(String(body.status)) ? String(body.status) : 'planned',
     userId
   );
-  return Number(info.lastInsertRowid);
+  const id = Number(info.lastInsertRowid);
+  /*
+   * The recipe is stamped onto the job here, in the caller's transaction, so a
+   * job and the figures it is costed against are written together or not at
+   * all. A product with no recipe stamps nothing and the job falls back — see
+   * `snapshotRecipe`.
+   */
+  snapshotRecipe(id, productId);
+  return id;
 }
 
 /**
@@ -767,6 +781,29 @@ workOrdersRouter.post('/batches/:batchId/disposition', requirePermission('qc', '
   const wo = accessible(req, Number(b.work_order_id))!;
   syncOrderStatus(Number(wo.order_id));
   res.json(batchById(batchId));
+});
+
+/**
+ * Bring a job's stamped recipe up to the product's current one.
+ *
+ * The escape from what would otherwise be a trap: a job is costed against the
+ * recipe it was raised on, which is the point — but a recipe raised **in
+ * error** would then be stuck on every job that took it, and a job carrying
+ * output cannot be deleted and re-raised. This codebase has built exactly one
+ * such trap already (`work_orders.product_id`) and does not intend to build a
+ * second.
+ *
+ * `work_order: full`, like editing the job itself: it changes what the job is
+ * said to need, which is a planning figure rather than a quality one.
+ * Deliberately **not** automatic on a recipe edit — that would be the drift
+ * this whole thing exists to stop, arriving through the back door.
+ */
+workOrdersRouter.post('/:id/recipe-snapshot', requirePermission('work_order', 'full'), (req: AuthedRequest, res) => {
+  const id = Number(req.params.id);
+  const wo = accessible(req, id);
+  if (!wo) return res.status(404).json({ error: 'Work order not found' });
+  snapshotRecipe(id, wo.product_id as number | null);
+  res.json(getFull(req, id));
 });
 
 workOrdersRouter.post('/:id/qc-checks', requirePermission('qc', 'full'), (req: AuthedRequest, res) => {

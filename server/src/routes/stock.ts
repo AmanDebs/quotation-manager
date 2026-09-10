@@ -79,7 +79,14 @@ stockRouter.get('/moves', (req, res) => {
 
 /** What the open jobs need against what we have. */
 stockRouter.get('/shortfall', (req, res) => {
-  res.json(shortfall(numOrNull(req.query.location_id)));
+  // `basis` was accepted and silently ignored, so this route always answered
+  // the jobs basis whatever it was asked — found while measuring the recipe
+  // snapshot, where the two bases deliberately disagree. Inert for the app,
+  // since the Stock page sends none and the buying screen goes through
+  // `purchase-orders/prefill/from-shortfall`, which has always passed it on.
+  // The default stays `jobs`, which is what every caller has been getting.
+  const basis = req.query.basis === 'orders' ? 'orders' : 'jobs';
+  res.json(shortfall(numOrNull(req.query.location_id), basis));
 });
 
 /**
