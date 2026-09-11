@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { db, transaction } from '../db/connection.js';
 import { nextNumber } from '../services/numbering.js';
-import { batchesFor, batchById, coaBlockError, dispositionError, isDisposition, DISPOSITIONS }
+import { batchesFor, batchById, coaBlockError, renameError, dispositionError, isDisposition, DISPOSITIONS }
   from '../services/batch.js';
 import { progressFor, progressForMany, LIVE_OK } from '../services/production.js';
 import { materialCostByWorkOrder } from '../services/costing.js';
@@ -590,6 +590,9 @@ workOrdersRouter.put('/batches/:batchId', requirePermission('output', 'full'), (
     return res.status(404).json({ error: 'Batch not found' });
   }
   const body = req.body ?? {};
+  // A lot on a certificate, a challan or a credit note keeps its number.
+  const renamed = renameError(batchId, body.number);
+  if (renamed) return res.status(409).json({ error: renamed });
   const existing = batchById(batchId)!;
   db.prepare('UPDATE batches SET number = ?, date = ?, notes = ? WHERE id = ?').run(
     String(body.number ?? existing.number).trim() || existing.number,

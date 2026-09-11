@@ -220,6 +220,37 @@ export function batchById(id: number): Batch | undefined {
 }
 
 /**
+ * Why this lot cannot be renamed, or null.
+ *
+ * A lot's number is a free-text field until it is on paper somewhere, and
+ * then it is fixed — the rule every issued number here follows. Three pieces
+ * of paper can carry it, and each is a reason on its own: the **certificate**
+ * states the batch it covers, the **challan** prints the lots that travelled
+ * (`despatch_batches`), and the **credit note** the lots that came back. A
+ * lot renamed after any of those makes "which lot does this document mean"
+ * unanswerable, which is the one thing a traceability number exists to
+ * answer. Refused with the document named, most recent kind first; the date
+ * and the notes stay editable, being nobody else's record.
+ */
+export function renameError(id: number, newNumber: unknown): string | null {
+  if (newNumber === undefined || newNumber === null) return null;
+  const b = batchById(id);
+  if (!b) return 'Batch not found.';
+  const after = String(newNumber).trim();
+  if (!after || after === b.number) return null;
+  if (b.cleared) {
+    return `Batch ${b.number} is named on certificate ${b.coa_no}, so its number cannot be changed.`;
+  }
+  if (b.trips.length) {
+    return `Batch ${b.number} is named on ${b.trips[0].reference}, so its number cannot be changed.`;
+  }
+  if (b.returns.length) {
+    return `Batch ${b.number} is named on credit note ${b.returns[0].number}, so its number cannot be changed.`;
+  }
+  return null;
+}
+
+/**
  * Why a Certificate of Analysis cannot be issued for this lot, or null.
  *
  * Shaped like `qcBlockError`, `lockError` and `incompleteError` — a function

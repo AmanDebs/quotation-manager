@@ -2,8 +2,8 @@ import './helpers/scratch.js';
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { db } from '../src/db/connection.js';
-import { batchesFor, batchById, coaBlockError } from '../src/services/batch.js';
-import { makeCustomer } from './helpers/factory.js';
+import { batchesFor, batchById, coaBlockError, renameError } from '../src/services/batch.js';
+import { makeCustomer, makeInvoice } from './helpers/factory.js';
 
 /**
  * A lot, and the certificate that clears it.
@@ -18,7 +18,7 @@ import { makeCustomer } from './helpers/factory.js';
 
 let seq = 0;
 
-function job(): { woId: number; productId: number; paramId: number } {
+function job(): { woId: number; productId: number; paramId: number; orderId: number } {
   const productId = Number((db.prepare(
     "INSERT INTO products (name, unit, unit_price) VALUES (?, 'per 1000', 10) RETURNING id"
   ).get(`Cap ${++seq}`) as { id: number }).id);
@@ -38,7 +38,7 @@ function job(): { woId: number; productId: number; paramId: number } {
     `INSERT INTO work_orders (number, order_id, order_line, product_id, qty_planned, status)
      VALUES (?, ?, 0, ?, 100000, 'released') RETURNING id`
   ).get(`WO/B-${seq}`, orderId, productId) as { id: number }).id);
-  return { woId, productId, paramId };
+  return { woId, productId, paramId, orderId };
 }
 
 const batch = (woId: number) => Number((db.prepare(
@@ -192,5 +192,52 @@ describe('when a certificate may be issued', () => {
   test('a lot that does not exist refuses rather than throwing', () => {
     assert.equal(coaBlockError(999999), 'Batch not found.');
     assert.equal(batchById(999999), undefined);
+  });
+});
+
+/**
+ * A lot's number is fixed once it is on paper — a certificate, a challan or a
+ * credit note — the rule every issued number here follows. Until then it is a
+ * free-text field somebody may well have mistyped.
+ */
+describe('when a lot may be renamed', () => {
+  test('freely while nothing names it, and a no-op is never refused', () => {
+    const { woId } = job();
+    const b = batch(woId);
+    assert.equal(renameError(b, 'B/CORRECTED'), null);
+    assert.equal(renameError(b, only(woId).number), null);
+    assert.equal(renameError(b, undefined), null, 'a PUT that does not send the number');
+    assert.equal(renameError(b, '  '), null, 'a blank keeps the old number, the route rule');
+  });
+
+  test('never once certified, naming the certificate', () => {
+    const { woId } = job();
+    const b = batch(woId);
+    db.prepare("UPDATE batches SET coa_no = 'COA/26-27/007', coa_date = '2026-09-05' WHERE id = ?").run(b);
+    assert.match(String(renameError(b, 'B/OTHER')), /named on certificate COA\/26-27\/007/);
+  });
+
+  test('never once on a challan, naming the trip', () => {
+    const { woId, orderId } = job();
+    const b = batch(woId);
+    const d = Number((db.prepare(
+      "INSERT INTO despatches (order_id, date, challan_no) VALUES (?, '2026-09-06', 'DC/26-27/003') RETURNING id"
+    ).get(orderId) as { id: number }).id);
+    db.prepare('INSERT INTO despatch_batches (despatch_id, batch_id) VALUES (?, ?)').run(d, b);
+    assert.match(String(renameError(b, 'B/OTHER')), /named on DC\/26-27\/003/);
+  });
+
+  test('never once on a credit note, drafted or not', () => {
+    const { woId, orderId } = job();
+    const b = batch(woId);
+    const customerId = Number((db.prepare('SELECT customer_id FROM orders WHERE id = ?').get(orderId) as { customer_id: number }).customer_id);
+    const inv = makeInvoice({ customerId, currency: 'INR', total: 1000 });
+    db.prepare('UPDATE commercial_invoices SET order_id = ? WHERE id = ?').run(orderId, inv);
+    const n = Number((db.prepare(
+      `INSERT INTO credit_notes (number, date, invoice_id, customer_id, company_id, kind, currency, grand_total, approval_status)
+       VALUES ('CN/26-27/002', '2026-09-10', ?, ?, 1, 'return', 'INR', 100, 'not_submitted') RETURNING id`
+    ).get(inv, customerId) as { id: number }).id);
+    db.prepare('INSERT INTO credit_note_batches (credit_note_id, batch_id) VALUES (?, ?)').run(n, b);
+    assert.match(String(renameError(b, 'B/OTHER')), /named on credit note CN\/26-27\/002/);
   });
 });
