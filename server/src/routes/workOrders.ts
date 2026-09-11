@@ -7,6 +7,7 @@ import { progressFor, progressForMany, LIVE_OK } from '../services/production.js
 import { materialCostByWorkOrder } from '../services/costing.js';
 import { paramsFor, checksForWorkOrder, summaryForWorkOrder, specOwner, RESULT_FAILED_SQL } from '../services/qc.js';
 import { requirementForJob, snapshotRecipe, recipeDiffers } from '../services/recipe.js';
+import { insertJob, type OrderRef } from '../services/orderJobs.js';
 import { syncOrderStatus } from '../services/orderStatus.js';
 import { requirePermission, type AuthedRequest } from '../middleware/auth.js';
 import { scopeClause, canAccessCustomer } from '../middleware/scope.js';
@@ -299,137 +300,13 @@ workOrdersRouter.get('/:id', requirePermission('work_order'), (req: AuthedReques
   res.json(wo);
 });
 
-/** The product on an order line, by the position rule the whole chain uses. */
-function productOfLine(orderId: number, pos: number): number | null {
-  const row = db.prepare(
-    `SELECT product_id FROM (
-       SELECT product_id, ROW_NUMBER() OVER (ORDER BY sort_order, id) - 1 AS p
-         FROM order_items WHERE order_id = ?
-     ) WHERE p = ?`
-  ).get(orderId, pos) as { product_id: number | null } | undefined;
-  return row?.product_id ?? null;
-}
-
-interface OrderRef { id: number; customer_id: number; company_id: number }
-
-/**
- * Write one job. Called by the single raise and by the bulk one, so a job is
- * created in exactly one place and the two cannot come to differ about what a
- * job starts as — the same reason `saveItems` is one function per document.
+/*
+ * `insertJob` and `productOfLine` live in `services/orderJobs.ts` now: the
+ * sales order raises its own jobs on booking, so the one place a job is
+ * written is a service both this router and the order's route can reach.
  *
- * The caller owns the transaction: raising six jobs is one act, and six
- * separate transactions would leave half an order planned when the fourth
- * fails.
+ * `POST /bulk` went with the Production tab it served — see that file.
  */
-function insertJob(order: OrderRef, body: Record<string, unknown>, userId: number): number {
-  // The job is numbered by the company that sold the order, so one series
-  // covers everything that entity does.
-  const companyId = resolveCompanyId(order.company_id, order.customer_id);
-  const number = String(body.number ?? '').trim() || nextNumber('work_order', { companyId });
-  const line = Number(body.order_line) || 0;
-  const productId = numOrNull(body.product_id) ?? productOfLine(order.id, line);
-  const info = db.prepare(
-    `INSERT INTO work_orders (number, company_id, ${fields.join(', ')}, status, created_by)
-     VALUES (?, ?, ${fields.map(() => '?').join(', ')}, ?, ?)`
-  ).run(
-    number, companyId,
-    order.id,
-    line,
-    productId,
-    String(body.description ?? ''),
-    Number(body.qty_planned) || 0,
-    numOrNull(body.location_id),
-    numOrNull(body.machine_id),
-    numOrNull(body.mould_id),
-    numOrNull(body.process_id),
-    String(body.planned_start ?? ''),
-    String(body.planned_end ?? ''),
-    String(body.notes ?? ''),
-    STATUSES.includes(String(body.status)) ? String(body.status) : 'planned',
-    userId
-  );
-  const id = Number(info.lastInsertRowid);
-  /*
-   * The recipe is stamped onto the job here, in the caller's transaction, so a
-   * job and the figures it is costed against are written together or not at
-   * all. A product with no recipe stamps nothing and the job falls back — see
-   * `snapshotRecipe`.
-   */
-  snapshotRecipe(id, productId);
-  return id;
-}
-
-/**
- * Raise a job on several lines of one sales order at once.
- *
- * The desk's ordinary act. A four-line order needed four presses of **+ Job**,
- * each opening a dialog to accept the figure it had already worked out — and
- * the figure is the same one every time, so the typing was the whole cost.
- *
- * **Deliberately not an automatic conversion on order approval**, which is the
- * shape an MRP would take. Two reasons, and the first is this app's own access
- * matrix: raising a job is `work_order: full` — Production and the super admin
- * — while **Sales**, which confirms the order, holds `view`. Auto-raising on
- * approval would have Sales issue shop-floor instructions without holding the
- * permission to. The second is that the quantity to plan is not always the
- * quantity ordered: a partial run, or stock already made, is normal here. So
- * this stays a Production act with the figures on screen and editable, and
- * saves the presses rather than the judgement.
- *
- * **The client chooses the lines and this refuses nonsense**, rather than the
- * server deciding what "still needs a job" means — that figure is a prefill
- * shown in a form somebody can disagree with, and computing it here as well
- * would be a second copy of it. What is checked is what only the server can
- * know: that the caller may see this order, that each line is really on it,
- * and that a charge line is never made.
- */
-workOrdersRouter.post('/bulk', requirePermission('work_order', 'full'), (req: AuthedRequest, res) => {
-  const body = req.body ?? {};
-  const order = db.prepare('SELECT id, customer_id, company_id FROM orders WHERE id = ?')
-    .get(Number(body.order_id)) as OrderRef | undefined;
-  if (!order || !canAccessCustomer(req, order.customer_id)) {
-    return res.status(404).json({ error: 'Sales order not found' });
-  }
-  const lines = Array.isArray(body.lines) ? (body.lines as Record<string, unknown>[]) : [];
-  if (!lines.length) return res.status(400).json({ error: 'Choose at least one line to raise a job on' });
-
-  // Numbered exactly as `orderLines.ts` numbers them — charges take a position
-  // too, so nothing is compacted first. The chain's own index rule.
-  const items = db.prepare(
-    `SELECT ROW_NUMBER() OVER (ORDER BY sort_order, id) - 1 AS pos, description, is_charge
-       FROM order_items WHERE order_id = ?`
-  ).all(order.id) as { pos: number; description: string; is_charge: number }[];
-
-  for (const l of lines) {
-    const pos = Number(l.order_line);
-    const item = items.find((it) => Number(it.pos) === pos);
-    if (!Number.isInteger(pos) || !item) {
-      return res.status(400).json({ error: `Line ${pos + 1} is not on this order — it may have been edited since` });
-    }
-    // A charge is freight or tooling: there is nothing to make.
-    if (Number(item.is_charge)) {
-      return res.status(400).json({ error: `${item.description || `Line ${pos + 1}`} is a charge, not goods, so no job can be raised for it` });
-    }
-    if (!(Number(l.qty_planned) > 0)) {
-      return res.status(400).json({ error: `${item.description || `Line ${pos + 1}`}: planned quantity must be more than zero` });
-    }
-  }
-
-  // One transaction for the whole press: six numbers drawn in order, and
-  // nothing written at all if the sixth insert fails.
-  const ids = transaction(() => lines.map((l) => insertJob(order, {
-    ...l,
-    order_id: order.id,
-    description: String(l.description ?? items.find((it) => Number(it.pos) === Number(l.order_line))?.description ?? ''),
-    status: body.status,
-  }, req.user!.id)));
-
-  // Raising jobs is a fact about the order, so its status follows — once for
-  // the whole act rather than once per job.
-  syncOrderStatus(order.id);
-  res.status(201).json({ created: ids.length, jobs: ids.map((id) => getFull(req, id)) });
-});
-
 workOrdersRouter.post('/', requirePermission('work_order', 'full'), (req: AuthedRequest, res) => {
   const body = req.body ?? {};
   const order = db.prepare('SELECT id, customer_id, company_id FROM orders WHERE id = ?')

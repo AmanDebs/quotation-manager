@@ -2,18 +2,17 @@ import { useEffect, useState } from 'react';
 import { useNavigate, useParams, useSearchParams, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
-import type { Order, OrderItem, Customer, TaxType, ColumnConfig, WorkOrder } from '../types';
+import type { Order, OrderItem, Customer, TaxType, ColumnConfig } from '../types';
 import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, Tabs, SettledDocumentType, FIELD_GRID, NOTES_ROWS } from '../components/ui';
 import { PdfLink } from '../components/PdfLink';
 import CompanySelect from '../components/CompanySelect';
 import { DocNumber, IncoTermsInput, PaymentTermsInput, HeaderCharges } from '../components/DocFields';
-import ProductionTab from '../components/ProductionTab';
 import MaterialTab from '../components/MaterialTab';
 import DispatchTab from '../components/DispatchTab';
 import LineItemsEditor from '../components/LineItemsEditor';
 import ColumnsControl, { newColumnConfig, hasColumnPrefs, orderColumns, ORDER_FORCED } from '../components/ColumnsControl';
 import FollowupButton from '../components/FollowupButton';
-import { ORDER_STATUSES, orderStatusLabel } from './Orders';
+import { offeredStatuses, orderStatusLabel } from './Orders';
 import { today, fmtMoney, fmtDate } from '../lib/format';
 import { useUnsavedChanges } from '../lib/useUnsavedChanges';
 import HistoryCard from '../components/HistoryCard';
@@ -92,17 +91,7 @@ export default function OrderFormPage() {
   const [draft, setDraft] = useState<Draft>(emptyDraft());
   const [prefilled, setPrefilled] = useState(false);
   const [prefillAdvance, setPrefillAdvance] = useState<Order['advance']>();
-  const [tab, setTab] = useState<'details' | 'production' | 'material' | 'dispatch'>('details');
-
-  // Jobs still to finish, shown on the tab so the floor's state is visible
-  // without opening it. Loaded here rather than in the tab so the count is
-  // there before the tab is ever clicked.
-  const { data: jobs = [] } = useQuery({
-    queryKey: ['work-orders', String(id)],
-    queryFn: () => api.get<WorkOrder[]>(`/api/work-orders?order_id=${id}`),
-    enabled: !isNew,
-  });
-  const openJobs = jobs.filter((w) => !['done', 'cancelled'].includes(w.status)).length;
+  const [tab, setTab] = useState<'details' | 'material' | 'dispatch'>('details');
 
   useEffect(() => {
     if (existing) {
@@ -236,7 +225,7 @@ export default function OrderFormPage() {
       {!isNew && (
         <div className="mb-4 flex flex-wrap items-center gap-2 text-sm">
           <span className="text-slate-500">Status:</span>
-          {ORDER_STATUSES.map((s) => (
+          {offeredStatuses(existing!.status).map((s) => (
             <button
               key={s}
               disabled={setStatus.isPending || existing!.status === s}
@@ -251,8 +240,12 @@ export default function OrderFormPage() {
         </div>
       )}
 
-      {/* Tabs only once the order exists: production has nothing to attach to
-          until there are saved lines to raise a job against. */}
+      {/*
+        * Tabs only once the order exists. There is no Production tab any more
+        * (2026-09-11, at the client's word): the order raises one job per goods
+        * line when it is booked and keeps them in step, so the tab's buttons
+        * had no decision left in them. The jobs themselves live on Work Orders.
+        */}
       {!isNew && (
         <Tabs
           className="mb-4"
@@ -260,14 +253,12 @@ export default function OrderFormPage() {
           onChange={setTab}
           tabs={[
             { key: 'details', label: 'Details' },
-            { key: 'production', label: 'Production', badge: openJobs || undefined },
             { key: 'material', label: 'Material' },
             { key: 'dispatch', label: 'Dispatch' },
           ]}
         />
       )}
 
-      {tab === 'production' && !isNew && existing && <ProductionTab order={existing} />}
       {tab === 'material' && !isNew && existing && <MaterialTab order={existing} />}
       {tab === 'dispatch' && !isNew && existing && <DispatchTab order={existing} />}
 

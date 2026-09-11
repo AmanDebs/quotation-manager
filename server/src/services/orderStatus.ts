@@ -143,9 +143,17 @@ export function impliedStatus(orderId: number): StatusFacts {
    * `scheduled` gained the derivation it never had — otherwise the hole is not
    * closed, only slid one rung along.
    */
+  /*
+   * **`confirmed` is retired from the ladder** (2026-09-11). It was the rung a
+   * raised job reached — and every order now raises its own jobs the moment it
+   * is booked, so "a job has been raised" is true of every order on its first
+   * day and the rung says nothing. Never set here any more, never offered by
+   * the status route; rows already holding it keep it. *Pending* now means
+   * booked with nothing released.
+   */
+  void anyJob;
   let implied: OrderStatus = 'pending';
   let reason = '';
-  if (anyJob) { implied = 'confirmed'; reason = 'a work order has been raised'; }
   if (anyScheduled) { implied = 'scheduled'; reason = 'a work order has been released or dated'; }
   if (anyProduction) { implied = 'in_production'; reason = 'production has been booked'; }
   if (allMade) { implied = 'ready'; reason = 'every line has been made in full'; }

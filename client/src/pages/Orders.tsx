@@ -13,6 +13,19 @@ export const ORDER_STATUSES: OrderStatus[] = [
 ];
 
 /**
+ * What a picker offers: `confirmed` — *Work Order* — is **retired, not
+ * removed** (2026-09-11), the quotation's own call about `sent`. It meant "a
+ * job has been raised", and every order now raises its jobs when it is
+ * booked, so the rung says nothing. It stays in `ORDER_STATUSES` — labelled,
+ * tinted, filterable, counted on the dashboard — because rows on file still
+ * hold it and a status you cannot filter for is a row you cannot find. A
+ * picker on such a row keeps it as an option so the control can show what is
+ * there; nothing else is ever offered it.
+ */
+export const offeredStatuses = (current?: string): OrderStatus[] =>
+  ORDER_STATUSES.filter((s) => s !== 'confirmed' || s === current);
+
+/**
  * The order's vocabulary, where it differs from the value that is stored.
  *
  * `confirmed` reads **Work Order** (Aglo, 2026-09-07): what the desk means by
@@ -262,7 +275,7 @@ export default function OrdersPage() {
                         className={`cursor-pointer rounded-full border px-2 py-0.5 text-xs font-medium focus:outline-none focus:ring-1 focus:ring-brand-600 disabled:opacity-50 ${statusTint[o.status] ?? 'bg-slate-100 text-slate-600 border-slate-300'}`}
                         title="Change status"
                       >
-                        {ORDER_STATUSES.map((s) => (
+                        {offeredStatuses(o.status).map((s) => (
                           <option key={s} value={s} className="bg-white text-slate-800">{orderStatusLabel(s)}</option>
                         ))}
                       </select>

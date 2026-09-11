@@ -72,16 +72,22 @@ const despatch = (orderId: number) => (db.prepare(
  * It was the only one of the seven rungs nothing could reach.
  */
 describe('raising a job and scheduling it are different steps', () => {
-  test('a job merely raised reaches Work Order and stops there', () => {
+  /**
+   * `confirmed` — *Work Order* — is retired (2026-09-11): every order raises
+   * its own jobs on booking, so a job merely raised is what every order has
+   * on its first day and the rung said nothing. Pending now means booked with
+   * nothing released.
+   */
+  test('a job merely raised leaves the order Pending', () => {
     const o = order();
     rawJob(o);
-    assert.equal(syncOrderStatus(o), 'confirmed');
+    assert.equal(syncOrderStatus(o), 'pending');
   });
 
   test('a start date on it schedules the order', () => {
     const o = order();
     const j = rawJob(o);
-    assert.equal(syncOrderStatus(o), 'confirmed');
+    assert.equal(syncOrderStatus(o), 'pending');
     db.prepare("UPDATE work_orders SET planned_start = '2026-09-20' WHERE id = ?").run(j);
     assert.equal(syncOrderStatus(o), 'scheduled');
   });
@@ -94,14 +100,12 @@ describe('raising a job and scheduling it are different steps', () => {
   });
 
   /** The ladder moves both ways, so withdrawing the commitment withdraws the rung. */
-  test('putting it back to planned puts the order back to Work Order', () => {
+  test('putting it back to planned puts the order back to Pending', () => {
     const o = order();
     const j = job(o);
     assert.equal(syncOrderStatus(o), 'scheduled');
     db.prepare("UPDATE work_orders SET status = 'planned' WHERE id = ?").run(j);
-    assert.equal(syncOrderStatus(o), 'confirmed');
-    db.prepare('DELETE FROM work_orders WHERE id = ?').run(j);
-    assert.equal(syncOrderStatus(o), 'pending', 'no job at all is not a work order');
+    assert.equal(syncOrderStatus(o), 'pending');
   });
 
   test('a cancelled job schedules nothing', () => {

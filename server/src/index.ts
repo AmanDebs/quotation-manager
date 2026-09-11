@@ -10,6 +10,7 @@ import { healthRouter } from './routes/health.js';
 import { backupRouter } from './routes/backup.js';
 import { startBackupSchedule } from './services/backup.js';
 import { startExpirySchedule } from './services/quotationExpiry.js';
+import { raiseJobsForOpenOrders } from './services/orderJobs.js';
 import { authRouter } from './routes/auth.js';
 import { usersRouter } from './routes/users.js';
 import { approvalsRouter } from './routes/approvals.js';
@@ -167,4 +168,8 @@ app.listen(PORT, () => {
   // anybody is logged in — so this runs on boot as well as daily, since the
   // app may have been down over the day that mattered.
   startExpirySchedule();
+  // Orders booked before the order raised its own jobs, and still open, get
+  // theirs now — there is no button left to raise them with. Idempotent: an
+  // order with any job is left alone.
+  raiseJobsForOpenOrders();
 });

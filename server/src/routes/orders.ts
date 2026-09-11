@@ -13,6 +13,7 @@ import { allows, type AuthedRequest } from '../middleware/auth.js';
 import { scopeClause, canAccessCustomer, linkError, customerChangeError } from '../middleware/scope.js';
 import { syncOrderStatus } from '../services/orderStatus.js';
 import { returnedQtyByLine } from '../services/creditNotes.js';
+import { syncOrderJobs } from '../services/orderJobs.js';
 import { resolveCompanyId } from '../services/companies.js';
 import { listBody, pageRequest } from '../services/pagination.js';
 import { syncProformaOrdered, syncProformaUnordered, alreadyOrderedError } from '../services/documentChain.js';
@@ -603,8 +604,13 @@ ordersRouter.post('/', (req: AuthedRequest, res) => {
         syncProformaOrdered(Number(body.pi_id));
       }
     }
+    // The order owns its jobs: one per goods line, raised here in the same
+    // transaction the way the invoice raises its packing list. See
+    // `services/orderJobs.ts` for why this is not an MRP.
+    syncOrderJobs(id, req.user!.id);
     return id;
   });
+  syncOrderStatus(id);
   res.status(201).json(getFull(id, req));
 });
 
@@ -632,7 +638,13 @@ ordersRouter.put('/:id', (req: AuthedRequest, res) => {
       ...(headerFields.map((f) => (h as Record<string, unknown>)[f]) as never[]),
       id
     );
-    if (Array.isArray(body.items)) saveItems(id, body.items as OrderItemInput[], h.tax_type, h.freight, h.insurance, h.currency);
+    if (Array.isArray(body.items)) {
+      saveItems(id, body.items as OrderItemInput[], h.tax_type, h.freight, h.insurance, h.currency);
+      // A new line gets its job, a corrected quantity moves an untouched one,
+      // a line that is gone cancels its unstarted job. The floor's own
+      // arrangements are left alone — `syncOrderJobs` says exactly where.
+      syncOrderJobs(id, req.user!.id);
+    }
   });
   // Changing what was ordered changes whether it has all been billed: asking
   // for more than has shipped re-opens an order the invoices had closed.
@@ -643,7 +655,17 @@ ordersRouter.put('/:id', (req: AuthedRequest, res) => {
 ordersRouter.post('/:id/status', (req: AuthedRequest, res) => {
   const id = Number(req.params.id);
   const { status } = req.body ?? {};
-  const allowed = ['pending', 'confirmed', 'scheduled', 'in_production', 'ready', 'partially_dispatched', 'completed', 'cancelled'];
+  const allowed = ['pending', 'scheduled', 'in_production', 'ready', 'partially_dispatched', 'completed', 'cancelled'];
+  /*
+   * `confirmed` — *Work Order* on screen — is **retired, not removed**, the
+   * way the quotation retired `sent`. It meant "a job has been raised", and
+   * once every order raises its own jobs on booking that is true of every
+   * order on its first day, so the rung says nothing. Rows already holding it
+   * keep it, stay labelled and filterable; it is simply no longer handed out.
+   */
+  if (status === 'confirmed') {
+    return res.status(409).json({ error: 'Work Order is no longer a status a sales order is set to: every order raises its jobs when it is booked. Use Pending or Scheduled.' });
+  }
   if (!allowed.includes(status)) return res.status(400).json({ error: 'Invalid status' });
   const existing = db.prepare('SELECT customer_id FROM orders WHERE id = ?').get(id) as { customer_id: number } | undefined;
   if (!existing || !canAccessCustomer(req, existing.customer_id)) return res.status(404).json({ error: 'Sales order not found' });
@@ -655,6 +677,9 @@ ordersRouter.post('/:id/status', (req: AuthedRequest, res) => {
   db.prepare(
     "UPDATE orders SET status = ?, status_before_auto = '', status_before_completed = '' WHERE id = ?"
   ).run(String(status), id);
+  // Cancelling the order withdraws the jobs nothing has been done on; the ones
+  // with a shift or material against them are the floor's to close.
+  if (status === 'cancelled') syncOrderJobs(id, req.user!.id);
   res.json(getFull(id, req));
 });
 
