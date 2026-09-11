@@ -1,7 +1,7 @@
 import './helpers/scratch.js';
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { fiscalYearOf, nextNumber, seriesKey, setNextNumber, listSeries, exportChangeError } from '../src/services/numbering.js';
+import { quotationTypeChangeError, fiscalYearOf, nextNumber, seriesKey, setNextNumber, listSeries, exportChangeError } from '../src/services/numbering.js';
 import { db } from '../src/db/connection.js';
 
 /**
@@ -165,5 +165,24 @@ describe('switching a document between export and domestic', () => {
   test('nor is a packing list or a work order', () => {
     assert.equal(exportChangeError('packing_list', exportDoc, 0), null);
     assert.equal(exportChangeError('work_order', exportDoc, 0), null);
+  });
+});
+
+/**
+ * A quotation's type is settled at creation — not because of its number
+ * series (it has one), but because the customer was picked to match it and
+ * the proforma raised from it takes its type. See the function's own note.
+ */
+describe('quotationTypeChangeError', () => {
+  const q = { number: 'QT/26-27/011', is_export: 1 };
+  test('a flip is refused, naming the quotation and the way out', () => {
+    assert.match(String(quotationTypeChangeError(q, 0)), /QT\/26-27\/011 was raised as an export quotation .* cannot be switched to domestic\. Use Duplicate/);
+    assert.match(String(quotationTypeChangeError({ ...q, is_export: 0 }, 1)), /a domestic quotation .* cannot be switched to export/);
+  });
+  test('the same type, or a body that does not mention it, is not a change', () => {
+    assert.equal(quotationTypeChangeError(q, 1), null);
+    assert.equal(quotationTypeChangeError(q, '1'), null);
+    assert.equal(quotationTypeChangeError(q, undefined), null);
+    assert.equal(quotationTypeChangeError(q, null), null);
   });
 });

@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { db, transaction } from '../db/connection.js';
-import { nextNumber } from '../services/numbering.js';
+import { quotationTypeChangeError, nextNumber } from '../services/numbering.js';
 import { computeTotals, type LineItemInput } from '../services/totals.js';
 import type { AuthedRequest } from '../middleware/auth.js';
 import { scopeClause, canAccessCustomer, customerChangeError } from '../middleware/scope.js';
@@ -259,6 +259,10 @@ quotationsRouter.put('/:id', (req: AuthedRequest, res) => {
   // from. 409, not 403: a conflict with what already exists downstream.
   const locked = lockError('quotations', id);
   if (locked) return res.status(409).json({ error: locked });
+  // The type was chosen before the customer was, and the proforma raised
+  // from here takes it: 409, a conflict with what is already on file.
+  const retyped = quotationTypeChangeError(existing, body.is_export);
+  if (retyped) return res.status(409).json({ error: retyped });
   const taxType = (body.tax_type ?? existing.tax_type ?? 'none') as 'none' | 'cgst_sgst' | 'igst';
   const currency = String(body.currency ?? existing.currency);
   const freight = Number(body.freight ?? existing.freight ?? 0);

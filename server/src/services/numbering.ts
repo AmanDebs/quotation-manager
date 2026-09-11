@@ -178,6 +178,34 @@ export function exportChangeError(
   return `This document was numbered ${String(existing.number ?? '')} from the ${was} series, so it cannot be switched to ${before ? 'domestic' : alt}. Raise a new document of the right type, or change the Number by hand if the series itself is wrong.`;
 }
 
+/**
+ * The quotation's type is settled at creation too — for a different reason.
+ *
+ * `exportChangeError` above skips quotations because they draw one number
+ * series whatever their type, so a flip could never leave the number
+ * disagreeing; the picker was left on a saved quotation because taking away
+ * something safe looked like a loss (2026-09-05). Two things changed since.
+ * `NewDocumentDialog` asks the type first and then offers only that kind of
+ * customer, so a flip leaves a Mauritius buyer on a domestic quotation
+ * charging IGST — the one thing that dialog exists to prevent. And since
+ * 2026-09-10 the proforma raised from a quotation takes its type from the
+ * quotation, so a flipped one produces a proforma numbered from the wrong
+ * series, which `exportChangeError` then rightly refuses to undo. The user
+ * asked why the flip was allowed (2026-09-12); it no longer is.
+ *
+ * A quote of the other kind is a **Duplicate**, which raises a fresh number
+ * and whose customer is editable — the shape a second offer already had.
+ */
+export function quotationTypeChangeError(existing: Record<string, unknown>, bodyFlag: unknown): string | null {
+  if (bodyFlag === undefined || bodyFlag === null) return null;
+  const before = Number(existing.is_export) ? 1 : 0;
+  const after = Number(bodyFlag) ? 1 : 0;
+  if (before === after) return null;
+  return `${String(existing.number ?? 'This quotation')} was raised as ${before ? 'an export' : 'a domestic'} quotation for `
+    + `${before ? 'an overseas' : 'an Indian'} buyer, so it cannot be switched to ${before ? 'domestic' : 'export'}. `
+    + 'Use Duplicate to quote the other way, and pick the customer to match.';
+}
+
 export const seriesKey = (docType: DocType, isExport: boolean): string =>
   isExport && patternColumn[docType].export ? `${docType}_export` : docType;
 

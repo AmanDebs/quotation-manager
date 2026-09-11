@@ -525,7 +525,12 @@ export function DownloadButton({ href, label = 'Download Excel', title }: { href
  * never a surprise. Quotations have one series either way and keep an
  * editable control.
  */
-export function SettledDocumentType({ isExport, number }: { isExport: boolean; number?: string }) {
+export function SettledDocumentType({ isExport, number, reason }: {
+  isExport: boolean;
+  number?: string;
+  /** Why it is settled, where the numbering series is not the reason — the quotation's case. */
+  reason?: string;
+}) {
   const kind = isExport ? 'export' : 'domestic';
   return (
     <div className="flex flex-wrap items-center gap-2 text-sm">
@@ -546,7 +551,7 @@ export function SettledDocumentType({ isExport, number }: { isExport: boolean; n
         */}
       {number && (
         <span className="text-xs text-slate-500">
-          {`${number} came from the ${kind} numbering series, so it cannot be changed here.`}
+          {reason ?? `${number} came from the ${kind} numbering series, so it cannot be changed here.`}
         </span>
       )}
     </div>

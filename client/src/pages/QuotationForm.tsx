@@ -381,29 +381,19 @@ export default function QuotationFormPage() {
              * customer, so a second control here answers a question already
              * put — and answering it differently leaves a domestic customer on
              * an export document, which is exactly what the dialog exists to
-             * prevent. It stays editable once saved: a quotation draws from
-             * one numbering series whatever its type, so nothing can disagree,
-             * which is why `exportChangeError` deliberately does not guard it.
+             * prevent. **Settled once saved too** (2026-09-12): it used to stay
+             * editable because a quotation draws one number series whatever
+             * its type, so nothing could disagree — but the proforma raised
+             * from here now takes the type from the quotation, and a flipped
+             * one would number that proforma from the wrong series, which
+             * cannot be undone. `quotationTypeChangeError` refuses it on the
+             * server; Duplicate is how a second kind of offer is made.
              */
-            isNew ? (
-              <SettledDocumentType isExport={!!draft.is_export} />
-            ) : (
-              <div className="flex items-center gap-2 text-sm">
-                <span className="text-slate-500">Type:</span>
-                <Select
-                  value={draft.is_export ? 'export' : 'domestic'}
-                  disabled={readOnly}
-                  onChange={(e) => {
-                    const isExport = e.target.value === 'export';
-                    set({ is_export: isExport ? 1 : 0, tax_type: isExport ? 'none' : draft.tax_type === 'none' ? 'igst' : draft.tax_type });
-                  }}
-                  className="w-32"
-                >
-                  <option value="export">🌍 Export</option>
-                  <option value="domestic">🇮🇳 Domestic</option>
-                </Select>
-              </div>
-            )
+            <SettledDocumentType
+              isExport={!!draft.is_export}
+              number={isNew ? undefined : existing?.number}
+              reason={isNew ? undefined : `Chosen when this quotation was started, with the customer picked to match. Use Duplicate to quote the other way.`}
+            />
           }
         >
           <div className={gridClass}>
