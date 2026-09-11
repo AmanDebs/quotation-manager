@@ -249,7 +249,8 @@ const RULES: Rule[] = [
   },
   {
     // The boxed customs header on the export invoice and its packing list.
-    key: 'ports', level: 'warn', tables: MONEY_DUE, when: isExport,
+    // Invoice only since 2026-09-12: on the proforma these are blocks below.
+    key: 'ports', level: 'warn', tables: ['commercial_invoices'], when: isExport,
     check: (d) => {
       const missing = [
         !text(d.row.port_of_loading) && 'port of loading',
@@ -259,7 +260,7 @@ const RULES: Rule[] = [
     },
   },
   {
-    key: 'origin', level: 'warn', tables: MONEY_DUE, when: isExport,
+    key: 'origin', level: 'warn', tables: ['commercial_invoices'], when: isExport,
     check: (d) => (text(d.row.country_of_origin) ? null : 'No country of origin stated.'),
   },
   {
@@ -284,7 +285,7 @@ const RULES: Rule[] = [
       : 'No bank account stated, and the advance is paid against this document.'),
   },
   {
-    key: 'payment_terms', level: 'warn', tables: MONEY_DUE,
+    key: 'payment_terms', level: 'warn', tables: ['commercial_invoices'],
     check: (d) => (text(d.row.payment_terms) ? null : 'No payment terms stated.'),
   },
   /*
@@ -335,6 +336,44 @@ const RULES: Rule[] = [
     key: 'containers', level: 'block', tables: ['quotations'], when: isExport,
     check: (d) => (text(d.row.container_count) ? null : 'Containers is blank.'),
   },
+  /*
+   * **And every field on the proforma form** (the client, 2026-09-12, with a
+   * new proforma in front of them: *"make everything mandatory like quotation
+   * except Buyer PO, Consignee, Notify 1, 2"*). The same rule one document
+   * down, with the four exemptions named by the client — the buyer's PO
+   * number and date arrive after the proforma is sent, and the consignee and
+   * notify parties are often the buyer's own address, which the PDF already
+   * falls back to. The three warnings above that used to cover the proforma
+   * (`ports`, `origin`, `payment_terms`) now cover the invoice alone, since
+   * here they are blocks with a field name each. Customer, date, lines and
+   * the bank account were already blocks; issued-by, currency, tax and
+   * partial-shipment carry defaults and cannot be blank. Delivery Terms is
+   * retired and not asked for. Export-only fields are asked on an export.
+   */
+  ...([
+    ['pi_validity', 'validity_date', 'Valid Until'],
+    ['pi_lead_time', 'lead_time', 'Production Lead Time'],
+    ['pi_payment_terms', 'payment_terms', 'Payment Terms'],
+    ['pi_inco', 'inco_terms', 'INCO Terms'],
+    ['pi_method', 'method_of_despatch', 'Method of Dispatch'],
+    ['pi_tolerance', 'quantity_tolerance', 'Quantity Tolerance'],
+    ['pi_hs_code', 'hs_code', 'HS Code'],
+    ['pi_prepared_by', 'prepared_by', 'Prepared By'],
+    ['pi_remarks', 'remarks', 'Remarks'],
+  ] as const).map(([key, column, label]): Rule => ({
+    key, level: 'block', tables: ['proforma_invoices'],
+    check: (d) => (text(d.row[column]) ? null : `${label} is blank.`),
+  })),
+  ...([
+    ['pi_origin', 'country_of_origin', 'Country of Origin'],
+    ['pi_port_of_loading', 'port_of_loading', 'Port of Loading'],
+    ['pi_port_of_discharge', 'port_of_discharge', 'Port of Discharge'],
+    ['pi_final_destination', 'final_destination', 'Final Destination'],
+    ['pi_containers', 'container_count', 'Number of Containers'],
+  ] as const).map(([key, column, label]): Rule => ({
+    key, level: 'block', tables: ['proforma_invoices'], when: isExport,
+    check: (d) => (text(d.row[column]) ? null : `${label} is blank.`),
+  })),
 ];
 
 /** Every rule this document breaks, blocking ones first. */

@@ -284,7 +284,15 @@ export default function ProformaFormPage() {
             {!isNew && <StatusBadge status={existing!.status} />}
             {!isNew && (
               <>
-                <PdfLink href={`/api/pdf/proforma/${id}`} guard={pdf}><Button variant="secondary">📄 PDF</Button></PdfLink>
+                <PdfLink
+                  href={`/api/pdf/proforma/${id}`}
+                  guard={pdf}
+                  // Every field is mandatory (2026-09-12), and an unfinished
+                  // proforma does not print — the quotation's rule, one step down.
+                  blocked={(existing!.checks ?? []).filter((f) => f.level === 'block').map((f) => f.message).join(' ') || undefined}
+                >
+                  <Button variant="secondary">📄 PDF</Button>
+                </PdfLink>
                 <FollowupButton docType="proforma" docId={Number(id)} customerId={existing!.customer_id} />
                 <Button
                   variant="secondary"
@@ -393,7 +401,7 @@ export default function ProformaFormPage() {
               />
             </Field>
             <Field label="Date"><Input disabled={readOnly} type="date" value={draft.date} onChange={(e) => set({ date: e.target.value })} /></Field>
-            <Field label="Valid Until"><Input disabled={readOnly} type="date" value={draft.validity_date} onChange={(e) => set({ validity_date: e.target.value })} /></Field>
+            <Field label="Valid Until *"><Input disabled={readOnly} type="date" value={draft.validity_date} onChange={(e) => set({ validity_date: e.target.value })} /></Field>
             <Field label="Currency (at customer's option)">
               <Select disabled={readOnly} value={draft.currency} onChange={(e) => set({ currency: e.target.value })}>
                 <option value="INR">INR</option><option value="USD">USD</option><option value="EUR">EUR</option>
@@ -406,8 +414,8 @@ export default function ProformaFormPage() {
                 <option value="igst">IGST (inter-state)</option>
               </Select>
             </Field>
-            <Field label="Production Lead Time"><Input disabled={readOnly} value={draft.lead_time} onChange={(e) => set({ lead_time: e.target.value })} placeholder="e.g. 4 weeks from advance" /></Field>
-            <Field label="Payment Terms">
+            <Field label="Production Lead Time *"><Input disabled={readOnly} value={draft.lead_time} onChange={(e) => set({ lead_time: e.target.value })} placeholder="e.g. 4 weeks from advance" /></Field>
+            <Field label="Payment Terms *">
               <PaymentTermsInput
                 isExport={!!draft.is_export}
                 disabled={readOnly}
@@ -430,10 +438,10 @@ export default function ProformaFormPage() {
                 <Input disabled={readOnly} value={draft.delivery_terms} onChange={(e) => set({ delivery_terms: e.target.value })} />
               </Field>
             )}
-            <Field label="INCO Terms">
+            <Field label="INCO Terms *">
               <IncoTermsInput isExport={!!draft.is_export} disabled={readOnly} value={draft.inco_terms} onChange={(v) => set({ inco_terms: v })} />
             </Field>
-            <Field label="Method of Dispatch">
+            <Field label="Method of Dispatch *">
               <Select disabled={readOnly} value={draft.method_of_despatch} onChange={(e) => set({ method_of_despatch: e.target.value })}>
                 <option value="">— select —</option>
                 <option>By Sea</option>
@@ -441,13 +449,13 @@ export default function ProformaFormPage() {
                 <option>By Road</option>
               </Select>
             </Field>
-            <Field label="Quantity Tolerance">
+            <Field label="Quantity Tolerance *">
               <Input disabled={readOnly} value={draft.quantity_tolerance} onChange={(e) => set({ quantity_tolerance: e.target.value })} placeholder="e.g. (±) 10% in value and quantity" />
             </Field>
-            <Field label="HS Code (header)">
+            <Field label="HS Code (header) *">
               <Input disabled={readOnly} value={draft.hs_code} onChange={(e) => set({ hs_code: e.target.value })} placeholder="e.g. 3923" />
             </Field>
-            <Field label="Prepared By">
+            <Field label="Prepared By *">
               <Input disabled={readOnly} value={draft.prepared_by} onChange={(e) => set({ prepared_by: e.target.value })} />
             </Field>
             {/* The buyer's own reference. This was a card of its own — a
@@ -455,7 +463,7 @@ export default function ProformaFormPage() {
                 that belong with the rest of the document's identity. */}
             <Field label="Buyer PO Number"><Input disabled={readOnly} value={draft.po_number} onChange={(e) => set({ po_number: e.target.value })} placeholder="Customer's PO reference" /></Field>
             <Field label="Buyer PO Date"><Input disabled={readOnly} type="date" value={draft.po_date} onChange={(e) => set({ po_date: e.target.value })} /></Field>
-            <Field label="Bank Account (printed on PI)" className="col-span-full">
+            <Field label="Bank Account (printed on PI) *" className="col-span-full">
               <Select disabled={readOnly}
                 value={draft.bank_account}
                 onChange={(e) => set({ bank_account: e.target.value })}
@@ -496,11 +504,11 @@ export default function ProformaFormPage() {
           </div>
           {!!draft.is_export && (
             <div className={`${gridClass} mb-3`}>
-              <Field label="Country of Origin"><Input disabled={readOnly} value={draft.country_of_origin} onChange={(e) => set({ country_of_origin: e.target.value })} /></Field>
-              <Field label="Port of Loading"><Input disabled={readOnly} value={draft.port_of_loading} onChange={(e) => set({ port_of_loading: e.target.value })} placeholder="e.g. Nhava Sheva" /></Field>
-              <Field label="Port of Discharge"><Input disabled={readOnly} value={draft.port_of_discharge} onChange={(e) => set({ port_of_discharge: e.target.value })} /></Field>
-              <Field label="Final Destination"><Input disabled={readOnly} value={draft.final_destination} onChange={(e) => set({ final_destination: e.target.value })} /></Field>
-              <Field label="Number of Containers"><Input disabled={readOnly} value={draft.container_count} onChange={(e) => set({ container_count: e.target.value })} placeholder="e.g. 2 x 40ft HC" /></Field>
+              <Field label="Country of Origin *"><Input disabled={readOnly} value={draft.country_of_origin} onChange={(e) => set({ country_of_origin: e.target.value })} /></Field>
+              <Field label="Port of Loading *"><Input disabled={readOnly} value={draft.port_of_loading} onChange={(e) => set({ port_of_loading: e.target.value })} placeholder="e.g. Nhava Sheva" /></Field>
+              <Field label="Port of Discharge *"><Input disabled={readOnly} value={draft.port_of_discharge} onChange={(e) => set({ port_of_discharge: e.target.value })} /></Field>
+              <Field label="Final Destination *"><Input disabled={readOnly} value={draft.final_destination} onChange={(e) => set({ final_destination: e.target.value })} /></Field>
+              <Field label="Number of Containers *"><Input disabled={readOnly} value={draft.container_count} onChange={(e) => set({ container_count: e.target.value })} placeholder="e.g. 2 x 40ft HC" /></Field>
               <Field label="Partial Shipment">
                 <Select disabled={readOnly} value={draft.partial_shipment} onChange={(e) => set({ partial_shipment: e.target.value })}>
                   <option>Allowed</option>
@@ -560,7 +568,7 @@ export default function ProformaFormPage() {
 
         {/* Nothing to read and nothing to write: gone, like the empty fields. */}
         <Card
-          title="Remarks"
+          title={readOnly ? 'Remarks' : 'Remarks *'}
           className={readOnly ? 'has-[[data-empty]]:hidden' : ''}
         >
           <Textarea disabled={readOnly} rows={NOTES_ROWS} value={draft.remarks} onChange={(e) => set({ remarks: e.target.value })} placeholder="Any other conditions specific to this customer…" />

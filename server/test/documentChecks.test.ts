@@ -26,6 +26,11 @@ const doc = (table: CheckedDoc['table'], row: Record<string, unknown> = {}, item
     // The quotation's own mandatory fields (2026-09-12), for the same reason.
     validity_date: '2026-09-30', delivery_terms: '4-6 weeks', prepared_by: 'R. Das',
     inco_terms: 'EX-Works', notes: 'Subject to Kolkata jurisdiction.',
+    // And the proforma's (2026-09-12, the same day and the same reason).
+    lead_time: '4 weeks from advance', method_of_despatch: 'By Sea', quantity_tolerance: '(±) 10%',
+    hs_code: '3923', remarks: 'Subject to Kolkata jurisdiction.',
+    country_of_origin: 'India', port_of_loading: 'Kolkata', port_of_discharge: 'Port Louis',
+    final_destination: 'Mauritius', container_count: '1 X 40ft HQ',
     ...row,
   },
   items,
@@ -107,15 +112,23 @@ describe('what deliberately does not stop one', () => {
 });
 
 describe('the warnings each document type carries', () => {
-  test('an export proforma wants its customs header, and refuses without a bank account', () => {
-    const d = doc('proforma_invoices', { is_export: 1, bank_account: '', payment_terms: '' });
+  test('an export invoice wants its customs header and its terms, and only warns', () => {
+    // These three covered the proforma too until 2026-09-12, when every field
+    // there became a block with a name of its own.
+    const d = doc('commercial_invoices', { is_export: 1, payment_terms: '', country_of_origin: '', port_of_loading: '', port_of_discharge: '' });
     assert.deepEqual(keys(d, 'warn'), ['origin', 'payment_terms', 'ports']);
+    assert.deepEqual(keys(d, 'block'), []);
+  });
+
+  test('a proforma refuses without a bank account', () => {
+    const d = doc('proforma_invoices', { is_export: 1, bank_account: '' });
     // Promoted from a warning 2026-09-07 at the client's word: a proforma that
     // does not say which account to pay cannot do the one job it has.
     assert.deepEqual(keys(d, 'block'), ['bank']);
+    assert.deepEqual(keys(d, 'warn'), []);
   });
 
-  test('and stating one satisfies it, leaving only the warnings', () => {
+  test('and stating one satisfies it', () => {
     const d = doc('proforma_invoices', { is_export: 1, bank_account: 'HDFC 50200012345678' });
     assert.deepEqual(keys(d, 'block'), []);
   });
@@ -125,8 +138,8 @@ describe('the warnings each document type carries', () => {
     assert.equal(keys(d).includes('bank'), false);
   });
 
-  test('and a domestic one is not asked about ports', () => {
-    const d = doc('proforma_invoices', { is_export: 0, tax_type: 'igst', bank_account: 'HDFC 001' });
+  test('and a domestic invoice is not asked about ports', () => {
+    const d = doc('commercial_invoices', { is_export: 0, tax_type: 'igst', port_of_loading: '', port_of_discharge: '', country_of_origin: '' });
     assert.deepEqual(keys(d, 'warn'), []);
   });
 
@@ -135,7 +148,7 @@ describe('the warnings each document type carries', () => {
   });
 
   test('the ports message names only the one that is missing', () => {
-    const d = doc('commercial_invoices', { is_export: 1, port_of_loading: 'Kolkata', country_of_origin: 'India' });
+    const d = doc('commercial_invoices', { is_export: 1, port_of_loading: 'Kolkata', port_of_discharge: '', country_of_origin: 'India' });
     const found = evaluate(d).find((f) => f.key === 'ports');
     assert.equal(found?.message, 'No port of discharge stated.');
   });
@@ -325,10 +338,47 @@ describe('the quotation mandatory fields', () => {
     assert.deepEqual(keys(doc('quotations', { is_export: 0, container_count: '' }), 'block'), [], 'a domestic quotation was asked for containers');
   });
 
-  test('the proforma and the invoice are not held to them', () => {
+  test('the proforma and the invoice are not held to the quotation keys', () => {
     for (const table of ['proforma_invoices', 'commercial_invoices'] as const) {
-      const d = doc(table, { validity_date: '', delivery_terms: '', prepared_by: '', inco_terms: '', notes: '' });
+      const d = doc(table, { delivery_terms: '', notes: '' });
       assert.deepEqual(keys(d, 'block'), [], table);
     }
+  });
+});
+
+/**
+ * And the proforma's (the client, 2026-09-12): everything on the form but the
+ * buyer's PO, the consignee and the two notify parties.
+ */
+describe('the proforma mandatory fields', () => {
+  const always: [string, string][] = [
+    ['validity_date', 'pi_validity'], ['lead_time', 'pi_lead_time'], ['payment_terms', 'pi_payment_terms'],
+    ['inco_terms', 'pi_inco'], ['method_of_despatch', 'pi_method'], ['quantity_tolerance', 'pi_tolerance'],
+    ['hs_code', 'pi_hs_code'], ['prepared_by', 'pi_prepared_by'], ['remarks', 'pi_remarks'],
+  ];
+  const exportOnly: [string, string][] = [
+    ['country_of_origin', 'pi_origin'], ['port_of_loading', 'pi_port_of_loading'],
+    ['port_of_discharge', 'pi_port_of_discharge'], ['final_destination', 'pi_final_destination'],
+    ['container_count', 'pi_containers'],
+  ];
+  test('each blank field blocks the proforma by name, on either type', () => {
+    for (const [field, key] of always) {
+      assert.deepEqual(keys(doc('proforma_invoices', { [field]: '' }), 'block'), [key], `blank ${field}`);
+      assert.deepEqual(keys(doc('proforma_invoices', { is_export: 1, [field]: '' }), 'block'), [key], `blank ${field} on an export`);
+    }
+  });
+  test('the customs fields on an export only', () => {
+    for (const [field, key] of exportOnly) {
+      assert.deepEqual(keys(doc('proforma_invoices', { is_export: 1, [field]: '' }), 'block'), [key], `blank ${field}`);
+      assert.deepEqual(keys(doc('proforma_invoices', { is_export: 0, tax_type: 'igst', [field]: '' }), 'block'), [], `a domestic proforma was asked for ${field}`);
+    }
+  });
+  test('the four exemptions block nothing', () => {
+    const d = doc('proforma_invoices', { is_export: 1, po_number: '', po_date: '', consignee: '', notify_party: '', notify_party_2: '' });
+    assert.deepEqual(keys(d, 'block'), []);
+  });
+  test('the invoice is not held to them', () => {
+    const all = Object.fromEntries([...always, ...exportOnly].map(([f]) => [f, '']));
+    assert.deepEqual(keys(doc('commercial_invoices', { is_export: 1, ...all }), 'block'), []);
   });
 });
