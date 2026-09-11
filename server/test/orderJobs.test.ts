@@ -52,10 +52,23 @@ describe('one job per goods line, on booking', () => {
     assert.deepEqual(live(o).map((j) => [j.order_line, j.qty_planned, j.description]), [[0, 120000, 'Cap'], [2, 40000, 'Handle']]);
   });
 
-  test('a line with no pieces stated plans at its billed quantity', () => {
-    const o = order([{ qty: 850, pcs: null, desc: 'Forgings, by weight' }]);
+  /** The live-book case: `137.5 per 1000` with no boxes typed is 137,500 pieces, not 137.5. */
+  test('a per-1000 line with no packing figures plans at its quantity in pieces', () => {
+    const o = order([{ qty: 137.5, pcs: null, desc: 'Preforms 48 mm' }]);
     syncOrderJobs(o, null);
-    assert.equal(live(o)[0].qty_planned, 850);
+    assert.equal(live(o)[0].qty_planned, 137500);
+  });
+
+  test('the boot pass corrects an untouched job planned under the old reading, and raises nothing for an order that has cancelled its own', () => {
+    const o = order([{ qty: 137.5, pcs: null }]);
+    syncOrderJobs(o, null);
+    db.prepare('UPDATE work_orders SET qty_planned = 137.5 WHERE order_id = ?').run(o);   // as the old rule left it
+    const declined = order([{ pcs: 1000 }]);
+    syncOrderJobs(declined, null);
+    db.prepare("UPDATE work_orders SET status = 'cancelled' WHERE order_id = ?").run(declined);
+    raiseJobsForOpenOrders();
+    assert.equal(live(o)[0].qty_planned, 137500, 'the boot pass left the mis-planned job alone');
+    assert.equal(live(declined).length, 0, 'a deliberately cancelled job was re-raised');
   });
 
   test('the job carries the line\'s product', () => {

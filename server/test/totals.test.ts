@@ -1,7 +1,8 @@
 import './helpers/scratch.js';
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { computeTotals, billedQty, round2 } from '../src/services/totals.js';
+import { computeTotals, billedQty, round2, piecesOrdered, PIECES_ORDERED_SQL } from '../src/services/totals.js';
+import { db } from '../src/db/connection.js';
 
 /**
  * `computeTotals` is the only place money is worked out, so it is the place
@@ -140,5 +141,34 @@ describe('computeTotals', () => {
   test('stored amounts are recomputed, never taken from the caller', () => {
     const t = computeTotals([goods({ amount: 999999 } as never)], 'igst');
     assert.equal(t.items[0].amount, 2000, 'a client-sent amount must never survive');
+  });
+});
+
+/**
+ * How many pieces a line orders. The bug this guards against was found on the
+ * live book: a per-1000 line entered as `137.5` with no boxes typed got a job
+ * for 137.5 pieces. The SQL twin is what the paged order book reads, and the
+ * two are run over the same rows so they cannot quietly disagree.
+ */
+describe('piecesOrdered', () => {
+  const cases: { qty: number | null; unit: string; total_pcs: number | null; want: number }[] = [
+    { qty: 137.5, unit: 'per 1000', total_pcs: null, want: 137500 },
+    { qty: 137.5, unit: 'per 1000', total_pcs: 120000, want: 120000 },   // the packing count wins
+    { qty: 2000, unit: 'unit', total_pcs: null, want: 2000 },
+    { qty: 850, unit: 'kg', total_pcs: null, want: 850 },                // not pieces, and not pretended to be
+    { qty: 850, unit: 'kg', total_pcs: 4050, want: 4050 },
+    { qty: null, unit: 'per 1000', total_pcs: null, want: 0 },
+  ];
+  test('converts a per-1000 quantity, takes the packing count first', () => {
+    for (const c of cases) assert.equal(piecesOrdered(c), c.want, JSON.stringify(c));
+  });
+  test('the SQL twin agrees on every case', () => {
+    db.exec('CREATE TEMP TABLE IF NOT EXISTS po_probe (qty REAL, unit TEXT, total_pcs REAL)');
+    for (const c of cases) {
+      db.prepare('DELETE FROM po_probe').run();
+      db.prepare('INSERT INTO po_probe (qty, unit, total_pcs) VALUES (?, ?, ?)').run(c.qty, c.unit, c.total_pcs);
+      const got = (db.prepare(`SELECT ${PIECES_ORDERED_SQL('l')} AS v FROM po_probe l`).get() as { v: number }).v;
+      assert.equal(Number(got), c.want, JSON.stringify(c));
+    }
   });
 });

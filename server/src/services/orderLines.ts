@@ -1,5 +1,6 @@
 import { db } from '../db/connection.js';
 import { fgOnHandByProduct } from './finishedGoods.js';
+import { PIECES_ORDERED_SQL } from './totals.js';
 import { searchClause } from './search.js';
 import { countOf } from './pagination.js';
 import { round2 } from './totals.js';
@@ -102,7 +103,7 @@ const SQL = `
     u.name AS created_by_name,
     o.is_export, o.status AS order_status, o.currency, o.port_of_discharge,
     l.pos AS order_line, l.product_id, l.description, l.code, l.color, l.unit,
-    COALESCE(l.total_pcs, l.qty, 0) AS ordered,
+    ${PIECES_ORDERED_SQL('l')} AS ordered,
     l.qty AS billing_qty,
     l.amount,
     COALESCE((

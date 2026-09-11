@@ -2,6 +2,7 @@ import { db } from '../db/connection.js';
 import { nextNumber } from './numbering.js';
 import { resolveCompanyId } from './companies.js';
 import { snapshotRecipe } from './recipe.js';
+import { piecesOrdered } from './totals.js';
 
 /**
  * The sales order owns its work orders (2026-09-11, at the client's word).
@@ -88,9 +89,8 @@ export function insertJob(order: OrderRef, body: Record<string, unknown>, userId
   return id;
 }
 
-/** What a line asks to be made: pieces where stated, else the billed quantity. */
-const target = (it: { total_pcs: number | null; qty: number | null }) =>
-  Number(it.total_pcs ?? it.qty) || 0;
+/** What a line asks to be made, in pieces — `piecesOrdered`'s rule, which converts a per-1000 quantity. */
+const target = (it: { total_pcs: number | null; qty: number | null; unit: string }) => piecesOrdered(it);
 
 export interface JobSync { raised: number[]; adjusted: number[]; cancelled: number[] }
 
@@ -99,7 +99,8 @@ export interface JobSync { raised: number[]; adjusted: number[]; cancelled: numb
  * call with nothing changed does nothing, which is what lets it run on every
  * save rather than only the first.
  */
-export function syncOrderJobs(orderId: number, userId: number | null): JobSync {
+export function syncOrderJobs(orderId: number, userId: number | null, opts: { raise?: boolean } = {}): JobSync {
+  const mayRaise = opts.raise !== false;
   const order = db.prepare('SELECT id, customer_id, company_id, status FROM orders WHERE id = ?')
     .get(orderId) as (OrderRef & { status: string }) | undefined;
   const out: JobSync = { raised: [], adjusted: [], cancelled: [] };
@@ -108,11 +109,11 @@ export function syncOrderJobs(orderId: number, userId: number | null): JobSync {
   // Positions count charge lines — the chain's index rule — so the position
   // is taken over every line and charges are skipped afterwards.
   const lines = (db.prepare(
-    `SELECT oi.product_id, oi.description, oi.qty, oi.total_pcs, oi.is_charge,
+    `SELECT oi.product_id, oi.description, oi.qty, oi.unit, oi.total_pcs, oi.is_charge,
             COALESCE(p.made_here, 1) AS made_here
        FROM order_items oi LEFT JOIN products p ON p.id = oi.product_id
       WHERE oi.order_id = ? ORDER BY oi.sort_order, oi.id`
-  ).all(orderId) as { product_id: number | null; description: string; qty: number | null; total_pcs: number | null; is_charge: number; made_here: number }[])
+  ).all(orderId) as { product_id: number | null; description: string; qty: number | null; unit: string; total_pcs: number | null; is_charge: number; made_here: number }[])
     .map((it, line) => ({ ...it, line }));
 
   const jobs = db.prepare(
@@ -140,6 +141,7 @@ export function syncOrderJobs(orderId: number, userId: number | null): JobSync {
       continue;
     }
     if (!mine.length) {
+      if (!mayRaise) continue;
       out.raised.push(insertJob(order, {
         order_line: it.line, product_id: it.product_id, description: it.description, qty_planned: target(it),
       }, userId));
@@ -169,14 +171,32 @@ export function syncOrderJobs(orderId: number, userId: number | null): JobSync {
  * Orders already cancelled or completed are left alone: nothing to make.
  */
 export function raiseJobsForOpenOrders(): number {
-  const ids = db.prepare(
-    `SELECT o.id FROM orders o
-      WHERE o.status NOT IN ('cancelled', 'completed')
-        AND NOT EXISTS (SELECT 1 FROM work_orders w WHERE w.order_id = o.id)`
-  ).all() as { id: number }[];
+  /*
+   * Every open order, not only the jobless: `syncOrderJobs` is idempotent and
+   * touches nothing the floor has acted on, so running it over the whole open
+   * book on boot costs nothing on a book already in step — and it is what
+   * corrected the jobs planned at 137.5 pieces when the pieces rule was fixed
+   * (2026-09-12): an untouched job follows its line's figure, and the line's
+   * figure had been wrong. A job Production cancelled stays cancelled: the
+   * sync counts cancelled jobs as absent for planning but the *raise* below
+   * is skipped for any order that has ever had one, so a deliberate cancel is
+   * not undone by the next boot.
+   */
+  const orders = db.prepare(
+    `SELECT o.id,
+            EXISTS (SELECT 1 FROM work_orders w WHERE w.order_id = o.id) AS has_any
+       FROM orders o WHERE o.status NOT IN ('cancelled', 'completed')`
+  ).all() as { id: number; has_any: number }[];
   let raised = 0;
-  for (const { id } of ids) raised += syncOrderJobs(id, null).raised.length;
-  if (raised) console.log(`Raised ${raised} work order${raised === 1 ? '' : 's'} for ${ids.length} sales order${ids.length === 1 ? '' : 's'} booked before orders raised their own.`);
+  let adjusted = 0;
+  for (const { id, has_any } of orders) {
+    const r = syncOrderJobs(id, null, { raise: !has_any });
+    raised += r.raised.length;
+    adjusted += r.adjusted.length;
+  }
+  if (raised || adjusted) {
+    console.log(`Sales orders on boot: raised ${raised} work order${raised === 1 ? '' : 's'}, corrected ${adjusted} untouched planned figure${adjusted === 1 ? '' : 's'}.`);
+  }
   return raised;
 }
 

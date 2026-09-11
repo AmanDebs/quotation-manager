@@ -59,6 +59,33 @@ const PIECES_PER_BILLING_UNIT: Record<string, number> = { 'per 1000': 1000, unit
 export const piecesPerBillingUnit = (unit: string | undefined | null): number | null =>
   PIECES_PER_BILLING_UNIT[unit ?? ''] ?? null;
 
+/**
+ * How many pieces a line orders — the figure a job is planned at and the order
+ * book measures *made* against.
+ *
+ * The packing count where it is stated; else the billed quantity **converted
+ * by its basis** — a line entered as `137.5 per 1000` with no boxes typed is
+ * 137,500 pieces, not 137.5. Reading `total_pcs ?? qty` was the bug found on
+ * the live book (2026-09-12): every per-1000 line entered without packing
+ * figures got a job for a few hundred pieces, and the order's *all made* rung
+ * read the same way. A line on a weight basis with no piece count falls back
+ * to its billed quantity as before, which is not pieces and is not pretended
+ * to be — it is what those lines have always been measured in here.
+ *
+ * `PIECES_ORDERED_SQL` is this restated for the order-book query, which is
+ * paged and cannot derive after the fetch; `totals.test.ts` runs both over the
+ * same rows and asserts they agree.
+ */
+export function piecesOrdered(it: Pick<LineItemInput, 'qty' | 'unit' | 'total_pcs'>): number {
+  if (it.total_pcs != null) return Number(it.total_pcs) || 0;
+  if (it.qty == null) return 0;
+  const per = piecesPerBillingUnit(it.unit);
+  return (per != null ? Number(it.qty) * per : Number(it.qty)) || 0;
+}
+
+export const PIECES_ORDERED_SQL = (l: string) =>
+  `COALESCE(${l}.total_pcs, CASE ${l}.unit WHEN 'per 1000' THEN ${l}.qty * 1000 WHEN 'unit' THEN ${l}.qty ELSE ${l}.qty END, 0)`;
+
 /** True when the rate is quoted against a piece count, so Total Qty is pieces. */
 export const isPieceBasis = (unit: string | undefined | null): boolean =>
   piecesPerBillingUnit(unit) != null;

@@ -1,5 +1,6 @@
 import { db } from '../db/connection.js';
 import { returnedQtyByLine } from './creditNotes.js';
+import { piecesOrdered } from './totals.js';
 import { productionByOrder } from './production.js';
 
 /**
@@ -81,8 +82,8 @@ export function impliedStatus(orderId: number): StatusFacts {
     { status: string } | undefined;
   if (!order || order.status === 'cancelled') return { implied: null, reason: '' };
 
-  const items = db.prepare('SELECT total_pcs, qty, is_charge FROM order_items WHERE order_id = ? ORDER BY sort_order, id')
-    .all(orderId) as { total_pcs: number | null; qty: number | null; is_charge: number }[];
+  const items = db.prepare('SELECT total_pcs, qty, unit, is_charge FROM order_items WHERE order_id = ? ORDER BY sort_order, id')
+    .all(orderId) as { total_pcs: number | null; qty: number | null; unit: string; is_charge: number }[];
 
   // Invoiced value first: it is the strongest claim, and the existing
   // dispatchProgress walk already owns "how much has been billed".
@@ -121,7 +122,9 @@ export function impliedStatus(orderId: number): StatusFacts {
   // states a quantity. A price-only line cannot be "complete".
   const allMade = goods.length > 0
     && goods.every((it) => {
-      const target = it.total_pcs ?? it.qty;
+      // In pieces, by the one rule: a per-1000 line entered without packing
+      // figures used to read as a few hundred pieces and go "all made" at once.
+      const target = piecesOrdered(it);
       if (!target) return false;
       return (production.get(it.line)?.produced ?? 0) >= target;
     });

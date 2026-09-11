@@ -91,7 +91,7 @@ export default function WorkOrdersPage() {
   if (location) query.set('location_id', location);
   if (openOnly && !status) query.set('open', '1');
 
-  const list = usePagedList<WorkOrder, { jobs: number; planned: number; made: number }>(['work-orders', 'all', query.toString()], `/api/work-orders?${query.toString()}`);
+  const list = usePagedList<WorkOrder, { jobs: number; unplanned?: number; planned: number; made: number }>(['work-orders', 'all', query.toString()], `/api/work-orders?${query.toString()}`);
   const jobs = list.rows;
   const { data: locations = [] } = useQuery({ queryKey: ['master', 'locations', false], queryFn: () => api.get<Location[]>('/api/locations') });
   const { data: machines = [] } = useQuery({ queryKey: ['master', 'machines', false], queryFn: () => api.get<Machine[]>('/api/machines') });
@@ -100,6 +100,10 @@ export default function WorkOrdersPage() {
   // routes/workOrders.ts. Adding up the rows to hand would answer a different
   // question in exactly the same words.
   const summary = list.summary ?? { jobs: jobs.length, planned: 0, made: 0 };
+  // Over the whole filtered set, not the page: a queue counted over the page in
+  // hand would shrink as you paged through it. Optional for a server not yet
+  // redeployed, which simply shows no chip.
+  const unplanned = summary.unplanned ?? 0;
 
   return (
     <div>
@@ -133,6 +137,17 @@ export default function WorkOrdersPage() {
         <span className="ml-auto text-sm text-slate-500">
           {summary.jobs} job{summary.jobs === 1 ? '' : 's'} · {fmtQty(summary.made)} of {fmtQty(summary.planned)} pcs made
         </span>
+        {/* The queue: jobs the order raised that nobody has planned yet. A
+            filter, not a count of its own — it links to exactly what it says. */}
+        {!status && unplanned > 0 && (
+          <button
+            className="rounded-md bg-amber-50 px-2 py-1 text-xs text-amber-800 ring-1 ring-amber-200 hover:bg-amber-100"
+            onClick={() => setStatus('planned')}
+            title="Show only the jobs still to plan"
+          >
+            {unplanned} not planned
+          </button>
+        )}
         {mayPlan && (
           <Button
             disabled={ticked.size === 0}
@@ -176,6 +191,7 @@ export default function WorkOrdersPage() {
                 <th className="pb-2 pr-3">Sales Order</th>
                 <th className="pb-2 pr-3">Customer</th>
                 <th className="pb-2 pr-3">Item</th>
+                <th className="pb-2 pr-3">Plant</th>
                 <th className="pb-2 pr-3">Machine</th>
                 <th className="pb-2 pr-3">Planned</th>
                 <th className="pb-2 pr-3 text-right">Pcs</th>
@@ -200,19 +216,18 @@ export default function WorkOrdersPage() {
                         />
                       </td>
                     )}
-                    <td className="py-2 pr-3 font-medium">
+                    {/* A document number is one word; split across two lines it reads as two. */}
+                    <td className="whitespace-nowrap py-2 pr-3 font-medium">
                       <Link to={`/work-orders/${w.id}`} className="text-brand-600 hover:underline">{w.number}</Link>
                     </td>
-                    <td className="py-2 pr-3">
+                    <td className="whitespace-nowrap py-2 pr-3">
                       <Link to={`/orders/${w.order_id}`} className="text-brand-600 hover:underline">{w.order_number}</Link>
                     </td>
                     <td className="py-2 pr-3">{w.customer_name}</td>
                     <td className="py-2 pr-3">{w.description || w.product_name || '—'}</td>
-                    <td className="py-2 pr-3 text-xs text-slate-500">
-                      {w.machine_name || '—'}
-                      {w.location_name && <div className="text-slate-400">{w.location_name}</div>}
-                    </td>
-                    <td className={`py-2 pr-3 text-xs ${late ? 'font-medium text-red-600' : 'text-slate-500'}`}>
+                    <td className="py-2 pr-3 text-xs text-slate-500">{w.location_name || '—'}</td>
+                    <td className="py-2 pr-3 text-xs text-slate-500">{w.machine_name || '—'}</td>
+                    <td className={`whitespace-nowrap py-2 pr-3 text-xs ${late ? 'font-medium text-red-600' : 'text-slate-500'}`}>
                       {w.planned_start || w.planned_end
                         ? `${w.planned_start ? fmtDate(w.planned_start) : '?'} → ${w.planned_end ? fmtDate(w.planned_end) : '?'}`
                         : '—'}
@@ -221,14 +236,19 @@ export default function WorkOrdersPage() {
                     <td className="py-2 pr-3 text-right tabular-nums">{fmtQty(w.qty_planned)}</td>
                     <td className="py-2 pr-3 text-right tabular-nums">
                       {fmtQty(w.progress?.produced ?? 0)}
-                      {w.qty_planned > 0 && (
-                        <div className="text-xs text-slate-400">
-                          {Math.round(((w.progress?.produced ?? 0) / w.qty_planned) * 100)}%
-                        </div>
-                      )}
+                      {w.qty_planned > 0 && (() => {
+                        const pct = Math.round(((w.progress?.produced ?? 0) / w.qty_planned) * 100);
+                        // Past the plan is a fact worth a colour: the figure is
+                        // right, and it is the plan that is now wrong.
+                        return (
+                          <div className={`text-xs ${pct > 100 ? 'font-medium text-amber-700' : 'text-slate-400'}`} title={pct > 100 ? 'More made than planned — the plan is behind the floor' : undefined}>
+                            {pct}%{pct > 100 ? ' over' : ''}
+                          </div>
+                        );
+                      })()}
                     </td>
                     <td className="py-2 pr-3">
-                      <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${workOrderStatusStyle[w.status]}`}>
+                      <span className={`inline-block whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ${workOrderStatusStyle[w.status]}`}>
                         {workOrderStatusLabel(w.status)}
                       </span>
                     </td>

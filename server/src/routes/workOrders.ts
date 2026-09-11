@@ -128,10 +128,13 @@ function jobSummary(sql: string, params: unknown[]) {
   return db.prepare(
     `WITH f AS (${sql})
      SELECT (SELECT COUNT(*) FROM f) AS jobs,
+            -- Still to plan, over the whole filtered set: the chip that names
+            -- the queue must not count the page in hand.
+            (SELECT COUNT(*) FROM f WHERE status = 'planned') AS unplanned,
             COALESCE((SELECT SUM(qty_planned) FROM f), 0) AS planned,
             COALESCE((SELECT SUM(${LIVE_OK('e')}) FROM production_entries e
                        WHERE e.work_order_id IN (SELECT id FROM f)), 0) AS made`
-  ).get(...(params as never[])) as { jobs: number; planned: number; made: number };
+  ).get(...(params as never[])) as { jobs: number; unplanned: number; planned: number; made: number };
 }
 
 workOrdersRouter.get('/', requirePermission('work_order'), (req: AuthedRequest, res) => {
