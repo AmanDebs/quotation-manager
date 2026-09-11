@@ -3,7 +3,9 @@ import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { WorkOrder, WorkOrderStatus, Location, Machine } from '../types';
-import { PageHeader, Card, Select, EmptyState, Pagination, TH_CLASS } from '../components/ui';
+import { PageHeader, Card, Select, Button, EmptyState, Pagination, TH_CLASS } from '../components/ui';
+import PlanJobsModal from '../components/PlanJobsModal';
+import { useCan } from '../App';
 import { fmtQty, fmtDate } from '../lib/format';
 import { useUrlFilter } from '../lib/useUrlFilter';
 import { usePagedList, PAGE_SIZE } from '../lib/usePagedList';
@@ -66,6 +68,22 @@ export default function WorkOrdersPage() {
   const [machine, setMachine] = useState('');
   const [location, setLocation] = useState('');
   const [openOnly, setOpenOnly] = useState(true);
+  const can = useCan();
+  /*
+   * The planning step: tick jobs, press Plan. Selection is by id and lives
+   * only on this page — it is not in the URL, since a half-ticked set is not
+   * a view anybody bookmarks. Closed jobs cannot be ticked; the server refuses
+   * them by name anyway, and a box that cannot be ticked says so sooner.
+   */
+  const [ticked, setTicked] = useState<Set<number>>(new Set());
+  const [planning, setPlanning] = useState(false);
+  const mayPlan = can('work_order', 'full');
+  const plannable = (w: WorkOrder) => !['done', 'cancelled'].includes(w.status);
+  const toggle = (id: number, on: boolean) => setTicked((t) => {
+    const next = new Set(t);
+    if (on) next.add(id); else next.delete(id);
+    return next;
+  });
 
   const query = new URLSearchParams();
   if (status) query.set('status', status);
@@ -115,15 +133,45 @@ export default function WorkOrdersPage() {
         <span className="ml-auto text-sm text-slate-500">
           {summary.jobs} job{summary.jobs === 1 ? '' : 's'} · {fmtQty(summary.made)} of {fmtQty(summary.planned)} pcs made
         </span>
+        {mayPlan && (
+          <Button
+            disabled={ticked.size === 0}
+            onClick={() => setPlanning(true)}
+            title={ticked.size ? undefined : 'Tick the jobs to plan first'}
+          >
+            Plan {ticked.size || ''} job{ticked.size === 1 ? '' : 's'}…
+          </Button>
+        )}
       </div>
+      {planning && (
+        <PlanJobsModal
+          jobs={jobs.filter((w) => ticked.has(w.id))}
+          onClose={() => setPlanning(false)}
+          onPlanned={() => { setPlanning(false); setTicked(new Set()); }}
+        />
+      )}
 
       <Card className="overflow-x-auto">
         {jobs.length === 0 ? (
-          <EmptyState message="No work orders match. Raise one from an order's Production tab." />
+          <EmptyState message="No work orders match. A sales order raises its jobs when it is booked." />
         ) : (
           <table className="w-full text-sm">
             <thead>
               <tr className={TH_CLASS}>
+                {mayPlan && (
+                  <th className="pb-2 pr-2">
+                    <input
+                      type="checkbox"
+                      title="Tick every job on this page that can be planned"
+                      checked={jobs.some(plannable) && jobs.filter(plannable).every((w) => ticked.has(w.id))}
+                      onChange={(e) => setTicked((t) => {
+                        const next = new Set(t);
+                        for (const w of jobs.filter(plannable)) { if (e.target.checked) next.add(w.id); else next.delete(w.id); }
+                        return next;
+                      })}
+                    />
+                  </th>
+                )}
                 <th className="pb-2 pr-3">Job</th>
                 <th className="pb-2 pr-3">Sales Order</th>
                 <th className="pb-2 pr-3">Customer</th>
@@ -141,7 +189,17 @@ export default function WorkOrdersPage() {
                 const late = !!w.planned_end && w.planned_end < todayIso
                   && !['done', 'cancelled'].includes(w.status);
                 return (
-                  <tr key={w.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50">
+                  <tr key={w.id} className={`border-b border-slate-100 last:border-0 hover:bg-slate-50 ${ticked.has(w.id) ? 'bg-brand-50' : ''}`}>
+                    {mayPlan && (
+                      <td className="py-2 pr-2">
+                        <input
+                          type="checkbox"
+                          checked={ticked.has(w.id)}
+                          disabled={!plannable(w)}
+                          onChange={(e) => toggle(w.id, e.target.checked)}
+                        />
+                      </td>
+                    )}
                     <td className="py-2 pr-3 font-medium">
                       <Link to={`/work-orders/${w.id}`} className="text-brand-600 hover:underline">{w.number}</Link>
                     </td>

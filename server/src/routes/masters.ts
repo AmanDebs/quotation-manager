@@ -233,7 +233,10 @@ export const MASTERS: MasterConfig[] = [
       { name: 'name', kind: 'text', required: true },
       { name: 'code', kind: 'text' },
       { name: 'location_id', kind: 'int' },
-      { name: 'type', kind: 'text' },
+      // Validated against the column's own CHECK, like materials.category —
+      // found by an API call that sent no type and got a 500 for it. The
+      // fallback is the column's default, so an omitted type lands there.
+      { name: 'type', kind: 'text', oneOf: ['moulding', 'assembly', 'other'], fallback: 'moulding' },
       { name: 'notes', kind: 'text' },
       activeFlag,
     ],

@@ -307,6 +307,72 @@ workOrdersRouter.get('/:id', requirePermission('work_order'), (req: AuthedReques
  *
  * `POST /bulk` went with the Production tab it served — see that file.
  */
+/**
+ * Plan several jobs at once: machine, mould, process, plant, dates — and
+ * release them, which is what moves them *Not planned → Scheduled*.
+ *
+ * The step the order-raised job created a need for (2026-09-11): every job now
+ * arrives with nothing set, and filling six of them in one at a time on the
+ * job page was the day's chore. This is one press over a ticked set on the
+ * Work Orders list.
+ *
+ * **A field omitted is left alone; a field sent blank clears it** — the
+ * despatch `batch_ids` contract. So planning the mould on four jobs does not
+ * wipe the machine two of them already had, and clearing a date is a thing
+ * somebody can actually do. `release` is separate from the fields because it
+ * is a different act: setting a machine says where, releasing says go. A job
+ * that is already past `planned` is never moved back by this — releasing a
+ * running job is a no-op, not a demotion.
+ *
+ * One request, one transaction: six jobs planned is one act, and six separate
+ * PUTs would leave half a shift planned when the fourth failed. Every job is
+ * checked for scope before anything is written. Cancelled and completed jobs
+ * are refused by name rather than silently skipped: a plan that quietly left
+ * one out reads as success.
+ *
+ * `work_order: full`, like editing a job — Production and the super admin.
+ */
+workOrdersRouter.post('/plan', requirePermission('work_order', 'full'), (req: AuthedRequest, res) => {
+  const body = req.body ?? {};
+  const ids = [...new Set((Array.isArray(body.ids) ? body.ids : []).map(Number).filter((n: number) => Number.isInteger(n) && n > 0))] as number[];
+  if (!ids.length) return res.status(400).json({ error: 'Tick at least one job to plan' });
+
+  const jobs = ids.map((id) => accessible(req, id));
+  const missing = jobs.findIndex((j) => !j);
+  if (missing >= 0) return res.status(404).json({ error: 'Work order not found' });
+  const closed = (jobs as Record<string, unknown>[]).filter((j) => ['done', 'cancelled'].includes(String(j.status)));
+  if (closed.length) {
+    return res.status(409).json({
+      error: `${closed.map((j) => j.number).join(', ')} ${closed.length === 1 ? 'is' : 'are'} already ${closed.length === 1 ? String(closed[0].status) === 'done' ? 'completed' : 'cancelled' : 'completed or cancelled'} and cannot be planned.`,
+    });
+  }
+
+  // Only what was sent is written. `undefined` means "not in the body".
+  const sets: string[] = [];
+  const params: unknown[] = [];
+  for (const f of ['location_id', 'machine_id', 'mould_id', 'process_id'] as const) {
+    if (f in body) { sets.push(`${f} = ?`); params.push(numOrNull(body[f])); }
+  }
+  for (const f of ['planned_start', 'planned_end'] as const) {
+    if (f in body) { sets.push(`${f} = ?`); params.push(String(body[f] ?? '')); }
+  }
+  const release = body.release === true;
+  if (!sets.length && !release) return res.status(400).json({ error: 'Nothing to plan: send at least one field, or release' });
+
+  transaction(() => {
+    if (sets.length) {
+      const upd = db.prepare(`UPDATE work_orders SET ${sets.join(', ')} WHERE id = ?`);
+      for (const id of ids) upd.run(...(params as never[]), id);
+    }
+    // Forward only: a job already released, running or paused stays where it is.
+    if (release) db.prepare(`UPDATE work_orders SET status = 'released' WHERE id IN (${ids.map(() => '?').join(',')}) AND status = 'planned'`).run(...ids);
+  });
+  // A start date or a release is what schedules the order, so every order
+  // touched is asked again — once each, however many of its jobs were ticked.
+  for (const orderId of new Set((jobs as Record<string, unknown>[]).map((j) => Number(j.order_id)))) syncOrderStatus(orderId);
+  res.json({ planned: ids.length, jobs: ids.map((id) => getFull(req, id)) });
+});
+
 workOrdersRouter.post('/', requirePermission('work_order', 'full'), (req: AuthedRequest, res) => {
   const body = req.body ?? {};
   const order = db.prepare('SELECT id, customer_id, company_id FROM orders WHERE id = ?')
