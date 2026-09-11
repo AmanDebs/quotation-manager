@@ -121,14 +121,21 @@ export const PAYMENT_TERMS_EXPORT: Suggestion[] = [
  * second copy of the answer to drift from the one that prints.
  */
 const JOIN = '; ';
+const NL = String.fromCharCode(10);
 const partsOf = (v: string) => v.split(';').map((s) => s.trim()).filter(Boolean);
 
 function SuggestInput({
-  options, value, onChange, disabled, placeholder, label, multiple,
+  options, value, onChange, onPick, disabled, placeholder, label, multiple,
 }: {
   options: Suggestion[];
   value: string;
   onChange: (v: string) => void;
+  /**
+   * Called with the suggestion itself when one is picked (single-select
+   * only), *after* `onChange` — for a caller whose pick fills more than this
+   * one box, the delivery party's case. Typing never calls it.
+   */
+  onPick?: (s: Suggestion) => void;
   disabled?: boolean;
   placeholder?: string;
   /** What the chevron announces to a screen reader. */
@@ -166,6 +173,7 @@ function SuggestInput({
   const pick = (t: Suggestion) => {
     if (!multiple) {
       onChange(t.value);
+      onPick?.(t);
       setOpen(false);
       return;
     }
@@ -415,12 +423,26 @@ const billingAddress = (c?: { name: string; address: string; city: string; gstin
  * be corrected on the customer record later — and the echo shows the same
  * thing without the staleness.
  */
+/** What the delivery-name picker needs of a customer row. */
+export interface DeliveryParty { id: number; name: string; address: string; city: string; gstin: string }
+
 export function ShipToFields({
-  isExport, value, buyer, notify1, notify2, onChange, disabled, gridClass,
+  isExport, value, buyer, customers = [], notify1, notify2, onChange, disabled, gridClass,
 }: {
   isExport: boolean;
   value: ShipTo;
-  buyer?: { name: string; address: string; city: string; gstin: string };
+  buyer?: DeliveryParty;
+  /**
+   * The customer book, offered on Delivery Name (asked for 2026-09-12): the
+   * party goods are delivered to is very often another customer on file — a
+   * buyer's depot, a sister concern, a consignee they sell on to — and
+   * picking one fills the address and the GSTIN from the record rather than
+   * having them typed a second time. The box stays free text, because it is
+   * also regularly a warehouse or a job-worker that is no customer of ours.
+   * The buyer is left out of the list: delivering to the buyer is what the
+   * tick above already says.
+   */
+  customers?: DeliveryParty[];
   notify1: string;
   notify2: string;
   onChange: (patch: Partial<ShipTo & { notify_party: string; notify_party_2: string }>) => void;
@@ -487,7 +509,23 @@ export function ShipToFields({
       ) : (
         <div className={`${gridClass} mt-3`}>
           <Field label="Delivery Name">
-            <Input disabled={disabled} value={value.ship_to_name} onChange={(e) => onChange({ ship_to_name: e.target.value })} placeholder="Who receives the goods" />
+            <SuggestInput
+              options={customers
+                .filter((c) => c.id !== buyer?.id)
+                .map((c) => ({ value: c.name, label: c.city ? `${c.name} · ${c.city}` : c.name }))}
+              value={value.ship_to_name}
+              onChange={(v) => onChange({ ship_to_name: v })}
+              // A pick fills all three from the record; the boxes stay
+              // editable, since a customer's delivery address is not
+              // always their registered one.
+              onPick={(s) => {
+                const c = customers.find((x) => x.name === s.value);
+                if (c) onChange({ ship_to_name: c.name, consignee: [c.address, c.city].filter(Boolean).join(NL), ship_to_gstin: c.gstin });
+              }}
+              disabled={disabled}
+              label="Show customers"
+              placeholder="Who receives the goods — pick a customer, or type"
+            />
           </Field>
           <Field label="Delivery Address">
             <Textarea disabled={disabled} rows={2} value={value.consignee} onChange={(e) => onChange({ consignee: e.target.value })} />

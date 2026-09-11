@@ -522,6 +522,7 @@ export default function ProformaFormPage() {
             isExport={!!draft.is_export}
             value={{ consignee: draft.consignee, ship_to_name: draft.ship_to_name, ship_to_gstin: draft.ship_to_gstin }}
             buyer={customers.find((x) => x.id === draft.customer_id)}
+            customers={customers}
             notify1={draft.notify_party}
             notify2={draft.notify_party_2}
             onChange={(patch) => set(patch)}
