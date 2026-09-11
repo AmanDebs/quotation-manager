@@ -71,7 +71,7 @@ export default function PackingListFormPage() {
     }
   }, [isNew, fromInvoice, prefilled]);
 
-  const { markSaved, isDirty, prompt } = useUnsavedChanges(draft, {
+  const { markSaved, pdf, prompt } = useUnsavedChanges(draft, {
     // Deferred, so the mutation declared just below is initialised by the
     // time the dialog can call it. Same condition as the page's Save button.
     run: () => save.mutateAsync(draft),
@@ -117,7 +117,7 @@ export default function PackingListFormPage() {
         subtitle={isNew ? (fromInvoice ? 'Pre-filled from invoice — add packages, dimensions and weights' : undefined) : existing!.customer_name}
         actions={
           !isNew && (
-            <PdfLink href={`/api/pdf/packing-list/${id}`} isDirty={isDirty}><Button variant="secondary">📄 PDF</Button></PdfLink>
+            <PdfLink href={`/api/pdf/packing-list/${id}`} guard={pdf}><Button variant="secondary">📄 PDF</Button></PdfLink>
           )
         }
       />

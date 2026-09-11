@@ -160,7 +160,7 @@ export default function ProformaFormPage() {
     }
   }, [isNew, draft.customer_id, customers, prefilled]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const { markSaved, isDirty, prompt } = useUnsavedChanges(draft, {
+  const { markSaved, pdf, prompt } = useUnsavedChanges(draft, {
     // Deferred, so the mutation declared just below is initialised by the
     // time the dialog can call it. Same condition as the page's Save button.
     run: () => save.mutateAsync(draft),
@@ -284,7 +284,7 @@ export default function ProformaFormPage() {
             {!isNew && <StatusBadge status={existing!.status} />}
             {!isNew && (
               <>
-                <PdfLink href={`/api/pdf/proforma/${id}`} isDirty={isDirty}><Button variant="secondary">📄 PDF</Button></PdfLink>
+                <PdfLink href={`/api/pdf/proforma/${id}`} guard={pdf}><Button variant="secondary">📄 PDF</Button></PdfLink>
                 <FollowupButton docType="proforma" docId={Number(id)} customerId={existing!.customer_id} />
                 <Button
                   variant="secondary"

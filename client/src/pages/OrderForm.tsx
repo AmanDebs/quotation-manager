@@ -143,7 +143,7 @@ export default function OrderFormPage() {
    */
   const banked = existing?.advance ?? prefillAdvance;
 
-  const { markSaved, isDirty, prompt } = useUnsavedChanges(draft, {
+  const { markSaved, pdf, prompt } = useUnsavedChanges(draft, {
     // Deferred, so the mutation declared just below is initialised by the
     // time the dialog can call it. Same condition as the page's Save button.
     run: () => save.mutateAsync(draft),
@@ -208,7 +208,7 @@ export default function OrderFormPage() {
           <div className="flex flex-wrap items-center gap-2">
             {!isNew && (
               <>
-                <PdfLink href={`/api/pdf/order/${id}`} isDirty={isDirty}><Button variant="secondary">📄 Order PDF</Button></PdfLink>
+                <PdfLink href={`/api/pdf/order/${id}`} guard={pdf}><Button variant="secondary">📄 Order PDF</Button></PdfLink>
                 <FollowupButton docType="general" docId={Number(id)} customerId={existing!.customer_id} />
                 {/* The invoice is what follows an order now. Raising a proforma
                     from here ran the chain backwards — the proforma comes

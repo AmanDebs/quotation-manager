@@ -170,7 +170,7 @@ export default function QuotationFormPage() {
     }));
   };
 
-  const { markSaved, isDirty, prompt } = useUnsavedChanges(draft, {
+  const { markSaved, pdf, prompt } = useUnsavedChanges(draft, {
     // Deferred, so the mutation declared just below is initialised by the
     // time the dialog can call it. Same condition as the page's Save button.
     run: () => save.mutateAsync(draft),
@@ -260,7 +260,7 @@ export default function QuotationFormPage() {
             {!isNew && <StatusBadge status={existing!.status} />}
             {!isNew && (
               <>
-                <PdfLink href={`/api/pdf/quotation/${id}`} isDirty={isDirty}>
+                <PdfLink href={`/api/pdf/quotation/${id}`} guard={pdf}>
                   <Button variant="secondary">📄 PDF</Button>
                 </PdfLink>
                 <FollowupButton docType="quotation" docId={Number(id)} customerId={existing!.customer_id} />

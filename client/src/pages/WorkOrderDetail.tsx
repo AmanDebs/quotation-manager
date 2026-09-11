@@ -121,7 +121,7 @@ export default function WorkOrderDetailPage() {
    * It closes a second gap while it is here: leaving with the Details form
    * edited used to lose them without a word.
    */
-  const { markSaved, isDirty, prompt } = useUnsavedChanges(draft, {
+  const { markSaved, pdf, prompt } = useUnsavedChanges(draft, {
     run: () => save.mutateAsync(draft!),
     can: !!draft && draft.qty_planned > 0,
   });
@@ -200,7 +200,7 @@ export default function WorkOrderDetailPage() {
         actions={
           <div className="flex flex-wrap items-center gap-2">
             {can('qc') && (
-              <PdfLink href={`/api/pdf/qc-report/${job.id}`} isDirty={isDirty} title="Every inspection on this job, with the tolerance each reading was judged against">
+              <PdfLink href={`/api/pdf/qc-report/${job.id}`} guard={pdf} title="Every inspection on this job, with the tolerance each reading was judged against">
                 📄 QC Report
               </PdfLink>
             )}
@@ -487,7 +487,7 @@ export default function WorkOrderDetailPage() {
                       </td>
                       <td className="whitespace-nowrap py-2 text-right">
                         {b.cleared ? (
-                          <PdfLink href={`/api/pdf/coa/${b.id}`} isDirty={isDirty} title="Certificate of Analysis">
+                          <PdfLink href={`/api/pdf/coa/${b.id}`} guard={pdf} title="Certificate of Analysis">
                             📄 COA
                           </PdfLink>
                         ) : can('qc', 'full') ? (
@@ -645,7 +645,7 @@ export default function WorkOrderDetailPage() {
               {/* Beside the checks it prints, which is where somebody looking
                   at them thinks to ask for it — the header carries it too, for
                   the same reason every document form carries its own. */}
-              <PdfLink href={`/api/pdf/qc-report/${job.id}`} isDirty={isDirty} title="Grouped by date and shift, each reading beside the tolerance it was judged against">
+              <PdfLink href={`/api/pdf/qc-report/${job.id}`} guard={pdf} title="Grouped by date and shift, each reading beside the tolerance it was judged against">
                 📄 QC Report
               </PdfLink>
               {can('qc', 'full') && <Button variant="secondary" onClick={() => setInspecting(true)}>Record check</Button>}

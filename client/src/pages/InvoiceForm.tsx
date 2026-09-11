@@ -169,7 +169,7 @@ export default function InvoiceFormPage() {
     }
   }, [isNew, draft.customer_id, customers, prefilled]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const { markSaved, isDirty, prompt } = useUnsavedChanges(draft, {
+  const { markSaved, pdf, prompt } = useUnsavedChanges(draft, {
     // Deferred, so the mutation declared just below is initialised by the
     // time the dialog can call it. Same condition as the page's Save button.
     run: () => save.mutateAsync(draft),
@@ -246,11 +246,11 @@ export default function InvoiceFormPage() {
             {!isNew && <StatusBadge status={existing!.status} />}
             {!isNew && (
               <>
-                <PdfLink href={`/api/pdf/invoice/${id}`} isDirty={isDirty}><Button variant="secondary">📄 Invoice</Button></PdfLink>
-                <PdfLink href={`/api/pdf/packing-list/${existing!.packing?.id}`} isDirty={isDirty}>
+                <PdfLink href={`/api/pdf/invoice/${id}`} guard={pdf}><Button variant="secondary">📄 Invoice</Button></PdfLink>
+                <PdfLink href={`/api/pdf/packing-list/${existing!.packing?.id}`} guard={pdf}>
                   <Button variant="secondary" disabled={!existing!.packing}>📦 Packing List</Button>
                 </PdfLink>
-                <PdfLink href={`/api/pdf/invoice-with-packing/${id}`} isDirty={isDirty}><Button>📄+📦 Both</Button></PdfLink>
+                <PdfLink href={`/api/pdf/invoice-with-packing/${id}`} guard={pdf}><Button>📄+📦 Both</Button></PdfLink>
                 {/*
                   * The quality summary that ships with the shipment. The
                   * standalone report is the `qc` function and so is offered
@@ -259,11 +259,11 @@ export default function InvoiceFormPage() {
                   * is the whole point of it existing.
                   */}
                 {can('qc') && (
-                  <PdfLink href={`/api/pdf/invoice-qc-report/${id}`} isDirty={isDirty}>
+                  <PdfLink href={`/api/pdf/invoice-qc-report/${id}`} guard={pdf}>
                     <Button variant="secondary">🔬 QC Report</Button>
                   </PdfLink>
                 )}
-                <PdfLink href={`/api/pdf/invoice-with-qc/${id}`} isDirty={isDirty}>
+                <PdfLink href={`/api/pdf/invoice-with-qc/${id}`} guard={pdf}>
                   <Button variant="secondary">📄+🔬 Invoice &amp; QC</Button>
                 </PdfLink>
                 <FollowupButton docType="invoice" docId={Number(id)} customerId={existing!.customer_id} />

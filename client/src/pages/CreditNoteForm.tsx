@@ -112,7 +112,7 @@ export default function CreditNoteFormPage() {
     });
   }, [isNew, fromInvoice, prefilled]);
 
-  const { markSaved, isDirty, prompt } = useUnsavedChanges(draft, {
+  const { markSaved, pdf, prompt } = useUnsavedChanges(draft, {
     run: () => save.mutateAsync(draft),
     can: !!draft.invoice_id && draft.items.length > 0,
   });
@@ -179,7 +179,7 @@ export default function CreditNoteFormPage() {
           <div className="flex flex-wrap items-center gap-2">
             {!isNew && (
               <>
-                <PdfLink href={`/api/pdf/credit-note/${id}`} isDirty={isDirty}><Button variant="secondary">📄 Credit Note</Button></PdfLink>
+                <PdfLink href={`/api/pdf/credit-note/${id}`} guard={pdf}><Button variant="secondary">📄 Credit Note</Button></PdfLink>
                 <Link to={`/invoices/${existing!.invoice_id}`}><Button variant="secondary">Open invoice</Button></Link>
               </>
             )}

@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import type { PdfGuard } from '../lib/useUnsavedChanges';
 
 /**
  * A link to a document's PDF that knows whether the form behind it holds edits
@@ -13,16 +14,16 @@ import type { ReactNode } from 'react';
  * It would have stayed unreported, too, because the PDF that opens looks
  * entirely normal — it is a real document, just not the one on screen.
  *
- * **The sentence is deliberately not the navigation one.** Leaving the page
- * loses the edits; opening a PDF loses nothing at all — the form is still
- * there, untouched, in the tab behind it. The hazard is a *stale document*,
- * not lost work, and a prompt that says "lose them?" about an action that
- * loses nothing is how people learn these dialogs are wrong and start clicking
- * through them. So this one states the actual fact and still lets the user go
- * ahead, which is often what they want: comparing the version already sent
- * against what they are now typing is a real thing to do.
+ * **The dialog is the hook's, not a `confirm()`** (2026-09-12, the user having
+ * put the two side by side: the navigation prompt was the app's own modal
+ * with three buttons and this was the browser's black box with two). It is
+ * the same modal now, with the wording this case needs — leaving the page
+ * loses the edits, opening a PDF loses nothing at all, the form being still
+ * there in the tab behind — and the third button this case wanted all along:
+ * **Save & open**, which is what somebody who clicked 📄 mid-edit almost
+ * always meant.
  *
- * **`isDirty` is a required prop and not a context**, which is the opposite of
+ * **`guard` is a required prop and not a context**, which is the opposite of
  * the call `ReadOnlyFields` makes about the same spread-out problem — and the
  * reason is this bug. A context is forgotten by *not wrapping*, and a missing
  * provider is silent: the links render, nothing prompts, and the failure looks
@@ -35,20 +36,15 @@ import type { ReactNode } from 'react';
  * the QC register and the purchase-order rows all point at documents as the
  * server holds them, so there is no draft that could be ahead of the file.
  */
-
-const STALE =
-  'This form has changes that have not been saved yet, and the PDF is built from the saved '
-  + 'version — so it will not show them.\n\nOpen the saved version anyway?';
-
 export function PdfLink({
   href,
-  isDirty,
+  guard,
   title,
   children,
 }: {
   href: string;
-  /** From `useUnsavedChanges`. Read on click, so it must be the live answer. */
-  isDirty: () => boolean;
+  /** From `useUnsavedChanges`: asks whether the form is dirty, and owns the dialog if it is. */
+  guard: PdfGuard;
   title?: string;
   children: ReactNode;
 }) {
@@ -58,10 +54,9 @@ export function PdfLink({
       target="_blank"
       rel="noreferrer"
       title={title}
-      // `confirm` rather than a Modal, matching every other confirmation in
-      // this app — and it has to be answered before the browser acts on the
-      // click it is holding up.
-      onClick={(e) => { if (isDirty() && !confirm(STALE)) e.preventDefault(); }}
+      // The browser is holding the click; a dirty form takes it over and the
+      // dialog opens the PDF itself once the person has said which version.
+      onClick={(e) => { if (guard.isDirty()) { e.preventDefault(); guard.ask(href); } }}
     >
       {children}
     </a>
