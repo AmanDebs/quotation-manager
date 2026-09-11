@@ -260,7 +260,13 @@ export default function QuotationFormPage() {
             {!isNew && <StatusBadge status={existing!.status} />}
             {!isNew && (
               <>
-                <PdfLink href={`/api/pdf/quotation/${id}`} guard={pdf}>
+                <PdfLink
+                  href={`/api/pdf/quotation/${id}`}
+                  guard={pdf}
+                  // An approved document always prints — the server's own rule.
+                  blocked={existing!.approval_status === 'approved' ? undefined
+                    : (existing!.checks ?? []).filter((f) => f.level === 'block').map((f) => f.message).join(' ') || undefined}
+                >
                   <Button variant="secondary">📄 PDF</Button>
                 </PdfLink>
                 <FollowupButton docType="quotation" docId={Number(id)} customerId={existing!.customer_id} />
@@ -423,7 +429,7 @@ export default function QuotationFormPage() {
               />
             </Field>
             <Field label="Date"><Input type="date" disabled={readOnly} value={draft.date} onChange={(e) => set({ date: e.target.value })} /></Field>
-            <Field label="Valid Until"><Input type="date" disabled={readOnly} value={draft.validity_date} onChange={(e) => set({ validity_date: e.target.value })} /></Field>
+            <Field label="Valid Until *"><Input type="date" disabled={readOnly} value={draft.validity_date} onChange={(e) => set({ validity_date: e.target.value })} /></Field>
             <Field label="Currency">
               <Select value={draft.currency} disabled={readOnly} onChange={(e) => set({ currency: e.target.value })}>
                 <option value="INR">INR</option><option value="USD">USD</option><option value="EUR">EUR</option>
@@ -436,7 +442,7 @@ export default function QuotationFormPage() {
                 <option value="igst">IGST (inter-state)</option>
               </Select>
             </Field>
-            <Field label="Payment Terms">
+            <Field label="Payment Terms *">
               <PaymentTermsInput
                 isExport={!!draft.is_export}
                 disabled={readOnly}
@@ -444,9 +450,9 @@ export default function QuotationFormPage() {
                 onChange={(v) => set({ payment_terms: v })}
               />
             </Field>
-            <Field label="Delivery Timeline"><Input disabled={readOnly} value={draft.delivery_terms} onChange={(e) => set({ delivery_terms: e.target.value })} placeholder="e.g. 4–6 weeks from order" /></Field>
-            <Field label="Prepared By"><Input disabled={readOnly} value={draft.prepared_by} onChange={(e) => set({ prepared_by: e.target.value })} placeholder="Who prepared this quote" /></Field>
-            <Field label="INCO Terms / Basis">
+            <Field label="Delivery Timeline *"><Input disabled={readOnly} value={draft.delivery_terms} onChange={(e) => set({ delivery_terms: e.target.value })} placeholder="e.g. 4–6 weeks from order" /></Field>
+            <Field label="Prepared By *"><Input disabled={readOnly} value={draft.prepared_by} onChange={(e) => set({ prepared_by: e.target.value })} placeholder="Who prepared this quote" /></Field>
+            <Field label="INCO Terms / Basis *">
               <IncoTermsInput
                 isExport={!!draft.is_export}
                 disabled={readOnly}
@@ -472,7 +478,7 @@ export default function QuotationFormPage() {
               <Field label="Containers"><Input disabled={readOnly} value={draft.container_count} onChange={(e) => set({ container_count: e.target.value })} placeholder="e.g. 5 X 40ft HQ" /></Field>
             )}
             <div className={`col-span-full ${readOnly ? 'has-[[data-empty]]:hidden' : ''}`}>
-              <span className={`mb-1 block ${labelClass(readOnly)}`}>Notes (printed on quotation)</span>
+              <span className={`mb-1 block ${labelClass(readOnly)}`}>Notes (printed on quotation) *</span>
               <Textarea rows={NOTES_ROWS} disabled={readOnly} value={draft.notes} onChange={(e) => set({ notes: e.target.value })} />
             </div>
           </div>

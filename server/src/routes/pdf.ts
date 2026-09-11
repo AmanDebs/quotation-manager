@@ -1,4 +1,6 @@
 import { Router } from 'express';
+import { incompleteError } from '../services/documentChecks.js';
+import type { DocTable } from '../services/approval.js';
 import { db } from '../db/connection.js';
 import {
   buildQuotationPdf, buildOrderPdf, buildProformaPdf, buildInvoicePdf, buildPackingListPdf,
@@ -249,12 +251,31 @@ pdfRouter.get('/:type/:id/:name?', async (req: AuthedRequest, res) => {
     return res.redirect(302, `/api/pdf/${type}/${id}/${encodeURIComponent(filename)}${query ? `?${query}` : ''}`);
   }
 
-  // Documents that have not been approved are watermarked, so an unapproved
-  // draft can be previewed but never passed off as a final document.
+  /*
+   * An unfinished document does not print at all (2026-09-12, at the client's
+   * word: *"if any field is not filled pdf should not be generated"*). The same
+   * `incompleteError` that refuses approval refuses the PDF, so the two cannot
+   * disagree about what finished means; the form disables the button with the
+   * same sentence, and this is the backstop for the link typed by hand.
+   * 422, the approval routes' own answer: nothing conflicts, it is incomplete.
+   * Approvable documents only — an order or a challan has no such rule.
+   *
+   * **An approved document always prints.** Approval now requires every
+   * field, so nothing new reaches a customer incomplete — but a quotation
+   * approved and sent before a field became mandatory was finished by the
+   * judgement of whoever approved it, and refusing its reprint would hold a
+   * document the customer already has to a rule that did not exist when it
+   * went. Measured on the seed: every quotation on file would otherwise have
+   * been refused on three fields at once.
+   */
   let watermark: string | undefined;
   if (entry.approvable) {
     const appr = db.prepare(`SELECT approval_status FROM ${entry.table} WHERE id = ?`).get(id) as { approval_status: string };
     if (appr.approval_status !== 'approved') {
+      const unfinished = incompleteError(entry.table as DocTable, id);
+      if (unfinished) return res.status(422).json({ error: unfinished });
+      // Not approved but finished: previewable, and watermarked so the draft
+      // can never be passed off as a final document.
       watermark = appr.approval_status === 'pending' ? 'PENDING APPROVAL' : 'DRAFT — NOT APPROVED';
     }
   }

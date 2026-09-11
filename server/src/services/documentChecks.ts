@@ -287,6 +287,46 @@ const RULES: Rule[] = [
     key: 'payment_terms', level: 'warn', tables: MONEY_DUE,
     check: (d) => (text(d.row.payment_terms) ? null : 'No payment terms stated.'),
   },
+  /*
+   * **Every field on the quotation form is mandatory** (the client, 2026-09-12,
+   * with the form in front of them: *"make all fields mandatory, if any field
+   * is not filled pdf should not be generated"*). The list this table was
+   * shaped to wait for, finally supplied — for the quotation. Six fields the
+   * form asks and the rules did not: validity, payment terms, delivery
+   * timeline, the person who prepared it, the delivery basis, and the printed
+   * notes. Customer, date and lines were already blocks; issued-by, currency
+   * and tax carry defaults and cannot be blank.
+   *
+   * Blocks, not warnings, and on the quotation **only**: the proforma and the
+   * invoice were not on the screen the instruction was given over, and
+   * blocking a field there is a rule that stops a shipment. Each names its
+   * own field, so the finding reads as a list of what to fill in rather than
+   * one sentence saying "incomplete".
+   */
+  {
+    key: 'validity', level: 'block', tables: ['quotations'],
+    check: (d) => (text(d.row.validity_date) ? null : 'Valid Until is blank.'),
+  },
+  {
+    key: 'q_payment_terms', level: 'block', tables: ['quotations'],
+    check: (d) => (text(d.row.payment_terms) ? null : 'Payment Terms are blank.'),
+  },
+  {
+    key: 'delivery', level: 'block', tables: ['quotations'],
+    check: (d) => (text(d.row.delivery_terms) ? null : 'Delivery Timeline is blank.'),
+  },
+  {
+    key: 'prepared_by', level: 'block', tables: ['quotations'],
+    check: (d) => (text(d.row.prepared_by) ? null : 'Prepared By is blank.'),
+  },
+  {
+    key: 'inco', level: 'block', tables: ['quotations'],
+    check: (d) => (text(d.row.inco_terms) ? null : 'INCO Terms / Basis is blank.'),
+  },
+  {
+    key: 'notes', level: 'block', tables: ['quotations'],
+    check: (d) => (text(d.row.notes) ? null : 'Notes (printed on the quotation) are blank.'),
+  },
 ];
 
 /** Every rule this document breaks, blocking ones first. */

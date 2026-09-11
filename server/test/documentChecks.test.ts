@@ -22,7 +22,11 @@ const doc = (table: CheckedDoc['table'], row: Record<string, unknown> = {}, item
   // `bank_account` joined this list when it became a blocking rule.
   row: {
     date: '2026-09-01', grand_total: 1000, tax_type: 'none', is_export: 0,
-    payment_terms: '30 days', bank_account: 'HDFC 50200012345678', ...row,
+    payment_terms: '30 days', bank_account: 'HDFC 50200012345678',
+    // The quotation's own mandatory fields (2026-09-12), for the same reason.
+    validity_date: '2026-09-30', delivery_terms: '4-6 weeks', prepared_by: 'R. Das',
+    inco_terms: 'EX-Works', notes: 'Subject to Kolkata jurisdiction.',
+    ...row,
   },
   items,
   customer: { gstin: '19AAAAA0000A1Z5' },
@@ -127,7 +131,7 @@ describe('the warnings each document type carries', () => {
   });
 
   test('a quotation is asked for none of it', () => {
-    assert.deepEqual(keys(doc('quotations', { is_export: 1, payment_terms: '' })), []);
+    assert.deepEqual(keys(doc('quotations', { is_export: 1, gstin: '' })), []);
   });
 
   test('the ports message names only the one that is missing', () => {
@@ -291,5 +295,34 @@ describe('nothing is invoiced until it has passed QC', () => {
   test('and a proforma is never asked the question at all', () => {
     const o = order([product(true)]);
     assert.ok(!keys(doc('proforma_invoices', { order_id: o }), 'block').includes('qc'));
+  });
+});
+
+/**
+ * Every field on the quotation form is mandatory (the client, 2026-09-12), and
+ * each blank is named on its own so the finding reads as a list of what to
+ * fill in. On the quotation only: the proforma and the invoice were not on
+ * the screen the instruction was given over.
+ */
+describe('the quotation mandatory fields', () => {
+  const blanks: [string, string][] = [
+    ['validity_date', 'validity'], ['payment_terms', 'q_payment_terms'], ['delivery_terms', 'delivery'],
+    ['prepared_by', 'prepared_by'], ['inco_terms', 'inco'], ['notes', 'notes'],
+  ];
+  test('each blank field blocks the quotation by name', () => {
+    for (const [field, key] of blanks) {
+      assert.deepEqual(keys(doc('quotations', { [field]: '' }), 'block'), [key], `blank ${field}`);
+    }
+  });
+  test('all six blank names all six, and a finished quotation names none', () => {
+    const all = Object.fromEntries(blanks.map(([f]) => [f, '']));
+    assert.deepEqual(keys(doc('quotations', all), 'block'), blanks.map(([, k]) => k).sort());
+    assert.deepEqual(keys(doc('quotations'), 'block'), []);
+  });
+  test('the proforma and the invoice are not held to them', () => {
+    for (const table of ['proforma_invoices', 'commercial_invoices'] as const) {
+      const d = doc(table, { validity_date: '', delivery_terms: '', prepared_by: '', inco_terms: '', notes: '' });
+      assert.deepEqual(keys(d, 'block'), [], table);
+    }
   });
 });

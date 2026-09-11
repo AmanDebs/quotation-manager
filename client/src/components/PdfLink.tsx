@@ -40,14 +40,30 @@ export function PdfLink({
   href,
   guard,
   title,
+  blocked,
   children,
 }: {
   href: string;
   /** From `useUnsavedChanges`: asks whether the form is dirty, and owns the dialog if it is. */
   guard: PdfGuard;
   title?: string;
+  /**
+   * Why the document cannot be printed yet — the blocking findings from
+   * `checks`, joined. The server refuses the same PDF with the same sentence
+   * (422), so this is the explanation in front of the refusal rather than a
+   * second copy of the rule: a link that fails when clicked teaches people to
+   * click it twice.
+   */
+  blocked?: string;
   children: ReactNode;
 }) {
+  if (blocked) {
+    return (
+      <span className="inline-block cursor-not-allowed opacity-60" title={`Cannot print yet — ${blocked}`} aria-disabled="true">
+        {children}
+      </span>
+    );
+  }
   return (
     <a
       href={href}
