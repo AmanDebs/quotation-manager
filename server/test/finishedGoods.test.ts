@@ -136,6 +136,29 @@ describe('each record moves the figure it should', () => {
     assert.equal(onHand(p), 0);
   });
 
+  /**
+   * Found by walking the app: a lot of 4,50,000 shipped 3,00,000, took 20,000
+   * back and was scrapped, and the shelf read −2,80,000 — scrap had dropped
+   * the whole lot from *made*, shipment included. A dispatched lot is
+   * condemned only in what came back.
+   */
+  test('scrapping a lot that partly came back condemns the return, not the shipment', () => {
+    const p = product();
+    const o = order([p]);
+    const j = job(o.id, 0, p);
+    const b = batch(j);
+    shift(j, 450000, b);
+    const d = trip(o.id, [[0, 300000]]);
+    db.prepare('INSERT INTO despatch_batches (despatch_id, batch_id) VALUES (?, ?)').run(d, b);
+    const n = returned(o, p, 20000);
+    db.prepare('INSERT INTO credit_note_batches (credit_note_id, batch_id) VALUES (?, ?)').run(n, b);
+    assert.equal(onHand(p), 170000);
+    db.prepare("UPDATE batches SET disposition = 'scrapped' WHERE id = ?").run(b);
+    assert.equal(onHand(p), 150000, 'scrap dropped the shipped goods from the record');
+    assert.equal(rowFor(p)!.made, 450000);
+    assert.equal(rowFor(p)!.returned, 0);
+  });
+
   test('a count corrects the record, and the sign is the person\'s', () => {
     const p = product();
     const o = order([p]);

@@ -36,11 +36,23 @@ import { round2 } from './totals.js';
  * the lot itself goes on reporting what it made, because "what did we scrap"
  * has to stay answerable. The job stops counting it; the lot remembers it.
  *
- * `sb` is an alias nothing else here uses, so the fragment can be pasted into
- * a query that already has its own.
+ * **A lot that went out is condemned only in what came back** (2026-09-12,
+ * found by walking the app: a lot of 4,50,000 shipped 3,00,000, took 20,000
+ * back and was then scrapped — and the roll-ups dropped all 4,50,000, so the
+ * order read as if nothing had been made for goods the buyer physically
+ * holds, the very defect `dispositionError` was written to prevent). Scrap
+ * on a lot never dispatched means the lot no longer exists, and this fragment
+ * says so. Scrap on a lot named on a trip means the *returned* goods are
+ * condemned: the output stands, the shipment stands, and the finished-goods
+ * ledger takes the returned pieces back off the shelf (`finishedGoods.ts`).
+ * The lot itself still reads *scrapped*, which is what happened to it.
+ *
+ * `sb` and `sdb` are aliases nothing else here uses, so the fragment can be
+ * pasted into a query that already has its own.
  */
 const CONDEMNED = (e: string) =>
-  `EXISTS (SELECT 1 FROM batches sb WHERE sb.id = ${e}.batch_id AND sb.disposition = 'scrapped')`;
+  `EXISTS (SELECT 1 FROM batches sb WHERE sb.id = ${e}.batch_id AND sb.disposition = 'scrapped'`
+  + ` AND NOT EXISTS (SELECT 1 FROM despatch_batches sdb WHERE sdb.batch_id = sb.id))`;
 
 /** Good output that still exists. */
 export const LIVE_OK = (e: string) => `CASE WHEN ${CONDEMNED(e)} THEN 0 ELSE ${e}.qty_ok END`;

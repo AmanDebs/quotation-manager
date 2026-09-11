@@ -124,15 +124,26 @@ export function finishedGoods(opts: { locationId?: number | null; productId?: nu
     at(r.product_id, r.location_id).dispatched += Number(r.qty);
   }
 
-  // Returned: an approved return's lines, at the plant the note names.
+  // Returned: an approved return's lines, at the plant the note names —
+  // unless the note names a scrapped lot of that product, in which case what
+  // came back was condemned and is not on the shelf. Scrapping a dispatched
+  // lot means exactly this (`production.ts`, CONDEMNED): the output and the
+  // shipment stand, the returned goods do not.
   for (const r of db.prepare(
-    `SELECT ci.product_id, ci.qty, ci.unit, ci.total_pcs, n.location_id
+    `SELECT ci.product_id, ci.qty, ci.unit, ci.total_pcs, n.location_id,
+            EXISTS (
+              SELECT 1 FROM credit_note_batches cb
+                JOIN batches b ON b.id = cb.batch_id
+                JOIN work_orders w ON w.id = b.work_order_id
+               WHERE cb.credit_note_id = n.id AND b.disposition = 'scrapped' AND w.product_id = ci.product_id
+            ) AS condemned
        FROM credit_note_items ci JOIN credit_notes n ON n.id = ci.credit_note_id
       WHERE n.kind = 'return' AND n.approval_status = 'approved' AND ci.is_charge = 0`
-  ).all() as { product_id: number | null; qty: number | null; unit: string; total_pcs: number | null; location_id: number | null }[]) {
+  ).all() as { product_id: number | null; qty: number | null; unit: string; total_pcs: number | null; location_id: number | null; condemned: number }[]) {
     const pcs = piecesOf(r);
     if (pcs == null) continue;                       // a weight-billed line with no piece count says nothing
     if (r.product_id == null) { unplaced.returned += pcs; continue; }
+    if (r.condemned) continue;                       // came back, and was scrapped: not stock
     at(r.product_id, r.location_id).returned += pcs;
   }
 

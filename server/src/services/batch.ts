@@ -462,6 +462,13 @@ export function dispositionError(id: number, disposition: Disposition): string |
    * does this, or a lot could be condemned on the strength of a return nobody
    * has signed.
    */
+  /*
+   * What scrap *means* differs by whether the lot went out, and `production.ts`
+   * (CONDEMNED) holds the rule: a lot never dispatched stops existing; a lot
+   * that shipped and came back is condemned only in what came back. So
+   * allowing it here on a returned lot cannot drop the order's made-figure for
+   * goods the buyer still holds, which was the reason for refusing it at all.
+   */
   if (b.trips.length && !b.returned) {
     const where = b.trips.map((t) => t.reference || t.order_number).filter(Boolean).join(', ');
     const drafted = b.returns.length ? ' A return naming it is drafted but not yet approved.' : '';
