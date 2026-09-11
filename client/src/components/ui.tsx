@@ -528,7 +528,11 @@ export function DownloadButton({ href, label = 'Download Excel', title }: { href
 export function SettledDocumentType({ isExport, number, reason }: {
   isExport: boolean;
   number?: string;
-  /** Why it is settled, where the numbering series is not the reason — the quotation's case. */
+  /**
+   * Why it is settled, where the numbering series is not the reason — the
+   * quotation's case. Shown on hover only, never as a sentence: the user
+   * asked for that line to go (2026-09-12), the badge being the whole message.
+   */
   reason?: string;
 }) {
   const kind = isExport ? 'export' : 'domestic';
@@ -539,7 +543,7 @@ export function SettledDocumentType({ isExport, number, reason }: {
         // On a new document the badge is the whole message: the New dialog
         // just asked, so a sentence explaining the answer back to the person
         // who gave it is noise. The reason stays on hover rather than on screen.
-        title={number ? undefined : 'Chosen when you started this document. Start again from + New if it is wrong.'}
+        title={reason ?? (number ? undefined : 'Chosen when you started this document. Start again from + New if it is wrong.')}
       >
         {isExport ? '🌍 Export' : '🇮🇳 Domestic'}
       </span>
@@ -549,9 +553,9 @@ export function SettledDocumentType({ isExport, number, reason }: {
         * change — so somebody looking for the missing control needs telling
         * why it is missing.
         */}
-      {number && (
+      {number && !reason && (
         <span className="text-xs text-slate-500">
-          {reason ?? `${number} came from the ${kind} numbering series, so it cannot be changed here.`}
+          {`${number} came from the ${kind} numbering series, so it cannot be changed here.`}
         </span>
       )}
     </div>
