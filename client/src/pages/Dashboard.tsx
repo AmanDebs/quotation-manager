@@ -5,12 +5,13 @@ import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
 } from 'recharts';
 import { api } from '../api/client';
-import type { Followup, DashboardLayout, WorkOrderStatus } from '../types';
+import type { Followup, DashboardLayout } from '../types';
 import { useCan, useUser, usePatchUser } from '../App';
 import { Button, Card, Input, Select, PageHeader, Modal, CAPTION_CLASS, TH_CLASS } from '../components/ui';
 import { Icon } from '../components/icons';
 import { useCompanies } from '../components/CompanySelect';
 import { ORDER_STATUSES, orderStatusLabel } from './Orders';
+import { WORK_ORDER_STATUSES, workOrderStatusLabel } from './WorkOrders';
 import { STATUSES as QUOTATION_STATUSES, quotationStatusLabel } from './Quotations';
 import { addDays, fmtDate, fmtMoney, fmtQty, today } from '../lib/format';
 
@@ -85,7 +86,6 @@ const EMPTY = 'py-6 text-center text-sm text-slate-400';
  * `sm`, where every one of the six fits and no scrollbar appears.
  */
 
-const WORK_ORDER_STATUSES: WorkOrderStatus[] = ['planned', 'released', 'running', 'paused', 'done', 'cancelled'];
 
 interface ShortMaterial {
   material_id: number; name: string; unit: string;
@@ -969,7 +969,7 @@ export default function DashboardPage() {
                     className="rounded-lg border border-slate-200 px-2 py-1 text-xs transition-colors hover:border-slate-300 hover:bg-slate-50"
                   >
                     <span className="font-semibold tabular-nums">{jobsAt(s)}</span>{' '}
-                    <span className="text-slate-500">{s}</span>
+                    <span className="text-slate-500">{workOrderStatusLabel(s)}</span>
                   </Link>
                 ))}
                 {openJobs === 0 && <span className="text-sm text-slate-400">No jobs open.</span>}

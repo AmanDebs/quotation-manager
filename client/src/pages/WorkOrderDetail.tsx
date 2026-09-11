@@ -18,6 +18,7 @@ import { PdfLink } from '../components/PdfLink';
 import { useUnsavedChanges } from '../lib/useUnsavedChanges';
 import { useCan } from '../App';
 import { fmtDate, fmtMoney, fmtQty } from '../lib/format';
+import { offeredWorkOrderStatuses, workOrderStatusLabel, workOrderStatusStyle } from './WorkOrders';
 
 /**
  * One job, on a page of its own.
@@ -61,16 +62,7 @@ interface Draft {
   notes: string;
 }
 
-const STATUSES: WorkOrderStatus[] = ['planned', 'released', 'running', 'paused', 'done', 'cancelled'];
 
-const statusStyle: Record<WorkOrderStatus, string> = {
-  planned: 'bg-slate-50 text-slate-600 ring-slate-200',
-  released: 'bg-blue-50 text-blue-700 ring-blue-200',
-  running: 'bg-purple-50 text-purple-700 ring-purple-200',
-  paused: 'bg-amber-50 text-amber-800 ring-amber-200',
-  done: 'bg-green-50 text-green-700 ring-green-200',
-  cancelled: 'bg-red-50 text-red-700 ring-red-200',
-};
 
 export default function WorkOrderDetailPage() {
   const { id } = useParams();
@@ -222,16 +214,16 @@ export default function WorkOrderDetailPage() {
           which follows the facts. A job is released and paused by a person. */}
       <div className="mb-3 flex flex-wrap items-center gap-1.5 text-sm">
         <span className="mr-1 text-slate-500">Status:</span>
-        {STATUSES.map((s) => (
+        {offeredWorkOrderStatuses(job.status).map((s) => (
           <button
             key={s}
             disabled={!mayEdit || setStatus.isPending}
             onClick={() => setStatus.mutate(s)}
             className={`rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 transition-colors ${
-              job.status === s ? statusStyle[s] : 'bg-white text-slate-500 ring-slate-200 hover:ring-slate-300'
+              job.status === s ? workOrderStatusStyle[s] : 'bg-white text-slate-500 ring-slate-200 hover:ring-slate-300'
             } ${mayEdit ? '' : 'cursor-default'}`}
           >
-            {s}
+            {workOrderStatusLabel(s)}
           </button>
         ))}
       </div>

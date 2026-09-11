@@ -15,9 +15,41 @@ import { usePagedList, PAGE_SIZE } from '../lib/usePagedList';
  * is "what is running and what is late", and something with no date is neither.
  */
 
-const STATUSES: WorkOrderStatus[] = ['planned', 'released', 'running', 'paused', 'done', 'cancelled'];
+/**
+ * The job's vocabulary: **Not planned → Scheduled → Running → Completed**, with
+ * Cancelled off to the side (Aglo, 2026-09-11). A display layer over the
+ * stored values, which do not change — `work_orders.status` carries a CHECK
+ * listing all six, SQLite cannot ALTER one, and the strings are load-bearing in
+ * `orderStatus.ts`, `orderJobs.ts` and every roll-up. So `planned` reads
+ * *Not planned*, which is exactly what an order-raised job is until somebody
+ * gives it a machine and a date; `released` reads *Scheduled*, the word the
+ * order's own ladder already uses for a released job; `done` reads *Completed*.
+ *
+ * `paused` is **retired, not removed**, the quotation's call about `sent`: not
+ * in the client's list, so no longer offered — but still labelled, tinted and
+ * filterable, because a job on file may hold it and a status you cannot
+ * filter for is a row you cannot find. A picker on such a job keeps it as an
+ * option so the control can show what is there.
+ */
+export const WORK_ORDER_STATUSES: WorkOrderStatus[] = ['planned', 'released', 'running', 'paused', 'done', 'cancelled'];
 
-const statusStyle: Record<WorkOrderStatus, string> = {
+const WORK_ORDER_STATUS_LABELS: Record<WorkOrderStatus, string> = {
+  planned: 'Not planned',
+  released: 'Scheduled',
+  running: 'Running',
+  paused: 'Paused',
+  done: 'Completed',
+  cancelled: 'Cancelled',
+};
+
+export const workOrderStatusLabel = (s: string): string =>
+  WORK_ORDER_STATUS_LABELS[s as WorkOrderStatus] ?? s;
+
+/** What a picker offers: the four steps and Cancelled, plus a retired value the job already holds. */
+export const offeredWorkOrderStatuses = (current?: string): WorkOrderStatus[] =>
+  WORK_ORDER_STATUSES.filter((s) => s !== 'paused' || s === current);
+
+export const workOrderStatusStyle: Record<WorkOrderStatus, string> = {
   planned: 'bg-slate-100 text-slate-600',
   released: 'bg-blue-100 text-blue-700',
   running: 'bg-purple-100 text-purple-700',
@@ -61,7 +93,7 @@ export default function WorkOrdersPage() {
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <Select className="w-40" value={status} onChange={(e) => setStatus(e.target.value)}>
           <option value="">All statuses</option>
-          {STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+          {WORK_ORDER_STATUSES.map((s) => <option key={s} value={s}>{workOrderStatusLabel(s)}</option>)}
         </Select>
         <Select className="w-44" value={location} onChange={(e) => setLocation(e.target.value)}>
           <option value="">All plants</option>
@@ -138,8 +170,8 @@ export default function WorkOrdersPage() {
                       )}
                     </td>
                     <td className="py-2 pr-3">
-                      <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${statusStyle[w.status]}`}>
-                        {w.status}
+                      <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${workOrderStatusStyle[w.status]}`}>
+                        {workOrderStatusLabel(w.status)}
                       </span>
                     </td>
                   </tr>
