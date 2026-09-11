@@ -7,7 +7,7 @@ import { amountInWords } from './amountInWords.js';
 import { round2, isPieceBasis, piecesPerBillingUnit, computeTotals } from './totals.js';
 import { invoiceReceivable, proformaAdvance, orderAdvance } from './receivables.js';
 import { paramsFor, specOwner, checksForWorkOrder } from './qc.js';
-import { batchById, batchesOnDespatch } from './batch.js';
+import { batchById, batchesOnDespatch, batchesOnCreditNote } from './batch.js';
 import { getCompany, defaultCompany } from './companies.js';
 
 // The npm package ships fonts only as base64 vfs; decode them for the server printer.
@@ -1610,6 +1610,10 @@ export function buildCreditNotePdf(id: number): TDocumentDefinitions {
        LEFT JOIN proforma_invoices p ON p.id = i.pi_id WHERE i.id = ?`
   ).get(n.invoice_id) as Row | undefined;
   const items = db.prepare('SELECT * FROM credit_note_items WHERE credit_note_id = ? ORDER BY sort_order, id').all(id) as Row[];
+  // The lots that came back, if any were named. Printed for the reason the
+  // challan prints them: a batch number identifies nothing unless it appears
+  // on the paper that records the movement.
+  const lots = batchesOnCreditNote(id);
 
   const cur = n.currency;
   const showTax = n.tax_type !== 'none';
@@ -1674,6 +1678,27 @@ export function buildCreditNotePdf(id: number): TDocumentDefinitions {
     amountWords(n, cur),
     ...(n.reason
       ? [{ text: 'REASON FOR CREDIT:', fontSize: 9, bold: true, color: s.theme, margin: [0, 8, 0, 2] as any }, { text: n.reason, fontSize: 8 }]
+      : []),
+    // No block at all when none were named, so a note naming no lots prints
+    // no empty box headed Batches — which would read as a fault.
+    ...(lots.length
+      ? [
+        { text: 'BATCHES RETURNED:', fontSize: 9, bold: true, color: s.theme, margin: [0, 8, 0, 2] as any },
+        {
+          table: {
+            widths: [90, 110, '*'],
+            body: [
+              [{ text: 'BATCH', bold: true, fontSize: 7.5 }, { text: 'CERTIFICATE OF ANALYSIS', bold: true, fontSize: 7.5 }, { text: 'GOODS', bold: true, fontSize: 7.5 }],
+              ...lots.map((b) => [
+                { text: b.number, fontSize: 8 },
+                { text: b.coa_no ? `${b.coa_no}${b.coa_date ? ` ${fmtDate(b.coa_date)}` : ''}` : '—', fontSize: 8 },
+                { text: b.product_name || `Line ${b.order_line + 1}`, fontSize: 8 },
+              ]),
+            ],
+          },
+          layout: boxedLayout,
+        },
+      ]
       : []),
     /*
      * The note's own remarks and **not** the company's default terms —

@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import { useCan, useUser } from '../App';
-import type { CreditNote, CreditKind, LineItem, ColumnConfig, TaxType } from '../types';
+import type { CreditNote, CreditKind, LineItem, ColumnConfig, TaxType, ReturnableBatch } from '../types';
 import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, SettledDocumentType, FIELD_GRID, TH_CLASS } from '../components/ui';
 import { PdfLink } from '../components/PdfLink';
 import { DocNumber } from '../components/DocFields';
@@ -40,11 +40,13 @@ interface Draft {
   is_export: number;
   column_config: ColumnConfig;
   items: LineItem[];
+  /** Which lots came back. Sent whole; `[]` clears. */
+  batch_ids: number[];
 }
 
 const emptyDraft = (): Draft => ({
   invoice_id: null, date: today(), kind: 'return', reason: '', notes: '', prepared_by: '',
-  currency: 'INR', tax_type: 'igst', is_export: 0, column_config: newColumnConfig(), items: [],
+  currency: 'INR', tax_type: 'igst', is_export: 0, column_config: newColumnConfig(), items: [], batch_ids: [],
 });
 
 const KIND_LABEL: Record<CreditKind, string> = { return: 'Goods returned', adjustment: 'Adjustment (money only)' };
@@ -71,6 +73,8 @@ export default function CreditNoteFormPage() {
   // a saved one carries them as `invoice_lines`.
   const [lines, setLines] = useState<CreditNote['invoice_lines']>();
   const [invoiceNumber, setInvoiceNumber] = useState('');
+  // The lots that could have come back, on a new note; a saved one carries its own.
+  const [orderBatches, setOrderBatches] = useState<ReturnableBatch[] | undefined>();
 
   useEffect(() => {
     if (existing) {
@@ -79,6 +83,7 @@ export default function CreditNoteFormPage() {
         reason: existing.reason, notes: existing.notes, prepared_by: existing.prepared_by,
         currency: existing.currency, tax_type: existing.tax_type, is_export: existing.is_export,
         column_config: existing.column_config ?? {}, items: existing.items ?? [],
+        batch_ids: (existing.batches ?? []).map((b) => b.id),
       });
     }
   }, [existing]);
@@ -91,13 +96,14 @@ export default function CreditNoteFormPage() {
    */
   useEffect(() => {
     if (!isNew || !fromInvoice || prefilled) return;
-    api.get<Partial<Draft> & { items: LineItem[]; invoice_number: string; invoice_lines: CreditNote['invoice_lines'] }>(
-      `/api/credit-notes/prefill/from-invoice/${fromInvoice}`
-    ).then((p) => {
-      const { invoice_number, invoice_lines, ...rest } = p;
+    api.get<Partial<Draft> & {
+      items: LineItem[]; invoice_number: string; invoice_lines: CreditNote['invoice_lines']; order_batches?: ReturnableBatch[];
+    }>(`/api/credit-notes/prefill/from-invoice/${fromInvoice}`).then((p) => {
+      const { invoice_number, invoice_lines, order_batches, ...rest } = p;
       setDraft((d) => ({ ...d, ...rest, invoice_id: Number(fromInvoice), items: p.items ?? [] }));
       setInvoiceNumber(invoice_number);
       setLines(invoice_lines);
+      setOrderBatches(order_batches);
       setPrefilled(true);
     });
   }, [isNew, fromInvoice, prefilled]);
@@ -156,6 +162,7 @@ export default function CreditNoteFormPage() {
   const canEdit = can('invoice', 'full');
   const openLines = existing?.invoice_lines ?? lines;
   const invoiceRef = existing?.invoice_number ?? invoiceNumber;
+  const lots = existing?.order_batches ?? orderBatches ?? [];
 
   return (
     <div className="mx-auto max-w-7xl">
@@ -276,6 +283,54 @@ export default function CreditNoteFormPage() {
             </div>
           )}
         </Card>
+
+        {/*
+          * Which identified lots came back — `despatch_batches` read the
+          * other way, and the fact that lets the floor scrap a lot that has
+          * been to the customer. Absent unless the order has lots and this
+          * is a return: an adjustment moves no goods, and the server refuses
+          * a lot named on one. A lot named on this note stays ticked here
+          * whether or not it can be re-offered.
+          */}
+        {draft.kind === 'return' && lots.length > 0 && (
+          <Card title="Lots returned">
+            <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
+              {lots.map((b) => {
+                const on = draft.batch_ids.includes(b.id);
+                return (
+                  <label
+                    key={b.id}
+                    className={`flex cursor-pointer items-start gap-2 rounded-lg px-2 py-1.5 text-sm ring-1 hover:bg-slate-50 ${
+                      on ? 'bg-brand-50 ring-brand-200' : 'ring-slate-200'
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      className="mt-0.5"
+                      checked={on}
+                      onChange={(e) => set({
+                        batch_ids: e.target.checked ? [...draft.batch_ids, b.id] : draft.batch_ids.filter((x) => x !== b.id),
+                      })}
+                    />
+                    <span className="min-w-0">
+                      <span className="font-medium">{b.number}</span>
+                      <span className="ml-1 text-slate-500">{b.product_name || `Line ${b.order_line + 1}`}</span>
+                      <span className="block text-xs text-slate-500">
+                        {b.trips.length
+                          ? `Dispatched on ${b.trips.map((t) => t.reference || fmtDate(t.date)).join(', ')}`
+                          : 'Not named on any dispatch'}
+                        {b.coa_no ? ` · ${b.coa_no}` : ''}
+                      </span>
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+            <p className="mt-2 text-xs text-slate-400">
+              Once this credit note is approved, a lot named here can be scrapped or reworked on its job.
+            </p>
+          </Card>
+        )}
 
         <Card title="Notes">
           <Textarea rows={2} value={draft.notes} onChange={(e) => set({ notes: e.target.value })} placeholder="Printed on the credit note, e.g. Replacement to follow on the next consignment." />

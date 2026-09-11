@@ -483,6 +483,15 @@ export default function WorkOrderDetailPage() {
                             {t.destination && <span className="text-slate-400"> · {t.destination}</span>}
                           </div>
                         )) : <span className="text-slate-300">—</span>}
+                        {/* ...and came back. Approved is what counts; a drafted
+                            return is said to be one, since it is why scrap is
+                            still refused. */}
+                        {b.returns?.map((r) => (
+                          <div key={r.credit_note_id} className={`whitespace-nowrap ${r.approval_status === 'approved' ? 'text-amber-700' : 'text-slate-400'}`}>
+                            ↩ returned on <Link to={`/credit-notes/${r.credit_note_id}`} className="hover:underline">{r.number}</Link>
+                            {r.approval_status !== 'approved' && ' (not yet approved)'}
+                          </div>
+                        ))}
                       </td>
                       <td className="whitespace-nowrap py-2 text-right">
                         {b.cleared ? (

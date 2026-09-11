@@ -2,7 +2,10 @@ import { Router } from 'express';
 import { db, transaction } from '../db/connection.js';
 import { nextNumber } from '../services/numbering.js';
 import { computeTotals, type LineItemInput } from '../services/totals.js';
-import { type AuthedRequest } from '../middleware/auth.js';
+import { allows, type AuthedRequest } from '../middleware/auth.js';
+import {
+  batchesOnCreditNote, setCreditNoteBatches, returnBatchError, batchesForInvoice,
+} from '../services/batch.js';
 import { scopeClause, canAccessCustomer } from '../middleware/scope.js';
 import { submit, decide, resetApprovalOnEdit, mayApprove } from '../services/approval.js';
 import { incompleteError, checkDocument } from '../services/documentChecks.js';
@@ -39,9 +42,23 @@ const listSql = `
   LEFT JOIN users u ON u.id = n.created_by
   LEFT JOIN users a ON a.id = n.approved_by`;
 
-function getFull(id: number) {
+/**
+ * `req` is optional only so a caller that has none omits the lot picker rather
+ * than leaking it — the safe direction, and the shape the order's own
+ * `getFull` takes. Every caller here passes it.
+ */
+function getFull(id: number, req?: AuthedRequest) {
   const note = db.prepare(`${listSql} WHERE n.id = ?`).get(id) as Record<string, unknown> | undefined;
   if (!note) return undefined;
+  /*
+   * Which lots came back — the last leg of the traceability chain read the
+   * other way, and the fact that lets a returned lot be scrapped. Always
+   * carried, like the lines: it is part of the record. The **picker** of lots
+   * available to name is gated on `qc` as the order's own is, and absent
+   * rather than empty for a caller without it.
+   */
+  note.batches = batchesOnCreditNote(id);
+  if (req && allows(req, 'qc')) note.order_batches = batchesForInvoice(Number(note.invoice_id));
   note.items = db.prepare('SELECT * FROM credit_note_items WHERE credit_note_id = ? ORDER BY sort_order, id').all(id);
   note.column_config = JSON.parse(String(note.column_config || '{}'));
   // Shown on the form above a disabled Submit, not sprung on the press — the
@@ -249,6 +266,8 @@ creditNotesRouter.get('/prefill/from-invoice/:invoiceId', (req: AuthedRequest, r
     kind: 'return',
     date: new Date().toISOString().slice(0, 10),
     invoice_lines: creditableLines(inv.id, -1),
+    // The lots that could have come back — absent, not empty, without `qc`.
+    ...(allows(req, 'qc') ? { order_batches: batchesForInvoice(inv.id) } : {}),
     items: lines.map((it) => {
       const billed = Number(it.qty) || 0;
       const left = Math.max(0, billed - (Number(it.already_credited) || 0));
@@ -272,7 +291,7 @@ creditNotesRouter.get('/prefill/from-invoice/:invoiceId', (req: AuthedRequest, r
 });
 
 creditNotesRouter.get('/:id', (req: AuthedRequest, res) => {
-  const note = getFull(Number(req.params.id));
+  const note = getFull(Number(req.params.id), req);
   if (!note || !canAccessCustomer(req, Number(note.customer_id))) return res.status(404).json({ error: 'Credit note not found' });
   res.json(note);
 });
@@ -304,6 +323,8 @@ creditNotesRouter.post('/', (req: AuthedRequest, res) => {
   if (overLine) return res.status(400).json({ error: overLine });
   const overAll = creditTotalError(inv.id, totals.grand_total);
   if (overAll) return res.status(400).json({ error: overAll });
+  const badLot = returnBatchError(inv.id, kind, body.batch_ids ?? []);
+  if (badLot) return res.status(400).json({ error: badLot });
 
   const id = transaction(() => {
     const number = nextNumber('credit_note', { isExport: inv.is_export === 1, companyId: inv.company_id, date });
@@ -320,10 +341,11 @@ creditNotesRouter.post('/', (req: AuthedRequest, res) => {
     );
     const id = Number(info.lastInsertRowid);
     saveItems(id, items, inv.tax_type, inv.currency);
+    setCreditNoteBatches(id, Array.isArray(body.batch_ids) ? body.batch_ids : []);
     return id;
   });
   syncAfter(inv.id);
-  res.status(201).json(getFull(id));
+  res.status(201).json(getFull(id, req));
 });
 
 creditNotesRouter.put('/:id', (req: AuthedRequest, res) => {
@@ -355,6 +377,20 @@ creditNotesRouter.put('/:id', (req: AuthedRequest, res) => {
   const bad = kindError(kind);
   if (bad) return res.status(400).json({ error: bad });
 
+  /*
+   * Lots: omitted leaves them alone, `[]` clears them — the despatch PUT's
+   * contract. A note re-typed as an **adjustment** clears them whatever was
+   * sent, since an adjustment moves no goods; one that *names* lots while
+   * claiming to be an adjustment is refused by the guard instead.
+   */
+  const lots: unknown[] | null = kind === 'adjustment'
+    ? (Array.isArray(body.batch_ids) && body.batch_ids.length ? body.batch_ids : [])
+    : Array.isArray(body.batch_ids) ? body.batch_ids : null;
+  if (lots) {
+    const badLot = returnBatchError(inv.id, kind, lots);
+    if (badLot) return res.status(400).json({ error: badLot });
+  }
+
   const items = Array.isArray(body.items) ? (body.items as LineItemInput[]) : null;
   if (items) {
     const totals = computeTotals(items, inv.tax_type, 0, 0, inv.currency);
@@ -385,13 +421,14 @@ creditNotesRouter.put('/:id', (req: AuthedRequest, res) => {
       id
     );
     if (items) saveItems(id, items, inv.tax_type, inv.currency);
+    if (lots) setCreditNoteBatches(id, lots);
     // An edited credit note stops crediting anything until it is approved
     // again — which is the behaviour wanted rather than a side effect: what
     // reduces a balance is a figure somebody signed off, not one being typed.
     resetApprovalOnEdit('credit_notes', id);
   });
   syncAfter(inv.id);
-  res.json(getFull(id));
+  res.json(getFull(id, req));
 });
 
 creditNotesRouter.post('/:id/submit', (req: AuthedRequest, res) => {
@@ -406,7 +443,7 @@ creditNotesRouter.post('/:id/submit', (req: AuthedRequest, res) => {
   // A manager submitting approves in the same action, and an approved credit
   // note is one that counts — so the balance and the order move here too.
   syncAfter(existing.invoice_id);
-  res.json(getFull(id));
+  res.json(getFull(id, req));
 });
 
 creditNotesRouter.post('/:id/approve', (req: AuthedRequest, res) => {
@@ -421,7 +458,7 @@ creditNotesRouter.post('/:id/approve', (req: AuthedRequest, res) => {
   if (unfinished) return res.status(422).json({ error: unfinished });
   decide('credit_notes', id, req.user!, approving, String(req.body?.note ?? ''));
   syncAfter(existing.invoice_id);
-  res.json(getFull(id));
+  res.json(getFull(id, req));
 });
 
 creditNotesRouter.delete('/:id', (req: AuthedRequest, res) => {
@@ -432,6 +469,7 @@ creditNotesRouter.delete('/:id', (req: AuthedRequest, res) => {
   // Resolved before the delete, or there would be nothing left to sync from.
   const invoiceId = existing.invoice_id;
   transaction(() => {
+    db.prepare('DELETE FROM credit_note_batches WHERE credit_note_id = ?').run(id);
     db.prepare('DELETE FROM credit_note_items WHERE credit_note_id = ?').run(id);
     db.prepare('DELETE FROM credit_notes WHERE id = ?').run(id);
   });

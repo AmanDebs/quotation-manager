@@ -697,6 +697,25 @@ CREATE TABLE IF NOT EXISTS credit_note_items (
 
 CREATE INDEX IF NOT EXISTS idx_credit_note_items_note ON credit_note_items(credit_note_id);
 
+-- Which identified lots came back on this credit note -- `despatch_batches`
+-- read the other way, and the fact that lets `dispositionError` finally rule
+-- on a lot that has been to the customer and returned. The same shape for
+-- the same reasons: a link and nothing else, no order line (the batch's job
+-- names it), no quantity (the credit line already states the pieces, and a
+-- per-lot split would be a second set of figures with nothing to reconcile
+-- them against), hanging off the note rather than its items because those
+-- are deleted and reinserted on every save.
+CREATE TABLE IF NOT EXISTS credit_note_batches (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  credit_note_id INTEGER NOT NULL REFERENCES credit_notes(id) ON DELETE CASCADE,
+  batch_id INTEGER NOT NULL REFERENCES batches(id),
+  UNIQUE (credit_note_id, batch_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_credit_note_batches_note ON credit_note_batches(credit_note_id);
+-- The reverse question -- did this lot come back -- is the one scrap asks.
+CREATE INDEX IF NOT EXISTS idx_credit_note_batches_batch ON credit_note_batches(batch_id);
+
 CREATE TABLE IF NOT EXISTS followups (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   doc_type TEXT NOT NULL CHECK (doc_type IN ('enquiry','quotation','proforma','invoice','general')),

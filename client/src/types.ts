@@ -286,6 +286,24 @@ export interface Batch {
    * *this lot has not shipped*.
    */
   trips: BatchTrip[];
+  /** The credit notes this lot was named as returned on, whatever their approval. */
+  returns?: BatchReturn[];
+  /** Named on an **approved** return — physically back, so it may be scrapped. */
+  returned?: boolean;
+}
+
+/** A credit note one lot came back on — the trips read the other way. */
+export interface BatchReturn {
+  credit_note_id: number;
+  number: string;
+  date: string;
+  approval_status: string;
+  invoice_number: string;
+}
+
+/** A lot on the order behind an invoice, as the credit note's picker needs it. */
+export interface ReturnableBatch extends OrderBatch {
+  trips: BatchTrip[];
 }
 
 /** A lot named on one trip. Everything but the ids is read back through the job. */
@@ -1013,6 +1031,13 @@ export interface CreditNote {
   column_config?: ColumnConfig;
   checks?: DocumentFinding[];
   invoice_lines?: CreditableLine[];
+  /** The lots named as returned on this note. */
+  batches?: DespatchBatch[];
+  /**
+   * The lots on the order behind the invoice, for the picker. **Absent, not
+   * empty, for a caller without `qc`** — the order's own rule for its picker.
+   */
+  order_batches?: ReturnableBatch[];
 }
 
 export interface PackingListItem {

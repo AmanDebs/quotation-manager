@@ -116,6 +116,29 @@ export interface Batch {
    * *this lot has not shipped*, only as *nobody recorded it against one*.
    */
   trips: BatchTrip[];
+  /**
+   * The credit notes this lot was named on as returned — the trips read the
+   * other way. Every note naming it whatever its approval, so the screen can
+   * say a return is drafted; `returned` below counts only the approved.
+   */
+  returns: BatchReturn[];
+  /**
+   * Named on an **approved** return credit note. The one fact that lets a
+   * dispatched lot be scrapped: the goods are physically back, so condemning
+   * them no longer drops the order's figure for goods the buyer still holds.
+   * Only approved, the rule `CREDITED_SQL` states — a drafted return is not
+   * yet a return.
+   */
+  returned: boolean;
+}
+
+/** A credit note one lot came back on. */
+export interface BatchReturn {
+  credit_note_id: number;
+  number: string;
+  date: string;
+  approval_status: string;
+  invoice_number: string;
 }
 
 const num = (v: unknown) => round2(Number(v) || 0);
@@ -148,6 +171,8 @@ export function batchesFor(workOrderId: number): Batch[] {
   const checks = checksForWorkOrder(workOrderId);
   // Where each lot went, on the same one-query-for-the-job rule.
   const trips = tripsForBatches(rows.map((r) => Number(r.id)));
+  // And whether it came back.
+  const returns = returnsForBatches(rows.map((r) => Number(r.id)));
 
   return rows.map((r) => {
     const id = Number(r.id);
@@ -180,6 +205,8 @@ export function batchesFor(workOrderId: number): Batch[] {
       held: qc === 'failed' && disposition === '',
       scrapped: disposition === 'scrapped',
       trips: trips.get(id) ?? [],
+      returns: returns.get(id) ?? [],
+      returned: (returns.get(id) ?? []).some((n) => n.approval_status === 'approved'),
     };
   });
 }
@@ -428,12 +455,146 @@ export function dispositionError(id: number, disposition: Disposition): string |
   const b = batchById(id);
   if (!b) return 'Batch not found.';
   if (disposition === '') return null;
-  if (b.trips.length) {
+  /*
+   * ...unless it came back. A lot named on an **approved** return credit note
+   * is physically here again, and scrapping it is exactly what the return was
+   * for. Approved, not merely drafted: the balance moves on approval and so
+   * does this, or a lot could be condemned on the strength of a return nobody
+   * has signed.
+   */
+  if (b.trips.length && !b.returned) {
     const where = b.trips.map((t) => t.reference || t.order_number).filter(Boolean).join(', ');
+    const drafted = b.returns.length ? ' A return naming it is drafted but not yet approved.' : '';
     return `Batch ${b.number} has already been dispatched${where ? ` on ${where}` : ''}, `
-      + 'so it cannot be reworked or scrapped here.';
+      + 'so it cannot be reworked or scrapped here. If the goods came back, name the lot on the '
+      + `credit note for that return and approve it first.${drafted}`;
   }
   return null;
+}
+
+/* ------------------------------------------------------------------ */
+/* WHAT CAME BACK                                                      */
+/* ------------------------------------------------------------------ */
+
+/** A lot on the order behind an invoice, as the credit note's picker needs it. */
+export interface ReturnableBatch extends OrderBatch {
+  /** The trips it went out on — a hint, not a gate; naming lots on a trip is optional. */
+  trips: BatchTrip[];
+}
+
+/** The sales order an invoice bills against, or null — `dispatchProgress`'s own walk. */
+export function orderBehindInvoice(invoiceId: number): number | null {
+  const row = db.prepare(
+    `SELECT COALESCE(order_id, (SELECT order_id FROM proforma_invoices WHERE id = pi_id)) AS o
+       FROM commercial_invoices WHERE id = ?`
+  ).get(invoiceId) as { o: number | null } | undefined;
+  return row?.o ? Number(row.o) : null;
+}
+
+/**
+ * Every lot on the order behind an invoice, with where each went, for the
+ * credit note's picker. Empty for an invoice with no order behind it — such an
+ * invoice was produced against nothing, so there is no lot to have come back.
+ */
+export function batchesForInvoice(invoiceId: number): ReturnableBatch[] {
+  const orderId = orderBehindInvoice(invoiceId);
+  if (!orderId) return [];
+  const lots = batchesForOrder(orderId);
+  const trips = tripsForBatches(lots.map((b) => b.id));
+  return lots.map((b) => ({ ...b, trips: trips.get(b.id) ?? [] }));
+}
+
+/** The lots named on one credit note, in order-line order. */
+export function batchesOnCreditNote(creditNoteId: number): DespatchBatch[] {
+  const rows = db.prepare(
+    `SELECT ${LOT_COLUMNS}
+       FROM credit_note_batches cb
+       JOIN batches b ON b.id = cb.batch_id
+       JOIN work_orders w ON w.id = b.work_order_id
+       LEFT JOIN products p ON p.id = w.product_id
+      WHERE cb.credit_note_id = ?
+      ORDER BY w.order_line, b.date, b.id`
+  ).all(creditNoteId) as Record<string, unknown>[];
+  return rows.map(toLot);
+}
+
+/** Rewrite which lots came back on a credit note, whole — `setDespatchBatches`'s shape. */
+export function setCreditNoteBatches(creditNoteId: number, batchIds: unknown[]): void {
+  db.prepare('DELETE FROM credit_note_batches WHERE credit_note_id = ?').run(creditNoteId);
+  const ins = db.prepare('INSERT INTO credit_note_batches (credit_note_id, batch_id) VALUES (?, ?)');
+  for (const id of uniqueIds(batchIds)) ins.run(creditNoteId, id);
+}
+
+/**
+ * Why these lots may not be named as returned on a credit note, or null.
+ *
+ * `despatchBatchError` read the other way, with one refusal of its own at the
+ * front: an **adjustment** moves no goods, so a lot named on one is a
+ * contradiction rather than a record. Then the same two: a lot not on file,
+ * and a lot made against another order — the order behind the *invoice*,
+ * reached the way `dispatchProgress` reaches it, since a credit note carries
+ * no `order_id` of its own. A scrapped lot is refused too: it never left, so
+ * it cannot have come back.
+ *
+ * **Deliberately not required: that the lot was named on a trip.** Naming
+ * lots on a dispatch is optional and every trip on file predates it, so
+ * refusing a return for a lot nobody recorded going out would refuse the
+ * honest case. The picker shows the trips as a hint instead.
+ *
+ * Naming no lots is always allowed, as everywhere the link exists.
+ */
+export function returnBatchError(invoiceId: number, kind: string, batchIds: unknown[]): string | null {
+  const raw = (batchIds ?? []) as unknown[];
+  if (!raw.length) return null;
+  if (kind !== 'return') {
+    return 'An adjustment credits money and moves no goods, so it cannot name a lot as returned. '
+      + 'Record the credit as goods returned if a lot actually came back.';
+  }
+  if (raw.some((v) => !Number.isInteger(Number(v)) || Number(v) <= 0)) {
+    return 'One of the batches named is not on file — it may have been deleted since.';
+  }
+  const orderId = orderBehindInvoice(invoiceId);
+  for (const id of uniqueIds(raw)) {
+    const row = db.prepare(
+      `SELECT b.number, b.disposition, w.order_id
+         FROM batches b JOIN work_orders w ON w.id = b.work_order_id
+        WHERE b.id = ?`
+    ).get(id) as { number: string; disposition: string; order_id: number } | undefined;
+    if (!row) return 'One of the batches named is not on file — it may have been deleted since.';
+    if (!orderId || Number(row.order_id) !== orderId) {
+      return `Batch ${row.number} was made against another sales order, so it cannot have come back on this invoice.`;
+    }
+    if (String(row.disposition) === 'scrapped') {
+      return `Batch ${row.number} was scrapped and never left, so it cannot have come back.`;
+    }
+  }
+  return null;
+}
+
+/** Every credit note each of these lots came back on, keyed by batch id. */
+export function returnsForBatches(batchIds: number[]): Map<number, BatchReturn[]> {
+  const out = new Map<number, BatchReturn[]>();
+  if (!batchIds.length) return out;
+  const rows = db.prepare(
+    `SELECT cb.batch_id, n.id, n.number, n.date, n.approval_status, i.number AS invoice_number
+       FROM credit_note_batches cb
+       JOIN credit_notes n ON n.id = cb.credit_note_id
+       JOIN commercial_invoices i ON i.id = n.invoice_id
+      WHERE cb.batch_id IN (${batchIds.map(() => '?').join(',')})
+      ORDER BY n.date, n.id`
+  ).all(...batchIds) as Record<string, unknown>[];
+  for (const r of rows) {
+    const key = Number(r.batch_id);
+    if (!out.has(key)) out.set(key, []);
+    out.get(key)!.push({
+      credit_note_id: Number(r.id),
+      number: String(r.number ?? ''),
+      date: String(r.date ?? ''),
+      approval_status: String(r.approval_status ?? ''),
+      invoice_number: String(r.invoice_number ?? ''),
+    });
+  }
+  return out;
 }
 
 /** A lot on the order, as the dispatch form's picker needs it. */

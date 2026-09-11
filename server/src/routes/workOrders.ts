@@ -678,6 +678,12 @@ workOrdersRouter.delete('/batches/:batchId', requirePermission('output', 'full')
       error: `Batch ${full.number} has been dispatched${where ? ` on ${where}` : ''} and cannot be deleted.`,
     });
   }
+  // And the link the other way: a lot named as returned on a credit note.
+  if (full.returns.length) {
+    return res.status(409).json({
+      error: `Batch ${full.number} is named as returned on ${full.returns.map((n) => n.number).join(', ')} and cannot be deleted.`,
+    });
+  }
   // A certified lot is on paper with the customer; a lot with output behind it
   // is a day's production. Neither is deleted to tidy up — the entries are
   // moved off it first, which is a decision somebody makes on purpose.
