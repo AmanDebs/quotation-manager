@@ -131,7 +131,7 @@ describe('the warnings each document type carries', () => {
   });
 
   test('a quotation is asked for none of it', () => {
-    assert.deepEqual(keys(doc('quotations', { is_export: 1, gstin: '' })), []);
+    assert.deepEqual(keys(doc('quotations', { is_export: 1, gstin: '', container_count: '1 X 40ft HQ' })), []);
   });
 
   test('the ports message names only the one that is missing', () => {
@@ -319,6 +319,12 @@ describe('the quotation mandatory fields', () => {
     assert.deepEqual(keys(doc('quotations', all), 'block'), blanks.map(([, k]) => k).sort());
     assert.deepEqual(keys(doc('quotations'), 'block'), []);
   });
+  test('containers on an export quotation only', () => {
+    assert.deepEqual(keys(doc('quotations', { is_export: 1, container_count: '' }), 'block'), ['containers']);
+    assert.deepEqual(keys(doc('quotations', { is_export: 1, container_count: '2 X 40ft HQ' }), 'block'), []);
+    assert.deepEqual(keys(doc('quotations', { is_export: 0, container_count: '' }), 'block'), [], 'a domestic quotation was asked for containers');
+  });
+
   test('the proforma and the invoice are not held to them', () => {
     for (const table of ['proforma_invoices', 'commercial_invoices'] as const) {
       const d = doc(table, { validity_date: '', delivery_terms: '', prepared_by: '', inco_terms: '', notes: '' });

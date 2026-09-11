@@ -475,7 +475,7 @@ export default function QuotationFormPage() {
               * when there is a value, so an empty field was already silent.
               */}
             {(!!draft.is_export || !!draft.container_count) && (
-              <Field label="Containers"><Input disabled={readOnly} value={draft.container_count} onChange={(e) => set({ container_count: e.target.value })} placeholder="e.g. 5 X 40ft HQ" /></Field>
+              <Field label="Containers *"><Input disabled={readOnly} value={draft.container_count} onChange={(e) => set({ container_count: e.target.value })} placeholder="e.g. 5 X 40ft HQ" /></Field>
             )}
             <div className={`col-span-full ${readOnly ? 'has-[[data-empty]]:hidden' : ''}`}>
               <span className={`mb-1 block ${labelClass(readOnly)}`}>Notes (printed on quotation) *</span>

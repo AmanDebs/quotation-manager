@@ -327,6 +327,14 @@ const RULES: Rule[] = [
     key: 'notes', level: 'block', tables: ['quotations'],
     check: (d) => (text(d.row.notes) ? null : 'Notes (printed on the quotation) are blank.'),
   },
+  {
+    // The one field an export quotation carries that a domestic one does not
+    // (the client, 2026-09-12, with an export quotation in front of them).
+    // Export only: a domestic sale goes on a lorry, and the form does not
+    // even offer the box there.
+    key: 'containers', level: 'block', tables: ['quotations'], when: isExport,
+    check: (d) => (text(d.row.container_count) ? null : 'Containers is blank.'),
+  },
 ];
 
 /** Every rule this document breaks, blocking ones first. */
