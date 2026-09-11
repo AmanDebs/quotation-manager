@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import { useCan, useUser } from '../App';
-import type { CreditNote, CreditKind, LineItem, ColumnConfig, TaxType, ReturnableBatch } from '../types';
+import type { CreditNote, CreditKind, LineItem, ColumnConfig, TaxType, ReturnableBatch, Location } from '../types';
 import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, SettledDocumentType, FIELD_GRID, TH_CLASS } from '../components/ui';
 import { PdfLink } from '../components/PdfLink';
 import { DocNumber } from '../components/DocFields';
@@ -42,11 +42,13 @@ interface Draft {
   items: LineItem[];
   /** Which lots came back. Sent whole; `[]` clears. */
   batch_ids: number[];
+  /** Where the goods arrived — the finished-goods ledger's plant for a return. */
+  location_id: number | null;
 }
 
 const emptyDraft = (): Draft => ({
   invoice_id: null, date: today(), kind: 'return', reason: '', notes: '', prepared_by: '',
-  currency: 'INR', tax_type: 'igst', is_export: 0, column_config: newColumnConfig(), items: [], batch_ids: [],
+  currency: 'INR', tax_type: 'igst', is_export: 0, column_config: newColumnConfig(), items: [], batch_ids: [], location_id: null,
 });
 
 const KIND_LABEL: Record<CreditKind, string> = { return: 'Goods returned', adjustment: 'Adjustment (money only)' };
@@ -61,6 +63,7 @@ export default function CreditNoteFormPage() {
   const isNew = !id;
   const fromInvoice = search.get('from_invoice');
 
+  const { data: locations = [] } = useQuery({ queryKey: ['master', 'locations', false], queryFn: () => api.get<Location[]>('/api/locations') });
   const { data: existing, error: loadError } = useQuery({
     queryKey: ['credit-note', id],
     queryFn: () => api.get<CreditNote>(`/api/credit-notes/${id}`),
@@ -84,6 +87,7 @@ export default function CreditNoteFormPage() {
         currency: existing.currency, tax_type: existing.tax_type, is_export: existing.is_export,
         column_config: existing.column_config ?? {}, items: existing.items ?? [],
         batch_ids: (existing.batches ?? []).map((b) => b.id),
+        location_id: existing.location_id ?? null,
       });
     }
   }, [existing]);
@@ -224,6 +228,16 @@ export default function CreditNoteFormPage() {
             <Field label="Type"><SettledDocumentType isExport={!!draft.is_export} number={draft.number} /></Field>
             <Field label="Currency"><DocNumber value={draft.currency} title="The invoice's currency" /></Field>
             <Field label="Prepared By"><Input value={draft.prepared_by} onChange={(e) => set({ prepared_by: e.target.value })} /></Field>
+            {/* Where the goods came back to, so the finished-goods ledger can
+                place them. Only a return has a plant; an adjustment moves nothing. */}
+            {draft.kind === 'return' && (
+              <Field label="Returned to plant">
+                <Select value={draft.location_id ?? ''} onChange={(e) => set({ location_id: e.target.value ? Number(e.target.value) : null })}>
+                  <option value="">Plant not recorded</option>
+                  {locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+                </Select>
+              </Field>
+            )}
           </div>
           <p className="mt-2 text-xs text-slate-500">
             {draft.kind === 'return'

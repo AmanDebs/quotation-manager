@@ -32,11 +32,13 @@ export const creditNotesRouter = Router();
 const listSql = `
   SELECT n.*, c.name AS customer_name, c.country AS customer_country,
          i.number AS invoice_number, i.date AS invoice_date, i.grand_total AS invoice_total,
+         l.name AS location_name,
          co.company_name AS company_name,
          u.name AS created_by_name, a.name AS approved_by_name
   FROM credit_notes n
   JOIN customers c ON c.id = n.customer_id
   JOIN commercial_invoices i ON i.id = n.invoice_id
+  LEFT JOIN locations l ON l.id = n.location_id
   -- LEFT, not JOIN: a document must still list if its company row is gone.
   LEFT JOIN companies co ON co.id = n.company_id
   LEFT JOIN users u ON u.id = n.created_by
@@ -330,13 +332,16 @@ creditNotesRouter.post('/', (req: AuthedRequest, res) => {
     const number = nextNumber('credit_note', { isExport: inv.is_export === 1, companyId: inv.company_id, date });
     const info = db.prepare(
       `INSERT INTO credit_notes (number, date, invoice_id, customer_id, company_id, kind, reason,
-                                 currency, tax_type, is_export, notes, prepared_by, created_by, column_config)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+                                 currency, tax_type, is_export, notes, prepared_by, location_id, created_by, column_config)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       String(body.number || number), date, inv.id, inv.customer_id, inv.company_id,
       kind, String(body.reason ?? ''),
       inv.currency, inv.tax_type, inv.is_export,
       String(body.notes ?? ''), String(body.prepared_by ?? ''),
+      // Where the goods arrived, for the finished-goods ledger. An adjustment
+      // moves nothing, so it carries none.
+      kind === 'return' && Number(body.location_id) > 0 ? Number(body.location_id) : null,
       req.user!.id, JSON.stringify(body.column_config ?? {})
     );
     const id = Number(info.lastInsertRowid);
@@ -404,7 +409,7 @@ creditNotesRouter.put('/:id', (req: AuthedRequest, res) => {
 
   transaction(() => {
     db.prepare(
-      `UPDATE credit_notes SET number = ?, date = ?, kind = ?, reason = ?, notes = ?, prepared_by = ?,
+      `UPDATE credit_notes SET number = ?, date = ?, kind = ?, reason = ?, notes = ?, prepared_by = ?, location_id = ?,
               currency = ?, tax_type = ?, is_export = ?, customer_id = ?, company_id = ?, column_config = ?
        WHERE id = ?`
     ).run(
@@ -414,6 +419,9 @@ creditNotesRouter.put('/:id', (req: AuthedRequest, res) => {
       String(body.reason ?? existing.reason ?? ''),
       String(body.notes ?? existing.notes ?? ''),
       String(body.prepared_by ?? existing.prepared_by ?? ''),
+      kind !== 'return' ? null
+        : 'location_id' in body ? (Number(body.location_id) > 0 ? Number(body.location_id) : null)
+          : (existing.location_id as number | null),
       // Re-copied from the invoice on every save rather than kept: if the
       // invoice was corrected, the credit follows it.
       inv.currency, inv.tax_type, inv.is_export, inv.customer_id, inv.company_id,

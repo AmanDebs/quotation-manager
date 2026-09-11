@@ -29,6 +29,7 @@ import { despatchesRouter } from './routes/despatches.js';
 import { proformasRouter } from './routes/proformas.js';
 import { invoicesRouter } from './routes/invoices.js';
 import { creditNotesRouter } from './routes/creditNotes.js';
+import { finishedGoodsRouter } from './routes/finishedGoods.js';
 import { packingListsRouter } from './routes/packingLists.js';
 import { followupsRouter } from './routes/followups.js';
 import { paymentsRouter } from './routes/payments.js';
@@ -106,6 +107,8 @@ app.use('/api/purchase-orders', requireAuth, requirePermission('purchasing', 'fu
 // The stock ledger guards its own writes — reads are open because anyone
 // planning a job needs to know whether there is material for it.
 app.use('/api/stock', requireAuth, requirePermission('material'), stockRouter);
+// Finished goods on its own function: Logistics holds `fg` and `material: none`.
+app.use('/api/finished-goods', requireAuth, requireFunction('fg'), finishedGoodsRouter);
 app.use('/api/despatches', requireAuth, requireFunction('dispatch'), despatchesRouter);
 app.use('/api/proformas', requireAuth, requireFunction('proforma'), proformasRouter);
 app.use('/api/invoices', requireAuth, requireFunction('invoice'), invoicesRouter);

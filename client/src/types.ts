@@ -999,6 +999,24 @@ export interface Invoice {
   despatches?: InvoiceDespatch[];
 }
 
+/** One product at one plant on the finished-goods ledger. Every column but `adjusted` is derived. */
+export interface FgRow {
+  product_id: number; product_name: string; color: string;
+  location_id: number | null; location_name: string | null;
+  made: number; dispatched: number; returned: number; adjusted: number; on_hand: number;
+}
+export interface FgReport {
+  rows: FgRow[];
+  /** Pieces on lines naming no product, which the ledger cannot place. Reported, not dropped. */
+  unplaced: { dispatched: number; returned: number };
+}
+/** A count or an opening balance — the one thing the ledger stores. Signed. */
+export interface FgAdjustment {
+  id: number; product_id: number; location_id: number | null; date: string; qty: number;
+  reason: string; notes: string;
+  product_name: string; location_name: string | null; created_by_name: string | null;
+}
+
 /** A credit note as the invoice page lists it. */
 export interface CreditNoteSummary {
   id: number; number: string; date: string; kind: CreditKind; reason: string;
@@ -1026,6 +1044,8 @@ export interface CreditableLine {
 export interface CreditNote {
   id: number; number: string; date: string; invoice_id: number; customer_id: number; company_id?: number;
   kind: CreditKind; reason: string; notes: string; prepared_by: string;
+  /** Where returned goods arrived, for the finished-goods ledger. Null on an adjustment. */
+  location_id?: number | null; location_name?: string | null;
   currency: string; tax_type: TaxType; is_export: number;
   subtotal: number; tax_total: number; grand_total: number;
   approval_status: ApprovalStatus;

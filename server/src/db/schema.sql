@@ -652,6 +652,10 @@ CREATE TABLE IF NOT EXISTS credit_notes (
   is_export INTEGER NOT NULL DEFAULT 0,
   notes TEXT NOT NULL DEFAULT '',
   prepared_by TEXT NOT NULL DEFAULT '',
+  -- Where returned goods arrived, for the finished-goods ledger. Nullable:
+  -- a return nobody placed lands in the "plant not recorded" bucket rather
+  -- than at a guessed plant. Meaningless on an adjustment.
+  location_id INTEGER REFERENCES locations(id),
   -- There is deliberately **no status ladder**. A credit note is issued once
   -- and that is the whole of its life: it is never sent, negotiated, part
   -- shipped or paid. What it does have is approval, and that carries the
@@ -720,6 +724,29 @@ CREATE TABLE IF NOT EXISTS credit_note_batches (
 CREATE INDEX IF NOT EXISTS idx_credit_note_batches_note ON credit_note_batches(credit_note_id);
 -- The reverse question -- did this lot come back -- is the one scrap asks.
 CREATE INDEX IF NOT EXISTS idx_credit_note_batches_batch ON credit_note_batches(batch_id);
+
+-- Finished goods: the one thing the ledger stores (2026-09-11). On hand is
+-- derived -- made, less dispatched, plus returned, over records that already
+-- exist for their own reasons -- and this table holds what cannot be: an
+-- opening balance, and a count that disagreed with the record. Signed, like
+-- material_moves; per product and per plant, like the raw-material ledger.
+-- See services/finishedGoods.ts.
+CREATE TABLE IF NOT EXISTS fg_adjustments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  product_id INTEGER NOT NULL REFERENCES products(id),
+  location_id INTEGER REFERENCES locations(id),
+  date TEXT NOT NULL,
+  qty REAL NOT NULL,
+  -- 'opening' for stock that predates the record, 'count' for a stock take,
+  -- 'other' for anything else -- no CHECK, the rule products.product_type
+  -- states; enforced in the route.
+  reason TEXT NOT NULL DEFAULT 'count',
+  notes TEXT NOT NULL DEFAULT '',
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_fg_adjustments_product ON fg_adjustments(product_id, location_id);
 
 CREATE TABLE IF NOT EXISTS followups (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

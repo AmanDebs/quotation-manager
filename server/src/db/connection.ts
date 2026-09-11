@@ -155,6 +155,8 @@ for (const t of ['settings', 'companies']) {
   addColumnIfMissing(t, 'cn_pattern', "TEXT NOT NULL DEFAULT 'CN/{FY}/{SEQ}'");
   addColumnIfMissing(t, 'cn_export_pattern', "TEXT NOT NULL DEFAULT 'CN-EX/{FY}/{SEQ}'");
 }
+// Where a return arrived, for the finished-goods ledger (2026-09-11).
+addColumnIfMissing('credit_notes', 'location_id', 'INTEGER REFERENCES locations(id)');
 
 /*
  * The purchase order, brought up to the shape of the documents around it

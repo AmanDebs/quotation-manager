@@ -22,6 +22,7 @@ import InvoicesPage from './pages/Invoices';
 import InvoiceFormPage from './pages/InvoiceForm';
 import CreditNotesPage from './pages/CreditNotes';
 import CreditNoteFormPage from './pages/CreditNoteForm';
+import FinishedGoodsPage from './pages/FinishedGoods';
 import PackingListsPage from './pages/PackingLists';
 import PackingListFormPage from './pages/PackingListForm';
 import FollowupsPage from './pages/Followups';
@@ -158,6 +159,7 @@ const LANDING: [string, string][] = [
   ['quotation', '/quotations'],
   ['order', '/orders'],
   ['material', '/stock'],
+  ['fg', '/finished-goods'],
   ['customer', '/customers'],
   // Last, so it can never pre-empt a business team: the System Administrator
   // reaches none of the screens above, and without an entry here would land on
@@ -213,6 +215,7 @@ export const routes: RouteObject[] = [
       { path: '/quality', element: <Needs fn="qc"><QualityPage /></Needs> },
       { path: '/despatches', element: <Needs fn="dispatch"><DespatchesPage /></Needs> },
       { path: '/stock', element: <Needs fn="material"><StockPage /></Needs> },
+      { path: '/finished-goods', element: <Needs fn="fg"><FinishedGoodsPage /></Needs> },
       { path: '/purchase-orders', element: <Needs fn="purchasing"><PurchaseOrdersPage /></Needs> },
       { path: '/masters', element: <Needs fn="master"><MastersPage /></Needs> },
       { path: '/approvals', element: <Needs fn="approval"><ApprovalsPage /></Needs> },

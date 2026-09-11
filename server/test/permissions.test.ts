@@ -80,7 +80,7 @@ describe('the access table', () => {
   test('the system administrator reaches no business data at all', () => {
     const business: Fn[] = [
       'enquiry', 'quotation', 'proforma', 'order', 'invoice', 'packing_list',
-      'work_order', 'output', 'qc', 'material', 'dispatch',
+      'work_order', 'output', 'qc', 'material', 'dispatch', 'fg',
       'customer', 'product', 'followup', 'payment', 'purchasing', 'approval', 'dashboard',
     ];
     for (const fn of business) {

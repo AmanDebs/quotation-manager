@@ -57,6 +57,7 @@ const ENTITY_FN: Record<string, Fn> = {
   invoices: 'invoice',
   // A credit note's history follows the invoice function, as the record does.
   'credit-notes': 'invoice',
+  'finished-goods': 'fg',
   'packing-lists': 'packing_list',
   followups: 'followup',
   payments: 'payment',
@@ -84,6 +85,8 @@ const OWNER_SQL: Record<string, string | null> = {
   proformas: 'SELECT customer_id FROM proforma_invoices WHERE id = ?',
   invoices: 'SELECT customer_id FROM commercial_invoices WHERE id = ?',
   'credit-notes': 'SELECT customer_id FROM credit_notes WHERE id = ?',
+  // No customer of its own: the shed is nobody's. Refused unless the caller may read the whole log.
+  'finished-goods': null,
   'packing-lists': 'SELECT customer_id FROM packing_lists WHERE id = ?',
   followups: 'SELECT customer_id FROM followups WHERE id = ?',
   payments: 'SELECT customer_id FROM payments WHERE id = ?',

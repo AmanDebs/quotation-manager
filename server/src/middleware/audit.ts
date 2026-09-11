@@ -36,6 +36,7 @@ const TABLES: Record<string, string> = {
   proformas: 'proforma_invoices',
   invoices: 'commercial_invoices',
   'credit-notes': 'credit_notes',
+  'finished-goods': 'fg_adjustments',
   'packing-lists': 'packing_lists',
   followups: 'followups',
   payments: 'payments',

@@ -60,6 +60,9 @@ const NAV: { heading: string; items: NavItem[] }[] = [
       { to: '/quality', label: 'Quality', icon: 'gauge', needs: 'qc' },
       { to: '/despatches', label: 'Dispatches', icon: 'truck', needs: 'dispatch' },
       { to: '/stock', label: 'Stock', icon: 'box', needs: 'material' },
+      // Finished goods on the shelf — its own function, since Logistics holds
+      // it and holds no `material`.
+      { to: '/finished-goods', label: 'Finished Goods', icon: 'box', needs: 'fg' },
       // Supplier rates are not everyone's business, and committing a spend is
       // not a shop-floor action — so purchasing is the super admin's, front and back.
       { to: '/purchase-orders', label: 'Purchase Orders', icon: 'cart', needs: 'purchasing' },

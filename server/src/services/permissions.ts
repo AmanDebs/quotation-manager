@@ -59,8 +59,9 @@ export function isTeamRole(v: unknown): v is TeamRole {
 export const FUNCTIONS = [
   // The sales chain.
   'enquiry', 'quotation', 'proforma', 'order', 'dashboard',
-  // The floor.
-  'work_order', 'output', 'qc', 'material', 'dispatch',
+  // The floor. `fg` is finished goods on hand — the spec's *View FG
+  // Inventory* cell, which had nothing to grant until the ledger existed.
+  'work_order', 'output', 'qc', 'material', 'dispatch', 'fg',
   // Going out.
   'invoice', 'packing_list',
   // Reference data.
@@ -99,7 +100,7 @@ export const ACCESS: Record<TeamRole, Record<Fn, Level>> = {
    */
   super_admin: {
     enquiry: 'full', quotation: 'full', proforma: 'full', order: 'full', dashboard: 'full',
-    work_order: 'full', output: 'full', qc: 'full', material: 'full', dispatch: 'full',
+    work_order: 'full', output: 'full', qc: 'full', material: 'full', dispatch: 'full', fg: 'full',
     invoice: 'full', packing_list: 'full',
     customer: 'full', product: 'full', master: 'full', followup: 'full', payment: 'full',
     purchasing: 'full', approval: 'full', audit: 'full', team: 'full', settings: 'full', backup: 'full',
@@ -121,7 +122,7 @@ export const ACCESS: Record<TeamRole, Record<Fn, Level>> = {
    */
   sys_admin: {
     enquiry: 'none', quotation: 'none', proforma: 'none', order: 'none', dashboard: 'none',
-    work_order: 'none', output: 'none', qc: 'none', material: 'none', dispatch: 'none',
+    work_order: 'none', output: 'none', qc: 'none', material: 'none', dispatch: 'none', fg: 'none',
     invoice: 'none', packing_list: 'none',
     customer: 'none', product: 'none', master: 'full', followup: 'none', payment: 'none',
     purchasing: 'none', approval: 'none', audit: 'full', team: 'full', settings: 'full', backup: 'full',
@@ -142,6 +143,7 @@ export const ACCESS: Record<TeamRole, Record<Fn, Level>> = {
     work_order: 'view', output: 'none', material: 'none',
     qc: 'view',        // Read Only (View COA Status)
     dispatch: 'view',  // Read Only (Tracking Status)
+    fg: 'view',        // What can be promised from stock
     invoice: 'full', packing_list: 'full',
     customer: 'full', product: 'full', master: 'view', followup: 'full', payment: 'full',
     purchasing: 'none', approval: 'full', audit: 'none', team: 'none', settings: 'none', backup: 'none',
@@ -156,16 +158,18 @@ export const ACCESS: Record<TeamRole, Record<Fn, Level>> = {
    * makes the whole Sales module read-only for it. `exportOnlyInvoice` stays
    * in the code but can no longer fire, there being no write left to narrow.
    *
-   * And *View FG Inventory* has **nothing to grant**: there is no
-   * finished-goods ledger in this app — `material_moves` is raw material — so
-   * the production functions stay `none` until one exists. Granting `material`
-   * would be granting a different thing from the one that was asked for.
+   * *View FG Inventory* had **nothing to grant** until 2026-09-11 — there was
+   * no finished-goods ledger, and granting `material` (raw material) would
+   * have been granting a different thing from the one asked for. It is `fg`
+   * now, held `full` here rather than `view` because a stock count is a
+   * stores act and the Dispatch Lead is the stores.
    */
   logistics: {
     enquiry: 'none', quotation: 'none', proforma: 'none', order: 'view', dashboard: 'view',
     work_order: 'none', output: 'none', material: 'none',
     qc: 'view',        // Read Only (Verify COA Clearance) — the spec's pre-dispatch step
     dispatch: 'full',  // Full (Pick, Pack, Gate Pass, Logistics)
+    fg: 'full',        // View FG Inventory — and the stock count, which is a stores act
     invoice: 'view', packing_list: 'full',
     customer: 'view', product: 'view', master: 'view', followup: 'none', payment: 'none',
     purchasing: 'none', approval: 'none', audit: 'none', team: 'none', settings: 'none', backup: 'none',
@@ -184,6 +188,7 @@ export const ACCESS: Record<TeamRole, Record<Fn, Level>> = {
     work_order: 'full', output: 'full', material: 'full',
     qc: 'view',        // Read Only (View QC Logs)
     dispatch: 'none',  // No Access
+    fg: 'view',        // What the floor has made and not yet shipped
     invoice: 'none', packing_list: 'none',
     customer: 'view', product: 'view', master: 'view', followup: 'none', payment: 'none',
     purchasing: 'none', approval: 'none', audit: 'none', team: 'none', settings: 'none', backup: 'none',
@@ -205,6 +210,7 @@ export const ACCESS: Record<TeamRole, Record<Fn, Level>> = {
     qc: 'full',                           // Full (Shift QC, Final COA Approval)
     material: 'none',
     dispatch: 'view',                     // Read Only (Pre-Dispatch Verification)
+    fg: 'view',
     invoice: 'none', packing_list: 'none',
     customer: 'view', product: 'view', master: 'view', followup: 'none', payment: 'none',
     purchasing: 'none', approval: 'none', audit: 'none', team: 'none', settings: 'none', backup: 'none',
