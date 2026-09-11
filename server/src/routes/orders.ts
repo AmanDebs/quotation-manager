@@ -12,6 +12,7 @@ import { buildXlsx, attachmentName, type Column } from '../services/xlsx.js';
 import { allows, type AuthedRequest } from '../middleware/auth.js';
 import { scopeClause, canAccessCustomer, linkError, customerChangeError } from '../middleware/scope.js';
 import { syncOrderStatus } from '../services/orderStatus.js';
+import { returnedQtyByLine } from '../services/creditNotes.js';
 import { resolveCompanyId } from '../services/companies.js';
 import { listBody, pageRequest } from '../services/pagination.js';
 import { syncProformaOrdered, syncProformaUnordered, alreadyOrderedError } from '../services/documentChain.js';
@@ -63,10 +64,28 @@ function dispatchProgress(orderId: number, items: { qty: number | null; unit_pri
     invItems.forEach((it, i) => {
       if (i < dispatched.length && it.qty != null) dispatched[i] += it.qty;
     });
+    /*
+     * ...less anything that came back. A **return** credit note takes its
+     * quantities off the line it credits, by the same position rule, so a line
+     * returned in full is open again and the order stops reading Completed
+     * over goods sitting in the yard. `fullyBilled()` reads this walk, so the
+     * status ladder follows without a second rule.
+     *
+     * An **adjustment** is excluded inside `returnedQtyByLine` rather than
+     * here: it credits money against a line without anything moving, and
+     * counting it would re-open the line for goods still with the buyer.
+     */
+    for (const [i, qty] of returnedQtyByLine(inv.id)) {
+      if (i < dispatched.length) dispatched[i] -= qty;
+    }
   }
 
   const perLine = items.map((it, i) => {
-    const done = round2(dispatched[i]);
+    // Floored: `returnLimitError` caps a return at what the line was billed,
+    // but an invoice edited downwards afterwards could still leave the
+    // subtraction below zero, and "minus 400 pieces dispatched" is true of
+    // nothing.
+    const done = round2(Math.max(0, dispatched[i]));
     const ordered = it.qty ?? 0;
     return {
       qty_dispatched: done,

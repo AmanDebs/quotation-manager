@@ -80,6 +80,12 @@ CREATE TABLE IF NOT EXISTS companies (
   -- The lot on the box, and the certificate that clears it.
   batch_pattern TEXT NOT NULL DEFAULT 'B/{FY}/{SEQ}',
   coa_pattern TEXT NOT NULL DEFAULT 'COA/{FY}/{SEQ}',
+  -- The credit note. It splits export from domestic like the invoice it
+  -- credits, and for the same reason: it is a tax document mirroring one, and
+  -- a domestic number on a credit against an export invoice would break the
+  -- consecutive-per-series numbering a GST return is checked against.
+  cn_pattern TEXT NOT NULL DEFAULT 'CN/{FY}/{SEQ}',
+  cn_export_pattern TEXT NOT NULL DEFAULT 'CN-EX/{FY}/{SEQ}',
   -- The one a document falls back to when neither it nor its customer names one.
   is_default INTEGER NOT NULL DEFAULT 0,
   active INTEGER NOT NULL DEFAULT 1,
@@ -129,6 +135,12 @@ CREATE TABLE IF NOT EXISTS settings (
   -- The lot on the box, and the certificate that clears it.
   batch_pattern TEXT NOT NULL DEFAULT 'B/{FY}/{SEQ}',
   coa_pattern TEXT NOT NULL DEFAULT 'COA/{FY}/{SEQ}',
+  -- The credit note. It splits export from domestic like the invoice it
+  -- credits, and for the same reason: it is a tax document mirroring one, and
+  -- a domestic number on a credit against an export invoice would break the
+  -- consecutive-per-series numbering a GST return is checked against.
+  cn_pattern TEXT NOT NULL DEFAULT 'CN/{FY}/{SEQ}',
+  cn_export_pattern TEXT NOT NULL DEFAULT 'CN-EX/{FY}/{SEQ}',
   note_presets TEXT NOT NULL DEFAULT '[]'
 );
 INSERT OR IGNORE INTO settings (id) VALUES (1);
@@ -573,6 +585,117 @@ CREATE TABLE IF NOT EXISTS packing_list_items (
   custom3 TEXT NOT NULL DEFAULT '',
   sort_order INTEGER NOT NULL DEFAULT 0
 );
+
+-- What comes back, and what the buyer is credited for it (2026-09-10).
+--
+-- Scrap gave a condemned lot a decision to record, and immediately exposed
+-- the hole beside it: `dispositionError` refuses to rule on a lot that has
+-- gone to the customer, saying in as many words that bad goods already
+-- delivered are a *return* and this app has no shape for one. This is that
+-- shape.
+--
+-- **A credit note is the document, and the return is what most of them are
+-- for.** Two things could have been built -- a physical goods-inward record
+-- mirroring `despatches`, and a money document mirroring the invoice -- and
+-- one of them would have been useless on its own: recording that 5,000 pieces
+-- came back while the invoice goes on demanding the money for them is the
+-- silent under-reporting this codebase refuses everywhere else. Under GST a
+-- sales return *is* a credit note (s.34), stated against the original invoice,
+-- so there is one document rather than two records to reconcile.
+--
+-- `invoice_id` is therefore NOT NULL, unlike `despatches.invoice_id` which is
+-- nullable precisely because a lorry can leave before the paperwork. The
+-- asymmetry is real: goods can go before they are billed, but nothing can be
+-- credited before it is billed -- there is no balance to reduce, no tax to
+-- reverse and nothing for `receivables.ts` to hang the credit on. Goods that
+-- come back before they were invoiced are simply not invoiced.
+--
+-- Currency, tax type, export flag and customer are **copied from that invoice
+-- on every save and never read from the body**: a credit note that taxed
+-- differently from the document it credits would be a second opinion about
+-- the same supply, and the copy cannot drift because `exportChangeError`
+-- freezes the invoice's own flag once it is numbered.
+CREATE TABLE IF NOT EXISTS credit_notes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  number TEXT NOT NULL,
+  date TEXT NOT NULL,
+  invoice_id INTEGER NOT NULL REFERENCES commercial_invoices(id),
+  customer_id INTEGER NOT NULL REFERENCES customers(id),
+  -- The group entity issuing it. Taken from the invoice, like everything else.
+  company_id INTEGER NOT NULL DEFAULT 1 REFERENCES companies(id),
+  -- Why there is a credit, and the only field on this row that changes what
+  -- the rest of the app does with it.
+  --
+  --   return     -- goods came back. The quantities come off what the order
+  --                line counts as dispatched, so a line credited in full is
+  --                open again and the order stops reading Completed over
+  --                goods sitting in the yard.
+  --   adjustment -- money only: a rate agreed down after the fact, a short
+  --                shipment settled, a discount. Nothing physical moved, so
+  --                nothing may touch the dispatched figure.
+  --
+  -- No CHECK, the rule `products.product_type` states -- SQLite cannot ALTER
+  -- one, and this list expects to grow (a rate difference and a post-sale
+  -- discount are already arguably two things). The route answers 400 naming
+  -- what it accepts.
+  kind TEXT NOT NULL DEFAULT 'return',
+  -- Free text, and the only part of a credit nobody can reconstruct later --
+  -- the same reason `batches.disposition_note` exists.
+  reason TEXT NOT NULL DEFAULT '',
+  currency TEXT NOT NULL DEFAULT 'INR',
+  tax_type TEXT NOT NULL DEFAULT 'none' CHECK (tax_type IN ('none','cgst_sgst','igst')),
+  is_export INTEGER NOT NULL DEFAULT 0,
+  notes TEXT NOT NULL DEFAULT '',
+  prepared_by TEXT NOT NULL DEFAULT '',
+  -- There is deliberately **no status ladder**. A credit note is issued once
+  -- and that is the whole of its life: it is never sent, negotiated, part
+  -- shipped or paid. What it does have is approval, and that carries the
+  -- weight a status would -- see below.
+  approval_status TEXT NOT NULL DEFAULT 'not_submitted' CHECK (approval_status IN ('not_submitted','pending','approved','rejected')),
+  approved_by INTEGER REFERENCES users(id),
+  approved_at TEXT NOT NULL DEFAULT '',
+  approval_note TEXT NOT NULL DEFAULT '',
+  column_config TEXT NOT NULL DEFAULT '{}',
+  subtotal REAL NOT NULL DEFAULT 0,
+  tax_total REAL NOT NULL DEFAULT 0,
+  grand_total REAL NOT NULL DEFAULT 0,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_credit_notes_invoice ON credit_notes(invoice_id);
+CREATE INDEX IF NOT EXISTS idx_credit_notes_customer ON credit_notes(customer_id);
+
+-- The same columns as `invoice_items`, because a credit note line *is* an
+-- invoice line being taken back and is prefilled from one. `sort_order` is
+-- load-bearing: position is how a credit line reaches the invoice line it
+-- credits and thence the order line, the index rule the whole chain uses.
+CREATE TABLE IF NOT EXISTS credit_note_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  credit_note_id INTEGER NOT NULL REFERENCES credit_notes(id) ON DELETE CASCADE,
+  product_id INTEGER REFERENCES products(id),
+  description TEXT NOT NULL DEFAULT '',
+  hsn_code TEXT NOT NULL DEFAULT '',
+  qty REAL,
+  unit TEXT NOT NULL DEFAULT 'unit',
+  unit_price REAL NOT NULL DEFAULT 0,
+  tax_pct REAL NOT NULL DEFAULT 0,
+  amount REAL NOT NULL DEFAULT 0,
+  color TEXT NOT NULL DEFAULT '',
+  packs REAL,
+  pcs_per_pack REAL,
+  total_pcs REAL,
+  qty_20ft REAL,
+  qty_40ft REAL,
+  is_charge INTEGER NOT NULL DEFAULT 0,
+  custom1 TEXT NOT NULL DEFAULT '',
+  custom2 TEXT NOT NULL DEFAULT '',
+  custom3 TEXT NOT NULL DEFAULT '',
+  image TEXT NOT NULL DEFAULT '',
+  sort_order INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_credit_note_items_note ON credit_note_items(credit_note_id);
 
 CREATE TABLE IF NOT EXISTS followups (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

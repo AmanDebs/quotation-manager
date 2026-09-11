@@ -119,8 +119,9 @@ customersRouter.delete('/:id', (req: AuthedRequest, res) => {
             (SELECT COUNT(*) FROM orders WHERE customer_id = ?) +
             (SELECT COUNT(*) FROM proforma_invoices WHERE customer_id = ?) +
             (SELECT COUNT(*) FROM commercial_invoices WHERE customer_id = ?) +
-            (SELECT COUNT(*) FROM packing_lists WHERE customer_id = ?) AS c`
-  ).get(id, id, id, id, id) as { c: number };
+            (SELECT COUNT(*) FROM packing_lists WHERE customer_id = ?) +
+            (SELECT COUNT(*) FROM credit_notes WHERE customer_id = ?) AS c`
+  ).get(id, id, id, id, id, id) as { c: number };
   if (used.c > 0) return res.status(409).json({ error: 'Customer has documents and cannot be deleted' });
   const linked = db.prepare(
     `SELECT (SELECT COUNT(*) FROM followups WHERE customer_id = ?) +

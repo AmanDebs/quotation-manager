@@ -1579,6 +1579,119 @@ export function buildInvoicePdf(id: number): TDocumentDefinitions {
 }
 
 /* ------------------------------------------------------------------ */
+/* CREDIT NOTE                                                         */
+/* ------------------------------------------------------------------ */
+/**
+ * The credit note: the invoice being partly taken back.
+ *
+ * Laid out like the order rather than like the invoice it credits, and that
+ * is a judgement worth keeping. The invoice's boxed customs grid — ports,
+ * notify parties, method of despatch, bank block — describes a consignment
+ * going out, and none of it is true of a credit: nothing is shipped, nothing
+ * clears customs, and the buyer is being *paid*, not asked to pay. What a
+ * credit note has to state is narrower and GST says exactly what (s.34): our
+ * number and date, the buyer, **the invoice it is against and that invoice's
+ * date**, the goods, and the tax being reversed. So the header is one boxed
+ * pair — the customer, and those references — and the money rides inside the
+ * items table as it does on the invoice, with the subtotal kept for the same
+ * reason: the tax reversed is charged on a taxable value that has to be
+ * legible.
+ *
+ * Why there is a credit prints as a line of its own, because it is the one
+ * part of the document nobody can reconstruct afterwards.
+ */
+export function buildCreditNotePdf(id: number): TDocumentDefinitions {
+  const n = db.prepare('SELECT * FROM credit_notes WHERE id = ?').get(id) as Row;
+  if (!n) throw new Error('Credit note not found');
+  const s = companyProfile(n.company_id);
+  const c = db.prepare('SELECT * FROM customers WHERE id = ?').get(n.customer_id) as Row;
+  const inv = db.prepare(
+    `SELECT i.number, i.date, p.po_number FROM commercial_invoices i
+       LEFT JOIN proforma_invoices p ON p.id = i.pi_id WHERE i.id = ?`
+  ).get(n.invoice_id) as Row | undefined;
+  const items = db.prepare('SELECT * FROM credit_note_items WHERE credit_note_id = ? ORDER BY sort_order, id').all(id) as Row[];
+
+  const cur = n.currency;
+  const showTax = n.tax_type !== 'none';
+  const cfg = forceColumns(JSON.parse(String(n.column_config || '{}')) as ColumnConfig, INVOICE_FORCED);
+
+  const specs: ColumnSpec[] = [
+    { key: 'sl', label: 'SL', width: 16, align: 'center', always: true, value: (_it, i) => String(i + 1) },
+    { key: 'description', label: 'Description of Goods', width: '*', always: true, value: (it) => String(it.description) },
+    // A charge line is credited for its money and has no quantity of its own.
+    { key: 'qty', label: n.kind === 'return' ? 'Qty Returned' : 'Quantity', width: 62, align: 'right', always: true, value: (it) => (it.is_charge ? '' : it.qty != null ? `${fmtNum(it.qty)} ${it.unit}` : '—') },
+    { key: 'unit_price', label: 'Rate', width: 55, align: 'right', always: true, value: (it) => (it.is_charge ? '' : `${fmtNum(it.unit_price, 3)}/${it.unit === 'per 1000' ? '1000' : it.unit}`) },
+    { key: 'color', label: 'Color', width: 46, align: 'center', value: (it) => String(it.color || '') },
+    { key: 'packs', label: 'Boxes', width: 40, align: 'right', value: (it) => (it.packs != null ? fmtNum(it.packs, 0) : '') },
+    { key: 'hsn', label: 'HSN Code', width: 45, align: 'center', value: (it) => String(it.hsn_code || '') },
+    ...(showTax ? [{ key: 'tax', label: 'Tax %', width: 28, align: 'right' as const, value: (it: Row) => `${it.tax_pct ?? 0}%` }] : []),
+    { key: 'amount', label: `Amount ${cur}`, width: 62, align: 'right', always: true, value: (it) => fmtMoney(it.amount, cur) },
+  ];
+
+  const detail = (rows: [string, string][]): Cell => ({
+    table: {
+      widths: [110, '*'],
+      body: rows.map(([l, v]) => [
+        { text: l, fontSize: 7.5, bold: true, color: '#333333' },
+        { text: v || '—', fontSize: 7.5 },
+      ]),
+    },
+    layout: { ...gridLayout, hLineColor: '#dddddd', vLineColor: '#dddddd' },
+  });
+  const sectionHead = (t: string): Cell => ({ text: t, bold: true, fontSize: 8, color: '#ffffff', fillColor: s.theme });
+
+  const info: [string, string][] = [
+    ['Credit Note No.', n.number],
+    ['Date', fmtDate(n.date)],
+    // The reference GST requires: the original invoice, with its date.
+    ['Against Invoice', inv ? `${inv.number}   dt. ${fmtDate(inv.date)}` : '—'],
+    ...(inv?.po_number ? [['Your PO No.', String(inv.po_number)] as [string, string]] : []),
+    ['Nature', n.kind === 'return' ? 'Goods returned' : 'Adjustment to invoice value'],
+    ['Currency', currencyNames[cur] ?? cur],
+  ];
+
+  // The money rides inside the items table, as on the invoice; the subtotal
+  // stays because the tax reversed is charged on it.
+  const money: MoneyRow[] = totalsRows(n, cur, 'TOTAL CREDIT').map((r) => (
+    r.label === 'TOTAL CREDIT' ? { ...r, sums: true } : r
+  ));
+
+  const content: Content[] = [
+    ...companyHeader(s, { isExport: !!n.is_export }),
+    docTitle(s, 'CREDIT NOTE'),
+    {
+      table: {
+        widths: ['*', '*'],
+        body: [
+          [sectionHead('CUSTOMER'), sectionHead('CREDIT NOTE DETAILS')],
+          [{ stack: [{ text: customerAddress(c), fontSize: 8 }] }, detail(info)],
+        ] as any,
+      },
+      layout: boxedLayout,
+      margin: [0, 0, 0, 8] as any,
+    },
+    itemsTable(s, items, specs, cfg, money),
+    amountWords(n, cur),
+    ...(n.reason
+      ? [{ text: 'REASON FOR CREDIT:', fontSize: 9, bold: true, color: s.theme, margin: [0, 8, 0, 2] as any }, { text: n.reason, fontSize: 8 }]
+      : []),
+    /*
+     * The note's own remarks and **not** the company's default terms —
+     * `notesAndTerms` merges those in, and they are the terms of an offer
+     * (prices ex-works, levies extra, jurisdiction), the same clauses the
+     * invoice stopped printing on 2026-09-08 for the same reason. A credit
+     * note demands nothing and offers nothing; the only text it has to carry
+     * is why the credit was given, which printed above.
+     */
+    ...(n.notes
+      ? [{ text: 'NOTES:', fontSize: 9, bold: true, color: s.theme, margin: [0, 10, 0, 3] as any }, { text: n.notes, fontSize: 8 }]
+      : []),
+    signatureBlock(s, { preparedBy: n.prepared_by }),
+  ];
+  return baseDoc(content);
+}
+
+/* ------------------------------------------------------------------ */
 /* PACKING LIST                                                        */
 /* ------------------------------------------------------------------ */
 export function buildPackingListPdf(id: number): TDocumentDefinitions {

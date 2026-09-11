@@ -80,9 +80,12 @@ const NOUN: Record<DocTable, string> = {
   quotations: 'quotation',
   proforma_invoices: 'proforma',
   commercial_invoices: 'invoice',
+  credit_notes: 'credit note',
 };
 
-const ALL: DocTable[] = ['quotations', 'proforma_invoices', 'commercial_invoices'];
+const ALL: DocTable[] = ['quotations', 'proforma_invoices', 'commercial_invoices', 'credit_notes'];
+/** The three that ask the customer for money. A credit note gives it back. */
+const SELLING: DocTable[] = ['quotations', 'proforma_invoices', 'commercial_invoices'];
 const MONEY_DUE: DocTable[] = ['proforma_invoices', 'commercial_invoices'];
 
 interface Rule {
@@ -115,7 +118,13 @@ const RULES: Rule[] = [
   {
     // A document of nothing but freight is not a sale. Checked separately from
     // `items` so the message says which of the two is wrong.
-    key: 'goods', level: 'block', tables: ALL,
+    //
+    // **Not asked of a credit note**, which is the one document here that may
+    // legitimately be nothing but a charge: an overbilled freight line is
+    // credited for its money alone, nothing having shipped to come back. A
+    // blocking rule that fires wrongly stops a document going out, so this is
+    // named rather than inherited from `ALL`.
+    key: 'goods', level: 'block', tables: SELLING,
     check: (d) => (d.items.length === 0 || goods(d.items).length
       ? null
       : 'Every line is a charge — there is nothing being sold.'),
@@ -144,10 +153,18 @@ const RULES: Rule[] = [
     },
   },
   {
-    key: 'total', level: 'block', tables: MONEY_DUE,
+    /*
+     * A credit note is asked this and **not** the quantity rule above it: an
+     * adjustment credits money without anything moving, so a lump sum against
+     * no quantity at all is the ordinary shape of one. What cannot be right is
+     * a credit for nothing.
+     */
+    key: 'total', level: 'block', tables: [...MONEY_DUE, 'credit_notes'],
     check: (d) => (Number(d.row.grand_total) > 0
       ? null
-      : `The ${NOUN[d.table]} total is zero — there is nothing to pay.`),
+      : d.table === 'credit_notes'
+        ? 'The credit note total is zero — there is nothing to credit.'
+        : `The ${NOUN[d.table]} total is zero — there is nothing to pay.`),
   },
   {
     /*
@@ -288,12 +305,14 @@ const ITEM_TABLE: Record<DocTable, string> = {
   quotations: 'quotation_items',
   proforma_invoices: 'pi_items',
   commercial_invoices: 'invoice_items',
+  credit_notes: 'credit_note_items',
 };
 
 const FK: Record<DocTable, string> = {
   quotations: 'quotation_id',
   proforma_invoices: 'pi_id',
   commercial_invoices: 'invoice_id',
+  credit_notes: 'credit_note_id',
 };
 
 /** Load a document and judge it. Returns an empty list for one that is gone. */

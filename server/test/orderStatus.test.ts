@@ -242,6 +242,44 @@ describe('closing an order', () => {
   });
 
   /**
+   * Goods that came back were not delivered. A **return** credit note takes
+   * its quantity off the billed figure by position, so a line returned in
+   * full re-opens the order; an **adjustment** credits money alone and must
+   * leave the order closed, nothing having moved.
+   */
+  test('a return re-opens it; an adjustment does not', () => {
+    const o = order();
+    const inv = billInFull(o, customerOf(o));
+    syncOrderStatus(o);
+    assert.equal(statusOf(o), 'completed');
+
+    const note = (kind: string, qty: number) => {
+      const id = (db.prepare(
+        `INSERT INTO credit_notes (number, date, invoice_id, customer_id, company_id, kind, currency, grand_total, approval_status)
+         VALUES (?, '2026-09-10', ?, ?, 1, ?, 'INR', 100, 'approved') RETURNING id`
+      ).get(`CN/OS-${++seq}`, inv, customerOf(o), kind) as { id: number }).id;
+      db.prepare("INSERT INTO credit_note_items (credit_note_id, description, qty, unit, sort_order) VALUES (?, '28mm Cap', ?, 'per 1000', 0)").run(id, qty);
+      return id;
+    };
+    note('adjustment', 100);
+    syncOrderStatus(o);
+    assert.equal(statusOf(o), 'completed', 'an adjustment re-opened the order for goods still with the buyer');
+
+    const back = note('return', 100);
+    syncOrderStatus(o);
+    // Not `pending`: the invoice still stands, and an order with an invoice
+    // on it is part-dispatched by the ladder's own rule. What matters is that
+    // it is no longer *Completed* over goods sitting in the yard.
+    assert.equal(statusOf(o), 'partially_dispatched', 'a full return left the order reading Completed');
+
+    // Un-approving the note (what an edit does) puts the credit — and the
+    // closing — back where they were.
+    db.prepare("UPDATE credit_notes SET approval_status = 'not_submitted' WHERE id = ?").run(back);
+    syncOrderStatus(o);
+    assert.equal(statusOf(o), 'completed');
+  });
+
+  /**
    * The commercial decision the original design was right to protect: closing
    * is often taken when a short shipment is accepted, and the invoices will
    * never add up. Setting the status by hand clears the memory, so nothing

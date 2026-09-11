@@ -20,7 +20,7 @@ import { describeChange, splitChanges, ACTION_LABEL, type AuditEntry } from '../
 
 /** The slug is the API's word for a thing; this is a person's. */
 const ENTITY_LABEL: Record<string, string> = {
-  quotations: 'Quotation', proformas: 'Proforma', invoices: 'Invoice', orders: 'Sales Order',
+  quotations: 'Quotation', proformas: 'Proforma', invoices: 'Invoice', 'credit-notes': 'Credit note', orders: 'Sales Order',
   'packing-lists': 'Packing list', customers: 'Customer', products: 'Product',
   enquiries: 'Enquiry', despatches: 'Dispatch', 'work-orders': 'Work order',
   'purchase-orders': 'Purchase order', followups: 'Follow-up', payments: 'Payment',
@@ -34,6 +34,7 @@ const LINK: Record<string, (id: number) => string> = {
   quotations: (id) => `/quotations/${id}`,
   proformas: (id) => `/proformas/${id}`,
   invoices: (id) => `/invoices/${id}`,
+  'credit-notes': (id) => `/credit-notes/${id}`,
   orders: (id) => `/orders/${id}`,
   'packing-lists': (id) => `/packing-lists/${id}`,
   customers: () => '/customers',

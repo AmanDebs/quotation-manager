@@ -63,7 +63,7 @@ export function nameTokens(name: string): { slug: string; initials: string } {
 /** Every pattern column, in the order Settings shows them. */
 export const PATTERN_COLUMNS = [
   'quote_pattern', 'pi_pattern', 'pi_export_pattern', 'inv_pattern', 'inv_export_pattern',
-  'pl_pattern', 'order_pattern', 'order_export_pattern', 'wo_pattern', 'po_pattern', 'po_import_pattern', 'challan_pattern', 'batch_pattern', 'coa_pattern',
+  'pl_pattern', 'order_pattern', 'order_export_pattern', 'wo_pattern', 'po_pattern', 'po_import_pattern', 'challan_pattern', 'batch_pattern', 'coa_pattern', 'cn_pattern', 'cn_export_pattern',
 ] as const;
 
 export type PatternColumn = (typeof PATTERN_COLUMNS)[number];
@@ -88,6 +88,8 @@ export const SCHEMA_DEFAULT_PATTERNS: Record<PatternColumn, string> = {
   challan_pattern: 'DC/{FY}/{SEQ}',
   batch_pattern: 'B/{FY}/{SEQ}',
   coa_pattern: 'COA/{FY}/{SEQ}',
+  cn_pattern: 'CN/{FY}/{SEQ}',
+  cn_export_pattern: 'CN-EX/{FY}/{SEQ}',
 };
 
 /**
@@ -114,5 +116,7 @@ export function defaultPatternsFor(name: string): Record<PatternColumn, string> 
     challan_pattern: `${slug}/DC/{FY}/{SEQ}`,
     batch_pattern: `${slug}/B/{FY}/{SEQ}`,
     coa_pattern: `${slug}/COA/{FY}/{SEQ}`,
+    cn_pattern: `${slug}/CN/{FY}/{SEQ}`,
+    cn_export_pattern: `${slug}/CN-EX/{FY}/{SEQ}`,
   };
 }

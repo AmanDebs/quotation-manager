@@ -12,7 +12,7 @@ const METHODS = ['Bank Transfer', 'Letter of Credit', 'Cheque', 'Cash', 'Other']
  * The linked document's detail query is invalidated so received/balance figures refresh.
  */
 export default function PaymentsCard({
-  docType, docId, currency, payments, received, total, balanceDue, advanceApplied, currencyMismatch,
+  docType, docId, currency, payments, received, total, balanceDue, advanceApplied, credited, currencyMismatch,
 }: {
   docType: 'proforma' | 'invoice';
   docId: number;
@@ -27,6 +27,11 @@ export default function PaymentsCard({
    * payment *is* the advance, so the split would say nothing.
    */
   advanceApplied?: number;
+  /**
+   * What approved credit notes have taken off the bill. Shown as its own
+   * figure, never folded into Received: a credit is not money that arrived.
+   */
+  credited?: number;
   /** Money against this document in another currency, credited to nothing. */
   currencyMismatch?: { currency: string; amount: number }[];
 }) {
@@ -182,6 +187,9 @@ export default function PaymentsCard({
           <span className="text-slate-500">
             of which advance: <span className="font-semibold tabular-nums">{fmtMoney(advanceApplied, currency)}</span>
           </span>
+        )}
+        {!!credited && credited > 0 && (
+          <span>Credited: <span className="font-semibold tabular-nums text-amber-700">−{fmtMoney(credited, currency)}</span></span>
         )}
         <span>Balance: <span className={`font-semibold tabular-nums ${outstanding > 0 ? 'text-red-600' : 'text-green-700'}`}>{fmtMoney(outstanding, currency)}</span></span>
       </div>

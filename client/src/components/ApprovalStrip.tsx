@@ -20,7 +20,7 @@ const styles: Record<ApprovalStatus, { bg: string; label: string }> = {
 export default function ApprovalStrip({
   docType, docId, status, approvedByName, approvedAt, note, queryKey, checks,
 }: {
-  docType: 'quotations' | 'proformas' | 'invoices';
+  docType: 'quotations' | 'proformas' | 'invoices' | 'credit-notes';
   docId: number;
   status: ApprovalStatus;
   approvedByName?: string | null;

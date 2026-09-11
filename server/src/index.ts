@@ -27,6 +27,7 @@ import { stockRouter } from './routes/stock.js';
 import { despatchesRouter } from './routes/despatches.js';
 import { proformasRouter } from './routes/proformas.js';
 import { invoicesRouter } from './routes/invoices.js';
+import { creditNotesRouter } from './routes/creditNotes.js';
 import { packingListsRouter } from './routes/packingLists.js';
 import { followupsRouter } from './routes/followups.js';
 import { paymentsRouter } from './routes/payments.js';
@@ -107,6 +108,9 @@ app.use('/api/stock', requireAuth, requirePermission('material'), stockRouter);
 app.use('/api/despatches', requireAuth, requireFunction('dispatch'), despatchesRouter);
 app.use('/api/proformas', requireAuth, requireFunction('proforma'), proformasRouter);
 app.use('/api/invoices', requireAuth, requireFunction('invoice'), invoicesRouter);
+// The invoice function, not a new one: a credit note is the invoice being
+// partly taken back, and the client's own matrix has no cell for anything else.
+app.use('/api/credit-notes', requireAuth, requireFunction('invoice'), creditNotesRouter);
 app.use('/api/packing-lists', requireAuth, requireFunction('packing_list'), packingListsRouter);
 app.use('/api/followups', requireAuth, requireFunction('followup'), followupsRouter);
 // Payments are the receivables ledger. Behind customer scope alone it would be

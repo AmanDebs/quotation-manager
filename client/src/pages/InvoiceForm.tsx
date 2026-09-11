@@ -13,7 +13,7 @@ import FollowupButton from '../components/FollowupButton';
 import PaymentsCard from '../components/PaymentsCard';
 import ApprovalStrip from '../components/ApprovalStrip';
 import ColumnsControl, { PACKING_COLUMNS, newColumnConfig, hasColumnPrefs, invoiceColumns, INVOICE_OMIT, INVOICE_FORCED } from '../components/ColumnsControl';
-import { fmtQty, fmtDate, today } from '../lib/format';
+import { fmtQty, fmtDate, fmtMoney, today } from '../lib/format';
 import { useDefaultOnce } from '../lib/useDefaultOnce';
 import { useUnsavedChanges } from '../lib/useUnsavedChanges';
 import HistoryCard from '../components/HistoryCard';
@@ -267,6 +267,17 @@ export default function InvoiceFormPage() {
                   <Button variant="secondary">📄+🔬 Invoice &amp; QC</Button>
                 </PdfLink>
                 <FollowupButton docType="invoice" docId={Number(id)} customerId={existing!.customer_id} />
+                {/*
+                  * Goods came back, or a rate was settled down: raise the
+                  * credit against this invoice. Offered only to a team that
+                  * may write invoices — Logistics reads this page and would
+                  * only ever get a 403 from the button.
+                  */}
+                {can('invoice', 'full') && existing!.approval_status === 'approved' && (
+                  <Link to={`/credit-notes/new?from_invoice=${id}`}>
+                    <Button variant="secondary">↩ Credit Note</Button>
+                  </Link>
+                )}
               </>
             )}
           </div>
@@ -572,8 +583,49 @@ export default function InvoiceFormPage() {
             total={existing!.grand_total}
             balanceDue={existing!.balance_due}
             advanceApplied={existing!.advance_applied}
+            credited={existing!.credited}
             currencyMismatch={existing!.currency_mismatch}
           />
+        )}
+
+        {/*
+          * Every credit note against this invoice, approved or not — so the
+          * page can say why the balance moved, and why a draft has not moved
+          * it yet. The figure the balance actually nets is `credited` above,
+          * which counts only the approved.
+          */}
+        {existing?.credit_notes && existing.credit_notes.length > 0 && (
+          <Card title={`Credit notes against this invoice (${existing.credit_notes.length})`}>
+            <table className="w-full text-sm">
+              <thead>
+                <tr className={TH_CLASS}>
+                  <th className="pb-2 pr-3">Number</th>
+                  <th className="pb-2 pr-3">Date</th>
+                  <th className="pb-2 pr-3">Nature</th>
+                  <th className="pb-2 pr-3">Reason</th>
+                  <th className="pb-2 pr-3 text-right">Credit</th>
+                  <th className="pb-2 pr-3">Approval</th>
+                </tr>
+              </thead>
+              <tbody>
+                {existing.credit_notes.map((n) => (
+                  <tr key={n.id} className="border-b border-slate-100 last:border-0">
+                    <td className="py-2 pr-3"><Link to={`/credit-notes/${n.id}`} className="font-medium text-brand-600 hover:underline">{n.number}</Link></td>
+                    <td className="whitespace-nowrap py-2 pr-3">{fmtDate(n.date)}</td>
+                    <td className="py-2 pr-3 text-xs text-slate-600">{n.kind === 'return' ? 'Goods returned' : 'Adjustment'}</td>
+                    <td className="py-2 pr-3 text-xs text-slate-500">{n.reason || '—'}</td>
+                    <td className="py-2 pr-3 text-right tabular-nums">{fmtMoney(n.grand_total, existing.currency)}</td>
+                    <td className="py-2 pr-3">
+                      <StatusBadge status={n.approval_status} />
+                      {n.approval_status !== 'approved' && (
+                        <span className="ml-1 text-xs text-slate-400" title="Only an approved credit note reduces the balance">credits nothing yet</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </Card>
         )}
 
         <ErrorText error={save.error ?? setStatus.error ?? remove.error} />

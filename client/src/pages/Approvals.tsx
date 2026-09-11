@@ -11,16 +11,19 @@ const routeFor: Record<PendingApproval['type'], string> = {
   quotation: '/quotations',
   proforma: '/proformas',
   invoice: '/invoices',
+  'credit-note': '/credit-notes',
 };
 const apiFor: Record<PendingApproval['type'], string> = {
   quotation: '/api/quotations',
   proforma: '/api/proformas',
   invoice: '/api/invoices',
+  'credit-note': '/api/credit-notes',
 };
 const labelFor: Record<PendingApproval['type'], string> = {
   quotation: 'Quotation',
   proforma: 'Proforma Invoice',
   invoice: 'Commercial Invoice',
+  'credit-note': 'Credit Note',
 };
 
 export default function ApprovalsPage() {

@@ -149,7 +149,10 @@ export function customerSummary(req: AuthedRequest, customerId: number): Custome
       const r = row(inv.currency);
       r.invoiced += inv.grand_total;
       r.received += Math.min(rec.amount_received, inv.grand_total);
-      const outstanding = Math.max(0, inv.grand_total - rec.amount_received);
+      // The owner's own balance, which nets credit notes — re-deriving it as
+      // total less received here is how this page came to state a receivable
+      // the invoice itself said was not owed.
+      const outstanding = Math.max(0, rec.balance_due);
       r.outstanding += outstanding;
       if (outstanding > 0.005) {
         const days = Math.max(0, Math.floor((todayMs - Date.parse(inv.date)) / 86_400_000));

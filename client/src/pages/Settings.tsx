@@ -111,12 +111,15 @@ const SERIES_LABEL: Record<string, string> = {
   work_order: 'Work Order',
   purchase_order: 'Purchase Order',
   challan: 'Delivery Challan',
+  batch: 'Batch',
+  coa: 'Certificate of Analysis',
+  credit_note: 'Credit Note',
 };
 
 type PatternKey =
   | 'quote_pattern' | 'pl_pattern' | 'order_pattern' | 'order_export_pattern'
   | 'pi_pattern' | 'pi_export_pattern' | 'inv_pattern' | 'inv_export_pattern'
-  | 'wo_pattern' | 'po_pattern' | 'challan_pattern';
+  | 'wo_pattern' | 'po_pattern' | 'challan_pattern' | 'cn_pattern' | 'cn_export_pattern';
 
 /** Same order and wording as the fields above. */
 const PATTERN_FIELDS: [PatternKey, string][] = [
@@ -131,6 +134,8 @@ const PATTERN_FIELDS: [PatternKey, string][] = [
   ['wo_pattern', 'Work Order'],
   ['po_pattern', 'Purchase Order'],
   ['challan_pattern', 'Delivery Challan'],
+  ['cn_pattern', 'Credit Note (domestic)'],
+  ['cn_export_pattern', 'Credit Note (export)'],
 ];
 
 /**
@@ -469,6 +474,8 @@ export default function SettingsPage() {
             <Field label="Work Order"><Input value={form.wo_pattern} onChange={(e) => set({ wo_pattern: e.target.value })} /></Field>
             <Field label="Purchase Order"><Input value={form.po_pattern} onChange={(e) => set({ po_pattern: e.target.value })} /></Field>
             <Field label="Delivery Challan"><Input value={form.challan_pattern} onChange={(e) => set({ challan_pattern: e.target.value })} /></Field>
+            <Field label="Credit Note (domestic)"><Input value={form.cn_pattern ?? ''} onChange={(e) => set({ cn_pattern: e.target.value })} /></Field>
+            <Field label="Credit Note (export)"><Input value={form.cn_export_pattern ?? ''} onChange={(e) => set({ cn_export_pattern: e.target.value })} /></Field>
           </div>
           <PatternClashes form={form} companies={companies} />
           <p className="mt-2 text-xs text-slate-400">

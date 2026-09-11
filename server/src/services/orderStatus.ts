@@ -1,4 +1,5 @@
 import { db } from '../db/connection.js';
+import { returnedQtyByLine } from './creditNotes.js';
 import { productionByOrder } from './production.js';
 
 /**
@@ -199,6 +200,10 @@ function fullyBilled(orderId: number): boolean {
     // Matched by position, the same index rule syncPackingList() and
     // dispatchProgress() use.
     rows.forEach((r, i) => { if (i < billed.length && r.qty != null) billed[i] += r.qty; });
+    // Less what came back on an approved return credit note — the same
+    // subtraction `dispatchProgress()` makes, so a line returned in full
+    // re-opens the order here as it does on the page.
+    for (const [i, qty] of returnedQtyByLine(inv.id)) { if (i < billed.length) billed[i] -= qty; }
   }
   return goods.every((it) => billed[it.line] + 1e-9 >= (it.qty ?? 0));
 }

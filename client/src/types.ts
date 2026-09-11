@@ -116,7 +116,7 @@ export interface ApprovalFields {
 }
 
 export interface PendingApproval {
-  type: 'quotation' | 'proforma' | 'invoice';
+  type: 'quotation' | 'proforma' | 'invoice' | 'credit-note';
   id: number; number: string; date: string; currency: string;
   grand_total: number; approval_status: ApprovalStatus; is_export: number;
   customer_name: string; created_by_name: string | null;
@@ -137,6 +137,7 @@ export interface Settings {
    * WO/26-27/001 with no way to change it.
    */
   wo_pattern: string; po_pattern: string; challan_pattern: string;
+  cn_pattern?: string; cn_export_pattern?: string;
   bank_accounts: BankAccount[];
   note_presets: NotePreset[];
 }
@@ -944,6 +945,14 @@ export interface Invoice {
    */
   advance_applied?: number;
   /**
+   * What approved credit notes have taken off this bill. Not money received
+   * and deliberately reported beside it rather than inside it — only
+   * `balance_due` nets the two. See `services/receivables.ts`.
+   */
+  credited?: number;
+  /** Every credit note raised against this invoice, whatever its approval. */
+  credit_notes?: CreditNoteSummary[];
+  /**
    * Money recorded against this invoice or its proforma in a currency it is not
    * billed in, so credited to nothing. Optional: a server that has not been
    * redeployed yet simply omits it.
@@ -964,6 +973,46 @@ export interface Invoice {
    * arriving with it. Render the card only when the key is present.
    */
   despatches?: InvoiceDespatch[];
+}
+
+/** A credit note as the invoice page lists it. */
+export interface CreditNoteSummary {
+  id: number; number: string; date: string; kind: CreditKind; reason: string;
+  grand_total: number; approval_status: ApprovalStatus;
+}
+
+/**
+ * Why there is a credit. A **return** means goods came back and its quantities
+ * come off what the order line counts as dispatched; an **adjustment** is
+ * money alone and touches nothing physical.
+ */
+export type CreditKind = 'return' | 'adjustment';
+
+/** One of the invoice's lines, with how much of it is still open to credit. */
+export interface CreditableLine {
+  sort_order: number; description: string; qty: number | null; unit: string;
+  is_charge: number; already_credited: number;
+}
+
+/**
+ * The credit note: the invoice being partly taken back. Currency, tax type,
+ * export flag, customer and company are all copied from that invoice on the
+ * server and are read-only here.
+ */
+export interface CreditNote {
+  id: number; number: string; date: string; invoice_id: number; customer_id: number; company_id?: number;
+  kind: CreditKind; reason: string; notes: string; prepared_by: string;
+  currency: string; tax_type: TaxType; is_export: number;
+  subtotal: number; tax_total: number; grand_total: number;
+  approval_status: ApprovalStatus;
+  approved_at?: string; approval_note?: string;
+  approved_by_name?: string | null; created_by_name?: string | null;
+  customer_name?: string; company_name?: string;
+  invoice_number?: string; invoice_date?: string; invoice_total?: number;
+  items?: LineItem[];
+  column_config?: ColumnConfig;
+  checks?: DocumentFinding[];
+  invoice_lines?: CreditableLine[];
 }
 
 export interface PackingListItem {

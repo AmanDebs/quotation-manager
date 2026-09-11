@@ -601,6 +601,13 @@ const statusColors: Record<string, string> = {
   paid: 'bg-green-50 text-green-700 ring-green-200',
   // Not a decision anybody made — a date that passed. It says so by staying grey.
   expired: 'bg-slate-100 text-slate-500 ring-slate-200',
+  // The approval states, worn as a status by the one document that has no
+  // other: a credit note is issued once, and approval is the whole of its life.
+  // `pending` is also a sales-order status, and the customer page badges one
+  // through here — so it takes a colour and deliberately no relabel.
+  not_submitted: 'bg-slate-50 text-slate-700 ring-slate-200',
+  pending: 'bg-amber-50 text-amber-700 ring-amber-200',
+  approved: 'bg-green-50 text-green-700 ring-green-200',
 };
 
 /**

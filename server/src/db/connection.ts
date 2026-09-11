@@ -148,6 +148,12 @@ db.exec('CREATE INDEX IF NOT EXISTS idx_batches_disposition ON batches(dispositi
 for (const t of ['settings', 'companies']) {
   addColumnIfMissing(t, 'batch_pattern', "TEXT NOT NULL DEFAULT 'B/{FY}/{SEQ}'");
   addColumnIfMissing(t, 'coa_pattern', "TEXT NOT NULL DEFAULT 'COA/{FY}/{SEQ}'");
+  // The credit note, which splits export from domestic like the invoice it
+  // credits. `credit_notes` itself needs nothing here: schema.sql runs first
+  // on every boot and CREATE TABLE IF NOT EXISTS reaches an existing database
+  // as well as a fresh one. Only a new *column* on an old table needs this.
+  addColumnIfMissing(t, 'cn_pattern', "TEXT NOT NULL DEFAULT 'CN/{FY}/{SEQ}'");
+  addColumnIfMissing(t, 'cn_export_pattern', "TEXT NOT NULL DEFAULT 'CN-EX/{FY}/{SEQ}'");
 }
 
 /*

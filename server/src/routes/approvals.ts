@@ -26,9 +26,14 @@ approvalsRouter.get('/', (req, res) => {
      SELECT 'invoice', i.id, i.number, i.date, i.currency, i.grand_total, i.approval_status,
             i.is_export, c.name, u.name
      FROM commercial_invoices i JOIN customers c ON c.id = i.customer_id LEFT JOIN users u ON u.id = i.created_by
-     WHERE i.approval_status = ?`,
+     WHERE i.approval_status = ?
+     UNION ALL
+     SELECT 'credit-note', n.id, n.number, n.date, n.currency, n.grand_total, n.approval_status,
+            n.is_export, c.name, u.name
+     FROM credit_notes n JOIN customers c ON c.id = n.customer_id LEFT JOIN users u ON u.id = n.created_by
+     WHERE n.approval_status = ?`,
     order: 'ORDER BY date DESC, type, id',
-    params: [status, status, status],
+    params: [status, status, status, status],
   }));
 });
 
@@ -36,7 +41,10 @@ approvalsRouter.get('/count', (_req, res) => {
   const row = db.prepare(
     `SELECT (SELECT COUNT(*) FROM quotations WHERE approval_status = 'pending' AND superseded_by IS NULL)
           + (SELECT COUNT(*) FROM proforma_invoices WHERE approval_status = 'pending')
-          + (SELECT COUNT(*) FROM commercial_invoices WHERE approval_status = 'pending') AS c`
+          + (SELECT COUNT(*) FROM commercial_invoices WHERE approval_status = 'pending')
+          -- A credit note waits on approval like the rest, and it is the one
+          -- document where waiting matters most: unapproved, it credits nothing.
+          + (SELECT COUNT(*) FROM credit_notes WHERE approval_status = 'pending') AS c`
   ).get() as { c: number };
   res.json({ pending: row.c });
 });

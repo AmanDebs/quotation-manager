@@ -3,6 +3,7 @@ import { db } from '../db/connection.js';
 import { allows, type AuthedRequest } from '../middleware/auth.js';
 import { scopeClause } from '../middleware/scope.js';
 import { receivedByInvoice } from '../services/receivables.js';
+import { creditedByInvoice } from '../services/creditNotes.js';
 import { defaultCompanyId } from '../services/companies.js';
 import { shortfall, onHandAll } from '../services/stock.js';
 import { DOCS_OUTSTANDING_D, SEA_LEG_D } from '../services/despatch.js';
@@ -356,6 +357,14 @@ dashboardRouter.get('/', (req: AuthedRequest, res) => {
   // invoices raised from its proforma whether or not they are all on screen.
   // Filtering here would silently over-credit whichever ones remain.
   const receivedPerInvoice = receivedByInvoice();
+  /*
+   * What has been credited back, which is neither invoiced revenue the company
+   * will collect nor money it received. Asked here for the same reason the
+   * allocation is: the invoice page nets credit notes off the balance due, and
+   * a dashboard that did not would state a receivable the document itself says
+   * is not owed.
+   */
+  const creditedPerInvoice = creditedByInvoice();
   // `overdue` is the count of this currency's invoices unpaid past 60 days.
   // The attention strip keeps its own whole-book figure — the store is not
   // any one currency's — but the Outstanding tile states a currency amount
@@ -372,10 +381,13 @@ dashboardRouter.get('/', (req: AuthedRequest, res) => {
 
   for (const inv of invoicesAll) {
     const received = receivedPerInvoice.get(inv.id) ?? 0;
+    const credited = creditedPerInvoice.get(inv.id) ?? 0;
     const row = receivablesMap.get(inv.currency) ?? { currency: inv.currency, invoiced: 0, received: 0, outstanding: 0, overdue: 0 };
     row.invoiced += inv.grand_total;
     row.received += Math.min(received, inv.grand_total);
-    const outstanding = Math.max(0, inv.grand_total - received);
+    // The same subtraction `invoiceReceivable` makes, so the tile and the
+    // document cannot disagree about what is owed.
+    const outstanding = Math.max(0, inv.grand_total - credited - received);
     row.outstanding += outstanding;
     receivablesMap.set(inv.currency, row);
 

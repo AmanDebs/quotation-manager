@@ -1,5 +1,6 @@
 import { db } from '../db/connection.js';
 import { round2 } from './totals.js';
+import { CREDITED_SQL } from './creditNotes.js';
 
 /**
  * Single source of truth for "how much has been received against this invoice".
@@ -81,9 +82,16 @@ function allocateAdvances(piId: number): Map<number, AppliedPayment[]> {
   const pool = db.prepare(
     'SELECT * FROM payments WHERE pi_id = ? AND invoice_id IS NULL ORDER BY date, id'
   ).all(piId) as unknown as PaymentRow[];
+  /*
+   * `credited` rides along because a credit note reduces what this invoice can
+   * absorb, and an advance that would otherwise have been trapped against a
+   * credited invoice has to flow on to the next one. Without it the pool sits
+   * allocated to a bill nobody owes while the invoice after it reads unpaid.
+   */
   const invoices = db.prepare(
-    'SELECT id, currency, grand_total FROM commercial_invoices WHERE pi_id = ? ORDER BY date, id'
-  ).all(piId) as { id: number; currency: string; grand_total: number }[];
+    `SELECT id, currency, grand_total, ${CREDITED_SQL('commercial_invoices.id')} AS credited
+       FROM commercial_invoices WHERE pi_id = ? ORDER BY date, id`
+  ).all(piId) as { id: number; currency: string; grand_total: number; credited: number }[];
 
   const remaining = pool.map((payment) => ({ payment, left: payment.amount }));
   const byInvoice = new Map<number, AppliedPayment[]>();
@@ -91,7 +99,7 @@ function allocateAdvances(piId: number): Map<number, AppliedPayment[]> {
   for (const inv of invoices) {
     const direct = db.prepare('SELECT COALESCE(SUM(amount), 0) AS v FROM payments WHERE invoice_id = ? AND (currency = ? OR TRIM(COALESCE(currency, \'\')) = \'\')')
       .get(inv.id, inv.currency) as { v: number };
-    let capacity = round2(Math.max(0, inv.grand_total - direct.v));
+    let capacity = round2(Math.max(0, inv.grand_total - inv.credited - direct.v));
     const share: AppliedPayment[] = [];
     for (const r of remaining) {
       if (capacity <= 0) break;
@@ -114,6 +122,20 @@ export interface InvoiceReceivable {
   payments: AppliedPayment[];
   amount_received: number;
   balance_due: number;
+  /**
+   * What approved credit notes have taken off this bill — goods returned, or
+   * a rate settled down after the fact.
+   *
+   * It is **not** money received and is deliberately reported beside it rather
+   * than folded into it: an invoice settled by a credit note has been paid by
+   * nobody, and a page that adds the two would say the customer had sent money
+   * they never sent. Only `balance_due` nets them, because what is still owed
+   * is one figure however it got there.
+   *
+   * Only **approved** notes count — a draft that moved a balance would be a way
+   * to write a debt off by typing one, which is what approval exists to stop.
+   */
+  credited: number;
   /** How much of the total received came from advances on the source proforma. */
   advance_applied: number;
   /**
@@ -186,9 +208,12 @@ export function proformaAdvance(piId: number): ProformaAdvance {
 
 /** What one invoice has actually been credited with. */
 export function invoiceReceivable(invoiceId: number): InvoiceReceivable {
-  const inv = db.prepare('SELECT id, pi_id, currency, grand_total FROM commercial_invoices WHERE id = ?').get(invoiceId) as
-    | { id: number; pi_id: number | null; currency: string; grand_total: number } | undefined;
-  if (!inv) return { payments: [], amount_received: 0, balance_due: 0, advance_applied: 0, currency_mismatch: [] };
+  const inv = db.prepare(
+    `SELECT id, pi_id, currency, grand_total, ${CREDITED_SQL('commercial_invoices.id')} AS credited
+       FROM commercial_invoices WHERE id = ?`
+  ).get(invoiceId) as
+    | { id: number; pi_id: number | null; currency: string; grand_total: number; credited: number } | undefined;
+  if (!inv) return { payments: [], amount_received: 0, balance_due: 0, credited: 0, advance_applied: 0, currency_mismatch: [] };
 
   const own = db.prepare('SELECT * FROM payments WHERE invoice_id = ? ORDER BY date, id').all(invoiceId) as unknown as PaymentRow[];
   const direct = own
@@ -203,10 +228,14 @@ export function invoiceReceivable(invoiceId: number): InvoiceReceivable {
 
   const advanceApplied = round2(advances.reduce((s, p) => s + p.applied_amount, 0));
   const received = round2(sumAmounts(direct) + advanceApplied);
+  const credited = round2(Number(inv.credited) || 0);
   return {
     payments: [...direct, ...advances],
     amount_received: received,
-    balance_due: round2(inv.grand_total - received),
+    // A subtraction, not a third opinion: what was billed, less what was
+    // credited back, less what has actually been banked.
+    balance_due: round2(inv.grand_total - credited - received),
+    credited,
     advance_applied: advanceApplied,
     currency_mismatch: mismatches([...own, ...pool], inv.currency),
   };
@@ -217,8 +246,10 @@ export function invoiceReceivable(invoiceId: number): InvoiceReceivable {
  * allocation rule, but without re-querying per invoice.
  */
 export function receivedByInvoice(): Map<number, number> {
-  const invoices = db.prepare('SELECT id, pi_id, currency, grand_total FROM commercial_invoices ORDER BY date, id').all() as
-    { id: number; pi_id: number | null; currency: string; grand_total: number }[];
+  const invoices = db.prepare(
+    `SELECT id, pi_id, currency, grand_total, ${CREDITED_SQL('commercial_invoices.id')} AS credited
+       FROM commercial_invoices ORDER BY date, id`
+  ).all() as { id: number; pi_id: number | null; currency: string; grand_total: number; credited: number }[];
   const payments = db.prepare('SELECT pi_id, invoice_id, amount, currency, date, id FROM payments ORDER BY date, id').all() as
     { pi_id: number | null; invoice_id: number | null; amount: number; currency: string }[];
 
@@ -243,7 +274,9 @@ export function receivedByInvoice(): Map<number, number> {
   const received = new Map<number, number>();
   for (const inv of invoices) {
     const direct = directTotal.get(inv.id) ?? 0;
-    let capacity = round2(Math.max(0, inv.grand_total - direct));
+    // The same capacity rule as `allocateAdvances`, or the dashboard and the
+    // invoice page would disagree about where an advance ended up.
+    let capacity = round2(Math.max(0, inv.grand_total - inv.credited - direct));
     let applied = 0;
     for (const r of (inv.pi_id != null ? pools.get(inv.pi_id) ?? [] : [])) {
       if (capacity <= 0) break;

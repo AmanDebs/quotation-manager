@@ -20,6 +20,8 @@ import OrdersPage from './pages/Orders';
 import OrderFormPage from './pages/OrderForm';
 import InvoicesPage from './pages/Invoices';
 import InvoiceFormPage from './pages/InvoiceForm';
+import CreditNotesPage from './pages/CreditNotes';
+import CreditNoteFormPage from './pages/CreditNoteForm';
 import PackingListsPage from './pages/PackingLists';
 import PackingListFormPage from './pages/PackingListForm';
 import FollowupsPage from './pages/Followups';
@@ -197,6 +199,10 @@ export const routes: RouteObject[] = [
       { path: '/invoices', element: <Needs fn="invoice"><InvoicesPage /></Needs> },
       { path: '/invoices/new', element: <Needs fn="invoice"><InvoiceFormPage /></Needs> },
       { path: '/invoices/:id', element: <Needs fn="invoice"><InvoiceFormPage /></Needs> },
+      // On the invoice function: a credit note is the invoice being partly taken back.
+      { path: '/credit-notes', element: <Needs fn="invoice"><CreditNotesPage /></Needs> },
+      { path: '/credit-notes/new', element: <Needs fn="invoice"><CreditNoteFormPage /></Needs> },
+      { path: '/credit-notes/:id', element: <Needs fn="invoice"><CreditNoteFormPage /></Needs> },
       { path: '/packing-lists', element: <Needs fn="packing_list"><PackingListsPage /></Needs> },
       { path: '/packing-lists/new', element: <Needs fn="packing_list"><PackingListFormPage /></Needs> },
       { path: '/packing-lists/:id', element: <Needs fn="packing_list"><PackingListFormPage /></Needs> },

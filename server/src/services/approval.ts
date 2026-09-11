@@ -14,13 +14,23 @@ import { incompleteError } from './documentChecks.js';
  */
 export const mayApprove = (user: { team_role?: unknown } | undefined) => can(user?.team_role, 'approval', 'full');
 
-export type DocTable = 'quotations' | 'proforma_invoices' | 'commercial_invoices';
+export type DocTable = 'quotations' | 'proforma_invoices' | 'commercial_invoices' | 'credit_notes';
 
 /** Statuses that mean "this document has gone to the customer". */
 const outgoingStatuses: Record<DocTable, string[]> = {
   quotations: ['sent', 'negotiating', 'accepted'],
   proforma_invoices: ['sent', 'order_confirmed', 'advance_received', 'in_production'],
   commercial_invoices: ['final', 'dispatched', 'paid'],
+  /*
+   * Empty, and deliberately so: a credit note has **no status ladder**. It is
+   * issued once and that is the whole of its life — never sent, negotiated,
+   * part shipped or paid — so approval carries the weight a status would
+   * elsewhere, and it carries more of it than usual: an approved credit note
+   * is what actually reduces the balance owed (`CREDITED_SQL`). Nothing calls
+   * `blockUnapprovedTransition` for this table; the entry is here because the
+   * map is keyed on the whole union and a silent omission would be a hole.
+   */
+  credit_notes: [],
 };
 
 export const requiresApproval = (table: DocTable, status: string) => outgoingStatuses[table].includes(status);

@@ -80,6 +80,16 @@ function getFull(id: number, req?: AuthedRequest) {
   // See the quotation's own getFull: shown on the form, not sprung on Submit.
   inv.checks = checkDocument('commercial_invoices', id);
   /*
+   * The credit notes raised against this invoice, every one whatever its
+   * approval, so the page can say why the balance moved — and why a draft one
+   * has not moved it yet. What they *amount* to is `money.credited` below,
+   * asked of `receivables.ts`, which counts only the approved.
+   */
+  inv.credit_notes = db.prepare(
+    `SELECT n.id, n.number, n.date, n.kind, n.reason, n.grand_total, n.approval_status
+       FROM credit_notes n WHERE n.invoice_id = ? ORDER BY n.date, n.id`
+  ).all(id);
+  /*
    * The trips billed under this invoice. You could always see the invoice from
    * a despatch; this is the other direction, which only the delete guard used
    * to know about.
@@ -162,6 +172,9 @@ function getFull(id: number, req?: AuthedRequest) {
   inv.payments = money.payments;
   inv.amount_received = money.amount_received;
   inv.balance_due = money.balance_due;
+  // What approved credit notes have taken off the bill — beside what was
+  // received, never inside it: a credit is not money that arrived.
+  inv.credited = money.credited;
   inv.advance_applied = money.advance_applied;
   // Money against this invoice or its proforma in another currency, credited to
   // nothing. Carried so the page can say so rather than silently under-reporting.
@@ -387,6 +400,7 @@ const invoiceColumns: Column<Row>[] = [
   { header: 'Total', value: (r) => num(r.grand_total), type: 'money' },
   { header: 'Received', value: (r) => num(r.amount_received), type: 'money' },
   { header: 'Of which advance', value: (r) => num(r.advance_applied), type: 'money' },
+  { header: 'Credited', value: (r) => num(r.credited), type: 'money' },
   { header: 'Balance due', value: (r) => num(r.balance_due), type: 'money' },
   { header: 'Unapplied (currency)', value: (r) => str(r.currency_mismatch) },
   { header: 'Status', value: (r) => str(r.status) },
@@ -403,6 +417,7 @@ invoicesRouter.get('/export', (req: AuthedRequest, res) => {
     const money = invoiceReceivable(Number(inv.id));
     inv.amount_received = money.amount_received;
     inv.advance_applied = money.advance_applied;
+    inv.credited = money.credited;
     inv.balance_due = money.balance_due;
     inv.currency_mismatch = money.currency_mismatch
       .map((m) => `${m.currency} ${m.amount}`)
@@ -597,6 +612,14 @@ invoicesRouter.delete('/:id', (req: AuthedRequest, res) => {
   if (!existing || !canAccessCustomer(req, existing.customer_id)) return res.status(404).json({ error: 'Invoice not found' });
   const paid = db.prepare('SELECT COUNT(*) AS c FROM payments WHERE invoice_id = ?').get(id) as { c: number };
   if (paid.c > 0) return res.status(409).json({ error: 'Invoice has recorded payments and cannot be deleted' });
+  // A credit note is raised against this invoice and numbered from its series;
+  // deleting the invoice under it would leave a credit against nothing.
+  const credits = db.prepare('SELECT COUNT(*) AS c FROM credit_notes WHERE invoice_id = ?').get(id) as { c: number };
+  if (credits.c > 0) {
+    return res.status(409).json({
+      error: `This invoice has ${credits.c} credit note${credits.c === 1 ? '' : 's'} raised against it. Delete ${credits.c === 1 ? 'it' : 'them'} first, or keep the invoice.`,
+    });
+  }
   // A despatch points at the invoice it was billed under. Without this the
   // foreign key still stops the delete, but the caller is told only that "this
   // record is still referenced by another document" — true, and useless.

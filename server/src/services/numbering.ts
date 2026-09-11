@@ -2,7 +2,7 @@ import { db } from '../db/connection.js';
 
 export type DocType =
   | 'quotation' | 'order' | 'proforma' | 'invoice' | 'packing_list'
-  | 'work_order' | 'purchase_order' | 'challan' | 'batch' | 'coa';
+  | 'work_order' | 'purchase_order' | 'challan' | 'batch' | 'coa' | 'credit_note';
 
 /** Indian fiscal year (April–March) as "25-26". */
 export function fiscalYear(date = new Date()): string {
@@ -76,6 +76,11 @@ const patternColumn: Record<DocType, { std: string; export?: string; flag?: stri
   // is made before anybody knows which container it leaves in.
   batch: { std: 'batch_pattern' },
   coa: { std: 'coa_pattern' },
+  // The credit note takes the invoice's export/domestic split, because it is
+  // a tax document that credits one: a credit against `AP/EX/101/25-26` drawn
+  // from the domestic series would put a gap in one book and a stray in the
+  // other, on numbering a GST return is checked against.
+  credit_note: { std: 'cn_pattern', export: 'cn_export_pattern', flag: 'is_export', altWord: 'export' },
 };
 
 /**

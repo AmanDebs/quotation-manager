@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { db } from '../db/connection.js';
 import {
   buildQuotationPdf, buildOrderPdf, buildProformaPdf, buildInvoicePdf, buildPackingListPdf,
-  buildInvoiceWithPackingPdf, buildPurchaseOrderPdf,
+  buildInvoiceWithPackingPdf, buildCreditNotePdf, buildPurchaseOrderPdf,
   buildQcReportPdf, buildOrderQcReportPdf, buildInvoiceQcReportPdf, buildInvoiceWithQcPdf,
   buildDeliveryChallanPdf, buildCoaPdf,
   renderPdf,
@@ -32,6 +32,10 @@ const builders = {
   'packing-list': { build: buildPackingListPdf, table: 'packing_lists', approvable: false, fn: 'packing_list' },
   // Invoice + its packing list in one file; approval follows the invoice.
   'invoice-with-packing': { build: buildInvoiceWithPackingPdf, table: 'commercial_invoices', approvable: true, fn: 'invoice' },
+  // The invoice being partly taken back, so it prints under the invoice
+  // function and is watermarked until approved — and an unapproved credit
+  // note is one that credits nothing, so the watermark says exactly that.
+  'credit-note': { build: buildCreditNotePdf, table: 'credit_notes', approvable: true, fn: 'invoice' },
   /*
    * The one document here addressed to a supplier rather than a customer.
    *
@@ -138,6 +142,7 @@ const DOC_LABEL: Record<DocType, string> = {
   invoice: 'Commercial Invoice',
   'packing-list': 'Packing List',
   'invoice-with-packing': 'Commercial Invoice & Packing List',
+  'credit-note': 'Credit Note',
   'purchase-order': 'Purchase Order',
   'qc-report': 'Quality Report',
   'order-qc-report': 'Quality Report',
