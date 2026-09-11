@@ -31,11 +31,11 @@ import { snapshotRecipe } from './recipe.js';
  * quantity corrected before anything was made moves the one planned job to
  * match, and a line that disappears cancels its unstarted job.
  *
- * The one judgement worth revisiting is **bought-in goods**: some lines are
- * traded rather than made, and a job is raised for them all the same, there
- * being no make-or-buy flag on the catalogue to tell them apart. Production
- * cancels the ones it does not make; a `made_here` flag on the product is the
- * small additive change if that becomes a chore.
+ * **Bought-in goods raise nothing.** `products.made_here = 0` marks a line
+ * that is traded rather than made — the same treatment as a charge line here
+ * and in `qcBlockError`, there being no job to raise and nothing to inspect.
+ * A product flipped to bought-in after booking has its untouched job
+ * withdrawn on the next save, and one flipped back gets a job again.
  */
 
 export interface OrderRef { id: number; customer_id: number; company_id: number }
@@ -108,8 +108,11 @@ export function syncOrderJobs(orderId: number, userId: number | null): JobSync {
   // Positions count charge lines — the chain's index rule — so the position
   // is taken over every line and charges are skipped afterwards.
   const lines = (db.prepare(
-    'SELECT product_id, description, qty, total_pcs, is_charge FROM order_items WHERE order_id = ? ORDER BY sort_order, id'
-  ).all(orderId) as { product_id: number | null; description: string; qty: number | null; total_pcs: number | null; is_charge: number }[])
+    `SELECT oi.product_id, oi.description, oi.qty, oi.total_pcs, oi.is_charge,
+            COALESCE(p.made_here, 1) AS made_here
+       FROM order_items oi LEFT JOIN products p ON p.id = oi.product_id
+      WHERE oi.order_id = ? ORDER BY oi.sort_order, oi.id`
+  ).all(orderId) as { product_id: number | null; description: string; qty: number | null; total_pcs: number | null; is_charge: number; made_here: number }[])
     .map((it, line) => ({ ...it, line }));
 
   const jobs = db.prepare(
@@ -131,7 +134,7 @@ export function syncOrderJobs(orderId: number, userId: number | null): JobSync {
 
   for (const it of lines) {
     const mine = byLine.get(it.line) ?? [];
-    if (it.is_charge || target(it) <= 0 || !live) {
+    if (it.is_charge || !it.made_here || target(it) <= 0 || !live) {
       // Nothing to make on this line: an unstarted job against it is withdrawn.
       for (const j of mine) if (untouched(j)) { cancel(j.id); out.cancelled.push(j.id); }
       continue;

@@ -17,7 +17,11 @@ export const productsRouter = Router();
  * open because every document form needs the picker.
  */
 
-const fields = ['name', 'description', 'hsn_code', 'unit', 'unit_price', 'country_of_origin', 'image', 'color', 'product_type'];
+const fields = ['name', 'description', 'hsn_code', 'unit', 'unit_price', 'country_of_origin', 'image', 'color', 'product_type', 'made_here'];
+
+// Absent means made here — the form always sends it, so only an API call with
+// nothing to say gets the default, and the default is what every product was.
+const madeHere = (v: unknown) => (v == null || v === '' ? 1 : Number(v) ? 1 : 0);
 /**
  * Numeric fields — kept separate because blank must persist as NULL, not 0.
  * `weight_grams` belongs here for that reason and for one more: the import's
@@ -336,6 +340,7 @@ productsRouter.post('/', (req, res) => {
       // one, so a person's choice always wins, and it is only silence that gets
       // guessed. Same helper as the boot pass and the import.
       String(body.product_type || guessProductType(String(body.name))),
+      madeHere(body.made_here),
       ...(packingFields.map((f) => numOrNull(body[f])) as never[])
     );
   res.status(201).json(db.prepare('SELECT * FROM products WHERE id = ?').get(Number(info.lastInsertRowid)));
@@ -360,6 +365,7 @@ productsRouter.put('/:id', requirePermission('product', 'full'), (req, res) => {
     String(body.image ?? ''),
     String(body.color ?? ''),
     String(body.product_type || guessProductType(String(body.name))),
+    madeHere(body.made_here),
     ...(packingFields.map((f) => numOrNull(body[f])) as never[]),
     id
   );

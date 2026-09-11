@@ -66,6 +66,23 @@ describe('one job per goods line, on booking', () => {
     assert.equal(j.product_id, p);
   });
 
+  /** Bought in and sold on: nothing to make, so nothing to raise. */
+  test('a bought-in product raises nothing, and flipping it withdraws the untouched job', () => {
+    const bought = Number((db.prepare("INSERT INTO products (name, unit, unit_price, made_here) VALUES ('Traded flange', 'unit', 1, 0) RETURNING id").get() as { id: number }).id);
+    const o = order([{ pcs: 1000, product: bought }, { pcs: 2000 }]);
+    const r = syncOrderJobs(o, null);
+    assert.deepEqual(live(o).map((j) => j.order_line), [1], 'a job was raised for a bought-in line');
+    assert.equal(r.raised.length, 1);
+    // It starts being made here after all.
+    db.prepare('UPDATE products SET made_here = 1 WHERE id = ?').run(bought);
+    assert.equal(syncOrderJobs(o, null).raised.length, 1);
+    assert.deepEqual(live(o).map((j) => j.order_line), [0, 1]);
+    // ...and then not.
+    db.prepare('UPDATE products SET made_here = 0 WHERE id = ?').run(bought);
+    assert.equal(syncOrderJobs(o, null).cancelled.length, 1);
+    assert.deepEqual(live(o).map((j) => j.order_line), [1]);
+  });
+
   test('is idempotent', () => {
     const o = order([{ pcs: 120000 }]);
     syncOrderJobs(o, null);

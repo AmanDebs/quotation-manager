@@ -191,6 +191,11 @@ CREATE TABLE IF NOT EXISTS products (
   -- the catalogue is quoted, priced and recipe'd on. Nullable: blank means
   -- not recorded, which is a different claim from 0 g.
   weight_grams REAL,
+  -- Make or buy. 1 = moulded here, so a sales order line for it raises a work
+  -- order and the QC gate asks for a pass; 0 = bought in and sold on, so
+  -- neither applies -- there is no job to inspect. Defaults to 1 because that
+  -- is what every product on file was treated as before the flag existed.
+  made_here INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 

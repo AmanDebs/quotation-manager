@@ -47,7 +47,7 @@ const empty: Omit<Product, 'id'> = {
   // already on file changes.
   name: '', description: '', hsn_code: '', unit: 'per 1000', unit_price: 0, country_of_origin: 'India',
   image: '', color: '', pcs_per_pack: null, qty_20ft: null, qty_40ft: null,
-  product_type: 'other', weight_grams: null,
+  product_type: 'other', weight_grams: null, made_here: 1,
 };
 
 /** Blank must stay blank — 0 boxes per container is a real, different claim. */
@@ -200,7 +200,10 @@ export default function ProductsPage() {
                       : <div className="h-10 w-10 rounded-lg border border-dashed border-slate-200" />}
                   </td>
                   <td className="py-2 pr-3 font-medium">{p.name}</td>
-                  <td className="py-2 pr-3 text-slate-500">{productTypeLabel(p.product_type)}</td>
+                  <td className="py-2 pr-3 text-slate-500">
+                    {productTypeLabel(p.product_type)}
+                    {p.made_here === 0 && <span className="ml-1 text-xs text-amber-700" title="Bought in and sold on: no work order is raised for it">bought in</span>}
+                  </td>
                   <td className="py-2 pr-3">{p.color || '—'}</td>
                   <td className="py-2 pr-3">{p.hsn_code || '—'}</td>
                   <td className="py-2 pr-3">{p.unit}</td>
@@ -267,6 +270,17 @@ export default function ProductsPage() {
             <Field label="Product Type">
               <Select value={editing.product_type} onChange={(e) => set({ product_type: e.target.value })}>
                 {PRODUCT_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+              </Select>
+            </Field>
+            {/*
+              * Make or buy. A sales order raises a work order for every line
+              * it can make; a bought-in product is traded, so no job is raised
+              * and the QC gate does not ask for a pass on it.
+              */}
+            <Field label="Made or bought">
+              <Select value={String(editing.made_here ?? 1)} onChange={(e) => set({ made_here: Number(e.target.value) })}>
+                <option value="1">Made here — a sales order raises a work order for it</option>
+                <option value="0">Bought in — traded, no work order</option>
               </Select>
             </Field>
             <div className="sm:col-span-2 rounded-lg border border-slate-200 bg-slate-50/40 p-3">

@@ -171,6 +171,12 @@ export interface Product {
   /** cap | preform | handle | semi_finished | other. See PRODUCT_TYPES. */
   product_type: string;
   /**
+   * 1 = moulded here (a sales order line raises a job, the QC gate applies);
+   * 0 = bought in and sold on (neither). Optional: a server not yet redeployed
+   * omits it, and absent reads as made here — what every product used to be.
+   */
+  made_here?: number;
+  /**
    * Grams per piece, which is the same number as kilograms per 1000 pieces —
    * the basis this catalogue is quoted, priced and recipe'd on. Null means not
    * recorded, which is a different claim from 0 g.

@@ -239,7 +239,10 @@ export function summaryForWorkOrder(workOrderId: number, productId: number | nul
  * line and no ordinary fixture would catch it.
  *
  * A spec'd line with **no work order at all** is blocked: not raising a job
- * would otherwise be the way around the gate entirely.
+ * would otherwise be the way around the gate entirely. **Unless the product
+ * is bought in** (`products.made_here = 0`, 2026-09-11): such a line has no
+ * job by nature and nothing made here to have inspected, so it is passed over
+ * like a charge line — the silence-is-not-failure rule, one more case.
  *
  * **Two callers now, and one definition of a pass.** The despatch register
  * asks it before goods may leave, and `documentChecks.ts` asks it before a
@@ -286,9 +289,10 @@ export function qcBlockError(
   // Every line of the order, numbered exactly as orderLines.ts numbers them —
   // charge lines included, because they take a position too.
   const items = db.prepare(
-    `SELECT ROW_NUMBER() OVER (ORDER BY sort_order, id) - 1 AS pos, product_id, description, is_charge
-       FROM order_items WHERE order_id = ?`
-  ).all(orderId) as { pos: number; product_id: number | null; description: string; is_charge: number }[];
+    `SELECT ROW_NUMBER() OVER (ORDER BY oi.sort_order, oi.id) - 1 AS pos, oi.product_id, oi.description, oi.is_charge,
+            COALESCE(p.made_here, 1) AS made_here
+       FROM order_items oi LEFT JOIN products p ON p.id = oi.product_id WHERE oi.order_id = ?`
+  ).all(orderId) as { pos: number; product_id: number | null; description: string; is_charge: number; made_here: number }[];
 
   // Judged against this customer's own tolerances where they have some.
   const owner = db.prepare('SELECT customer_id FROM orders WHERE id = ?').get(orderId) as
@@ -312,8 +316,9 @@ export function qcBlockError(
 
   for (const pos of [...wanted].sort((a, b) => a - b)) {
     const line = items.find((it) => Number(it.pos) === pos)!;
-    // A charge is a fee, not goods: there is nothing to inspect.
-    if (Number(line.is_charge)) continue;
+    // A charge is a fee, not goods: there is nothing to inspect. Nor is there
+    // on a bought-in product — nothing was made here to have been checked.
+    if (Number(line.is_charge) || !Number(line.made_here)) continue;
     if (paramsFor(line.product_id, owner?.customer_id).length === 0) continue;
     const name = line.description || `Line ${pos + 1}`;
     /*

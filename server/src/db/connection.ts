@@ -318,6 +318,8 @@ addColumnIfMissing('products', 'qty_40ft', 'REAL');
  * matching two of the words stays `other`; see `guessProductType`.
  */
 addColumnIfMissing('products', 'weight_grams', 'REAL');
+// Make or buy (2026-09-11). Default 1: every product on file was made here as far as the app knew.
+addColumnIfMissing('products', 'made_here', 'INTEGER NOT NULL DEFAULT 1');
 if (addColumnIfMissing('products', 'product_type', "TEXT NOT NULL DEFAULT 'other'")) {
   const named = db.prepare('SELECT id, name FROM products').all() as { id: number; name: string }[];
   const setType = db.prepare('UPDATE products SET product_type = ? WHERE id = ?');

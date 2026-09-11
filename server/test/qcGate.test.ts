@@ -65,6 +65,19 @@ function makeCheck(workOrderId: number, value: number | null): number {
 const send = (line: number) => [{ order_line: line }];
 
 describe('what the gate refuses', () => {
+  /**
+   * A bought-in product has no job by nature and nothing made here to have
+   * been inspected, so a spec on it is not asked for — the same treatment as
+   * a charge line. Without this a traded line with a spec was blocked with
+   * no way through, there being no job to record a check against.
+   */
+  test('never a bought-in product, spec or no spec', () => {
+    const p = makeProduct(true);
+    db.prepare('UPDATE products SET made_here = 0 WHERE id = ?').run(p);
+    const order = makeOrder([p]);
+    assert.equal(qcBlockError(order, send(0)), null);
+  });
+
   test('a spec’d line with no passing check', () => {
     const p = makeProduct(true);
     const order = makeOrder([p]);
