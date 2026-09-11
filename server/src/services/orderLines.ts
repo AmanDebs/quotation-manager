@@ -1,4 +1,5 @@
 import { db } from '../db/connection.js';
+import { fgOnHandByProduct } from './finishedGoods.js';
 import { searchClause } from './search.js';
 import { countOf } from './pagination.js';
 import { round2 } from './totals.js';
@@ -62,6 +63,14 @@ export interface OrderLine {
   sent: number;
   billed: number;
   state: LineState;
+  /**
+   * Finished goods on the shelf for this line's product, across every plant —
+   * the same figure on every line of that product, since nothing reserves
+   * stock to a line. `null` on a custom line naming no product: the ledger has
+   * no row to read, which is not the same as none. Filled in by the route only
+   * for a caller holding `fg`; absent, not zero, otherwise.
+   */
+  in_stock?: number | null;
 }
 
 export interface Filters {
@@ -218,6 +227,18 @@ export function orderLines(f: Filters = {}, page?: { limit: number; offset: numb
   }));
 }
 
+/**
+ * Put the shelf beside the demand. The order book is `order: view`; the
+ * figure is `fg`, and under the current matrix every role that reads the book
+ * also holds `fg` — so this binds on nobody today, and is kept for the reason
+ * `exportOnlyInvoice` is kept: the rule lives where the answer is decided, so
+ * narrowing a cell later narrows this with it.
+ */
+export function withStock<T extends { product_id: number | null }>(rows: T[]): (T & { in_stock: number | null })[] {
+  const shelf = fgOnHandByProduct();
+  return rows.map((r) => ({ ...r, in_stock: r.product_id == null ? null : (shelf.get(r.product_id) ?? 0) }));
+}
+
 /** How many lines match, for the pager. Counts the same query it pages. */
 export function countOrderLines(f: Filters = {}): number {
   const { sql, params } = lineWhere(f);
@@ -238,6 +259,8 @@ export interface ProductDemand {
   orders: number;
   /** Earliest promised date among lines not yet shipped; '' when none remain. */
   next_due: string;
+  /** On the shelf for this product, as on the lines. `null` for a custom line. */
+  in_stock?: number | null;
 }
 
 /**

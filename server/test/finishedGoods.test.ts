@@ -2,7 +2,8 @@ import './helpers/scratch.js';
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { db } from '../src/db/connection.js';
-import { finishedGoods } from '../src/services/finishedGoods.js';
+import { finishedGoods, fgOnHandByProduct } from '../src/services/finishedGoods.js';
+import { withStock } from '../src/services/orderLines.js';
 import { makeCustomer, makeInvoice, makeLocation } from './helpers/factory.js';
 
 /**
@@ -197,5 +198,22 @@ describe('what cannot be placed is reported, not dropped', () => {
     ).get(`CN/FG-${++seq}`, inv, o.customerId) as { id: number }).id);
     db.prepare("INSERT INTO credit_note_items (credit_note_id, product_id, description, qty, unit, sort_order) VALUES (?, ?, 'x', 850, 'kg', 0)").run(n, p);
     assert.equal(rowFor(p), undefined);
+  });
+});
+
+describe('the shelf beside the demand', () => {
+  test('per product across plants, the same figure on every line of it, and null on a custom line', () => {
+    const p = product();
+    const [a, b] = [makeLocation('A'), makeLocation('B')];
+    const o = order([p, p, null]);
+    db.prepare("UPDATE order_items SET is_charge = 0, description = 'Custom' WHERE order_id = ? AND sort_order = 2").run(o.id);
+    shift(job(o.id, 0, p, a), 6000);
+    shift(job(o.id, 1, p, b), 4000);
+    trip(o.id, [[0, 1000]], a);
+    assert.equal(fgOnHandByProduct().get(p), 9000);
+    const rows = withStock([
+      { product_id: p, line: 0 }, { product_id: p, line: 1 }, { product_id: null, line: 2 },
+    ]);
+    assert.deepEqual(rows.map((r) => r.in_stock), [9000, 9000, null]);
   });
 });

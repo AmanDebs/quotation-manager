@@ -711,6 +711,12 @@ export interface OrderLine {
   ordered: number; amount: number;
   made: number; sent: number; billed: number;
   state: LineState;
+  /**
+   * Finished goods on the shelf for this line's product, across every plant —
+   * the same figure on every line of that product. `null` on a custom line;
+   * absent for a caller without `fg`.
+   */
+  in_stock?: number | null;
 }
 
 /** The same lines folded up: how much of this product is on order altogether. */
@@ -721,6 +727,8 @@ export interface ProductDemand {
   ordered: number; made: number; shipped: number; to_ship: number;
   orders: number;
   next_due: string;
+  /** On the shelf for this product; `null` for a custom line, absent without `fg`. */
+  in_stock?: number | null;
 }
 
 /** Physically sent per order line — the counterpart to the invoiced figure. */

@@ -306,6 +306,7 @@ function LinesTable({ lines, showCompany, pager }: {
   // A domestic book has no discharge port on any row, and a column that is
   // empty on every line for ever is worse than no column.
   const anyPort = lines.some((l) => l.port_of_discharge);
+  const showStock = anyStock(lines);
 
   return (
     <Card className="overflow-x-auto">
@@ -328,6 +329,7 @@ function LinesTable({ lines, showCompany, pager }: {
                 <th className="pb-2 pr-3 text-right">Qty</th>
                 <th className="pb-2 pr-3 text-right">Made</th>
                 <th className="pb-2 pr-3 text-right">Sent</th>
+                {showStock && <th className="pb-2 pr-3 text-right" title="Finished goods on the shelf for this product, across every plant">In stock</th>}
                 <th className="pb-2 pr-3">Promised</th>
                 <th className="pb-2 pr-3">Added By</th>
                 <th className="pb-2 pr-3">State</th>
@@ -375,6 +377,7 @@ function LinesTable({ lines, showCompany, pager }: {
                     <td className="py-1.5 pr-3 text-right tabular-nums text-slate-500">
                       {l.sent || l.billed ? fmtQty(Math.max(l.sent, l.billed)) : '—'}
                     </td>
+                    {showStock && <StockCell value={l.in_stock} />}
                     <td className={`whitespace-nowrap py-1.5 pr-3 ${overdue ? 'font-semibold text-red-600' : ''}`}>
                       {l.promised_date ? fmtDate(l.promised_date) : '—'}{overdue && ' ⚠'}
                     </td>
@@ -396,6 +399,7 @@ function LinesTable({ lines, showCompany, pager }: {
           <p className="mt-2 text-xs text-slate-400">
             Made, sent and state are worked out from the work orders, despatches and invoices
             recorded against each line — there is nothing here to keep up to date by hand.
+            {showStock && ' In stock is the product’s shelf across every plant, shared by every open line of it — nothing reserves it to one order.'}
           </p>
           <Pagination
             page={pager.page} pages={pager.pages} total={pager.total} limit={PAGE_SIZE}
@@ -407,9 +411,29 @@ function LinesTable({ lines, showCompany, pager }: {
   );
 }
 
+
+/**
+ * Finished goods on the shelf for a row's product. Drawn only when the server
+ * sent the key — it withholds it from a caller without `fg` — and only when
+ * some row has a figure, the `Dest Port` rule: a column empty on every line
+ * for ever is worse than no column. Per product, not per line: nothing here
+ * reserves stock to an order, so the same shelf prints against every open
+ * line of that product, and the footnote says so.
+ */
+function StockCell({ value }: { value: number | null | undefined }) {
+  if (value == null) return <td className="py-1.5 pr-3 text-right text-slate-300">—</td>;
+  return (
+    <td className={`py-1.5 pr-3 text-right tabular-nums ${value < 0 ? 'text-red-600' : value > 0 ? 'text-slate-700' : 'text-slate-400'}`}>
+      {fmtQty(value)}
+    </td>
+  );
+}
+const anyStock = (rows: { in_stock?: number | null }[]) => rows.some((r) => r.in_stock != null);
+
 /** The same lines folded up: what is on order per product, and what to run next. */
 function DemandTable({ rows, onPick }: { rows: ProductDemand[]; onPick: (row: ProductDemand) => void }) {
   const t = today();
+  const showStock = anyStock(rows);
 
   return (
     <Card className="overflow-x-auto">
@@ -427,6 +451,7 @@ function DemandTable({ rows, onPick }: { rows: ProductDemand[]; onPick: (row: Pr
                 <th className="pb-2 pr-3 text-right">Made</th>
                 <th className="pb-2 pr-3 text-right">Shipped</th>
                 <th className="pb-2 pr-3 text-right">To ship</th>
+                {showStock && <th className="pb-2 pr-3 text-right" title="Finished goods on the shelf, across every plant">In stock</th>}
                 <th className="pb-2 pr-3 text-right">Sales orders</th>
                 <th className="pb-2 pr-3">Next due</th>
               </tr>
@@ -450,6 +475,7 @@ function DemandTable({ rows, onPick }: { rows: ProductDemand[]; onPick: (row: Pr
                     <td className={`py-2 pr-3 text-right tabular-nums ${r.to_ship > 0 ? 'font-semibold text-amber-700' : 'text-green-700'}`}>
                       {r.to_ship > 0 ? fmtQty(r.to_ship) : 'clear'}
                     </td>
+                    {showStock && <StockCell value={r.in_stock} />}
                     <td className="py-2 pr-3 text-right tabular-nums text-slate-500">{r.orders}</td>
                     <td className={`whitespace-nowrap py-2 pr-3 ${overdue ? 'font-semibold text-red-600' : ''}`}>
                       {r.next_due ? fmtDate(r.next_due) : '—'}{overdue && ' ⚠'}
@@ -462,6 +488,7 @@ function DemandTable({ rows, onPick }: { rows: ProductDemand[]; onPick: (row: Pr
           <p className="mt-2 text-xs text-slate-400">
             Ordered most-outstanding first. A line without a catalogue product groups by its description and
             colour, so a one-off still shows up as itself. Click a row for the orders behind it.
+            {showStock && ' In stock is the shelf across every plant; against To ship it says what can go now and what still has to be made.'}
           </p>
         </>
       )}

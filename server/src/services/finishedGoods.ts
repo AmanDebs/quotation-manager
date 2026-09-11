@@ -168,3 +168,18 @@ export function finishedGoods(opts: { locationId?: number | null; productId?: nu
 
   return { rows, unplaced: { dispatched: round2(unplaced.dispatched), returned: round2(unplaced.returned) } };
 }
+
+/**
+ * On hand per product across every plant — what the order book reads.
+ *
+ * Asked once for the whole book rather than once per line (the N+1 this
+ * codebase keeps bounding), and **per product, not per line**: the shelf is
+ * one shelf, shared by every open line of that product, so the same figure
+ * prints against each of them and the screen says so. Allocating it across
+ * lines would be inventing a reservation nobody made.
+ */
+export function fgOnHandByProduct(): Map<number, number> {
+  const out = new Map<number, number>();
+  for (const r of finishedGoods().rows) out.set(r.product_id, round2((out.get(r.product_id) ?? 0) + r.on_hand));
+  return out;
+}

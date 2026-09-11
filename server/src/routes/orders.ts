@@ -6,7 +6,7 @@ import { productionByOrder } from '../services/production.js';
 import { despatchedByOrder } from './despatches.js';
 import { orderMaterialCost } from '../services/costing.js';
 import { orderAdvance, advanceForProforma } from '../services/receivables.js';
-import { orderLines, productDemand, countOrderLines, orderSearchClause,
+import { withStock, orderLines, productDemand, countOrderLines, orderSearchClause,
   type Filters, type OrderLine, type ProductDemand } from '../services/orderLines.js';
 import { buildXlsx, attachmentName, type Column } from '../services/xlsx.js';
 import { allows, type AuthedRequest } from '../middleware/auth.js';
@@ -311,12 +311,15 @@ function lineFilters(req: AuthedRequest): Filters {
 ordersRouter.get('/lines', (req: AuthedRequest, res) => {
   const f = lineFilters(req);
   const p = pageRequest(req.query);
-  if (!p) return res.json(orderLines(f));
+  // The shelf beside the demand — absent, not zero, for a caller without `fg`.
+  const stock = allows(req, 'fg');
+  if (!p) return res.json(stock ? withStock(orderLines(f)) : orderLines(f));
   const total = countOrderLines(f);
   const pages = Math.max(1, Math.ceil(total / p.limit));
   const page = Math.min(p.page, pages);
+  const rows = orderLines(f, { limit: p.limit, offset: (page - 1) * p.limit });
   res.json({
-    rows: orderLines(f, { limit: p.limit, offset: (page - 1) * p.limit }),
+    rows: stock ? withStock(rows) : rows,
     total, page, pages, limit: p.limit,
   });
 });
@@ -328,7 +331,8 @@ ordersRouter.get('/lines', (req: AuthedRequest, res) => {
  * that affordable.
  */
 ordersRouter.get('/by-product', (req: AuthedRequest, res) => {
-  res.json(productDemand(lineFilters(req)));
+  const rows = productDemand(lineFilters(req));
+  res.json(allows(req, 'fg') ? withStock(rows) : rows);
 });
 
 /**
@@ -364,6 +368,7 @@ const lineColumns: Column<OrderLine>[] = [
   { header: 'Made', value: (r) => r.made, type: 'number' },
   { header: 'Sent', value: (r) => r.sent, type: 'number' },
   { header: 'Billed', value: (r) => r.billed, type: 'number' },
+  { header: 'In stock', value: (r) => r.in_stock ?? '', type: 'number' },
   { header: 'Promised', value: (r) => r.promised_date, type: 'date' },
   { header: 'State', value: (r) => STATE_LABEL[r.state] ?? r.state },
   { header: 'Amount', value: (r) => r.amount, type: 'money' },
@@ -382,6 +387,7 @@ const productColumns: Column<ProductDemand>[] = [
   { header: 'Made', value: (r) => r.made, type: 'number' },
   { header: 'Shipped', value: (r) => r.shipped, type: 'number' },
   { header: 'To ship', value: (r) => r.to_ship, type: 'number' },
+  { header: 'In stock', value: (r) => r.in_stock ?? '', type: 'number' },
   { header: 'Orders', value: (r) => r.orders, type: 'number' },
   { header: 'Next due', value: (r) => r.next_due, type: 'date' },
 ];
@@ -411,7 +417,7 @@ ordersRouter.get('/export', (req: AuthedRequest, res) => {
   let book: Buffer;
   if (view === 'by-product') {
     sheet = 'By product';
-    book = buildXlsx(sheet, productColumns, productDemand(lineFilters(req)));
+    book = buildXlsx(sheet, productColumns, allows(req, 'fg') ? withStock(productDemand(lineFilters(req))) : productDemand(lineFilters(req)));
   } else if (view === 'orders') {
     sheet = 'Sales orders';
     const { where, params } = orderListWhere(req);
@@ -431,7 +437,7 @@ ordersRouter.get('/export', (req: AuthedRequest, res) => {
   } else {
     sheet = 'Sales order lines';
     // No page argument: the whole filtered set.
-    book = buildXlsx(sheet, lineColumns, orderLines(lineFilters(req)));
+    book = buildXlsx(sheet, lineColumns, allows(req, 'fg') ? withStock(orderLines(lineFilters(req))) : orderLines(lineFilters(req)));
   }
 
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
