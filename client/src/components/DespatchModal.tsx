@@ -127,6 +127,9 @@ export function DespatchEditor({ orderId, despatch, onClose }: {
       queryClient.invalidateQueries({ queryKey: ['despatches'] });
       queryClient.invalidateQueries({ queryKey: ['order', String(orderId)] });
       queryClient.invalidateQueries({ queryKey: ['orders'] });
+      // The order book's other two readers: a trip moves Sent and the state.
+      queryClient.invalidateQueries({ queryKey: ['order-lines'] });
+      queryClient.invalidateQueries({ queryKey: ['order-demand'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard'] });
       onClose();
     },
