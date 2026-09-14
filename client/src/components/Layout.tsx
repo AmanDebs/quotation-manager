@@ -55,6 +55,10 @@ const NAV: { heading: string; items: NavItem[] }[] = [
       // super admin hold `payment`; nobody on the floor does.
       { to: '/payments', label: 'Payments', icon: 'coins', needs: 'payment' },
       { to: '/followups', label: 'Follow-ups', icon: 'bell', needs: 'followup' },
+      // What the open jobs will consume, by start date — asked for under Sales
+      // (2026-09-14), where the desk plans buying against the order book. The
+      // figure is the material function's, so it shows for whoever holds it.
+      { to: '/material-required', label: 'Raw Material Required', icon: 'box', needs: 'material' },
     ],
   },
   {

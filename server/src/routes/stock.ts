@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { db } from '../db/connection.js';
 import { onHandAll, onOrder, shortfall } from '../services/stock.js';
+import { materialSchedule } from '../services/materialSchedule.js';
 import { valuation } from '../services/costing.js';
 import { round2 } from '../services/totals.js';
 import { requirePermission, type AuthedRequest } from '../middleware/auth.js';
@@ -87,6 +88,11 @@ stockRouter.get('/shortfall', (req, res) => {
   // The default stays `jobs`, which is what every caller has been getting.
   const basis = req.query.basis === 'orders' ? 'orders' : 'jobs';
   res.json(shortfall(numOrNull(req.query.location_id), basis));
+});
+
+/** The same need, by the day it is needed — see `services/materialSchedule.ts`. */
+stockRouter.get('/schedule', (req, res) => {
+  res.json(materialSchedule(numOrNull(req.query.location_id)));
 });
 
 /**

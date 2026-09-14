@@ -898,6 +898,17 @@ export interface PaymentRegisterSummary {
   mismatched: number;
 }
 
+/** Raw material required by start date (`GET /api/stock/schedule`). */
+export interface MaterialSchedule {
+  dates: string[];
+  rows: {
+    material_id: number; material_name: string; unit: string; total: number;
+    by_date: Record<string, number>; unscheduled: number;
+  }[];
+  uncosted: { id: number; number: string; description: string }[];
+  has_unscheduled: boolean;
+}
+
 /** One trip billed under an invoice, as the invoice tracker shows it. */
 export interface TrackerShipment {
   despatch_id: number;
