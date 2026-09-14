@@ -7,7 +7,6 @@ import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, Ta
 import { PdfLink } from '../components/PdfLink';
 import CompanySelect from '../components/CompanySelect';
 import { DocNumber, IncoTermsInput, PaymentTermsInput, HeaderCharges } from '../components/DocFields';
-import MaterialTab from '../components/MaterialTab';
 import DispatchTab from '../components/DispatchTab';
 import LineItemsEditor from '../components/LineItemsEditor';
 import ColumnsControl, { newColumnConfig, hasColumnPrefs, orderColumns, ORDER_FORCED } from '../components/ColumnsControl';
@@ -91,7 +90,7 @@ export default function OrderFormPage() {
   const [draft, setDraft] = useState<Draft>(emptyDraft());
   const [prefilled, setPrefilled] = useState(false);
   const [prefillAdvance, setPrefillAdvance] = useState<Order['advance']>();
-  const [tab, setTab] = useState<'details' | 'material' | 'dispatch'>('details');
+  const [tab, setTab] = useState<'details' | 'dispatch'>('details');
 
   useEffect(() => {
     if (existing) {
@@ -245,6 +244,9 @@ export default function OrderFormPage() {
         * (2026-09-11, at the client's word): the order raises one job per goods
         * line when it is booked and keeps them in step, so the tab's buttons
         * had no decision left in them. The jobs themselves live on Work Orders.
+        * The Material tab went the same way (2026-09-14, at the client's word):
+        * the shortfall it showed is the Stock page's, asked of one order, and
+        * the buying decision is made across the whole factory there.
         */}
       {!isNew && (
         <Tabs
@@ -253,13 +255,11 @@ export default function OrderFormPage() {
           onChange={setTab}
           tabs={[
             { key: 'details', label: 'Details' },
-            { key: 'material', label: 'Material' },
             { key: 'dispatch', label: 'Dispatch' },
           ]}
         />
       )}
 
-      {tab === 'material' && !isNew && existing && <MaterialTab order={existing} />}
       {tab === 'dispatch' && !isNew && existing && <DispatchTab order={existing} />}
 
       <div className={`space-y-4 ${tab === 'details' ? '' : 'hidden'}`}>
