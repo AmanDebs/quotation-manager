@@ -1,8 +1,11 @@
-import { useQuery } from '@tanstack/react-query';
+import { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { api } from '../api/client';
-import type { Despatch, Location, Customer } from '../types';
-import { PageHeader, Card, Select, Input, EmptyState, Pagination, DownloadButton, TH_CLASS } from '../components/ui';
+import type { Despatch, Location, Customer, Order } from '../types';
+import { PageHeader, Card, Select, Input, Button, Modal, EmptyState, ErrorText, Pagination, DownloadButton, SearchSelect, TH_CLASS } from '../components/ui';
+import { DespatchEditor } from '../components/DespatchModal';
+import { useCan } from '../App';
 import { fmtQty, fmtDate } from '../lib/format';
 import { useUrlFilter } from '../lib/useUrlFilter';
 import { usePagedList, PAGE_SIZE } from '../lib/usePagedList';
@@ -28,7 +31,48 @@ import { usePagedList, PAGE_SIZE } from '../lib/usePagedList';
  * list is paged, so filtering here would only ever filter the page; in the URL
  * because "shipments whose documents are still out" is a view somebody will
  * want to keep.
+ *
+ * **Since 2026-09-14 a dispatch is recorded here**, not on the sales order:
+ * the client asked for the order's tab to be read-only and for this page to
+ * sit between Sales Orders and Commercial Invoices, which is where a trip
+ * belongs in the chain. Recording starts by naming the order — a trip is a
+ * fact about an order's lines, and the dialog is filled from the order in
+ * full — so `+ Record dispatch` asks which order first and then opens the
+ * same dialog the tab used to. Edit and Delete sit on each row for whoever
+ * holds `dispatch: full`; a row somebody may only view carries the challan.
  */
+
+/**
+ * Which order the trip is for. Open orders only, newest first: a completed
+ * or cancelled order has nothing left to send, and offering it would let a
+ * lorry be recorded against a closed book.
+ */
+function PickOrder({ onPick, onClose }: { onPick: (id: number) => void; onClose: () => void }) {
+  const { data } = useQuery({
+    queryKey: ['orders', 'for-dispatch'],
+    queryFn: () => api.get<{ rows: Order[] }>('/api/orders?page=1&limit=500'),
+  });
+  const [value, setValue] = useState('');
+  const open = (data?.rows ?? []).filter((o) => o.status !== 'completed' && o.status !== 'cancelled');
+  return (
+    <Modal title="Record a dispatch" onClose={onClose}>
+      <p className="mb-3 text-sm text-slate-600">Which sales order is this dispatch against?</p>
+      <SearchSelect
+        value={value}
+        onChange={setValue}
+        placeholder="Search sales order or customer…"
+        options={open.map((o) => ({ value: String(o.id), label: o.number, hint: o.customer_name ?? '' }))}
+      />
+      {data && open.length === 0 && (
+        <p className="mt-2 text-sm text-slate-500">No open sales orders. A dispatch is recorded against an order that still has goods to send.</p>
+      )}
+      <div className="mt-4 flex justify-end gap-2">
+        <Button variant="secondary" onClick={onClose}>Cancel</Button>
+        <Button disabled={!value} onClick={() => onPick(Number(value))}>Next</Button>
+      </div>
+    </Modal>
+  );
+}
 
 interface Summary {
   trips: number; pieces: number; boxes: number; unbilled: number;
@@ -58,6 +102,21 @@ function DocsCell({ d }: { d: Despatch }) {
 }
 
 export default function DespatchesPage() {
+  const can = useCan();
+  const canWrite = can('dispatch', 'full');
+  const queryClient = useQueryClient();
+  // Three steps of one flow: pick the order, then the dialog for a new trip
+  // on it; or the dialog for a saved trip straight away.
+  const [picking, setPicking] = useState(false);
+  const [editing, setEditing] = useState<{ orderId: number; despatch?: Despatch } | null>(null);
+  const remove = useMutation({
+    mutationFn: (id: number) => api.del(`/api/despatches/${id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['despatches'] });
+      queryClient.invalidateQueries({ queryKey: ['orders'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+    },
+  });
   const [location, setLocation] = useUrlFilter('location_id');
   const [customer, setCustomer] = useUrlFilter('customer_id');
   const [from, setFrom] = useUrlFilter('from');
@@ -98,8 +157,14 @@ export default function DespatchesPage() {
         // The desk reconciles this sheet in Excel, so the register it is
         // compared against has to come out of here — through the same filters,
         // so the download cannot disagree with the table above it.
-        actions={<DownloadButton href={`/api/despatches/export${query.toString() ? `?${query}` : ''}`} />}
+        actions={(
+          <div className="flex items-center gap-2">
+            <DownloadButton href={`/api/despatches/export${query.toString() ? `?${query}` : ''}`} />
+            {canWrite && <Button onClick={() => setPicking(true)}>+ Record dispatch</Button>}
+          </div>
+        )}
       />
+      <ErrorText error={remove.error} />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <Input
@@ -173,7 +238,7 @@ export default function DespatchesPage() {
         {trips.length === 0 ? (
           <EmptyState message={filtered
             ? 'Nothing matches those filters'
-            : 'Nothing recorded. Dispatches are entered from an order’s Dispatch tab.'} />
+            : (canWrite ? 'Nothing recorded yet. Press + Record dispatch to enter the first.' : 'Nothing recorded yet.')} />
         ) : (
           <table className="w-full text-sm">
             <thead>
@@ -195,6 +260,7 @@ export default function DespatchesPage() {
                     nobody can find — the order tab's copy says "Challan"
                     beside its icon and that is the half that was missing. */}
                 <th className="pb-2">Challan</th>
+                {canWrite && <th className="pb-2" />}
               </tr>
             </thead>
             <tbody>
@@ -234,6 +300,18 @@ export default function DespatchesPage() {
                         title="Delivery challan — the document that travelled with this trip"
                       >📄 Print</a>
                     </td>
+                    {canWrite && (
+                      <td className="whitespace-nowrap py-2 text-right">
+                        <Button variant="ghost" onClick={() => setEditing({ orderId: d.order_id, despatch: d })}>Edit</Button>
+                        <Button
+                          variant="danger"
+                          className="ml-1 border-0"
+                          onClick={() => { if (confirm('Delete this dispatch record?')) remove.mutate(d.id); }}
+                        >
+                          Delete
+                        </Button>
+                      </td>
+                    )}
                   </tr>
                 );
               })}
@@ -245,6 +323,18 @@ export default function DespatchesPage() {
           onPage={list.setPage} noun="dispatches"
         />
       </Card>
+
+      {picking && (
+        <PickOrder onClose={() => setPicking(false)} onPick={(orderId) => { setPicking(false); setEditing({ orderId }); }} />
+      )}
+      {editing && (
+        <DespatchEditor
+          key={editing.despatch?.id ?? `new-${editing.orderId}`}
+          orderId={editing.orderId}
+          despatch={editing.despatch}
+          onClose={() => setEditing(null)}
+        />
+      )}
     </div>
   );
 }

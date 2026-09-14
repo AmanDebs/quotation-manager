@@ -40,6 +40,10 @@ const NAV: { heading: string; items: NavItem[] }[] = [
       { to: '/quotations', label: 'Quotations', icon: 'document', needs: 'quotation' },
       { to: '/proformas', label: 'Proforma Invoices', icon: 'receipt', needs: 'proforma' },
       { to: '/orders', label: 'Sales Orders', icon: 'clipboard', needs: 'order' },
+      // Between the order and the invoice, which is where a dispatch sits in
+      // the chain (2026-09-14, at the client's word). It is also where a trip
+      // is recorded now that the order's own tab is read-only.
+      { to: '/despatches', label: 'Dispatches', icon: 'truck', needs: 'dispatch' },
       // No Packing Lists entry: the commercial invoice owns its packing list,
       // so it is created and edited on the invoice. The pages remain routed for
       // any bookmarked link, but they are no longer a place you navigate to.
@@ -58,7 +62,6 @@ const NAV: { heading: string; items: NavItem[] }[] = [
     items: [
       { to: '/work-orders', label: 'Work Orders', icon: 'wrench', needs: 'work_order' },
       { to: '/quality', label: 'Quality', icon: 'gauge', needs: 'qc' },
-      { to: '/despatches', label: 'Dispatches', icon: 'truck', needs: 'dispatch' },
       { to: '/stock', label: 'Stock', icon: 'box', needs: 'material' },
       // Finished goods on the shelf — its own function, since Logistics holds
       // it and holds no `material`.
