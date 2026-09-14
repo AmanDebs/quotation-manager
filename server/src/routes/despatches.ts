@@ -465,6 +465,33 @@ despatchesRouter.put('/:id', (req: AuthedRequest, res) => {
   res.json(withItems(accessible(req, id)!));
 });
 
+/**
+ * The sea leg alone — BL, container, ETD, ETA and the documents — revised
+ * from the invoice tracker (2026-09-14: *"ETA and ETD and Document can be
+ * revised"*). A PATCH rather than the PUT above because the tracker holds
+ * none of the trip's lines, plant, transporter or lots, and a PUT built from
+ * a stale copy of those would overwrite a trip somebody corrected a moment
+ * earlier — the reason internal notes have a PATCH of their own. A field
+ * omitted is left alone; a field sent blank clears it, the planning contract.
+ * Same guard as any write to a trip: `dispatch: full` through the mount.
+ */
+despatchesRouter.patch('/:id/sea-leg', (req: AuthedRequest, res) => {
+  const id = Number(req.params.id);
+  const existing = accessible(req, id);
+  if (!existing) return res.status(404).json({ error: 'Dispatch not found' });
+  const body = req.body ?? {};
+  const v = (f: string) => (body[f] === undefined ? String(existing[f] ?? '') : String(body[f] ?? '').trim());
+  const docsStatus = oneOf(DOCS_STATUSES, v('docs_status'));
+  if (docsStatus === null) return res.status(400).json({ error: 'Documents status must be one of: sent, received' });
+  const docsMethod = oneOf(DOCS_METHODS, v('docs_method'));
+  if (docsMethod === null) return res.status(400).json({ error: 'Documents method must be one of: telex, courier' });
+  db.prepare(
+    `UPDATE despatches SET bl_no = ?, container_no = ?, etd = ?, eta = ?, docs_status = ?, docs_method = ?, docs_date = ?
+      WHERE id = ?`
+  ).run(v('bl_no'), v('container_no'), v('etd'), v('eta'), docsStatus, docsMethod, v('docs_date'), id);
+  res.json(withItems(accessible(req, id)!));
+});
+
 despatchesRouter.delete('/:id', (req: AuthedRequest, res) => {
   const id = Number(req.params.id);
   const existing = accessible(req, id);

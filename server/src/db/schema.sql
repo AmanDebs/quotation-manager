@@ -507,6 +507,9 @@ CREATE TABLE IF NOT EXISTS commercial_invoices (
   -- a fresh reference is obtained for each export consignment.
   arn_ref TEXT NOT NULL DEFAULT '',
   remarks TEXT NOT NULL DEFAULT '',
+  -- When the balance falls due. Typed on the invoice tracker; blank means
+  -- "on arrival" and the tracker shows the shipment's ETA in its place.
+  due_date TEXT NOT NULL DEFAULT '',
   tax_type TEXT NOT NULL DEFAULT 'none' CHECK (tax_type IN ('none','cgst_sgst','igst')),
   status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','final','dispatched','paid')),
   -- What the status was when the payment record promoted it to 'paid', so that

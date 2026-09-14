@@ -2,7 +2,8 @@ import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { PaymentRow, PaymentRegisterSummary, Customer } from '../types';
-import { PageHeader, Card, Select, Input, EmptyState, Pagination, DownloadButton, TH_CLASS, CAPTION_CLASS } from '../components/ui';
+import { PageHeader, Card, Select, Input, EmptyState, Pagination, DownloadButton, SegmentedTabs, TH_CLASS, CAPTION_CLASS } from '../components/ui';
+import InvoiceTracker from '../components/InvoiceTracker';
 import { fmtDate, fmtMoney } from '../lib/format';
 import { useUrlFilter } from '../lib/useUrlFilter';
 import { usePagedList, PAGE_SIZE } from '../lib/usePagedList';
@@ -41,7 +42,39 @@ function Totals({ summary }: { summary: PaymentRegisterSummary }) {
   );
 }
 
+/**
+ * Two views over one page (2026-09-14). **Receivables** is the invoice
+ * tracker — one line per commercial invoice, the export desk's own sheet —
+ * and is the view the page opens on, since the columns the client asked for
+ * are per invoice; **Payments** is the register below, per payment banked.
+ * Chosen by `?view=` so either is a link somebody can keep.
+ */
+type View = 'receivables' | 'payments';
+
 export default function PaymentsPage() {
+  const [viewRaw, setView] = useUrlFilter('view');
+  const view: View = viewRaw === 'payments' ? 'payments' : 'receivables';
+  return (
+    <div>
+      <PageHeader
+        title="Payments"
+        subtitle={view === 'receivables'
+          ? 'Every commercial invoice, what has come in against it, and what is still due'
+          : 'Every payment banked, and what it was banked against'}
+        actions={(
+          <SegmentedTabs<View>
+            value={view}
+            onChange={(v) => setView(v === 'receivables' ? '' : v)}
+            tabs={[{ key: 'receivables', label: 'Receivables' }, { key: 'payments', label: 'Payments' }]}
+          />
+        )}
+      />
+      {view === 'receivables' ? <InvoiceTracker /> : <PaymentRegister />}
+    </div>
+  );
+}
+
+function PaymentRegister() {
   const [from, setFrom] = useUrlFilter('from');
   const [to, setTo] = useUrlFilter('to');
   const [customer, setCustomer] = useUrlFilter('customer_id');
@@ -78,14 +111,6 @@ export default function PaymentsPage() {
 
   return (
     <div>
-      <PageHeader
-        title="Payments"
-        subtitle="Every payment banked, and what it was banked against"
-        // The same query the table is reading, so the download and the screen
-        // cannot disagree; the server ignores `page`/`limit` and sends the lot.
-        actions={<DownloadButton href={`/api/payments/export${query.toString() ? `?${query}` : ''}`} />}
-      />
-
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <Input type="date" className="w-40" value={from} onChange={(e) => setFrom(e.target.value)} />
         <span className="text-sm text-slate-400">to</span>
@@ -122,6 +147,9 @@ export default function PaymentsPage() {
           />
           Credited to nothing
         </label>
+        {/* The same query the table is reading, so the download and the screen
+            cannot disagree; the server ignores `page`/`limit` and sends the lot. */}
+        <DownloadButton href={`/api/payments/export${query.toString() ? `?${query}` : ''}`} />
         {list.summary && <Totals summary={list.summary} />}
       </div>
 

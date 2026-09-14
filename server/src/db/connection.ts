@@ -241,6 +241,8 @@ addColumnIfMissing('settings', 'arn_ref', "TEXT NOT NULL DEFAULT ''");
 // export consignment, so it is not a property of the company. The company's
 // value stays as the default an invoice starts from.
 addColumnIfMissing('commercial_invoices', 'arn_ref', "TEXT NOT NULL DEFAULT ''");
+// The invoice tracker's due date (2026-09-14); blank falls back to the ETA.
+addColumnIfMissing('commercial_invoices', 'due_date', "TEXT NOT NULL DEFAULT ''");
 addColumnIfMissing('settings', 'theme_color', "TEXT NOT NULL DEFAULT '#8b1a1a'");
 addColumnIfMissing('settings', 'quote_pattern', "TEXT NOT NULL DEFAULT 'QT/{FY}/{SEQ}'");
 addColumnIfMissing('settings', 'pi_pattern', "TEXT NOT NULL DEFAULT 'PI/{FY}/{SEQ}'");

@@ -605,6 +605,23 @@ invoicesRouter.post('/:id/status', (req: AuthedRequest, res) => {
   res.json(getFull(id, req));
 });
 
+/**
+ * The due date, from the invoice tracker (2026-09-14). Its own PATCH for the
+ * reason internal notes have one: through the PUT it would rewrite every line
+ * and trip `resetApprovalOnEdit`, knocking an approved invoice back to
+ * `not_submitted` over a date nobody outside the office reads. Blank means
+ * "on arrival", and the tracker shows the shipment's ETA in its place.
+ */
+invoicesRouter.patch('/:id/due-date', (req: AuthedRequest, res) => {
+  const id = Number(req.params.id);
+  const existing = db.prepare('SELECT customer_id FROM commercial_invoices WHERE id = ?').get(id) as { customer_id: number } | undefined;
+  if (!existing || !canAccessCustomer(req, existing.customer_id)) return res.status(404).json({ error: 'Invoice not found' });
+  const due = String(req.body?.due_date ?? '').trim();
+  if (due && !/^\d{4}-\d{2}-\d{2}$/.test(due)) return res.status(400).json({ error: 'Due date must be a date (YYYY-MM-DD) or blank' });
+  db.prepare('UPDATE commercial_invoices SET due_date = ? WHERE id = ?').run(due, id);
+  res.json({ id, due_date: due });
+});
+
 invoicesRouter.delete('/:id', (req: AuthedRequest, res) => {
   const id = Number(req.params.id);
   const existing = db.prepare('SELECT customer_id, pi_id, order_id FROM commercial_invoices WHERE id = ?').get(id) as

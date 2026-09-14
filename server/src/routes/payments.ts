@@ -7,6 +7,9 @@ import { currencyMismatchSql } from '../services/receivables.js';
 import { listBody } from '../services/pagination.js';
 import { searchClause } from '../services/search.js';
 import { buildXlsx, attachmentName, type Column } from '../services/xlsx.js';
+import { allows } from '../middleware/auth.js';
+import { pageRequest } from '../services/pagination.js';
+import { trackerRows, trackerSummary, type TrackerRow, type TrackerShipment } from '../services/invoiceTracker.js';
 
 export const paymentsRouter = Router();
 
@@ -94,6 +97,85 @@ function registerSummary(sql: string, params: unknown[]) {
     mismatched: mismatched.c,
   };
 }
+
+/* ---------------------------------------------------------------- tracker */
+
+/**
+ * The invoice tracker's rows, filtered and scoped in SQL and decorated by
+ * `services/invoiceTracker.ts`. The WHERE is built once and shared with the
+ * spreadsheet export, the rule every list here follows. See the service for
+ * why the status filter and the paging happen after the fetch.
+ */
+function trackerAll(req: AuthedRequest): TrackerRow[] {
+  const where: string[] = [];
+  const params: unknown[] = [];
+  const scope = scopeClause(req, 'i.customer_id');
+  if (scope.sql) { where.push(scope.sql); params.push(...scope.params); }
+  if (req.query.export === '1' || req.query.export === '0') { where.push('i.is_export = ?'); params.push(Number(req.query.export)); }
+  if (req.query.from) { where.push('i.date >= ?'); params.push(String(req.query.from)); }
+  if (req.query.to) { where.push('i.date <= ?'); params.push(String(req.query.to)); }
+  if (Number(req.query.customer_id) > 0) { where.push('i.customer_id = ?'); params.push(Number(req.query.customer_id)); }
+  // Number, customer, or the references a forwarder emails about.
+  const search = searchClause(
+    ['i.number', 'c.name', "(SELECT group_concat(bl_no || ' ' || container_no, ' ') FROM despatches d WHERE d.invoice_id = i.id)"],
+    String(req.query.q ?? ''),
+  );
+  if (search.sql) { where.push(search.sql); params.push(...search.params); }
+  const invoices = db.prepare(
+    `SELECT i.id, i.number, i.date, i.customer_id, COALESCE(c.name, '') AS customer_name,
+            i.currency, i.is_export, i.grand_total, i.due_date
+       FROM commercial_invoices i LEFT JOIN customers c ON c.id = i.customer_id
+       ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+      ORDER BY i.date DESC, i.id DESC`
+  ).all(...(params as never[])) as unknown as Parameters<typeof trackerRows>[0];
+  // The sea leg is the despatch register's; absent, not empty, for a caller
+  // who may not read it — decided here, never by the client.
+  let rows = trackerRows(invoices, allows(req, 'dispatch'));
+  const status = String(req.query.status ?? '');
+  if (status === 'pending' || status === 'completed') rows = rows.filter((r) => r.status === status);
+  return rows;
+}
+
+paymentsRouter.get('/tracker/export', (req: AuthedRequest, res) => {
+  const rows = trackerAll(req);
+  const join = (r: TrackerRow, f: (s: TrackerShipment) => string) =>
+    (r.shipments ?? []).map(f).filter(Boolean).join(', ');
+  const sea: Column<TrackerRow>[] = allows(req, 'dispatch') ? [
+    { header: 'BL / Container', value: (r) => join(r, (s) => [s.bl_no, s.container_no].filter(Boolean).join(' / ')) },
+    { header: 'ETD', value: (r) => join(r, (s) => s.etd) },
+    { header: 'ETA', value: (r) => join(r, (s) => s.eta) },
+    { header: 'Documents', value: (r) => join(r, (s) => [s.docs_status, s.docs_method].filter(Boolean).join(' - ')) },
+  ] : [];
+  const cols: Column<TrackerRow>[] = [
+    { header: 'CI No', value: (r) => r.number },
+    { header: 'Customer', value: (r) => r.customer_name },
+    { header: 'Type', value: (r) => (r.is_export ? 'Export' : 'Domestic') },
+    { header: 'Currency', value: (r) => r.currency },
+    { header: 'CI Amt', value: (r) => r.grand_total, type: 'money' },
+    { header: 'CI Date', value: (r) => r.date, type: 'date' },
+    ...sea,
+    { header: 'Advance received', value: (r) => r.advance_applied, type: 'money' },
+    { header: 'Received', value: (r) => r.amount_received, type: 'money' },
+    { header: 'Credited', value: (r) => r.credited, type: 'money' },
+    { header: 'Balance', value: (r) => r.balance_due, type: 'money' },
+    { header: 'Due date', value: (r) => r.due_date, type: 'date' },
+    { header: 'Status', value: (r) => (r.status === 'completed' ? 'Completed' : 'Pending') },
+  ];
+  const file = buildXlsx('Invoice tracker', cols, rows);
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', attachmentName(`Invoice tracker ${new Date().toISOString().slice(0, 10)}.xlsx`));
+  res.send(file);
+});
+
+paymentsRouter.get('/tracker', (req: AuthedRequest, res) => {
+  const all = trackerAll(req);
+  const p = pageRequest(req.query as Record<string, unknown>);
+  if (!p) return res.json(all);
+  const pages = Math.max(1, Math.ceil(all.length / p.limit));
+  const page = Math.min(p.page, pages);
+  const rows = all.slice((page - 1) * p.limit, page * p.limit);
+  res.json({ rows, total: all.length, page, pages, limit: p.limit, summary: trackerSummary(all) });
+});
 
 paymentsRouter.get('/', (req: AuthedRequest, res) => {
   const { where, params } = registerWhere(req);

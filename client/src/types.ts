@@ -898,6 +898,37 @@ export interface PaymentRegisterSummary {
   mismatched: number;
 }
 
+/** One trip billed under an invoice, as the invoice tracker shows it. */
+export interface TrackerShipment {
+  despatch_id: number;
+  bl_no: string; container_no: string; etd: string; eta: string;
+  docs_status: string; docs_method: string; docs_date: string;
+}
+
+/**
+ * One row of the invoice tracker (`GET /api/payments/tracker`): the export
+ * desk's own sheet, one line per commercial invoice. Money is
+ * `invoiceReceivable`'s; the sea leg is the despatch register's; the status
+ * is derived from the balance. `shipments` is absent, not empty, for a caller
+ * without `dispatch`.
+ */
+export interface TrackerRow {
+  id: number; number: string; date: string;
+  customer_id: number; customer_name: string;
+  currency: string; is_export: number; grand_total: number;
+  advance_applied: number; amount_received: number; credited: number; balance_due: number;
+  due_date: string;
+  /** `due_date` is the ETA standing in for a date nobody typed. */
+  due_on_arrival: boolean;
+  status: 'pending' | 'completed';
+  shipments?: TrackerShipment[];
+}
+
+export interface TrackerSummary {
+  invoices: number; pending: number; completed: number;
+  by_currency: { currency: string; invoiced: number; balance: number }[];
+}
+
 export interface Proforma {
   id: number; number: string; date: string; quotation_id: number | null; customer_id: number; company_id?: number;
   /** The order this proforma belongs to — set either way round, whichever was raised first. */
