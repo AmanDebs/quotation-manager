@@ -143,6 +143,17 @@ describe('a trip that names no invoice is found through the order', () => {
     assert.deepEqual(row.shipments?.map((s) => s.despatch_id), [d]);
   });
 
+  test('every loose trip on the order is shown, not only the first', () => {
+    const c = makeCustomer();
+    const o = order(c);
+    const inv = makeInvoice({ customerId: c, currency: 'USD', total: 100 });
+    db.prepare('UPDATE commercial_invoices SET order_id = ? WHERE id = ?').run(o, inv);
+    const a = tripOn(o, null, { bl: 'ONE' });
+    const b = tripOn(o, null, { bl: 'TWO' });
+    const [row] = trackerRows([head(inv)], true);
+    assert.deepEqual(row.shipments?.map((s) => s.despatch_id), [a, b]);
+  });
+
   test('a trip billed under another invoice is never borrowed', () => {
     const c = makeCustomer();
     const o = order(c);

@@ -156,13 +156,14 @@ export function shipmentsByInvoice(invoiceIds: number[]): Map<number, TrackerShi
       WHERE i.id IN (${marks})
       ORDER BY d.date, d.id`
   ).all(...invoiceIds) as Record<string, unknown>[];
+  // Decided before the loop, not inside it: an invoice with a linked trip
+  // takes none of the loose ones, and one without collects every loose one.
+  const hasLinked = new Set(out.keys());
   for (const r of viaOrder) {
     const id = Number(r.invoice_id);
-    if (out.has(id)) continue;
+    if (hasLinked.has(id)) continue;
     const list = out.get(id) ?? [];
     list.push(toShipment(r, false));
-    // Set after the loop's own check: an invoice reaches here only with no
-    // linked trip, and then collects every unlinked trip on its order.
     out.set(id, list);
   }
   return out;
