@@ -43,6 +43,15 @@ import { round2 } from './totals.js';
 
 export interface TrackerShipment {
   despatch_id: number;
+  /**
+   * True when the trip names this invoice (`despatches.invoice_id`). False
+   * when it was found through the **order behind the invoice** and names no
+   * invoice at all — the ordinary state of a trip recorded before the bill
+   * was raised, and the reason the tracker read blank on a real book
+   * (2026-09-14: *"This page should be linked with dispatch and CI"*). Shown
+   * as *via sales order*, and the revise dialog offers to link it.
+   */
+  linked: boolean;
   bl_no: string;
   container_no: string;
   etd: string;
@@ -105,25 +114,56 @@ export function dueDateOf(typed: string, shipments: { eta: string }[]): { due_da
   return { due_date: eta, due_on_arrival: eta !== '' };
 }
 
-/** The trips billed under each invoice, in one query rather than one per row. */
+/**
+ * The trips under each invoice, in two queries rather than one per row.
+ *
+ * First the trips that **name** the invoice. Then, for an invoice none names,
+ * the trips on the **order behind it** that name no invoice at all — reached
+ * the way `dispatchProgress()` reaches the order, the invoice's own
+ * `order_id` or backwards through its proforma's. A trip already billed under
+ * *another* invoice is never borrowed: two invoices claiming one lorry is
+ * the double count the link exists to prevent. Where a linked trip exists the
+ * order's unlinked ones are not shown beside it, since a consignment billed
+ * in two invoices would otherwise show every trip on both rows.
+ */
 export function shipmentsByInvoice(invoiceIds: number[]): Map<number, TrackerShipment[]> {
   const out = new Map<number, TrackerShipment[]>();
   if (!invoiceIds.length) return out;
-  const rows = db.prepare(
+  const marks = invoiceIds.map(() => '?').join(',');
+  const toShipment = (s: Record<string, unknown>, linked: boolean): TrackerShipment => ({
+    despatch_id: Number(s.despatch_id), linked,
+    bl_no: String(s.bl_no ?? ''), container_no: String(s.container_no ?? ''),
+    etd: String(s.etd ?? ''), eta: String(s.eta ?? ''),
+    docs_status: String(s.docs_status ?? ''), docs_method: String(s.docs_method ?? ''), docs_date: String(s.docs_date ?? ''),
+  });
+  const linked = db.prepare(
     `SELECT id AS despatch_id, invoice_id, bl_no, container_no, etd, eta, docs_status, docs_method, docs_date
-       FROM despatches WHERE invoice_id IN (${invoiceIds.map(() => '?').join(',')})
+       FROM despatches WHERE invoice_id IN (${marks})
       ORDER BY date, id`
-  ).all(...invoiceIds) as unknown as (TrackerShipment & { invoice_id: number })[];
-  for (const r of rows) {
-    const { invoice_id, ...s } = r;
-    const list = out.get(invoice_id) ?? [];
-    list.push({
-      despatch_id: Number(s.despatch_id),
-      bl_no: String(s.bl_no ?? ''), container_no: String(s.container_no ?? ''),
-      etd: String(s.etd ?? ''), eta: String(s.eta ?? ''),
-      docs_status: String(s.docs_status ?? ''), docs_method: String(s.docs_method ?? ''), docs_date: String(s.docs_date ?? ''),
-    });
-    out.set(invoice_id, list);
+  ).all(...invoiceIds) as Record<string, unknown>[];
+  for (const r of linked) {
+    const list = out.get(Number(r.invoice_id)) ?? [];
+    list.push(toShipment(r, true));
+    out.set(Number(r.invoice_id), list);
+  }
+  const viaOrder = db.prepare(
+    `SELECT i.id AS invoice_id, d.id AS despatch_id, d.bl_no, d.container_no, d.etd, d.eta,
+            d.docs_status, d.docs_method, d.docs_date
+       FROM commercial_invoices i
+       JOIN despatches d
+         ON d.order_id = COALESCE(i.order_id, (SELECT order_id FROM proforma_invoices WHERE id = i.pi_id))
+        AND d.invoice_id IS NULL
+      WHERE i.id IN (${marks})
+      ORDER BY d.date, d.id`
+  ).all(...invoiceIds) as Record<string, unknown>[];
+  for (const r of viaOrder) {
+    const id = Number(r.invoice_id);
+    if (out.has(id)) continue;
+    const list = out.get(id) ?? [];
+    list.push(toShipment(r, false));
+    // Set after the loop's own check: an invoice reaches here only with no
+    // linked trip, and then collects every unlinked trip on its order.
+    out.set(id, list);
   }
   return out;
 }

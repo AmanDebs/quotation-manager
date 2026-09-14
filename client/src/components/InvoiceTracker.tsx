@@ -58,6 +58,35 @@ function ShipmentCell({ shipments, render }: { shipments: TrackerShipment[]; ren
 }
 
 /**
+ * The references, each a link into the Dispatches register searched for
+ * itself, and marked *via sales order* when the trip does not yet name this
+ * invoice — found through the order behind it, which is where a trip
+ * recorded before the bill was raised sits.
+ */
+function ReferenceCell({ shipments }: { shipments: TrackerShipment[] }) {
+  if (!shipments.length) return <span className="text-slate-400">—</span>;
+  return (
+    <div className="space-y-0.5">
+      {shipments.map((s) => {
+        const ref = [s.bl_no, s.container_no].filter(Boolean).join(' / ');
+        return (
+          <div key={s.despatch_id}>
+            {ref
+              ? <Link to={`/despatches?q=${encodeURIComponent(s.bl_no || s.container_no)}`} className="text-brand-600 hover:underline">{ref}</Link>
+              : <span className="text-slate-400">no BL yet</span>}
+            {!s.linked && (
+              <span className={`ml-1 ${CAPTION_CLASS} text-amber-600`} title="This trip is on the sales order behind the invoice but does not name the invoice yet. Revise to link it.">
+                via sales order
+              </span>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
  * Revise the sea leg and the due date. One dialog for the row, with a block
  * per trip: an invoice is nearly always one container, and the rare one
  * billed across two is edited trip by trip rather than through a merged form
@@ -68,6 +97,9 @@ function EditModal({ row, canDispatch, canInvoice, onClose }: {
 }) {
   const qc = useQueryClient();
   const [ships, setShips] = useState<TrackerShipment[]>(row.shipments ?? []);
+  // Trips found through the order are offered to be linked, ticked by default:
+  // that is the fact the person opening this row is almost always here to record.
+  const [link, setLink] = useState<Set<number>>(() => new Set((row.shipments ?? []).filter((s) => !s.linked).map((s) => s.despatch_id)));
   const [due, setDue] = useState(row.due_on_arrival ? '' : row.due_date);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -83,6 +115,7 @@ function EditModal({ row, canDispatch, canInvoice, onClose }: {
           await api.patch(`/api/despatches/${s.despatch_id}/sea-leg`, {
             bl_no: s.bl_no, container_no: s.container_no, etd: s.etd, eta: s.eta,
             docs_status: s.docs_status, docs_method: s.docs_method, docs_date: s.docs_date,
+            ...(link.has(s.despatch_id) ? { invoice_id: row.id } : {}),
           });
         }
       }
@@ -103,6 +136,17 @@ function EditModal({ row, canDispatch, canInvoice, onClose }: {
       {canDispatch && ships.map((s, i) => (
         <div key={s.despatch_id} className="mb-4 rounded-lg bg-slate-50 p-3 ring-1 ring-inset ring-slate-200">
           {ships.length > 1 && <div className={`${CAPTION_CLASS} mb-2 text-slate-500`}>Trip {i + 1}</div>}
+          {!s.linked && (
+            <label className="mb-2 flex items-center gap-2 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                className="h-4 w-4 rounded border-slate-300"
+                checked={link.has(s.despatch_id)}
+                onChange={(e) => setLink((set) => { const n = new Set(set); if (e.target.checked) n.add(s.despatch_id); else n.delete(s.despatch_id); return n; })}
+              />
+              Link this trip to {row.number} — it is on the sales order but does not name the invoice yet
+            </label>
+          )}
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <Field label="BL No."><Input value={s.bl_no} onChange={(e) => setShip(i, { bl_no: e.target.value })} /></Field>
             <Field label="Container No."><Input value={s.container_no} onChange={(e) => setShip(i, { container_no: e.target.value })} /></Field>
@@ -128,7 +172,7 @@ function EditModal({ row, canDispatch, canInvoice, onClose }: {
       ))}
       {canDispatch && ships.length === 0 && (
         <p className="mb-4 text-sm text-slate-500">
-          No dispatch is linked to this invoice yet, so there is no BL, ETD or ETA to revise. Link the trip on the sales order's Dispatch tab.
+          No dispatch is on file for this invoice or the sales order behind it, so there is no BL, ETD or ETA to revise. Record the trip on the Dispatches page first.
         </p>
       )}
       {canInvoice && (
@@ -240,7 +284,7 @@ export default function InvoiceTracker() {
                   <td className="whitespace-nowrap py-2 pr-3 text-slate-500">{fmtDate(r.date)}</td>
                   {withSea && (
                     <td className="py-2 pr-3">
-                      <ShipmentCell shipments={r.shipments ?? []} render={(s) => [s.bl_no, s.container_no].filter(Boolean).join(' / ')} />
+                      <ReferenceCell shipments={r.shipments ?? []} />
                     </td>
                   )}
                   {withSea && (

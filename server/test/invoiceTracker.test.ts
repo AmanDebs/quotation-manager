@@ -16,15 +16,21 @@ const head = (id: number) => db.prepare(
      FROM commercial_invoices i LEFT JOIN customers c ON c.id = i.customer_id WHERE i.id = ?`
 ).get(id) as unknown as Parameters<typeof trackerRows>[0][number];
 
-function trip(customerId: number, invoiceId: number, o: Partial<{ eta: string; etd: string; bl: string; docs: string }>) {
-  const orderId = Number((db.prepare(
-    `INSERT INTO orders (number, date, customer_id, company_id, currency, tax_type, status)
-     VALUES (?, '2026-09-01', ?, 1, 'USD', 'none', 'pending') RETURNING id`
-  ).get(`SO/T-${invoiceId}-${Math.random()}`, customerId) as { id: number }).id);
+const order = (customerId: number) => Number((db.prepare(
+  `INSERT INTO orders (number, date, customer_id, company_id, currency, tax_type, status)
+   VALUES (?, '2026-09-01', ?, 1, 'USD', 'none', 'pending') RETURNING id`
+).get(`SO/T-${Math.random()}`, customerId) as { id: number }).id);
+
+/** A trip on `orderId`, naming `invoiceId` (or no invoice at all when null). */
+function tripOn(orderId: number, invoiceId: number | null, o: Partial<{ eta: string; etd: string; bl: string; docs: string }>) {
   return Number((db.prepare(
     `INSERT INTO despatches (order_id, date, invoice_id, bl_no, etd, eta, docs_status)
      VALUES (?, '2026-09-06', ?, ?, ?, ?, ?) RETURNING id`
   ).get(orderId, invoiceId, o.bl ?? '', o.etd ?? '', o.eta ?? '', o.docs ?? '') as { id: number }).id);
+}
+
+function trip(customerId: number, invoiceId: number, o: Partial<{ eta: string; etd: string; bl: string; docs: string }>) {
+  return tripOn(order(customerId), invoiceId, o);
 }
 
 describe('status is the balance', () => {
@@ -107,5 +113,56 @@ describe('the row is receivables plus the sea leg', () => {
       { currency: 'INR', invoiced: 9000, balance: 9000 },
       { currency: 'USD', invoiced: 1400, balance: 1000 },
     ]);
+  });
+});
+
+/**
+ * A trip recorded before the bill was raised names no invoice, and on a real
+ * book that was every trip — the tracker read blank. It is found through the
+ * order behind the invoice instead, and says so.
+ */
+describe('a trip that names no invoice is found through the order', () => {
+  test('via the invoice own order, marked unlinked, and the ETA still stands in', () => {
+    const c = makeCustomer();
+    const o = order(c);
+    const inv = makeInvoice({ customerId: c, currency: 'USD', total: 100 });
+    db.prepare('UPDATE commercial_invoices SET order_id = ? WHERE id = ?').run(o, inv);
+    const d = tripOn(o, null, { bl: 'MAEU1', eta: '2026-10-20' });
+    const [row] = trackerRows([head(inv)], true);
+    assert.deepEqual(row.shipments?.map((s) => [s.despatch_id, s.linked]), [[d, false]]);
+    assert.deepEqual({ due: row.due_date, arrival: row.due_on_arrival }, { due: '2026-10-20', arrival: true });
+  });
+
+  test('via the proforma order when the invoice carries only pi_id', () => {
+    const c = makeCustomer();
+    const o = order(c);
+    const pi = makeProforma({ customerId: c, currency: 'USD', total: 100, orderId: o });
+    const inv = makeInvoice({ customerId: c, currency: 'USD', total: 100, piId: pi });
+    const d = tripOn(o, null, { bl: 'MAEU2' });
+    const [row] = trackerRows([head(inv)], true);
+    assert.deepEqual(row.shipments?.map((s) => s.despatch_id), [d]);
+  });
+
+  test('a trip billed under another invoice is never borrowed', () => {
+    const c = makeCustomer();
+    const o = order(c);
+    const first = makeInvoice({ customerId: c, currency: 'USD', total: 100 });
+    const second = makeInvoice({ customerId: c, currency: 'USD', total: 100 });
+    db.prepare('UPDATE commercial_invoices SET order_id = ? WHERE id IN (?, ?)').run(o, first, second);
+    tripOn(o, first, { bl: 'FIRST' });
+    const rows = trackerRows([head(first), head(second)], true);
+    assert.deepEqual(rows.map((r) => r.shipments?.length), [1, 0]);
+    assert.equal(rows[0].shipments?.[0].linked, true);
+  });
+
+  test('a linked trip hides the order unlinked ones on that row', () => {
+    const c = makeCustomer();
+    const o = order(c);
+    const inv = makeInvoice({ customerId: c, currency: 'USD', total: 100 });
+    db.prepare('UPDATE commercial_invoices SET order_id = ? WHERE id = ?').run(o, inv);
+    const linked = tripOn(o, inv, { bl: 'LINKED' });
+    tripOn(o, null, { bl: 'LOOSE' });
+    const [row] = trackerRows([head(inv)], true);
+    assert.deepEqual(row.shipments?.map((s) => s.despatch_id), [linked]);
   });
 });

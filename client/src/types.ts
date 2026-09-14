@@ -901,6 +901,8 @@ export interface PaymentRegisterSummary {
 /** One trip billed under an invoice, as the invoice tracker shows it. */
 export interface TrackerShipment {
   despatch_id: number;
+  /** False when found through the order behind the invoice and naming no invoice yet. */
+  linked: boolean;
   bl_no: string; container_no: string; etd: string; eta: string;
   docs_status: string; docs_method: string; docs_date: string;
 }

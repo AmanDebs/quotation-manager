@@ -485,10 +485,25 @@ despatchesRouter.patch('/:id/sea-leg', (req: AuthedRequest, res) => {
   if (docsStatus === null) return res.status(400).json({ error: 'Documents status must be one of: sent, received' });
   const docsMethod = oneOf(DOCS_METHODS, v('docs_method'));
   if (docsMethod === null) return res.status(400).json({ error: 'Documents method must be one of: telex, courier' });
+  // The invoice tracker links a trip it found through the order to the
+  // invoice it is looking at. Same rule as the PUT: the invoice must be the
+  // same customer's, or a lorry would be billed on somebody else's paper.
+  let invoiceId = numOrNull(existing.invoice_id);
+  if (body.invoice_id !== undefined) {
+    invoiceId = numOrNull(body.invoice_id);
+    if (invoiceId !== null) {
+      const inv = db.prepare('SELECT customer_id FROM commercial_invoices WHERE id = ?')
+        .get(invoiceId) as { customer_id: number } | undefined;
+      if (!inv || inv.customer_id !== Number(existing.customer_id)) {
+        return res.status(400).json({ error: 'That invoice belongs to another customer' });
+      }
+    }
+  }
   db.prepare(
-    `UPDATE despatches SET bl_no = ?, container_no = ?, etd = ?, eta = ?, docs_status = ?, docs_method = ?, docs_date = ?
+    `UPDATE despatches SET bl_no = ?, container_no = ?, etd = ?, eta = ?, docs_status = ?, docs_method = ?, docs_date = ?,
+         invoice_id = ?
       WHERE id = ?`
-  ).run(v('bl_no'), v('container_no'), v('etd'), v('eta'), docsStatus, docsMethod, v('docs_date'), id);
+  ).run(v('bl_no'), v('container_no'), v('etd'), v('eta'), docsStatus, docsMethod, v('docs_date'), invoiceId, id);
   res.json(withItems(accessible(req, id)!));
 });
 
