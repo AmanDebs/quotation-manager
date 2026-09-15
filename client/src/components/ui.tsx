@@ -502,6 +502,10 @@ export function Field({ label, children, className = '', required }: {
   const isRequired = required ?? /\*\s*$/.test(label);
   const ref = useRef<HTMLLabelElement>(null);
   const [missing, setMissing] = useState(false);
+  // No dependency list on purpose: a controlled value lands in the DOM on
+  // commit, so the check has to run after every render. It cannot loop —
+  // `setMissing` with an unchanged value bails out of a re-render.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useLayoutEffect(() => {
     const el = ref.current;
     if (!isRequired || plain || !el) { setMissing(false); return; }
