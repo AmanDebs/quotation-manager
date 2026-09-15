@@ -211,6 +211,12 @@ export function DespatchFields({
         <thead>
           <tr className={TH_CLASS}>
             <th className="pb-2 pr-2">Line</th>
+            {/* Ordered, sent on other trips, and what is left — the figures
+                the pieces box is checked against, asked for as columns
+                (2026-09-15) rather than a caption under the line. */}
+            <th className="w-28 pb-2 pr-2 text-right">Ordered</th>
+            <th className="w-28 pb-2 pr-2 text-right" title="Sent on other trips">Sent</th>
+            <th className="w-28 pb-2 pr-2 text-right">Left to send</th>
             <th className="w-32 pb-2 pr-2 text-right">Pieces</th>
             <th className="w-24 pb-2 pr-2 text-right">Boxes</th>
             <th className="pb-2 pr-2">Note</th>
@@ -242,9 +248,6 @@ export function DespatchFields({
             <tr key={i} className="border-b border-slate-100">
               <td className="py-2 pr-2">
                 {line?.description || r.description || `Line ${r.order_line + 1}`}
-                {left !== null && (
-                  <div className="text-xs text-slate-400">{fmtQty(left)} left to ship</div>
-                )}
                 {/* The order has been edited since this lorry left. The row is
                     kept rather than merged away — dropping it would delete the
                     record of goods that physically went — but it is said out
@@ -253,6 +256,11 @@ export function DespatchFields({
                   <div className="text-xs text-amber-700">no longer a line on this order</div>
                 )}
               </td>
+              {/* A weight-billed line states no piece count, and says nothing
+                  rather than 0 — the ceiling below follows the same rule. */}
+              <td className="py-2 pr-2 text-right tabular-nums text-slate-500">{ordered ? fmtQty(ordered) : '—'}</td>
+              <td className="py-2 pr-2 text-right tabular-nums text-slate-500">{ordered ? fmtQty(Math.max(0, sentElsewhere)) : '—'}</td>
+              <td className={`py-2 pr-2 text-right tabular-nums font-medium ${left === 0 ? 'text-slate-400' : ''}`}>{left !== null ? fmtQty(left) : '—'}</td>
               <td className="py-2 pr-2">
                 <Input
                   type="number" min={0} max={ceiling} step="any"
