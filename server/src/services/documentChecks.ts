@@ -401,6 +401,7 @@ const RULES: Rule[] = [
   ...([
     ['so_received_via', 'order_through', 'Order Received Via'],
     ['so_po_date', 'po_date', 'Customer PO Date'],
+    ['so_promised', 'promised_date', 'Original Promised Date'],
     ['so_revised', 'revised_date', 'Revised Production Date'],
     ['so_payment_terms', 'payment_terms', 'Payment Terms'],
     ['so_remarks', 'remarks', 'Remarks'],

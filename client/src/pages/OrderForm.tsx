@@ -352,6 +352,10 @@ export default function OrderFormPage() {
                 form dropped on 2026-09-07: the Reports page's *Planned for
                 production* sheet is keyed on it, and a column nobody can
                 type into is a sheet nobody can fill. */}
+            {/* The promised date came back beside it (2026-09-15): it is what the
+                dashboard's overdue-orders chip and the order book's Promised
+                column read, both quiet since the card went. */}
+            <Field label="Original Promised Date *"><Input type="date" value={draft.promised_date} onChange={(e) => set({ promised_date: e.target.value })} /></Field>
             <Field label="Revised Production Date *"><Input type="date" value={draft.revised_date} onChange={(e) => set({ revised_date: e.target.value })} /></Field>
             <Field label="Currency">
               <Select value={draft.currency} onChange={(e) => set({ currency: e.target.value })}>
@@ -464,7 +468,9 @@ export default function OrderFormPage() {
           the spreadsheet export and the order book still print what is there.
           What is gone is the only way to type a new one — except **Revised
           Date**, which came back into Details on 2026-09-15 because the
-          Reports page's *Planned for production* sheet is keyed on it.
+          Reports page's *Planned for production* sheet is keyed on it, and
+          **Promised Despatch** (as *Original Promised Date*) the same day,
+          which wakes the three figures below up again.
 
           Two consequences worth knowing rather than discovering. The dashboard's
           **overdue orders** counts orders past `promised_date`, and the order
