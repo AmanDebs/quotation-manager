@@ -225,7 +225,7 @@ export default function OrdersPage() {
       <ErrorText error={setStatus.error} />
 
       {view === 'lines' && (
-        <LinesTable lines={lines} showCompany={showCompany} pager={lineList} />
+        <LinesTable lines={lines} pager={lineList} />
       )}
       {view === 'products' && (
         <DemandTable
@@ -317,9 +317,13 @@ export default function OrdersPage() {
 }
 
 /** One row per item, the way the desk's own sheet reads. */
-function LinesTable({ lines, showCompany, pager }: {
+/*
+ * Issued By, Made and In stock left this view on 2026-09-15 at the client's
+ * word — the sheet is read for what is sold and what has gone. The per-order
+ * and by-product views keep theirs, and the spreadsheet export is untouched.
+ */
+function LinesTable({ lines, pager }: {
   lines: OrderLine[];
-  showCompany: boolean;
   pager: PagedList<OrderLine>;
 }) {
   const navigate = useNavigate();
@@ -329,7 +333,6 @@ function LinesTable({ lines, showCompany, pager }: {
   // A domestic book has no discharge port on any row, and a column that is
   // empty on every line for ever is worse than no column.
   const anyPort = lines.some((l) => l.port_of_discharge);
-  const showStock = anyStock(lines);
 
   return (
     <Card className="overflow-x-auto">
@@ -343,16 +346,13 @@ function LinesTable({ lines, showCompany, pager }: {
                 <th className="pb-2 pr-3">Sales Order</th>
                 <th className="pb-2 pr-3">Date</th>
                 <th className="pb-2 pr-3">Customer</th>
-                {showCompany && <th className="pb-2 pr-3">Issued By</th>}
                 {/* Only where any row has one: a domestic book would carry an
                     empty column on every line for ever otherwise. */}
                 {anyPort && <th className="pb-2 pr-3">Dest Port</th>}
                 <th className="pb-2 pr-3">Item</th>
                 <th className="pb-2 pr-3">Colour</th>
                 <th className="pb-2 pr-3 text-right">Qty</th>
-                <th className="pb-2 pr-3 text-right">Made</th>
                 <th className="pb-2 pr-3 text-right">Sent</th>
-                {showStock && <th className="pb-2 pr-3 text-right" title="Finished goods on the shelf for this product, across every plant">In stock</th>}
                 <th className="pb-2 pr-3">Promised</th>
                 <th className="pb-2 pr-3">Added By</th>
                 <th className="pb-2 pr-3">State</th>
@@ -386,9 +386,6 @@ function LinesTable({ lines, showCompany, pager }: {
                     <td className={`py-1.5 pr-3 ${repeat ? 'text-slate-300' : ''}`}>
                       {repeat ? '' : l.customer_name}
                     </td>
-                    {showCompany && (
-                      <td className="py-1.5 pr-3 text-xs text-slate-500">{repeat ? '' : l.company_name ?? '—'}</td>
-                    )}
                     {anyPort && (
                       <td className={`py-1.5 pr-3 ${repeat ? 'text-slate-300' : 'text-slate-500'}`}>
                         {repeat ? '' : l.port_of_discharge || '—'}
@@ -397,11 +394,9 @@ function LinesTable({ lines, showCompany, pager }: {
                     <td className="py-1.5 pr-3">{l.description || '—'}</td>
                     <td className="py-1.5 pr-3 text-slate-500">{l.color || '—'}</td>
                     <td className="py-1.5 pr-3 text-right tabular-nums">{l.ordered ? fmtQty(l.ordered) : '—'}</td>
-                    <td className="py-1.5 pr-3 text-right tabular-nums text-slate-500">{l.made ? fmtQty(l.made) : '—'}</td>
                     <td className="py-1.5 pr-3 text-right tabular-nums text-slate-500">
                       {l.sent || l.billed ? fmtQty(Math.max(l.sent, l.billed)) : '—'}
                     </td>
-                    {showStock && <StockCell value={l.in_stock} />}
                     <td className={`whitespace-nowrap py-1.5 pr-3 ${overdue ? 'font-semibold text-red-600' : ''}`}>
                       {l.promised_date ? fmtDate(l.promised_date) : '—'}{overdue && ' ⚠'}
                     </td>
@@ -430,9 +425,8 @@ function LinesTable({ lines, showCompany, pager }: {
             </tbody>
           </table>
           <p className="mt-2 text-xs text-slate-400">
-            Made, sent and state are worked out from the work orders, despatches and invoices
+            Sent and state are worked out from the work orders, despatches and invoices
             recorded against each line — there is nothing here to keep up to date by hand.
-            {showStock && ' In stock is the product’s shelf across every plant, shared by every open line of it — nothing reserves it to one order.'}
           </p>
           <Pagination
             page={pager.page} pages={pager.pages} total={pager.total} limit={PAGE_SIZE}
