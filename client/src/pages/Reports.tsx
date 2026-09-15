@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { ReportPivot, DispatchReport, DueReport, DueGroup, DueColour } from '../types';
-import { PageHeader, Card, Select, Input, SegmentedTabs, EmptyState, TH_CLASS } from '../components/ui';
+import { PageHeader, Card, Select, Input, SegmentedTabs, EmptyState, DownloadButton, TH_CLASS } from '../components/ui';
 import { PivotTable } from '../components/PivotTable';
 import { useCompanies } from '../components/CompanySelect';
 import { useCan } from '../App';
@@ -72,6 +72,10 @@ export default function ReportsPage() {
   const [currency, setCurrency] = useUrlFilter('currency');
   const [from, setFrom] = useUrlFilter('from');
   const [to, setTo] = useUrlFilter('to');
+  // The sheets are read per person — *Meisha Total*, *Tannistha Total* — so a
+  // SPOC filter, and a subtotal line per SPOC when nobody is chosen.
+  const [spoc, setSpoc] = useUrlFilter('spoc');
+  const [subtotals, setSubtotals] = useUrlFilter('subtotals');
   const companies = useCompanies();
   const fy = fiscalYearRange();
 
@@ -100,6 +104,10 @@ export default function ReportsPage() {
   const currencyRows = data ? ('groups' in data ? data.groups : data.rows) : [];
   const present = [...new Set(currencyRows.map((r) => r.currency))].sort();
   const active = pickCurrency(currency, currencyRows);
+  const spocs = data && !('groups' in data) ? [...new Set(data.rows.map((r) => r.spoc))].sort() : [];
+  const exportParams = new URLSearchParams(params);
+  if (active) exportParams.set('currency', active);
+  const exportHref = `/api/reports/${view}/export${exportParams.toString() ? `?${exportParams}` : ''}`;
 
   if (tabs.length === 0) return <EmptyState message="Nothing here is yours to read." />;
 
@@ -109,11 +117,14 @@ export default function ReportsPage() {
         title="Reports"
         subtitle={tab.subtitle}
         actions={(
-          <SegmentedTabs<View>
-            value={view}
-            onChange={(v) => setView(v === tabs[0].key ? '' : v)}
-            tabs={tabs.map((t) => ({ key: t.key, label: t.label }))}
-          />
+          <>
+            <DownloadButton href={exportHref} title="Download this sheet, in the currency shown, as a spreadsheet" />
+            <SegmentedTabs<View>
+              value={view}
+              onChange={(v) => setView(v === tabs[0].key ? '' : v)}
+              tabs={tabs.map((t) => ({ key: t.key, label: t.label }))}
+            />
+          </>
         )}
       />
 
@@ -136,6 +147,18 @@ export default function ReportsPage() {
             <Input type="date" className="w-40" value={to || fy.to} onChange={(e) => setTo(e.target.value === fy.to ? '' : e.target.value)} />
           </>
         )}
+        {view !== 'due' && spocs.length > 0 && (
+          <Select className="w-40" value={spoc} onChange={(e) => setSpoc(e.target.value)}>
+            <option value="">All SPOCs</option>
+            {spocs.map((s) => <option key={s} value={s}>{s || '— none —'}</option>)}
+          </Select>
+        )}
+        {view !== 'due' && !spoc && spocs.length > 1 && (
+          <label className="flex items-center gap-1.5 text-sm text-slate-600">
+            <input type="checkbox" checked={subtotals === '1'} onChange={(e) => setSubtotals(e.target.checked ? '1' : '')} />
+            Subtotal per SPOC
+          </label>
+        )}
         {present.length === 1 && <span className="text-sm text-slate-500">All figures in {present[0]}.</span>}
       </div>
 
@@ -144,21 +167,30 @@ export default function ReportsPage() {
       ) : view === 'due' ? (
         <DueTable report={data as DueReport} currency={active} listUrl={listUrl} />
       ) : (
-        <Pivot view={view} data={data as ReportPivot | DispatchReport} currency={active} listUrl={listUrl} />
+        <Pivot view={view} data={data as ReportPivot | DispatchReport} currency={active} spoc={spoc} subtotals={!spoc && subtotals === '1'} listUrl={listUrl} />
       )}
     </div>
   );
 }
 
 /** The three customer × SPOC pivots, differing only in what a column is and where a cell links. */
-function Pivot({ view, data, currency, listUrl }: {
+function Pivot({ view, data, currency, spoc, subtotals, listUrl }: {
   view: Exclude<View, 'due'>;
   data: ReportPivot | DispatchReport;
   currency: string;
+  /** One person's rows only; blank means everybody. */
+  spoc: string;
+  subtotals: boolean;
   listUrl: (path: string, extra?: Record<string, string>) => string;
 }) {
-  const rows = data.rows.filter((r) => r.currency === currency);
-  const totals = data.totals.find((t) => t.currency === currency);
+  const rows = data.rows.filter((r) => r.currency === currency && (!spoc || r.spoc === spoc));
+  // The grand total is the server's per-currency figure; narrowed to one
+  // SPOC it is that person's rows added up, which is what the sheet's own
+  // filter would show.
+  const totals = spoc
+    ? { currency, count: rows.reduce((n, r) => n + r.count, 0), total: rows.reduce((n, r) => n + r.total, 0),
+        cells: Object.fromEntries(data.columns.map((c) => [c, rows.reduce((n, r) => n + (r.cells[c] ?? 0), 0)])) }
+    : data.totals.find((t) => t.currency === currency);
   const customer = (id: number) => `/customers/${id}`;
   const proformas = (id: number, status: string) => listUrl('/proformas', { customer_id: String(id), status });
   const receivables = (id: number, extra: Record<string, string>) => listUrl('/payments', { view: 'receivables', customer_id: String(id), ...extra });
@@ -167,7 +199,7 @@ function Pivot({ view, data, currency, listUrl }: {
     return (
       <PivotTable
         columns={data.columns.map((d) => ({ key: d, label: dayLabel(d), title: d }))}
-        rows={rows} totals={totals} currency={currency}
+        rows={rows} totals={totals} currency={currency} subtotalBySpoc={subtotals}
         rowHref={(r) => customer(r.customer_id)}
         cellHref={(r) => proformas(r.customer_id, 'in_production')}
         totalHref={(r) => proformas(r.customer_id, 'in_production')}
@@ -183,7 +215,7 @@ function Pivot({ view, data, currency, listUrl }: {
           { key: 'confirmed', label: 'Confirmed – not scheduled', title: 'Order confirmed or advance received, or booked with no production date yet' },
           { key: 'pending', label: 'Pending', title: 'Sent to the buyer, not yet confirmed' },
         ]}
-        rows={rows} totals={totals} currency={currency}
+        rows={rows} totals={totals} currency={currency} subtotalBySpoc={subtotals}
         rowHref={(r) => customer(r.customer_id)}
         cellHref={(r, col) => proformas(r.customer_id, col === 'pending' ? 'sent' : 'order_confirmed,advance_received,in_production')}
         totalHref={(r) => proformas(r.customer_id, 'sent,order_confirmed,advance_received,in_production')}
@@ -196,7 +228,7 @@ function Pivot({ view, data, currency, listUrl }: {
   return (
     <PivotTable
       columns={d.columns.map((m) => ({ key: m, label: monthLabel(m), title: m }))}
-      rows={rows} totals={totals} currency={currency}
+      rows={rows} totals={totals} currency={currency} subtotalBySpoc={subtotals}
       rowHref={(r) => customer(r.customer_id)}
       cellHref={(r, m) => receivables(r.customer_id, { from: `${m}-01`, to: monthEnd(m) })}
       totalHref={(r) => receivables(r.customer_id, { from: d.from, to: d.to })}

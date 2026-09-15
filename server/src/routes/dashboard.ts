@@ -8,6 +8,7 @@ import { defaultCompanyId } from '../services/companies.js';
 import { shortfall, onHandAll } from '../services/stock.js';
 import { DOCS_OUTSTANDING_D, SEA_LEG_D } from '../services/despatch.js';
 import { LIVE_OK, LIVE_REJECT } from '../services/production.js';
+import { dueReport } from '../services/reports.js';
 
 export const dashboardRouter = Router();
 
@@ -522,6 +523,22 @@ dashboardRouter.get('/', (req: AuthedRequest, res) => {
     };
   };
 
+  /**
+   * What is due, the way the Reports page's Due sheet counts it (2026-09-15):
+   * invoices still owing money whose due date — typed, or the shipment's
+   * ETA — has passed, and those falling due within the week. Both chips go
+   * to that sheet. Absent, not zero, for a caller without `payment`, the
+   * rule `despatchAttention` follows: the count is the receivable's, and
+   * the floor holds none of it.
+   */
+  const dueAttention = () => {
+    if (!allows(req, 'payment')) return {};
+    const d = dueReport({ scope, companyId }, today, 7);
+    let overdue = 0; let soon = 0;
+    for (const g of d.groups) for (const i of g.invoices) { if (i.colour === 'red') overdue += 1; else soon += 1; }
+    return { invoicesOverdue: overdue, invoicesDueThisWeek: soon };
+  };
+
   const attention = {
     overdueFollowups: followups.overdue.length,
     followupsToday: followups.today.length,
@@ -557,6 +574,7 @@ dashboardRouter.get('/', (req: AuthedRequest, res) => {
       today, ...scope.params, ...(companyId ? [companyId] : [])
     ),
     ...despatchAttention(),
+    ...dueAttention(),
     // Material short across the open order book. Group-wide and unscoped by
     // design: the store is not the customer's, and a buyer needs the whole
     // picture to raise one purchase order rather than several.

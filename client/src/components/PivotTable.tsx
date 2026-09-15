@@ -15,7 +15,7 @@ import { fmtMoneyRound } from '../lib/format';
  * whole unit here and only here — a sheet of forty cells is read for its
  * shape, and the paise are on the document a cell links to.
  */
-export function PivotTable({ columns, rows, totals, currency, rowHref, cellHref, totalHref, emptyMessage, footnote }: {
+export function PivotTable({ columns, rows, totals, currency, rowHref, cellHref, totalHref, emptyMessage, footnote, subtotalBySpoc }: {
   columns: { key: string; label: string; title?: string }[];
   rows: ReportPivotRow[];
   totals?: ReportPivotTotals;
@@ -28,10 +28,29 @@ export function PivotTable({ columns, rows, totals, currency, rowHref, cellHref,
   totalHref?: (r: ReportPivotRow) => string;
   emptyMessage: string;
   footnote?: ReactNode;
+  /**
+   * Group the rows by SPOC with a *Meisha Total* line closing each group —
+   * the collapsed reading of the desk's own pivot, which is per person.
+   */
+  subtotalBySpoc?: boolean;
 }) {
   if (rows.length === 0) return <Card><EmptyState message={emptyMessage} /></Card>;
   const num = 'whitespace-nowrap py-1.5 pr-3 text-right tabular-nums';
   const dot = <span className="text-slate-300">·</span>;
+  const ordered = subtotalBySpoc
+    ? [...rows].sort((a, b) => a.spoc.localeCompare(b.spoc) || a.customer_name.localeCompare(b.customer_name))
+    : rows;
+  /** A subtotal line over one SPOC's rows, in the shape of the grand total. */
+  const subtotal = (spoc: string, group: ReportPivotRow[]) => (
+    <tr key={`sub|${spoc}`} className="border-b border-slate-200 bg-slate-50 font-semibold">
+      <td className="py-1.5 pr-3" colSpan={2}>{spoc || '—'} Total</td>
+      {columns.map((c) => {
+        const v = group.reduce((n, r) => n + (r.cells[c.key] ?? 0), 0);
+        return <td key={c.key} className={num}>{v ? fmtMoneyRound(v, currency) : dot}</td>;
+      })}
+      <td className={num}>{fmtMoneyRound(group.reduce((n, r) => n + r.total, 0), currency)}</td>
+    </tr>
+  );
   return (
     <Card className="overflow-x-auto">
       <table className="w-full text-sm">
@@ -46,7 +65,7 @@ export function PivotTable({ columns, rows, totals, currency, rowHref, cellHref,
           </tr>
         </thead>
         <tbody>
-          {rows.map((r) => (
+          {ordered.map((r, i) => [
             <tr key={`${r.customer_id}|${r.spoc}`} className="border-b border-slate-100 hover:bg-slate-50">
               <td className="whitespace-nowrap py-1.5 pr-3 font-medium">
                 <Link to={rowHref(r)} className="text-brand-600 hover:underline">{r.customer_name}</Link>
@@ -73,8 +92,12 @@ export function PivotTable({ columns, rows, totals, currency, rowHref, cellHref,
                   ? <Link to={totalHref(r)} className="rounded px-1 hover:bg-brand-50 hover:text-brand-700">{fmtMoneyRound(r.total, currency)}</Link>
                   : fmtMoneyRound(r.total, currency)}
               </td>
-            </tr>
-          ))}
+            </tr>,
+            // The group's subtotal after its last row.
+            subtotalBySpoc && (i === ordered.length - 1 || ordered[i + 1].spoc !== r.spoc)
+              ? subtotal(r.spoc, ordered.filter((x) => x.spoc === r.spoc))
+              : null,
+          ])}
         </tbody>
         {totals && (
           <tfoot>

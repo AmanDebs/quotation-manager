@@ -127,6 +127,8 @@ interface DashboardData {
     materialShort?: number; materialBelowReorder?: number;
     // The sea leg: papers still with us, and what lands inside a week.
     documentsOutstanding?: number; arrivingSoon?: number;
+    // The Due sheet's two counts: past the due date, and due within a week.
+    invoicesOverdue?: number; invoicesDueThisWeek?: number;
   };
   /**
    * The same figures over the window immediately before this one, so a tile
@@ -582,10 +584,13 @@ export default function DashboardPage() {
     materialBelowReorder: raw.materialBelowReorder ?? 0,
     documentsOutstanding: raw.documentsOutstanding ?? 0,
     arrivingSoon: raw.arrivingSoon ?? 0,
+    invoicesOverdue: raw.invoicesOverdue ?? 0,
+    invoicesDueThisWeek: raw.invoicesDueThisWeek ?? 0,
   };
   const attentionTotal = a.overdueFollowups + a.followupsToday + a.overdueOrders + a.overdueInvoices
     + a.expiringQuotations + a.overdueWorkOrders + a.unbilledDespatches + a.materialShort
     + a.materialBelowReorder + a.documentsOutstanding + a.arrivingSoon
+    + a.invoicesOverdue + a.invoicesDueThisWeek
     + (isManager ? a.pendingApprovals : 0);
 
   // Headline money, all in the selected currency.
@@ -651,6 +656,10 @@ export default function DashboardPage() {
               <AttentionChip to="/followups" count={a.overdueFollowups} label="follow-ups overdue" tone="red" />
               <AttentionChip to={listUrl('/orders', { open: '1' })} count={a.overdueOrders} label="sales orders past promised date" tone="red" />
               <AttentionChip to={listUrl('/invoices')} count={a.overdueInvoices} label="invoices unpaid over 60 days" tone="red" />
+              {/* The Due sheet's own two figures, by the due date the invoice
+                  carries rather than its age; both open that sheet. */}
+              <AttentionChip to={listUrl('/reports', { view: 'due' })} count={a.invoicesOverdue} label="invoices past due date" tone="red" />
+              <AttentionChip to={listUrl('/reports', { view: 'due' })} count={a.invoicesDueThisWeek} label="invoices due this week" tone="amber" />
               <AttentionChip to="/followups" count={a.followupsToday} label="follow-ups due today" tone="amber" />
               <AttentionChip to={listUrl('/quotations', { status: 'sent' })} count={a.expiringQuotations} label="quotations expiring this week" tone="amber" />
               {isManager && <AttentionChip to="/approvals" count={a.pendingApprovals} label="awaiting your approval" tone="amber" />}
