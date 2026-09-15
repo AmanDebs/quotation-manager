@@ -7,16 +7,16 @@ import { Button, Select, Input, PageHeader, EmptyState, Card, ExportTabs, ErrorT
 import { useCompanies } from '../components/CompanySelect';
 import { fmtDate, fmtMoney, fmtQty, today } from '../lib/format';
 import { usePagedList, PAGE_SIZE, type PagedList } from '../lib/usePagedList';
-import { DespatchEditor } from '../components/DespatchModal';
 import { useCan } from '../App';
 
 /**
  * A dispatch is recorded from the book (asked for 2026-09-14: "a button to
- * record Dispatch on right side of state on every sales order"). The same
- * dialog the Dispatches page opens, keyed by the order, behind `dispatch:
- * full`; a completed or cancelled order has nothing left to send and gets
- * no button, which is the Dispatches page's own picker rule.
+ * record Dispatch on right side of state on every sales order"). It opens
+ * the record-a-dispatch page for that order, behind `dispatch: full`; a
+ * completed or cancelled order has nothing left to send and gets no button,
+ * which is the Dispatches page's own picker rule.
  */
+const recordDispatchUrl = (orderId: number) => `/despatches/new?order=${orderId}`;
 const CLOSED: ReadonlySet<string> = new Set(['completed', 'cancelled']);
 
 export const ORDER_STATUSES: OrderStatus[] = [
@@ -134,7 +134,6 @@ export default function OrdersPage() {
   const [openOnly, setOpenOnly] = useState(false);
   const can = useCan();
   const canDispatch = can('dispatch', 'full');
-  const [dispatching, setDispatching] = useState<number | null>(null);
 
   const params = new URLSearchParams();
   if (statusFilter) params.set('status', statusFilter);
@@ -298,7 +297,7 @@ export default function OrdersPage() {
                     {canDispatch && (
                       <td className="py-2 text-right" onClick={(e) => e.stopPropagation()}>
                         {!CLOSED.has(o.status) && (
-                          <Button variant="secondary" className="px-2 py-0.5 text-xs" onClick={() => setDispatching(o.id)}>Record dispatch</Button>
+                          <Button variant="secondary" className="px-2 py-0.5 text-xs" onClick={() => navigate(recordDispatchUrl(o.id))}>Record dispatch</Button>
                         )}
                       </td>
                     )}
@@ -312,9 +311,6 @@ export default function OrdersPage() {
             onPage={orderList.setPage} noun="orders"
           />
         </Card>
-      )}
-      {dispatching !== null && (
-        <DespatchEditor key={`new-${dispatching}`} orderId={dispatching} onClose={() => setDispatching(null)} />
       )}
     </div>
   );
@@ -330,7 +326,6 @@ function LinesTable({ lines, showCompany, pager }: {
   const t = today();
   const can = useCan();
   const canDispatch = can('dispatch', 'full');
-  const [dispatching, setDispatching] = useState<number | null>(null);
   // A domestic book has no discharge port on any row, and a column that is
   // empty on every line for ever is worse than no column.
   const anyPort = lines.some((l) => l.port_of_discharge);
@@ -425,7 +420,7 @@ function LinesTable({ lines, showCompany, pager }: {
                     {canDispatch && (
                       <td className="py-1.5 text-right" onClick={(e) => e.stopPropagation()}>
                         {!repeat && !CLOSED.has(l.order_status) && (
-                          <Button variant="secondary" className="whitespace-nowrap px-2 py-0.5 text-xs" onClick={() => setDispatching(l.order_id)}>Record dispatch</Button>
+                          <Button variant="secondary" className="whitespace-nowrap px-2 py-0.5 text-xs" onClick={() => navigate(recordDispatchUrl(l.order_id))}>Record dispatch</Button>
                         )}
                       </td>
                     )}
@@ -444,9 +439,6 @@ function LinesTable({ lines, showCompany, pager }: {
             onPage={pager.setPage} noun="lines"
           />
         </>
-      )}
-      {dispatching !== null && (
-        <DespatchEditor key={`new-${dispatching}`} orderId={dispatching} onClose={() => setDispatching(null)} />
       )}
     </Card>
   );

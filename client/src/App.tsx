@@ -30,6 +30,7 @@ import WorkOrdersPage from './pages/WorkOrders';
 import WorkOrderDetailPage from './pages/WorkOrderDetail';
 import QualityPage from './pages/Quality';
 import DespatchesPage from './pages/Despatches';
+import DespatchFormPage from './pages/DespatchForm';
 import StockPage from './pages/Stock';
 import MaterialRequiredPage from './pages/MaterialRequired';
 import PurchaseOrdersPage from './pages/PurchaseOrders';
@@ -215,6 +216,8 @@ export const routes: RouteObject[] = [
       { path: '/work-orders/:id', element: <Needs fn="work_order"><WorkOrderDetailPage /></Needs> },
       { path: '/quality', element: <Needs fn="qc"><QualityPage /></Needs> },
       { path: '/despatches', element: <Needs fn="dispatch"><DespatchesPage /></Needs> },
+      { path: '/despatches/new', element: <Needs fn="dispatch" level="full"><DespatchFormPage /></Needs> },
+      { path: '/despatches/:id/edit', element: <Needs fn="dispatch" level="full"><DespatchFormPage /></Needs> },
       { path: '/stock', element: <Needs fn="material"><StockPage /></Needs> },
       { path: '/material-required', element: <Needs fn="material"><MaterialRequiredPage /></Needs> },
       { path: '/finished-goods', element: <Needs fn="fg"><FinishedGoodsPage /></Needs> },

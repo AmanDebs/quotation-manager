@@ -1,21 +1,18 @@
 import { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { api } from '../api/client';
 import type { Order, Despatch, DespatchItem, Location, Transporter, OrderBatch } from '../types';
-import { Button, Input, Textarea, Select, Field, Modal, ErrorText, TH_CLASS, CAPTION_CLASS } from './ui';
+import { Input, Textarea, Select, Field, Card, FIELD_GRID, TH_CLASS, CAPTION_CLASS } from './ui';
 import { fmtQty, today } from '../lib/format';
 
 /**
- * Recording a dispatch: the dialog, its two prefills, and the editor that
- * fetches what they need.
+ * Recording a dispatch: the form's fields and its two prefills.
  *
- * This lived inside the sales order's Dispatch tab until 2026-09-14, when the
- * client asked for that tab to be read-only and for dispatches to be recorded
- * from the Dispatches page under Sales instead. The dialog is unchanged; what
- * moved is who opens it. `DespatchEditor` is the piece the register needs and
- * the tab never did: given an order id it fetches the order in full (lines,
- * invoices, proformas and the lots the picker offers), because a register row
- * does not carry them and the dialog cannot be filled from one.
+ * This lived inside the sales order's Dispatch tab as a dialog until
+ * 2026-09-14, when the client asked for that tab to be read-only and for
+ * dispatches to be recorded from the Dispatches page under Sales; a day later
+ * they asked for *"a whole new page to record dispatch, not a pop up"*, so
+ * the dialog became `pages/DespatchForm.tsx` and this is what it draws. The
+ * fields, the prefills and every rule about them are unchanged — what moved,
+ * twice, is the frame around them.
  */
 
 /**
@@ -101,72 +98,8 @@ const items = order.items ?? [];
 }
 
 
-/**
- * The dialog with its data around it: the order it is for, the masters, and
- * the save. `despatch` absent means a new trip on that order.
- */
-export function DespatchEditor({ orderId, despatch, onClose }: {
-  orderId: number;
-  despatch?: Despatch;
-  onClose: () => void;
-}) {
-  const queryClient = useQueryClient();
-  const { data: order } = useQuery({ queryKey: ['order', String(orderId)], queryFn: () => api.get<Order>(`/api/orders/${orderId}`) });
-  const { data: locations = [] } = useQuery({ queryKey: ['master', 'locations', false], queryFn: () => api.get<Location[]>('/api/locations') });
-  const { data: transporters = [] } = useQuery({ queryKey: ['master', 'transporters', false], queryFn: () => api.get<Transporter[]>('/api/transporters') });
-  const [draft, setDraft] = useState<Partial<Despatch> | null>(null);
-  // The draft is built once the order has arrived: a new trip prefills every
-  // line at what is still unsent, an edit merges the saved rows in by position.
-  if (order && draft === null) {
-    setDraft(despatch ? editTrip(order, despatch) : newTrip(order, locations, transporters));
-  }
-  const save = useMutation({
-    mutationFn: (d: Partial<Despatch>) =>
-      d.id ? api.put<Despatch>(`/api/despatches/${d.id}`, d) : api.post<Despatch>('/api/despatches', d),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['despatches'] });
-      queryClient.invalidateQueries({ queryKey: ['order', String(orderId)] });
-      queryClient.invalidateQueries({ queryKey: ['orders'] });
-      // The order book's other two readers: a trip moves Sent and the state.
-      queryClient.invalidateQueries({ queryKey: ['order-lines'] });
-      queryClient.invalidateQueries({ queryKey: ['order-demand'] });
-      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
-      onClose();
-    },
-  });
-  if (!order || !draft) return null;
-  /*
-   * What this trip itself already has on file, per line, to be excluded from
-   * "already sent": `items[i].despatched.qty` sums every despatch on the
-   * order including this one, and the server has never counted a trip against
-   * itself (`despatchLimitError` takes an `exceptDespatchId`). Read from the
-   * saved record, not from the draft being typed into.
-   */
-  const ownSent = new Map<number, number>();
-  for (const it of despatch?.items ?? []) ownSent.set(it.order_line, (ownSent.get(it.order_line) ?? 0) + (it.qty ?? 0));
-  return (
-    <DespatchModal
-      key={despatch?.id ?? 'new'}
-      draft={draft}
-      items={order.items ?? []}
-      ownSent={ownSent}
-      locations={locations}
-      transporters={transporters}
-      invoices={order.invoices ?? []}
-      isExport={!!order.is_export}
-      orderBatches={order.batches ?? []}
-      error={save.error}
-      saving={save.isPending}
-      onChange={setDraft}
-      onClose={onClose}
-      onSave={() => save.mutate(draft)}
-    />
-  );
-}
-
-export function DespatchModal({
-  draft, items, ownSent, locations, transporters, invoices, isExport, orderBatches,
-  error, saving, onChange, onClose, onSave,
+export function DespatchFields({
+  draft, items, ownSent, locations, transporters, invoices, isExport, orderBatches, onChange,
 }: {
   draft: Partial<Despatch>;
   items: NonNullable<Order['items']>;
@@ -178,11 +111,7 @@ export function DespatchModal({
   invoices: NonNullable<Order['invoices']>;
   /** Whether this order ships in a container, which decides the sea-leg block. */
   isExport: boolean;
-  error: unknown;
-  saving: boolean;
   onChange: (d: Partial<Despatch>) => void;
-  onClose: () => void;
-  onSave: () => void;
 }) {
   const set = (patch: Partial<Despatch>) => onChange({ ...draft, ...patch });
   const rows: DespatchItem[] = draft.items ?? [];
@@ -210,8 +139,9 @@ export function DespatchModal({
   };
 
   return (
-    <Modal title={draft.id ? 'Edit dispatch' : 'Record a dispatch'} onClose={onClose} wide>
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+    <div className="space-y-4">
+      <Card title="Trip">
+      <div className={FIELD_GRID}>
         <Field label="Date *"><Input type="date" value={draft.date ?? ''} onChange={(e) => set({ date: e.target.value })} /></Field>
         <Field label="Out of which plant">
           <Select value={draft.location_id ?? ''} onChange={(e) => set({ location_id: e.target.value ? Number(e.target.value) : null })}>
@@ -248,15 +178,13 @@ export function DespatchModal({
       {(isExport || draft.bl_no || draft.container_no || draft.etd || draft.eta || draft.docs_status) && (
         <>
           <div className={`${CAPTION_CLASS} mt-4`}>Shipment</div>
-          <div className="mt-1 grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div className={`mt-1 ${FIELD_GRID}`}>
             <Field label="BL number"><Input value={draft.bl_no ?? ''} onChange={(e) => set({ bl_no: e.target.value })} placeholder="e.g. Maersk-259385658" /></Field>
             <Field label="Container number"><Input value={draft.container_no ?? ''} onChange={(e) => set({ container_no: e.target.value })} placeholder="e.g. 262183004" /></Field>
-            <div />
             {/* Real dates, unlike Tentative delivery above: an arrivals list has
                 to sort and count down, which "5-6 Days" cannot do. */}
             <Field label="ETD"><Input type="date" value={draft.etd ?? ''} onChange={(e) => set({ etd: e.target.value })} /></Field>
             <Field label="ETA"><Input type="date" value={draft.eta ?? ''} onChange={(e) => set({ eta: e.target.value })} /></Field>
-            <div />
             <Field label="Documents">
               <Select value={draft.docs_status ?? ''} onChange={(e) => set({ docs_status: e.target.value })}>
                 <option value="">Not sent</option>
@@ -276,7 +204,10 @@ export function DespatchModal({
         </>
       )}
 
-      <table className="mt-4 w-full text-sm">
+      </Card>
+
+      <Card title="Lines">
+      <table className="w-full text-sm">
         <thead>
           <tr className={TH_CLASS}>
             <th className="pb-2 pr-2">Line</th>
@@ -414,15 +345,10 @@ export function DespatchModal({
         </>
       )}
 
-      <Field label="Notes" className="mt-3">
+      <Field label="Notes" className="mt-4">
         <Textarea rows={2} value={draft.notes ?? ''} onChange={(e) => set({ notes: e.target.value })} />
       </Field>
-
-      <ErrorText error={error} />
-      <div className="mt-4 flex justify-end gap-2">
-        <Button variant="secondary" onClick={onClose}>Cancel</Button>
-        <Button onClick={onSave} disabled={saving}>{saving ? 'Saving…' : 'Save dispatch'}</Button>
-      </div>
-    </Modal>
+      </Card>
+    </div>
   );
 }

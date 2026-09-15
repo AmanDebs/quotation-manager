@@ -1,10 +1,9 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
 import type { Despatch, Location, Customer, Order } from '../types';
 import { PageHeader, Card, Select, Input, Button, Modal, EmptyState, ErrorText, Pagination, DownloadButton, SearchSelect, TH_CLASS } from '../components/ui';
-import { DespatchEditor } from '../components/DespatchModal';
 import { useCan } from '../App';
 import { fmtQty, fmtDate } from '../lib/format';
 import { useUrlFilter } from '../lib/useUrlFilter';
@@ -105,10 +104,10 @@ export default function DespatchesPage() {
   const can = useCan();
   const canWrite = can('dispatch', 'full');
   const queryClient = useQueryClient();
-  // Three steps of one flow: pick the order, then the dialog for a new trip
-  // on it; or the dialog for a saved trip straight away.
+  const navigate = useNavigate();
+  // Recording is a page (`/despatches/new?order=N`); a new trip starts here by
+  // picking the order it is for, an edit goes straight to the page.
   const [picking, setPicking] = useState(false);
-  const [editing, setEditing] = useState<{ orderId: number; despatch?: Despatch } | null>(null);
   const remove = useMutation({
     mutationFn: (id: number) => api.del(`/api/despatches/${id}`),
     onSuccess: () => {
@@ -302,7 +301,7 @@ export default function DespatchesPage() {
                     </td>
                     {canWrite && (
                       <td className="whitespace-nowrap py-2 text-right">
-                        <Button variant="ghost" onClick={() => setEditing({ orderId: d.order_id, despatch: d })}>Edit</Button>
+                        <Button variant="ghost" onClick={() => navigate(`/despatches/${d.id}/edit`)}>Edit</Button>
                         <Button
                           variant="danger"
                           className="ml-1 border-0"
@@ -325,15 +324,7 @@ export default function DespatchesPage() {
       </Card>
 
       {picking && (
-        <PickOrder onClose={() => setPicking(false)} onPick={(orderId) => { setPicking(false); setEditing({ orderId }); }} />
-      )}
-      {editing && (
-        <DespatchEditor
-          key={editing.despatch?.id ?? `new-${editing.orderId}`}
-          orderId={editing.orderId}
-          despatch={editing.despatch}
-          onClose={() => setEditing(null)}
-        />
+        <PickOrder onClose={() => setPicking(false)} onPick={(orderId) => { setPicking(false); navigate(`/despatches/new?order=${orderId}`); }} />
       )}
     </div>
   );
