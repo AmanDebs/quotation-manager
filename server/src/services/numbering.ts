@@ -43,6 +43,12 @@ export function fiscalYearOf(date?: string | null): { start: number; label: stri
   return { start, label: `${String(start).slice(2)}-${String(start + 1).slice(2)}` };
 }
 
+/** The first and last day of the fiscal year a date falls in — Apr–Mar, like every counter here. */
+export function fiscalYearRange(date?: string | null): { from: string; to: string } {
+  const { start } = fiscalYearOf(date);
+  return { from: `${start}-04-01`, to: `${start + 1}-03-31` };
+}
+
 /**
  * Which pattern each document type numbers from, and — where it has a second
  * series — the column that says so and the word for it.

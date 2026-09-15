@@ -899,6 +899,27 @@ export interface PaymentRegisterSummary {
 }
 
 /** Raw material required by start date (`GET /api/stock/schedule`). */
+/** The Reports page's pivots (`services/reports.ts`): rows are customer × SPOC × currency. */
+export interface ReportPivotRow {
+  customer_id: number; customer_name: string; spoc: string; currency: string;
+  cells: Record<string, number>; counts: Record<string, number>; total: number; count: number;
+}
+export interface ReportPivotTotals { currency: string; cells: Record<string, number>; total: number; count: number }
+export interface ReportPivot { columns: string[]; rows: ReportPivotRow[]; totals: ReportPivotTotals[] }
+export interface DispatchReport extends ReportPivot { from: string; to: string }
+
+export type DueColour = 'red' | 'yellow' | 'green';
+export interface DueInvoice {
+  id: number; number: string; date: string; grand_total: number; balance_due: number;
+  due_date: string; due_on_arrival: boolean; days_to_due: number | null; colour: DueColour | null;
+}
+export interface DueGroup {
+  customer_id: number; customer_name: string; currency: string;
+  invoiced: number; due: number; invoices: DueInvoice[];
+  undated: { count: number; due: number; invoices: DueInvoice[] };
+}
+export interface DueReport { today: string; window_days: number; until: string; groups: DueGroup[]; undated_count: number }
+
 export interface MaterialSchedule {
   dates: string[];
   rows: {

@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
-import type { Proforma } from '../types';
+import type { Proforma, Customer } from '../types';
 import { Button, Select, Input, PageHeader, EmptyState, Card, ExportTabs, ErrorText, Pagination, DownloadButton, TH_CLASS } from '../components/ui';
 import { useCompanies } from '../components/CompanySelect';
 import NewDocumentDialog from '../components/NewDocumentDialog';
@@ -80,6 +80,9 @@ export default function ProformasPage() {
   // back button undoes a filter instead of leaving the page.
   const [statusFilter, setStatusFilter] = useUrlFilter('status');
   const [exportFilter, setExportFilter] = useUrlFilter('export');
+  // One customer's proformas — the Reports page links in with it (2026-09-15).
+  const [customerFilter, setCustomerFilter] = useUrlFilter('customer_id');
+  const { data: customers = [] } = useQuery({ queryKey: ['customers', ''], queryFn: () => api.get<Customer[]>('/api/customers') });
   // Server-side, not a filter over the rows on screen: the list is paged,
   // so searching what has been fetched would only search the current page.
   const [search, setSearch] = useUrlFilter('q');
@@ -98,6 +101,7 @@ export default function ProformasPage() {
   if (statusFilter) params.set('status', statusFilter);
   if (exportFilter) params.set('export', exportFilter);
   if (companyFilter) params.set('company', companyFilter);
+  if (customerFilter) params.set('customer_id', customerFilter);
   if (search) params.set('q', search);
   const list = usePagedList<Proforma>(
     // search rides in the key, so typing returns to page 1 rather than
@@ -149,6 +153,15 @@ export default function ProformasPage() {
           {STATUSES.map((s) => (
             <option key={s} value={s}>{label(s)}</option>
           ))}
+          {/* A linked-in comma list of statuses is offered as it stands, so the
+              box names what the table is showing rather than going blank. */}
+          {statusFilter.includes(',') && (
+            <option value={statusFilter}>{statusFilter.split(',').map(label).join(' / ')}</option>
+          )}
+        </Select>
+        <Select value={customerFilter} onChange={(e) => setCustomerFilter(e.target.value)} className="max-w-56">
+          <option value="">All customers</option>
+          {customers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
         </Select>
         <Input
           className="max-w-64"
@@ -162,7 +175,7 @@ export default function ProformasPage() {
         {proformas.length === 0 ? (
           <EmptyState
             message={
-              search || statusFilter || exportFilter || companyFilter
+              search || statusFilter || exportFilter || companyFilter || customerFilter
                 ? 'Nothing matches those filters.'
                 : 'No proforma invoices yet. Convert an accepted quotation, or create one directly.'
             }

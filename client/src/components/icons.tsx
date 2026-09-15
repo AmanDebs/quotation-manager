@@ -80,6 +80,8 @@ const PATHS: Record<string, ReactNode> = {
   // font happens to have it, at whatever weight that font thinks is right.
   'chevron-up': <path d="m6 14.5 6-5.5 6 5.5" />,
   'chevron-down': <path d="m6 9.5 6 5.5 6-5.5" />,
+  // Reports — a pivot grid: a frame with a header rule and two column rules.
+  chart: <><rect x="4" y="5" width="16" height="14" rx="1.5" /><path d="M4 10h16" /><path d="M10 10v9" /><path d="M15 10v9" /></>,
   power: <><path d="M12 3.5v8" /><path d="M7.2 6.6a7 7 0 1 0 9.6 0" /></>,
 };
 

@@ -9,6 +9,23 @@ export function fmtMoney(n: number | null | undefined, currency: string): string
   }).format(n)}`;
 }
 
+/**
+ * Money to the whole unit — for a pivot of totals, where the paise on forty
+ * cells is noise and the desk's own sheets print none. Never for a document.
+ */
+export function fmtMoneyRound(n: number | null | undefined, currency: string): string {
+  if (n == null) return '—';
+  const locale = currency === 'INR' ? 'en-IN' : 'en-US';
+  return `${symbols[currency] ?? currency + ' '}${new Intl.NumberFormat(locale, { maximumFractionDigits: 0 }).format(n)}`;
+}
+
+/** The first and last day of the fiscal year a date falls in — Apr–Mar, as the numbering counts. */
+export function fiscalYearRange(iso = today()): { from: string; to: string } {
+  const [y, m] = String(iso).split('-').map(Number);
+  const start = m >= 4 ? y : y - 1;
+  return { from: `${start}-04-01`, to: `${start + 1}-03-31` };
+}
+
 export function fmtQty(n: number | null | undefined): string {
   if (n == null) return '—';
   return new Intl.NumberFormat('en-IN', { maximumFractionDigits: 3 }).format(n);

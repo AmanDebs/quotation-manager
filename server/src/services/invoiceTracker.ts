@@ -169,7 +169,7 @@ export function shipmentsByInvoice(invoiceIds: number[]): Map<number, TrackerShi
   return out;
 }
 
-interface InvoiceHead {
+export interface InvoiceHead {
   id: number; number: string; date: string; customer_id: number; customer_name: string;
   currency: string; is_export: number; grand_total: number; due_date: string;
 }

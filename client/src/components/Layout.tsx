@@ -59,6 +59,10 @@ const NAV: { heading: string; items: NavItem[] }[] = [
       // (2026-09-14), where the desk plans buying against the order book. The
       // figure is the material function's, so it shows for whoever holds it.
       { to: '/material-required', label: 'Raw Material Required', icon: 'box', needs: 'material' },
+      // The desk's own pivot sheets — planned for production, yet to be
+      // scheduled, dispatch by month, and what is due — as linked tables
+      // (2026-09-15). Three of the four are proforma figures, hence the cell.
+      { to: '/reports', label: 'Reports', icon: 'chart', needs: 'proforma' },
     ],
   },
   {

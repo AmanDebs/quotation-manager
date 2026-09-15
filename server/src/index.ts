@@ -33,6 +33,7 @@ import { finishedGoodsRouter } from './routes/finishedGoods.js';
 import { packingListsRouter } from './routes/packingLists.js';
 import { followupsRouter } from './routes/followups.js';
 import { paymentsRouter } from './routes/payments.js';
+import { reportsRouter } from './routes/reports.js';
 import { dashboardRouter } from './routes/dashboard.js';
 import { pdfRouter } from './routes/pdf.js';
 import { auditRouter } from './routes/audit.js';
@@ -120,6 +121,8 @@ app.use('/api/followups', requireAuth, requireFunction('followup'), followupsRou
 // Payments are the receivables ledger. Behind customer scope alone it would be
 // readable by every role the scope change unrestricts.
 app.use('/api/payments', requireAuth, requireFunction('payment'), paymentsRouter);
+// Guarded per route: the four reports belong to three functions (see routes/reports.ts).
+app.use('/api/reports', requireAuth, reportsRouter);
 app.use('/api/dashboard', requireAuth, requirePermission('dashboard'), dashboardRouter);
 app.use('/api/pdf', requireAuth, pdfRouter);
 // Guards itself: the whole log is manager-only, one record's history follows

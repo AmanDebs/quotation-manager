@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { db, transaction } from '../db/connection.js';
+import { STATUS_SQL } from '../services/proformaStatus.js';
 import { nextNumber, exportChangeError } from '../services/numbering.js';
 import { computeTotals, round2, type LineItemInput } from '../services/totals.js';
 import type { AuthedRequest } from '../middleware/auth.js';
@@ -43,10 +44,10 @@ export const proformasRouter = Router();
  * wins, which is what lets one expression cover the list, `getFull` and the
  * spreadsheet export without any of them mapping rows by hand. Measured, not
  * assumed. Moving it above `p.*` would silently restore the stored value.
+ *
+ * The expression itself is `STATUS_SQL` in `services/proformaStatus.ts`,
+ * moved there on 2026-09-15 when the Reports page needed the same reading.
  */
-const STATUS_SQL = `CASE
-    WHEN p.status IN ('draft', 'sent') AND p.validity_date <> '' AND p.validity_date < date('now')
-    THEN 'expired' ELSE p.status END`;
 
 const listSql = `
   SELECT p.*, ${STATUS_SQL} AS status,
@@ -190,7 +191,15 @@ function proformaListWhere(req: AuthedRequest): { where: string[]; params: unkno
   // The same expression the SELECT uses, not `p.status`: an alias cannot be
   // referenced in WHERE, and filtering on the stored value would make Expired
   // a status the list shows and cannot find.
-  if (req.query.status) { where.push(`${STATUS_SQL} = ?`); params.push(String(req.query.status)); }
+  if (req.query.status) {
+    // A comma list, as the quotations list takes — the Reports page links in
+    // with "confirmed or advance received or booked" as one filter.
+    const statuses = String(req.query.status).split(',').map((v) => v.trim()).filter(Boolean);
+    if (statuses.length) { where.push(`${STATUS_SQL} IN (${statuses.map(() => '?').join(',')})`); params.push(...statuses); }
+  }
+  // One customer's proformas, for the Reports page's links and the customer
+  // filter beside the status one (2026-09-15).
+  if (Number(req.query.customer_id) > 0) { where.push('p.customer_id = ?'); params.push(Number(req.query.customer_id)); }
   if (req.query.export === '1' || req.query.export === '0') { where.push('p.is_export = ?'); params.push(Number(req.query.export)); }
   // Narrow to one selling entity. Ignored when the group has just one.
   if (Number(req.query.company) > 0) { where.push('p.company_id = ?'); params.push(Number(req.query.company)); }

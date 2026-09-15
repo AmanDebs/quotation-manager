@@ -332,6 +332,11 @@ export default function OrderFormPage() {
             <Field label="Handled By (SPOC)"><Input value={draft.spoc} onChange={(e) => set({ spoc: e.target.value })} placeholder="Who took this order" /></Field>
             <Field label="Customer's PO Number"><Input value={draft.po_number} onChange={(e) => set({ po_number: e.target.value })} /></Field>
             <Field label="Customer's PO Date"><Input type="date" value={draft.po_date} onChange={(e) => set({ po_date: e.target.value })} /></Field>
+            {/* Back on 2026-09-15, alone of the production-plan dates the
+                form dropped on 2026-09-07: the Reports page's *Planned for
+                production* sheet is keyed on it, and a column nobody can
+                type into is a sheet nobody can fill. */}
+            <Field label="Revised Production Date"><Input type="date" value={draft.revised_date} onChange={(e) => set({ revised_date: e.target.value })} /></Field>
             <Field label="Currency">
               <Select value={draft.currency} onChange={(e) => set({ currency: e.target.value })}>
                 <option value="INR">INR</option><option value="USD">USD</option><option value="EUR">EUR</option>
@@ -441,7 +446,9 @@ export default function OrderFormPage() {
           header freight fields follow: an order raised before this keeps every
           value it holds, an ordinary save cannot zero one, and the order PDF,
           the spreadsheet export and the order book still print what is there.
-          What is gone is the only way to type a new one.
+          What is gone is the only way to type a new one — except **Revised
+          Date**, which came back into Details on 2026-09-15 because the
+          Reports page's *Planned for production* sheet is keyed on it.
 
           Two consequences worth knowing rather than discovering. The dashboard's
           **overdue orders** counts orders past `promised_date`, and the order

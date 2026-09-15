@@ -33,6 +33,7 @@ import DespatchesPage from './pages/Despatches';
 import DespatchFormPage from './pages/DespatchForm';
 import StockPage from './pages/Stock';
 import MaterialRequiredPage from './pages/MaterialRequired';
+import ReportsPage from './pages/Reports';
 import PurchaseOrdersPage from './pages/PurchaseOrders';
 import MastersPage from './pages/Masters';
 import ApprovalsPage from './pages/Approvals';
@@ -220,6 +221,7 @@ export const routes: RouteObject[] = [
       { path: '/despatches/:id/edit', element: <Needs fn="dispatch" level="full"><DespatchFormPage /></Needs> },
       { path: '/stock', element: <Needs fn="material"><StockPage /></Needs> },
       { path: '/material-required', element: <Needs fn="material"><MaterialRequiredPage /></Needs> },
+      { path: '/reports', element: <Needs fn="proforma"><ReportsPage /></Needs> },
       { path: '/finished-goods', element: <Needs fn="fg"><FinishedGoodsPage /></Needs> },
       { path: '/purchase-orders', element: <Needs fn="purchasing"><PurchaseOrdersPage /></Needs> },
       { path: '/masters', element: <Needs fn="master"><MastersPage /></Needs> },
