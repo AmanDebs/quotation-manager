@@ -353,7 +353,11 @@ function LinesTable({ lines, pager }: {
                 <th className="pb-2 pr-3">Colour</th>
                 <th className="pb-2 pr-3 text-right">Qty</th>
                 <th className="pb-2 pr-3 text-right">Sent</th>
-                <th className="pb-2 pr-3">Promised</th>
+                {/* The order's two production dates (2026-09-15, at the
+                    client's word, in place of the one Promised column): the
+                    original, and the revised one where the plan has moved. */}
+                <th className="pb-2 pr-3">Original Production Date</th>
+                <th className="pb-2 pr-3">Revised Production Date</th>
                 <th className="pb-2 pr-3">Added By</th>
                 <th className="pb-2 pr-3">State</th>
                 {canDispatch && <th className="pb-2" />}
@@ -364,7 +368,10 @@ function LinesTable({ lines, pager }: {
                 // The order number is printed once per order and dimmed on the
                 // rows below it, so the eye groups them the way the sheet does.
                 const repeat = i > 0 && lines[i - 1].order_id === l.order_id;
-                const overdue = !!l.promised_date && l.promised_date < t && l.state !== 'shipped';
+                // Overdue is judged against the date that stands — the revised
+                // one where set, else the original — and marked on that column.
+                const due = l.revised_date || l.promised_date;
+                const overdue = !!due && due < t && l.state !== 'shipped';
                 return (
                   <tr
                     key={`${l.order_id}-${l.order_line}`}
@@ -397,8 +404,11 @@ function LinesTable({ lines, pager }: {
                     <td className="py-1.5 pr-3 text-right tabular-nums text-slate-500">
                       {l.sent || l.billed ? fmtQty(Math.max(l.sent, l.billed)) : '—'}
                     </td>
-                    <td className={`whitespace-nowrap py-1.5 pr-3 ${overdue ? 'font-semibold text-red-600' : ''}`}>
-                      {l.promised_date ? fmtDate(l.promised_date) : '—'}{overdue && ' ⚠'}
+                    <td className={`whitespace-nowrap py-1.5 pr-3 ${overdue && !l.revised_date ? 'font-semibold text-red-600' : ''}`}>
+                      {l.promised_date ? fmtDate(l.promised_date) : '—'}{overdue && !l.revised_date && ' ⚠'}
+                    </td>
+                    <td className={`whitespace-nowrap py-1.5 pr-3 ${overdue && l.revised_date ? 'font-semibold text-red-600' : ''}`}>
+                      {l.revised_date ? fmtDate(l.revised_date) : '—'}{overdue && !!l.revised_date && ' ⚠'}
                     </td>
                     {/* A property of the order, not the line — printed once per
                         order like the number and the date above it. */}

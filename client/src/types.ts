@@ -698,7 +698,7 @@ export interface Despatch {
 export type LineState = 'not_started' | 'in_production' | 'made' | 'part_shipped' | 'shipped';
 
 export interface OrderLine {
-  order_id: number; order_number: string; date: string; promised_date: string;
+  order_id: number; order_number: string; date: string; promised_date: string; revised_date: string;
   customer_id: number; customer_name: string; company_name: string | null;
   /** Who booked the order. Null on one whose author has since been removed. */
   created_by_name: string | null;

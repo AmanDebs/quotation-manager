@@ -34,7 +34,9 @@ export interface OrderLine {
   order_id: number;
   order_number: string;
   date: string;
+  /** The order's original production date, and the revised one where set. */
   promised_date: string;
+  revised_date: string;
   customer_id: number;
   customer_name: string;
   company_name: string | null;
@@ -98,7 +100,7 @@ const SQL = `
     FROM order_items oi
   )
   SELECT
-    o.id AS order_id, o.number AS order_number, o.date, o.promised_date,
+    o.id AS order_id, o.number AS order_number, o.date, o.promised_date, o.revised_date,
     o.customer_id, c.name AS customer_name, co.company_name,
     u.name AS created_by_name,
     o.is_export, o.status AS order_status, o.currency, o.port_of_discharge,
