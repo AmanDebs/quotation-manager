@@ -269,6 +269,13 @@ pdfRouter.get('/:type/:id/:name?', async (req: AuthedRequest, res) => {
    * been refused on three fields at once.
    */
   let watermark: string | undefined;
+  // The sales order has no approval to stand behind an unfinished one, so
+  // its gate is the findings alone (2026-09-15): every order on file prints
+  // once its blanks are filled, which the form lists.
+  if (entry.table === 'orders') {
+    const unfinished = incompleteError('orders', id);
+    if (unfinished) return res.status(422).json({ error: unfinished });
+  }
   if (entry.approvable) {
     const appr = db.prepare(`SELECT approval_status FROM ${entry.table} WHERE id = ?`).get(id) as { approval_status: string };
     if (appr.approval_status !== 'approved') {

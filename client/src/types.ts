@@ -838,6 +838,8 @@ export interface Order {
    * What the proforma this order was booked from has actually taken in.
    * Derived on every read, never stored; absent until the order is saved.
    */
+  /** What is still blank, from `documentChecks.ts` — listed on the form and the PDF's reason for refusing. */
+  checks?: DocumentFinding[];
   advance?: {
     pi_id: number | null;
     pi_number: string;

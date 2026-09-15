@@ -4,6 +4,15 @@ import { qcBlockError } from './qc.js';
 import type { DocTable } from './approval.js';
 
 /**
+ * The tables this judges: the four approvable documents, and the sales
+ * order — which has no approval workflow (it records the customer's
+ * commitment, not an offer), so for it the findings ride the form and gate
+ * the PDF and nothing else. Kept apart from `DocTable` so `approval.ts` is
+ * never asked to submit an order.
+ */
+export type CheckedTable = DocTable | 'orders';
+
+/**
  * What a document must carry before it can be approved.
  *
  * Approval is the gate every outgoing document passes through — `approval.ts`
@@ -49,7 +58,7 @@ export interface CheckedItem {
 }
 
 export interface CheckedDoc {
-  table: DocTable;
+  table: CheckedTable;
   row: Record<string, unknown>;
   items: CheckedItem[];
   /** The buyer, for the fields that live on them rather than on the document. */
@@ -76,22 +85,24 @@ const isExport = (d: CheckedDoc) => Number(d.row.is_export) === 1;
 const isDomestic = (d: CheckedDoc) => text(d.row.tax_type) !== 'none';
 
 /** The document's own word for itself, for messages that name it. */
-const NOUN: Record<DocTable, string> = {
+const NOUN: Record<CheckedTable, string> = {
   quotations: 'quotation',
   proforma_invoices: 'proforma',
   commercial_invoices: 'invoice',
   credit_notes: 'credit note',
+  orders: 'sales order',
 };
 
-const ALL: DocTable[] = ['quotations', 'proforma_invoices', 'commercial_invoices', 'credit_notes'];
-/** The three that ask the customer for money. A credit note gives it back. */
-const SELLING: DocTable[] = ['quotations', 'proforma_invoices', 'commercial_invoices'];
-const MONEY_DUE: DocTable[] = ['proforma_invoices', 'commercial_invoices'];
+const ALL: CheckedTable[] = ['quotations', 'proforma_invoices', 'commercial_invoices', 'credit_notes', 'orders'];
+/** The three that ask the customer for money, and the order that commits to it. A credit note gives it back. */
+const SELLING: CheckedTable[] = ['quotations', 'proforma_invoices', 'commercial_invoices', 'orders'];
+/** Where a line with no quantity or a zero total is a fault: a sum is being demanded, or made. */
+const MONEY_DUE: CheckedTable[] = ['proforma_invoices', 'commercial_invoices', 'orders'];
 
 interface Rule {
   key: string;
   level: Level;
-  tables: DocTable[];
+  tables: CheckedTable[];
   /** Narrows further — export vs domestic, mostly. */
   when?: (d: CheckedDoc) => boolean;
   /** The message when the rule is broken, or null when it is satisfied. */
@@ -374,6 +385,37 @@ const RULES: Rule[] = [
     key, level: 'block', tables: ['proforma_invoices'], when: isExport,
     check: (d) => (text(d.row[column]) ? null : `${label} is blank.`),
   })),
+
+  /*
+   * And every field on the sales order, with two exemptions the client named
+   * (2026-09-15: *"Make all fields mandatory in sales order except SPOC, PO
+   * Number"*). The order has no approval to gate, so these bite on the PDF
+   * and are listed on the form — the same words, from the same table.
+   *
+   * Not asked, and why: the advance figures, which legitimately read zero
+   * (credit terms; nothing banked yet) and are read from the proforma once
+   * one is linked; issued-by, currency and tax, which carry defaults; and the
+   * exemptions. Customer, date and lines were already blocks. The Revised
+   * Production Date is here because the Reports page keys on it.
+   */
+  ...([
+    ['so_received_via', 'order_through', 'Order Received Via'],
+    ['so_po_date', 'po_date', 'Customer PO Date'],
+    ['so_revised', 'revised_date', 'Revised Production Date'],
+    ['so_payment_terms', 'payment_terms', 'Payment Terms'],
+    ['so_remarks', 'remarks', 'Remarks'],
+  ] as const).map(([key, column, label]): Rule => ({
+    key, level: 'block', tables: ['orders'],
+    check: (d) => (text(d.row[column]) ? null : `${label} is blank.`),
+  })),
+  ...([
+    ['so_inco', 'inco_terms', 'INCO Terms'],
+    ['so_containers', 'container_count', 'Containers'],
+    ['so_port', 'port_of_discharge', 'Destination Port'],
+  ] as const).map(([key, column, label]): Rule => ({
+    key, level: 'block', tables: ['orders'], when: isExport,
+    check: (d) => (text(d.row[column]) ? null : `${label} is blank.`),
+  })),
 ];
 
 /** Every rule this document breaks, blocking ones first. */
@@ -388,22 +430,24 @@ export function evaluate(d: CheckedDoc): Finding[] {
   return out.sort((a, b) => (a.level === b.level ? 0 : a.level === 'block' ? -1 : 1));
 }
 
-const ITEM_TABLE: Record<DocTable, string> = {
+const ITEM_TABLE: Record<CheckedTable, string> = {
   quotations: 'quotation_items',
   proforma_invoices: 'pi_items',
   commercial_invoices: 'invoice_items',
   credit_notes: 'credit_note_items',
+  orders: 'order_items',
 };
 
-const FK: Record<DocTable, string> = {
+const FK: Record<CheckedTable, string> = {
   quotations: 'quotation_id',
   proforma_invoices: 'pi_id',
   commercial_invoices: 'invoice_id',
   credit_notes: 'credit_note_id',
+  orders: 'order_id',
 };
 
 /** Load a document and judge it. Returns an empty list for one that is gone. */
-export function checkDocument(table: DocTable, id: number): Finding[] {
+export function checkDocument(table: CheckedTable, id: number): Finding[] {
   const row = db.prepare(`SELECT * FROM ${table} WHERE id = ?`).get(id) as Record<string, unknown> | undefined;
   if (!row) return [];
   const items = db.prepare(
@@ -422,7 +466,7 @@ export function checkDocument(table: DocTable, id: number): Finding[] {
  * HTTP harness this codebase does not have. **Warnings are not refusals**: only
  * a `block` finding stops anything.
  */
-export function incompleteError(table: DocTable, id: number): string | null {
+export function incompleteError(table: CheckedTable, id: number): string | null {
   const blocking = checkDocument(table, id).filter((f) => f.level === 'block');
   if (!blocking.length) return null;
   return `This ${NOUN[table]} is not finished: ${blocking.map((f) => f.message).join(' ')}`;

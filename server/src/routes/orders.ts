@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { db, transaction } from '../db/connection.js';
+import { checkDocument } from '../services/documentChecks.js';
 import { nextNumber, exportChangeError } from '../services/numbering.js';
 import { computeTotals, round2, type LineItemInput } from '../services/totals.js';
 import { productionByOrder } from '../services/production.js';
@@ -152,6 +153,9 @@ function getFull(id: number, req?: AuthedRequest) {
    * figure instead of three.
    */
   order.advance = orderAdvance(id);
+  // What is still blank, in the words the PDF refuses with — listed on the
+  // form above a quiet button rather than sprung on a click.
+  order.checks = checkDocument('orders', id);
   /*
    * The identified lots made against this order, for the dispatch form's
    * picker — and **absent, not empty, for a caller who may not read them**,

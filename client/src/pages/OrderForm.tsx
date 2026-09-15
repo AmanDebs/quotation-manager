@@ -207,7 +207,13 @@ export default function OrderFormPage() {
           <div className="flex flex-wrap items-center gap-2">
             {!isNew && (
               <>
-                <PdfLink href={`/api/pdf/order/${id}`} guard={pdf}><Button variant="secondary">📄 Order PDF</Button></PdfLink>
+                <PdfLink
+                  href={`/api/pdf/order/${id}`}
+                  guard={pdf}
+                  blocked={(existing!.checks ?? []).filter((f) => f.level === 'block').map((f) => f.message).join(' ') || undefined}
+                >
+                  <Button variant="secondary">📄 Order PDF</Button>
+                </PdfLink>
                 <FollowupButton docType="general" docId={Number(id)} customerId={existing!.customer_id} />
                 {/* The invoice is what follows an order now. Raising a proforma
                     from here ran the chain backwards — the proforma comes
@@ -221,6 +227,16 @@ export default function OrderFormPage() {
         }
       />
 
+      {/* Every field is mandatory bar SPOC and the PO number (2026-09-15),
+          and the order has no approval to hold an unfinished one back — so
+          the PDF is what waits, and the reasons sit here in the server's
+          own words rather than behind a button that fails when pressed. */}
+      {!isNew && (existing!.checks ?? []).some((f) => f.level === 'block') && (
+        <div className="mb-4 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800 ring-1 ring-inset ring-amber-200">
+          <strong>Not finished — the PDF will not print until these are filled in:</strong>{' '}
+          {(existing!.checks ?? []).filter((f) => f.level === 'block').map((f) => f.message).join(' ')}
+        </div>
+      )}
       {!isNew && (
         <div className="mb-4 flex flex-wrap items-center gap-2 text-sm">
           <span className="text-slate-500">Status:</span>
@@ -323,20 +339,20 @@ export default function OrderFormPage() {
                 onChange={(id) => set({ company_id: id ?? undefined })}
               />
             </Field>
-            <Field label="Order Date"><Input type="date" value={draft.date} onChange={(e) => set({ date: e.target.value })} /></Field>
-            <Field label="Order Received Via">
+            <Field label="Order Date *"><Input type="date" value={draft.date} onChange={(e) => set({ date: e.target.value })} /></Field>
+            <Field label="Order Received Via *">
               <Select value={draft.order_through} onChange={(e) => set({ order_through: e.target.value })}>
                 {ORDER_THROUGH.map((o) => <option key={o}>{o}</option>)}
               </Select>
             </Field>
             <Field label="Handled By (SPOC)"><Input value={draft.spoc} onChange={(e) => set({ spoc: e.target.value })} placeholder="Who took this order" /></Field>
             <Field label="Customer's PO Number"><Input value={draft.po_number} onChange={(e) => set({ po_number: e.target.value })} /></Field>
-            <Field label="Customer's PO Date"><Input type="date" value={draft.po_date} onChange={(e) => set({ po_date: e.target.value })} /></Field>
+            <Field label="Customer's PO Date *"><Input type="date" value={draft.po_date} onChange={(e) => set({ po_date: e.target.value })} /></Field>
             {/* Back on 2026-09-15, alone of the production-plan dates the
                 form dropped on 2026-09-07: the Reports page's *Planned for
                 production* sheet is keyed on it, and a column nobody can
                 type into is a sheet nobody can fill. */}
-            <Field label="Revised Production Date"><Input type="date" value={draft.revised_date} onChange={(e) => set({ revised_date: e.target.value })} /></Field>
+            <Field label="Revised Production Date *"><Input type="date" value={draft.revised_date} onChange={(e) => set({ revised_date: e.target.value })} /></Field>
             <Field label="Currency">
               <Select value={draft.currency} onChange={(e) => set({ currency: e.target.value })}>
                 <option value="INR">INR</option><option value="USD">USD</option><option value="EUR">EUR</option>
@@ -349,7 +365,7 @@ export default function OrderFormPage() {
                 <option value="igst">IGST</option>
               </Select>
             </Field>
-            <Field label="Payment Terms" className="sm:col-span-2">
+            <Field label="Payment Terms *" className="sm:col-span-2">
               <PaymentTermsInput
                 isExport={!!draft.is_export}
                 value={draft.payment_terms}
@@ -359,10 +375,10 @@ export default function OrderFormPage() {
             {/* Export-only, as they were in the card these came from. */}
             {!!draft.is_export && (
               <>
-                <Field label="INCO Terms">
+                <Field label="INCO Terms *">
                   <IncoTermsInput isExport={!!draft.is_export} value={draft.inco_terms} onChange={(v) => set({ inco_terms: v })} />
                 </Field>
-                <Field label="Containers"><Input value={draft.container_count} onChange={(e) => set({ container_count: e.target.value })} placeholder="e.g. 2 X 40ft HQ" /></Field>
+                <Field label="Containers *"><Input value={draft.container_count} onChange={(e) => set({ container_count: e.target.value })} placeholder="e.g. 2 X 40ft HQ" /></Field>
                 {/*
                   Named to match the proforma and the invoice, so one word means
                   one thing along the chain and booking an order carries it
@@ -372,7 +388,7 @@ export default function OrderFormPage() {
                   the same question four times on a four-line order. It shows on
                   every line in the Order lines view, which is where it is read.
                 */}
-                <Field label="Destination Port">
+                <Field label="Destination Port *">
                   <Input
                     value={draft.port_of_discharge}
                     onChange={(e) => set({ port_of_discharge: e.target.value })}
@@ -501,7 +517,7 @@ export default function OrderFormPage() {
             * Internal remarks stay: that is where the running commentary on an
             * order goes, and it is read by nobody outside the office.
             */}
-          <Field label="Remarks (internal)">
+          <Field label="Remarks (internal) *">
             <Textarea rows={NOTES_ROWS} value={draft.remarks} onChange={(e) => set({ remarks: e.target.value })} />
           </Field>
         </Card>

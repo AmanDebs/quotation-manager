@@ -382,3 +382,52 @@ describe('the proforma mandatory fields', () => {
     assert.deepEqual(keys(doc('commercial_invoices', { is_export: 1, ...all }), 'block'), []);
   });
 });
+
+describe('the sales order mandatory fields', () => {
+  const finished = { order_through: 'Email', po_date: '2026-09-01', revised_date: '2026-09-25' };
+  const always: [string, string][] = [
+    ['order_through', 'so_received_via'], ['po_date', 'so_po_date'], ['revised_date', 'so_revised'],
+    ['payment_terms', 'so_payment_terms'], ['remarks', 'so_remarks'],
+  ];
+  const exportOnly: [string, string][] = [
+    ['inco_terms', 'so_inco'], ['container_count', 'so_containers'], ['port_of_discharge', 'so_port'],
+  ];
+  test('a finished order blocks nothing, and the two exemptions are not asked', () => {
+    assert.deepEqual(keys(doc('orders', { ...finished, spoc: '', po_number: '' }), 'block'), []);
+    assert.deepEqual(keys(doc('orders', { ...finished, is_export: 1 }), 'block'), []);
+  });
+  test('each blank field blocks the order by name, on either type', () => {
+    for (const [field, key] of always) {
+      assert.deepEqual(keys(doc('orders', { ...finished, [field]: '' }), 'block'), [key], `blank ${field}`);
+      assert.deepEqual(keys(doc('orders', { ...finished, is_export: 1, [field]: '' }), 'block'), [key], `blank ${field} on an export`);
+    }
+  });
+  test('the shipping fields on an export only', () => {
+    for (const [field, key] of exportOnly) {
+      assert.deepEqual(keys(doc('orders', { ...finished, is_export: 1, [field]: '' }), 'block'), [key], `blank ${field}`);
+      assert.deepEqual(keys(doc('orders', { ...finished, is_export: 0, tax_type: 'igst', [field]: '' }), 'block'), [], `a domestic order was asked for ${field}`);
+    }
+  });
+  test('the shared rules apply too: no lines, a line with no quantity, a zero total', () => {
+    assert.deepEqual(keys(doc('orders', finished, []), 'block'), ['items']);
+    assert.deepEqual(keys(doc('orders', finished, [line({ qty: null })]), 'block'), ['quantity']);
+    assert.deepEqual(keys(doc('orders', { ...finished, grand_total: 0 }), 'block'), ['total']);
+  });
+  test('the other documents are not held to the order fields', () => {
+    const all = Object.fromEntries([...always, ...exportOnly].map(([f]) => [f, '']));
+    assert.deepEqual(keys(doc('commercial_invoices', { is_export: 1, ...all }), 'block'), []);
+    assert.deepEqual(keys(doc('quotations', { ...all, inco_terms: 'FOB', payment_terms: '30 days' }), 'block'), []);
+  });
+  test('incompleteError names the order in its own words', () => {
+    const c = makeCustomer();
+    const id = Number((db.prepare(
+      `INSERT INTO orders (number, date, customer_id, company_id, currency, tax_type, status, grand_total)
+       VALUES ('SO/CHK-1', '2026-09-01', ?, 1, 'INR', 'igst', 'pending', 100) RETURNING id`
+    ).get(c) as { id: number }).id);
+    db.prepare("INSERT INTO order_items (order_id, description, qty, unit, unit_price, amount, sort_order) VALUES (?, 'Cap', 10, 'unit', 10, 100, 0)").run(id);
+    const err = incompleteError('orders', id);
+    assert.ok(err && err.startsWith('This sales order is not finished:') && err.includes('Revised Production Date is blank.'), err ?? 'no error');
+    db.prepare("UPDATE orders SET order_through = 'Email', po_date = '2026-09-01', revised_date = '2026-09-20', payment_terms = '30 days', remarks = 'ok' WHERE id = ?").run(id);
+    assert.equal(incompleteError('orders', id), null);
+  });
+});
