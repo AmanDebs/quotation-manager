@@ -1,5 +1,5 @@
 import { db } from '../db/connection.js';
-import { round2 } from './totals.js';
+import { round2, piecesOrdered, isPieceBasis } from './totals.js';
 
 /**
  * What a despatch line may say went out.
@@ -33,7 +33,12 @@ import { round2 } from './totals.js';
  *
  * A line the order states no piece count for is **not** bounded above: a
  * weight-billed line has no `total_pcs`, so there is nothing to compare with
- * and a guessed ceiling would refuse a real lorry.
+ * and a guessed ceiling would refuse a real lorry. The count is
+ * `piecesOrdered`'s — the packing figure, else the billed quantity converted
+ * by its basis — so a line entered as `137.5 per 1000` with no boxes typed is
+ * bounded at 137,500 like any other (until 2026-09-15 it read `total_pcs`
+ * alone and such a line had no ceiling at all, the defect the auto-raised
+ * jobs had).
  *
  * Shaped like `qcBlockError` and `lockError` — a function returning the
  * sentence to refuse with — so the rule is testable without an HTTP harness.
@@ -78,8 +83,8 @@ export function despatchLimitError(
   exceptDespatchId?: number,
 ): string | null {
   const items = db.prepare(
-    'SELECT description, total_pcs, is_charge FROM order_items WHERE order_id = ? ORDER BY sort_order, id'
-  ).all(orderId) as { description: string; total_pcs: number | null; is_charge: number }[];
+    'SELECT description, qty, unit, total_pcs, is_charge FROM order_items WHERE order_id = ? ORDER BY sort_order, id'
+  ).all(orderId) as { description: string; qty: number | null; unit: string; total_pcs: number | null; is_charge: number }[];
   const sent = sentByLine(orderId, exceptDespatchId);
 
   for (const line of lines) {
@@ -96,15 +101,17 @@ export function despatchLimitError(
     const item = items[i];
     // A line the order does not have, or a charge line, or one with no piece
     // count of its own: nothing to measure the figure against.
-    if (!item || item.is_charge || !item.total_pcs) continue;
+    if (!item || item.is_charge) continue;
+    const ordered = item.total_pcs != null || isPieceBasis(item.unit) ? piecesOrdered(item) : 0;
+    if (!ordered) continue;
 
     const already = sent.get(i) ?? 0;
-    const left = Math.max(0, round2(item.total_pcs - already));
+    const left = Math.max(0, round2(ordered - already));
     const ceiling = round2(left * (1 + OVER_TOLERANCE));
     if (qty > ceiling) {
       const name = item.description || `Line ${i + 1}`;
       return `${name}: ${fmt(qty)} pieces is more than this line has left to ship. `
-        + `It was ordered at ${fmt(item.total_pcs)}${already ? `, with ${fmt(already)} already sent` : ''}, `
+        + `It was ordered at ${fmt(ordered)}${already ? `, with ${fmt(already)} already sent` : ''}, `
         + `so at most ${fmt(ceiling)} can go on this trip. `
         + 'Raise the order quantity if more really was made.';
     }

@@ -96,6 +96,19 @@ describe('what a despatch line may say went out', () => {
   });
 });
 
+describe('a line entered by billing quantity, with no packing figures', () => {
+  test('is bounded at its quantity converted by its basis', () => {
+    const o = order(makeCustomer());
+    db.prepare(
+      `INSERT INTO order_items (order_id, description, qty, unit, unit_price, amount, total_pcs, is_charge, sort_order)
+       VALUES (?, 'Seal cap', 137.5, 'per 1000', 1, 137.5, NULL, 0, 0)`
+    ).run(o);
+    assert.equal(despatchLimitError(o, [{ order_line: 0, qty: 137_500 }]), null);
+    const err = despatchLimitError(o, [{ order_line: 0, qty: 200_000 }]);
+    assert.ok(err && err.includes('1,37,500'), err ?? 'no error');
+  });
+});
+
 describe('what deliberately has no ceiling', () => {
   test('a weight-billed line, which states no piece count', () => {
     const o = order(makeCustomer());

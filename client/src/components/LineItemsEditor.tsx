@@ -6,6 +6,7 @@ import { Button, Input, Select, SearchSelect, type SearchOption, TH_CLASS } from
 import { fmtMoney, fmtDate } from '../lib/format';
 import { shrinkImage } from '../lib/image';
 import { unitOptions, productTypeLabel } from '../pages/Products';
+import { PIECES_PER_BILLING_UNIT } from '../lib/pieces';
 
 /**
  * The photo for one line. Clicking the thumbnail replaces it, ✕ clears it.
@@ -71,13 +72,12 @@ function PhotoCell({ value, onChange }: { value: string; onChange: (v: string) =
   );
 }
 
-/**
- * Pieces in one billing unit, mirroring PIECES_PER_BILLING_UNIT in
- * server/src/services/totals.ts. The server is the authority — everything
- * here is a preview of what it will compute on save — but the preview has to
- * agree with it or the subtotal reads zero while the saved document does not.
+/*
+ * `PIECES_PER_BILLING_UNIT` mirrors server/src/services/totals.ts. The server
+ * is the authority — everything here is a preview of what it will compute on
+ * save — but the preview has to agree with it or the subtotal reads zero
+ * while the saved document does not.
  */
-const PIECES_PER_BILLING_UNIT: Record<string, number> = { 'per 1000': 1000, unit: 1 };
 
 /**
  * What a new line is billed on (asked for 2026-09-06).

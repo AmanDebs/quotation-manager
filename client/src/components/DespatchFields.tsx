@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { Order, Despatch, DespatchItem, Location, Transporter, OrderBatch } from '../types';
 import { Input, Textarea, Select, Field, Card, FIELD_GRID, TH_CLASS, CAPTION_CLASS } from './ui';
 import { fmtQty, today } from '../lib/format';
+import { piecesOrdered } from '../lib/pieces';
 
 /**
  * Recording a dispatch: the form's fields and its two prefills.
@@ -55,7 +56,7 @@ return {
   batch_ids: [],
   // Every line, defaulted to what is still unsent.
   items: items.map((it, i) => {
-    const qty = Math.max(0, (it.total_pcs ?? 0) - (it.despatched?.qty ?? 0)) || null;
+    const qty = Math.max(0, (piecesOrdered(it) ?? 0) - (it.despatched?.qty ?? 0)) || null;
     return { order_line: i, description: it.description, qty, packs: boxesFor(qty, it.pcs_per_pack) };
   }),
 };
@@ -236,7 +237,7 @@ export function DespatchFields({
              * A line with no piece count of its own — a weight-billed one — has
              * no ceiling to state, and says nothing rather than guessing.
              */
-            const ordered = line?.total_pcs ?? null;
+            const ordered = line ? piecesOrdered(line) : null;
             // Everything sent on this order *except* what this despatch itself
             // already has on file — the server's own `exceptDespatchId` rule,
             // without which an edit counts a trip against itself.

@@ -4,6 +4,7 @@ import { api } from '../api/client';
 import type { Order, Despatch } from '../types';
 import { Card, EmptyState, TH_CLASS } from './ui';
 import { fmtQty, fmtMoney, fmtDate } from '../lib/format';
+import { piecesOrdered } from '../lib/pieces';
 
 /**
  * Made, sent, billed — three different questions, shown together.
@@ -51,7 +52,7 @@ export default function DispatchTab({ order }: { order: Order }) {
             </thead>
             <tbody>
               {items.map((it, i) => {
-                const ordered = it.total_pcs ?? 0;
+                const ordered = piecesOrdered(it) ?? 0;
                 const sent = it.despatched?.qty ?? 0;
                 const billed = it.qty_dispatched ?? 0;
                 // Billed is in the line's billing unit; sent is pieces. Only
