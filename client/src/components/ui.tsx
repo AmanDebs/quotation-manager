@@ -475,7 +475,11 @@ export const TH_CLASS = `border-b border-slate-200 text-left ${CAPTION_CLASS}`;
 export const FIELD_GRID = 'grid grid-cols-1 gap-x-4 gap-y-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4';
 export const FIELD_GRID_PLAIN = 'grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4';
 
-export function Field({ label, children, className = '' }: { label: string; children: ReactNode; className?: string }) {
+export function Field({ label, children, className = '', required }: {
+  label: string; children: ReactNode; className?: string;
+  /** Defaults to the label's own convention: a trailing `*`. */
+  required?: boolean;
+}) {
   /**
    * A blank field on a read-only document is a label and a dash, and five of
    * them stacked is noise on a page nobody can type into — the blank is still
@@ -484,9 +488,39 @@ export function Field({ label, children, className = '' }: { label: string; chil
    */
   const plain = useReadOnlyFields();
   const hideIfEmpty = plain ? 'has-[[data-empty]]:hidden' : '';
+  /*
+   * A mandatory field that is still blank says so on the box, not only in
+   * the findings strip (asked for 2026-09-15: *"make mandatory fields input
+   * box red or some other indicator"*). The asterisk the label already
+   * carries is the contract; this reads it, watches the control inside, and
+   * marks the wrapper `data-missing` while the value is blank — styled in
+   * `index.css`, so no call site changes. Read from the DOM rather than
+   * threaded as a prop through forty-odd fields, which is how one gets
+   * missed; re-read after every render, since a controlled input's value
+   * lands in the DOM on commit, and on every keystroke in between.
+   */
+  const isRequired = required ?? /\*\s*$/.test(label);
+  const ref = useRef<HTMLLabelElement>(null);
+  const [missing, setMissing] = useState(false);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!isRequired || plain || !el) { setMissing(false); return; }
+    const read = () => {
+      const c = el.querySelector('input, select, textarea') as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | null;
+      setMissing(!!c && String(c.value ?? '').trim() === '');
+    };
+    read();
+    el.addEventListener('input', read);
+    el.addEventListener('change', read);
+    return () => { el.removeEventListener('input', read); el.removeEventListener('change', read); };
+  });
+  const text = isRequired ? label.replace(/\s*\*\s*$/, '') : label;
   return (
-    <label className={`block ${hideIfEmpty} ${className}`}>
-      <span className={`${plain ? 'mb-0' : 'mb-1'} block ${labelClass(plain)}`}>{label}</span>
+    <label ref={ref} className={`block ${hideIfEmpty} ${className}`} data-missing={missing ? '' : undefined}>
+      <span className={`${plain ? 'mb-0' : 'mb-1'} block ${labelClass(plain)}`}>
+        {text}
+        {isRequired && !plain && <span className="ml-0.5 text-red-500" title="Mandatory">*</span>}
+      </span>
       {children}
     </label>
   );

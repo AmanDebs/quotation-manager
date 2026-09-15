@@ -117,3 +117,21 @@ body {
   }
   .nav-scroll { scrollbar-color: rgb(255 255 255 / 0.22) transparent; }
 }
+
+/*
+ * A mandatory field still blank: `Field` in components/ui.tsx marks its
+ * wrapper `data-missing` while the control inside has no value, and this
+ * paints the box. Unlayered on purpose — the inputs carry their border as a
+ * Tailwind utility, and an unlayered rule wins over a layered one whatever
+ * the specificity, which is what lets this sit in one place rather than on
+ * every input. A rose tint, not a hard red: this is a box waiting to be
+ * filled, not an error somebody made.
+ */
+label[data-missing] :is(input, select, textarea) {
+  border-color: rgb(252 165 165);
+  background-color: rgb(255 241 242);
+}
+label[data-missing] :is(input, select, textarea):focus {
+  border-color: rgb(248 113 113);
+  background-color: #fff;
+}
