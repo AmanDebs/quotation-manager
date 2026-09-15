@@ -20,6 +20,8 @@ import HistoryCard from '../components/HistoryCard';
 
 interface Draft {
   number?: string;
+  /** On a new invoice only — a saved one edits its due date through its own PATCH. */
+  due_date?: string;
   customer_id: number | '';
   /** Which group entity is selling. Fixed once the document is numbered. */
   company_id?: number;
@@ -102,6 +104,23 @@ export default function InvoiceFormPage() {
 
   const [draft, setDraft] = useState<Draft>(emptyDraft());
   const [prefilled, setPrefilled] = useState(false);
+  /*
+   * The due date on a saved invoice is held apart from the draft and saved
+   * the moment it is picked, through `PATCH /due-date` (the tracker's route):
+   * through the PUT it would rewrite every line and reset the approval over
+   * a date, and in the draft it would arm the unsaved-changes prompt for an
+   * edit that has already been saved. On a new invoice it rides the create.
+   */
+  const [dueDate, setDueDate] = useState('');
+  useEffect(() => { if (existing) setDueDate(existing.due_date ?? ''); }, [existing]);
+  const saveDue = useMutation({
+    mutationFn: (due_date: string) => api.patch(`/api/invoices/${id}/due-date`, { due_date }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['invoice', String(id)] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+      queryClient.invalidateQueries({ queryKey: ['report'] });
+    },
+  });
 
   useEffect(() => {
     if (existing) {
@@ -359,6 +378,20 @@ export default function InvoiceFormPage() {
               />
             </Field>
             <Field label="Invoice Date"><Input type="date" value={draft.date} onChange={(e) => set({ date: e.target.value })} /></Field>
+            <Field label="Due Date">
+              <Input
+                type="date"
+                value={isNew ? (draft.due_date ?? '') : dueDate}
+                title="When the balance falls due. Leave blank and the shipment's ETA stands in — due on arrival."
+                onChange={(e) => {
+                  if (isNew) set({ due_date: e.target.value });
+                  else { setDueDate(e.target.value); saveDue.mutate(e.target.value); }
+                }}
+              />
+              <span className="mt-0.5 block text-xs text-slate-400">
+                {saveDue.isPending ? 'Saving…' : saveDue.isError ? 'Could not save the due date' : 'Blank = due on arrival (the dispatch ETA)'}
+              </span>
+            </Field>
             <Field label="Currency">
               <Select value={draft.currency} onChange={(e) => set({ currency: e.target.value })}>
                 <option value="INR">INR</option><option value="USD">USD</option><option value="EUR">EUR</option>

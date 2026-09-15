@@ -1020,6 +1020,8 @@ export interface Invoice {
   notify_party_2: string; method_of_despatch: string; lot_no: string; prepared_by: string;
   /** This consignment's own LUT/ARN; falls back to the company default. */
   arn_ref?: string;
+  /** Typed due date; blank means the shipment's ETA stands in (the tracker's rule). */
+  due_date?: string;
   remarks: string; tax_type: TaxType; status: string;
   subtotal: number; tax_total: number; grand_total: number;
   customer_name?: string; pi_number?: string; company_name?: string;

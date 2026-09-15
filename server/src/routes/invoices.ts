@@ -492,6 +492,10 @@ invoicesRouter.post('/', (req: AuthedRequest, res) => {
       JSON.stringify(body.column_config ?? {})
     );
     const id = Number(info.lastInsertRowid);
+    // The due date rides the create alone; on a saved invoice it has its own
+    // PATCH below, so the form need never PUT over a date.
+    const due = String(body.due_date ?? '').trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(due)) db.prepare('UPDATE commercial_invoices SET due_date = ? WHERE id = ?').run(due, id);
     saveItems(id, (body.items ?? []) as LineItemInput[], h.tax_type, h.freight, h.insurance, h.currency);
     syncPackingList(id, req.user!.id, body.packing as PackingInput | undefined);
     return id;
