@@ -188,8 +188,6 @@ export default function WorkOrdersPage() {
                   </th>
                 )}
                 <th className="pb-2 pr-3">Job</th>
-                <th className="pb-2 pr-3">Sales Order</th>
-                <th className="pb-2 pr-3">Customer</th>
                 <th className="pb-2 pr-3">Item</th>
                 <th className="pb-2 pr-3">Plant</th>
                 <th className="pb-2 pr-3">Machine</th>
@@ -200,11 +198,54 @@ export default function WorkOrdersPage() {
               </tr>
             </thead>
             <tbody>
-              {jobs.map((w) => {
+              {jobs.map((w, i) => {
                 // Late means the finish date has passed with work still to do.
                 const late = !!w.planned_end && w.planned_end < todayIso
                   && !['done', 'cancelled'].includes(w.status);
-                return (
+                /*
+                 * Clubbed by sales order (2026-09-15): the server sorts the
+                 * list order by order, and the first job of each opens a
+                 * header row naming the order, the customer and the group's
+                 * figures, with a tick that plans the whole order at once.
+                 * The order and customer columns therefore live on the
+                 * header rather than repeating on every job.
+                 */
+                const first = i === 0 || jobs[i - 1].order_id !== w.order_id;
+                const group = first ? jobs.filter((x) => x.order_id === w.order_id) : [];
+                const groupPlanned = group.reduce((n, x) => n + (x.qty_planned || 0), 0);
+                const groupMade = group.reduce((n, x) => n + (x.progress?.produced ?? 0), 0);
+                const groupPlannable = group.filter(plannable);
+                return [
+                  first && (
+                    <tr key={`order-${w.order_id}`} className="border-t border-slate-200 bg-slate-50">
+                      {mayPlan && (
+                        <td className="py-1.5 pr-2">
+                          {groupPlannable.length > 0 && (
+                            <input
+                              type="checkbox"
+                              title="Tick every job on this sales order that can be planned"
+                              checked={groupPlannable.every((x) => ticked.has(x.id))}
+                              onChange={(e) => setTicked((t) => {
+                                const next = new Set(t);
+                                for (const x of groupPlannable) { if (e.target.checked) next.add(x.id); else next.delete(x.id); }
+                                return next;
+                              })}
+                            />
+                          )}
+                        </td>
+                      )}
+                      <td className="whitespace-nowrap py-1.5 pr-3 font-semibold" colSpan={2}>
+                        <Link to={`/orders/${w.order_id}`} className="text-brand-700 hover:underline">{w.order_number}</Link>
+                        <span className="ml-2 font-normal text-slate-600">{w.customer_name}</span>
+                      </td>
+                      <td className="py-1.5 pr-3 text-xs text-slate-500" colSpan={3}>
+                        {group.length} job{group.length === 1 ? '' : 's'}
+                      </td>
+                      <td className="py-1.5 pr-3 text-right text-xs tabular-nums text-slate-500">{fmtQty(groupPlanned)}</td>
+                      <td className="py-1.5 pr-3 text-right text-xs tabular-nums text-slate-500">{fmtQty(groupMade)}</td>
+                      <td />
+                    </tr>
+                  ),
                   <tr key={w.id} className={`border-b border-slate-100 last:border-0 hover:bg-slate-50 ${ticked.has(w.id) ? 'bg-brand-50' : ''}`}>
                     {mayPlan && (
                       <td className="py-2 pr-2">
@@ -217,13 +258,9 @@ export default function WorkOrdersPage() {
                       </td>
                     )}
                     {/* A document number is one word; split across two lines it reads as two. */}
-                    <td className="whitespace-nowrap py-2 pr-3 font-medium">
+                    <td className="whitespace-nowrap py-2 pl-4 pr-3 font-medium">
                       <Link to={`/work-orders/${w.id}`} className="text-brand-600 hover:underline">{w.number}</Link>
                     </td>
-                    <td className="whitespace-nowrap py-2 pr-3">
-                      <Link to={`/orders/${w.order_id}`} className="text-brand-600 hover:underline">{w.order_number}</Link>
-                    </td>
-                    <td className="py-2 pr-3">{w.customer_name}</td>
                     <td className="py-2 pr-3">{w.description || w.product_name || '—'}</td>
                     <td className="py-2 pr-3 text-xs text-slate-500">{w.location_name || '—'}</td>
                     <td className="py-2 pr-3 text-xs text-slate-500">{w.machine_name || '—'}</td>
@@ -252,8 +289,8 @@ export default function WorkOrdersPage() {
                         {workOrderStatusLabel(w.status)}
                       </span>
                     </td>
-                  </tr>
-                );
+                  </tr>,
+                ];
               })}
             </tbody>
           </table>

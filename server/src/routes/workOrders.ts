@@ -152,7 +152,11 @@ workOrdersRouter.get('/', requirePermission('work_order'), (req: AuthedRequest, 
   const sql = `${listSql} ${where.length ? `WHERE ${where.join(' AND ')}` : ''}`;
   const body = listBody<Record<string, unknown>>(req.query, {
     sql,
-    order: "ORDER BY CASE WHEN w.planned_start = '' THEN 1 ELSE 0 END, w.planned_start, w.id DESC",
+    // Clubbed by sales order (2026-09-15, at the client's word): the newest
+    // order first, its jobs in line order under it. A total ordering, so an
+    // order's jobs never split across a page boundary by chance — only by
+    // the page being full.
+    order: 'ORDER BY o.date DESC, w.order_id DESC, w.order_line, w.id',
     params,
   }, (rows) => {
     const progress = progressForMany(
