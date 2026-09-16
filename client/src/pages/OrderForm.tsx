@@ -340,7 +340,7 @@ export default function OrderFormPage() {
               />
             </Field>
             <Field label="Order Date *"><Input type="date" value={draft.date} onChange={(e) => set({ date: e.target.value })} /></Field>
-            <Field label="Order Received Via *">
+            <Field label="Order Received Via">
               <Select value={draft.order_through} onChange={(e) => set({ order_through: e.target.value })}>
                 {ORDER_THROUGH.map((o) => <option key={o}>{o}</option>)}
               </Select>
