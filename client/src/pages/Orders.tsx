@@ -333,6 +333,13 @@ function LinesTable({ lines, pager }: {
   // A domestic book has no discharge port on any row, and a column that is
   // empty on every line for ever is worse than no column.
   const anyPort = lines.some((l) => l.port_of_discharge);
+  // Which order each row belongs to, counted from the top of the page, so
+  // alternate orders can be tinted.
+  const groupIndex = lines.reduce<number[]>((acc, l, i) => {
+    acc.push(i === 0 ? 0 : acc[i - 1] + (lines[i - 1].order_id === l.order_id ? 0 : 1));
+    return acc;
+  }, []);
+  const dash = <span className="text-slate-300">—</span>;
 
   return (
     <Card className="overflow-x-auto">
@@ -369,59 +376,68 @@ function LinesTable({ lines, pager }: {
             <tbody>
               {lines.map((l, i) => {
                 // The order number is printed once per order and dimmed on the
-                // rows below it, so the eye groups them the way the sheet does.
+                // rows below it, so the eye groups them the way the sheet does;
+                // every second order is tinted so a three-line order reads as
+                // one block rather than three rows that happen to touch.
                 const repeat = i > 0 && lines[i - 1].order_id === l.order_id;
+                const group = groupIndex[i];
+                const tint = group % 2 === 1 ? 'bg-slate-50/70' : '';
                 // Overdue is judged against the date that stands — the revised
                 // one where set, else the original — and marked on that column.
                 const due = l.revised_date || l.promised_date;
                 const overdue = !!due && due < t && l.state !== 'shipped';
+                const sent = Math.max(l.sent, l.billed);
+                const balance = l.ordered ? Math.max(0, l.ordered - sent) : null;
                 return (
                   <tr
                     key={`${l.order_id}-${l.order_line}`}
-                    className={`cursor-pointer border-slate-100 hover:bg-slate-50 ${repeat ? '' : 'border-t'}`}
+                    className={`cursor-pointer hover:bg-brand-50/60 ${tint} ${repeat ? '' : 'border-t border-slate-200'}`}
                     onClick={() => navigate(`/orders/${l.order_id}`)}
                   >
-                    <td className="py-1.5 pr-3 font-medium">
+                    {/* A document number is one word; split across two lines it reads as two. */}
+                    <td className="whitespace-nowrap py-2 pr-3 font-medium">
                       {repeat ? (
-                        <span className="text-slate-300">↳</span>
+                        <span className="pl-1 text-slate-300">↳</span>
                       ) : (
-                        <Link to={`/orders/${l.order_id}`} className="text-brand-600" onClick={(e) => e.stopPropagation()}>
+                        <Link to={`/orders/${l.order_id}`} className="text-brand-600 hover:underline" onClick={(e) => e.stopPropagation()}>
                           {l.order_number}
                         </Link>
                       )}
                     </td>
-                    <td className={`whitespace-nowrap py-1.5 pr-3 ${repeat ? 'text-slate-300' : ''}`}>
+                    <td className="whitespace-nowrap py-2 pr-3 text-slate-600">
                       {repeat ? '' : fmtDate(l.date)}
                     </td>
-                    <td className={`py-1.5 pr-3 ${repeat ? 'text-slate-300' : ''}`}>
+                    {/* One line, clipped, with the whole name on hover — a
+                        three-line customer name made every row three lines tall. */}
+                    <td className="max-w-[14rem] truncate py-2 pr-3" title={repeat ? undefined : l.customer_name}>
                       {repeat ? '' : l.customer_name}
                     </td>
                     {anyPort && (
-                      <td className={`py-1.5 pr-3 ${repeat ? 'text-slate-300' : 'text-slate-500'}`}>
-                        {repeat ? '' : l.port_of_discharge || '—'}
+                      <td className="whitespace-nowrap py-2 pr-3 text-slate-500">
+                        {repeat ? '' : l.port_of_discharge || dash}
                       </td>
                     )}
-                    <td className="py-1.5 pr-3">{l.description || '—'}</td>
-                    <td className="py-1.5 pr-3 text-slate-500">{l.color || '—'}</td>
-                    <td className="py-1.5 pr-3 text-right tabular-nums">{l.ordered ? fmtQty(l.ordered) : '—'}</td>
-                    <td className="py-1.5 pr-3 text-right tabular-nums text-slate-500">
-                      {l.sent || l.billed ? fmtQty(Math.max(l.sent, l.billed)) : '—'}
+                    <td className="max-w-[22rem] py-2 pr-3" title={l.description}>{l.description || dash}</td>
+                    <td className="whitespace-nowrap py-2 pr-3 text-slate-500">{l.color || dash}</td>
+                    <td className="py-2 pr-3 text-right tabular-nums">{l.ordered ? fmtQty(l.ordered) : dash}</td>
+                    <td className="py-2 pr-3 text-right tabular-nums text-slate-500">
+                      {sent ? fmtQty(sent) : dash}
                     </td>
-                    <td className="py-1.5 pr-3 text-right tabular-nums">
-                      {l.ordered ? fmtQty(Math.max(0, l.ordered - Math.max(l.sent, l.billed))) : '—'}
+                    <td className={`py-2 pr-3 text-right tabular-nums ${balance === 0 ? 'text-slate-400' : 'font-medium'}`}>
+                      {balance == null ? dash : fmtQty(balance)}
                     </td>
-                    <td className={`whitespace-nowrap py-1.5 pr-3 ${overdue && !l.revised_date ? 'font-semibold text-red-600' : ''}`}>
-                      {l.promised_date ? fmtDate(l.promised_date) : '—'}{overdue && !l.revised_date && ' ⚠'}
+                    <td className={`whitespace-nowrap py-2 pr-3 ${overdue && !l.revised_date ? 'font-semibold text-red-600' : 'text-slate-600'}`}>
+                      {l.promised_date ? fmtDate(l.promised_date) : dash}{overdue && !l.revised_date && ' ⚠'}
                     </td>
-                    <td className={`whitespace-nowrap py-1.5 pr-3 ${overdue && l.revised_date ? 'font-semibold text-red-600' : ''}`}>
-                      {l.revised_date ? fmtDate(l.revised_date) : '—'}{overdue && !!l.revised_date && ' ⚠'}
+                    <td className={`whitespace-nowrap py-2 pr-3 ${overdue && l.revised_date ? 'font-semibold text-red-600' : 'text-slate-600'}`}>
+                      {l.revised_date ? fmtDate(l.revised_date) : dash}{overdue && !!l.revised_date && ' ⚠'}
                     </td>
                     {/* A property of the order, not the line — printed once per
                         order like the number and the date above it. */}
-                    <td className={`whitespace-nowrap py-1.5 pr-3 text-slate-500 ${repeat ? 'text-slate-300' : ''}`}>
-                      {repeat ? '' : l.created_by_name || '—'}
+                    <td className="whitespace-nowrap py-2 pr-3 text-slate-500">
+                      {repeat ? '' : l.created_by_name || dash}
                     </td>
-                    <td className="py-1.5 pr-3">
+                    <td className="py-2 pr-3">
                       <span className={`inline-block whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset ${LINE_STATE[l.state].className}`}>
                         {LINE_STATE[l.state].label}
                       </span>
@@ -429,7 +445,7 @@ function LinesTable({ lines, pager }: {
                     {/* Once per order, beside its first line: a trip is a fact
                         about the order, carrying every line at once. */}
                     {canDispatch && (
-                      <td className="py-1.5 text-right" onClick={(e) => e.stopPropagation()}>
+                      <td className="py-2 text-right" onClick={(e) => e.stopPropagation()}>
                         {!repeat && !CLOSED.has(l.order_status) && (
                           <Button variant="secondary" className="whitespace-nowrap px-2 py-0.5 text-xs" onClick={() => navigate(recordDispatchUrl(l.order_id))}>Record dispatch</Button>
                         )}
