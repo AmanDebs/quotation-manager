@@ -54,10 +54,14 @@ return {
   // numbers on a challan nobody checked — the rule the box counts follow in
   // reverse, where a guess is safe because the piece count is beside it.
   batch_ids: [],
-  // Every line, defaulted to what is still unsent.
-  items: items.map((it, i) => {
+  // Every goods line, defaulted to what is still unsent. A charge line —
+  // freight, insurance — never goes on a lorry and is not offered (2026-09-16,
+  // at the client's word); positions are kept, since `order_line` is the
+  // index over *all* lines, charges included.
+  items: items.flatMap((it, i) => {
+    if (it.is_charge) return [];
     const qty = Math.max(0, (piecesOrdered(it) ?? 0) - (it.despatched?.qty ?? 0)) || null;
-    return { order_line: i, description: it.description, qty, packs: boxesFor(qty, it.pcs_per_pack) };
+    return [{ order_line: i, description: it.description, qty, packs: boxesFor(qty, it.pcs_per_pack) }];
   }),
 };
 }
@@ -87,13 +91,15 @@ return {
 export function editTrip(order: Order, d: Despatch): Partial<Despatch> {
 const items = order.items ?? [];
   const saved = new Map((d.items ?? []).map((it) => [it.order_line, it]));
-  const onOrder: DespatchItem[] = items.map((it, i) => ({
+  // A charge line is left out, as on a new trip — unless this trip already
+  // carries a figure against it, which is a record and stays visible.
+  const onOrder: DespatchItem[] = items.flatMap((it, i) => (it.is_charge && !saved.has(i) ? [] : [{
     order_line: i,
     description: it.description,
     qty: saved.get(i)?.qty ?? null,
     packs: saved.get(i)?.packs ?? null,
     notes: saved.get(i)?.notes ?? '',
-  }));
+  }]));
   const orphans = (d.items ?? []).filter((it) => it.order_line >= items.length);
   return { ...d, items: [...onOrder, ...orphans], batch_ids: (d.batches ?? []).map((b) => b.id) };
 }
