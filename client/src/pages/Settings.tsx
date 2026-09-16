@@ -2,8 +2,10 @@ import { useEffect, useState, type ChangeEvent } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Company, BankAccount, NotePreset } from '../types';
-import { Button, Input, Textarea, Field, Card, PageHeader, ErrorText, TH_CLASS } from '../components/ui';
+import { useNavigate } from 'react-router-dom';
+import { Button, Input, Textarea, Field, Card, PageHeader, ErrorText, Modal, TH_CLASS } from '../components/ui';
 import { shrinkImage } from '../lib/image';
+import { useUser } from '../App';
 
 /**
  * The logo and signature print on every document, so they go through the same
@@ -288,6 +290,86 @@ function SequenceCard({ companyId }: { companyId: number }) {
   );
 }
 
+/**
+ * Starting the book again (2026-09-16). Every transaction goes — documents,
+ * jobs, dispatches, payments, the log — and every master stays; numbering
+ * restarts at 001. Super Admin only, and the word RESET has to be typed:
+ * there is no undo but the snapshot the server takes first. The same act as
+ * `npm run reset-book`, offered here because a shell is one step too many.
+ */
+const RESET_LABELS: Record<string, string> = {
+  enquiries: 'enquiries', followups: 'follow-ups', quotations: 'quotations', proforma_invoices: 'proforma invoices',
+  orders: 'sales orders', commercial_invoices: 'commercial invoices', packing_lists: 'packing lists', credit_notes: 'credit notes',
+  payments: 'payments', work_orders: 'work orders', production_entries: 'production entries', batches: 'batches',
+  qc_checks: 'QC checks', despatches: 'dispatches', purchase_orders: 'purchase orders', material_moves: 'stock movements',
+  fg_adjustments: 'finished-goods counts', audit_log: 'activity entries',
+};
+function ResetBookCard() {
+  const user = useUser();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [typed, setTyped] = useState('');
+  const { data } = useQuery({
+    queryKey: ['reset-book-counts'],
+    queryFn: () => api.get<{ cleared: Record<string, number>; kept: Record<string, number> }>('/api/backup/reset-book'),
+    enabled: open,
+  });
+  const reset = useMutation({
+    mutationFn: () => api.post<{ ok: boolean; snapshot: string }>('/api/backup/reset-book', { confirm: typed }),
+    onSuccess: () => {
+      // Nothing cached is true any more.
+      queryClient.clear();
+      setOpen(false);
+      navigate('/');
+    },
+  });
+  if (user.team_role !== 'super_admin') return null;
+  const rows = Object.entries(data?.cleared ?? {}).filter(([k, n]) => n > 0 && RESET_LABELS[k]);
+  const total = Object.values(data?.cleared ?? {}).reduce((a, b) => a + b, 0);
+  return (
+    <Card
+      title="Reset the Book"
+      actions={<Button variant="danger" onClick={() => { setTyped(''); setOpen(true); }}>Reset the book…</Button>}
+    >
+      <p className="text-sm text-slate-500">
+        Empties every quotation, proforma, sales order, invoice, dispatch, work order, payment and log entry, and starts
+        every number series again at 001. Customers, products, masters, companies and accounts stay. A backup snapshot is
+        taken first; it is the only way back.
+      </p>
+      {open && (
+        <Modal title="Reset the book?" onClose={() => setOpen(false)}>
+          {data ? (
+            <>
+              <p className="text-sm text-slate-700">This will permanently delete:</p>
+              <ul className="mt-2 grid grid-cols-1 gap-x-6 gap-y-1 text-sm sm:grid-cols-2">
+                {rows.map(([k, n]) => (
+                  <li key={k} className="flex justify-between"><span className="text-slate-600">{RESET_LABELS[k]}</span><span className="tabular-nums font-medium">{n.toLocaleString('en-IN')}</span></li>
+                ))}
+                {rows.length === 0 && <li className="text-slate-500">Nothing — the book is already empty.</li>}
+              </ul>
+              <p className="mt-3 text-xs text-slate-500">
+                Kept: {data.kept.customers} customers, {data.kept.products} products, {data.kept.users} accounts, the companies and every factory master.
+                A snapshot is written to the server's backups folder first — download a backup now as well if you want one in hand.
+              </p>
+              <Field label="Type RESET to confirm" className="mt-4">
+                <Input value={typed} onChange={(e) => setTyped(e.target.value)} placeholder="RESET" autoFocus />
+              </Field>
+              {reset.isError && <ErrorText error={reset.error} />}
+              <div className="mt-4 flex justify-end gap-2">
+                <Button variant="secondary" onClick={() => setOpen(false)}>Cancel</Button>
+                <Button variant="danger" disabled={typed !== 'RESET' || reset.isPending || total === 0} onClick={() => reset.mutate()}>
+                  {reset.isPending ? 'Resetting…' : 'Delete everything and start again'}
+                </Button>
+              </div>
+            </>
+          ) : <p className="text-sm text-slate-500">Counting…</p>}
+        </Modal>
+      )}
+    </Card>
+  );
+}
+
 export default function SettingsPage() {
   const queryClient = useQueryClient();
   const { data: companies = [] } = useQuery({
@@ -492,6 +574,7 @@ export default function SettingsPage() {
         </Card>
 
         <BackupCard />
+        <ResetBookCard />
 
         <Card
           title="Note & Term Presets"
