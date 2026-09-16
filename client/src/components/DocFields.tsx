@@ -329,6 +329,35 @@ export function ContainersInput({
   );
 }
 
+/**
+ * Where an export leaves India, in the client's own list (2026-09-16:
+ * *"Nhava Sheva Port, Kolkata Port, Haldia Port, Any port in India"*). The
+ * last is a real answer on a proforma — the port is fixed when the booking
+ * is made. Free text behind the list, as every suggest field here is.
+ */
+export const PORTS_OF_LOADING: Suggestion[] = ['Nhava Sheva Port', 'Kolkata Port', 'Haldia Port', 'Any port in India']
+  .map((s) => ({ value: s, label: s }));
+
+/** The Port of Loading field, offered from `PORTS_OF_LOADING`. */
+export function PortOfLoadingInput({
+  value, onChange, disabled,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <SuggestInput
+      options={PORTS_OF_LOADING}
+      value={value}
+      onChange={onChange}
+      disabled={disabled}
+      label="Show ports of loading"
+      placeholder="e.g. Nhava Sheva Port, or type your own"
+    />
+  );
+}
+
 /** How this document is to be paid, offered from the list its type is sold on. */
 export function PaymentTermsInput({
   value, onChange, disabled, isExport, placeholder,

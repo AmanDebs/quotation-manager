@@ -7,7 +7,7 @@ import type { Invoice, Customer, LineItem, TaxType, Settings, ColumnConfig, Pack
 import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, StatusBadge, SettledDocumentType, FIELD_GRID, TH_CLASS } from '../components/ui';
 import { PdfLink } from '../components/PdfLink';
 import CompanySelect from '../components/CompanySelect';
-import { DocNumber, IncoTermsInput, PaymentTermsInput, HeaderCharges, ShipToFields } from '../components/DocFields';
+import { DocNumber, IncoTermsInput, PaymentTermsInput, PortOfLoadingInput, HeaderCharges, ShipToFields } from '../components/DocFields';
 import LineItemsEditor from '../components/LineItemsEditor';
 import FollowupButton from '../components/FollowupButton';
 import PaymentsCard from '../components/PaymentsCard';
@@ -471,7 +471,7 @@ export default function InvoiceFormPage() {
           {!!draft.is_export && (
             <div className={`${FIELD_GRID} mb-3`}>
               <Field label="Country of Origin"><Input value={draft.country_of_origin} onChange={(e) => set({ country_of_origin: e.target.value })} /></Field>
-              <Field label="Port of Loading"><Input value={draft.port_of_loading} onChange={(e) => set({ port_of_loading: e.target.value })} /></Field>
+              <Field label="Port of Loading"><PortOfLoadingInput value={draft.port_of_loading} onChange={(v) => set({ port_of_loading: v })} /></Field>
               <Field label="Port of Discharge"><Input value={draft.port_of_discharge} onChange={(e) => set({ port_of_discharge: e.target.value })} /></Field>
               <Field label="Final Destination"><Input value={draft.final_destination} onChange={(e) => set({ final_destination: e.target.value })} /></Field>
             </div>
