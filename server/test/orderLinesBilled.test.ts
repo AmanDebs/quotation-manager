@@ -37,15 +37,23 @@ describe('billed on an order line is in pieces', () => {
 
   const lines = orderLines({}).filter((l) => l.order_id === orderId).sort((a, b) => a.order_line - b.order_line);
 
-  test('a per-1000 line billed in full reads fully shipped, not 0.1%', () => {
+  test('a per-1000 line billed in full reads fully billed, not 0.1%', () => {
     assert.equal(lines[0].ordered, 3245000);
     assert.equal(lines[0].billed, 3245000);
-    assert.equal(lines[0].state, 'shipped');
   });
   test('a stated piece count on the invoice line is what counts', () => {
     assert.equal(lines[1].ordered, 100000);
     assert.equal(lines[1].billed, 40000);
-    assert.equal(lines[1].state, 'part_shipped');
+  });
+  test('an invoice alone does not make a line shipped; the dispatch record does', () => {
+    assert.equal(lines[0].state, 'not_started');
+    assert.equal(lines[1].state, 'not_started');
+    const loc = Number((db.prepare("INSERT INTO locations (name) VALUES ('Plant') RETURNING id").get() as { id: number }).id);
+    const trip = Number((db.prepare("INSERT INTO despatches (order_id, location_id, date) VALUES (?, ?, '2026-09-10') RETURNING id").get(orderId, loc) as { id: number }).id);
+    db.prepare('INSERT INTO despatch_items (despatch_id, order_line, qty) VALUES (?, 0, 3245000), (?, 1, 40000)').run(trip, trip);
+    const after = orderLines({}).filter((l) => l.order_id === orderId).sort((a, b) => a.order_line - b.order_line);
+    assert.equal(after[0].state, 'shipped');
+    assert.equal(after[1].state, 'part_shipped');
   });
   test('a weight-billed line stays in its own unit', () => {
     assert.equal(lines[2].ordered, 500);

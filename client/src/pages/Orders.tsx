@@ -369,8 +369,8 @@ function LinesTable({ lines, pager }: {
                 <th className="pb-2 pr-3">Colour</th>
                 <th className="pb-2 pr-3 text-right">Qty</th>
                 <th className="pb-2 pr-3 text-right">Sent</th>
-                {/* What is still to go: ordered less what has gone, the way
-                    the Sent column reads it (2026-09-16, at the client's word). */}
+                {/* What is still to go: ordered less what has gone on a lorry
+                    (2026-09-16, at the client's word). */}
                 <th className="pb-2 pr-3 text-right">Balance</th>
                 {/* The order's two production dates (2026-09-15, at the
                     client's word, in place of the one Promised column): the
@@ -395,7 +395,8 @@ function LinesTable({ lines, pager }: {
                 // one where set, else the original — and marked on that column.
                 const due = l.revised_date || l.promised_date;
                 const overdue = !!due && due < t && l.state !== 'shipped';
-                const sent = Math.max(l.sent, l.billed);
+                // The dispatch record alone — an invoice is not a lorry (2026-09-16).
+                const sent = l.sent;
                 const balance = l.ordered ? Math.max(0, l.ordered - sent) : null;
                 return (
                   <tr

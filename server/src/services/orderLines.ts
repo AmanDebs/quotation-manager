@@ -184,8 +184,18 @@ export function orderSearchClause(q: string | undefined, itemAlias?: string): { 
   };
 }
 
-function stateOf(ordered: number, made: number, sent: number, billed: number): LineState {
-  const out = Math.max(sent, billed);
+/**
+ * Shipped means the dispatch record says so, and nothing else (2026-09-16,
+ * the client having raised an invoice and watched an unsent line read
+ * *Shipped*). Until the dispatch register existed the invoice walk was the
+ * only record of goods leaving, so a billed line counted as sent; on this
+ * desk the invoice regularly goes out before the lorry, so that reading
+ * called the paperwork a shipment. `billed` still rides the row — the order
+ * book's Billed column and the ladder's *Completed* read it — but it no
+ * longer stands in for the lorry.
+ */
+function stateOf(ordered: number, made: number, sent: number): LineState {
+  const out = sent;
   if (ordered > 0 && out >= ordered) return 'shipped';
   if (out > 0) return 'part_shipped';
   if (ordered > 0 && made >= ordered) return 'made';
@@ -233,7 +243,7 @@ export function orderLines(f: Filters = {}, page?: { limit: number; offset: numb
     made: round2(r.made),
     sent: round2(r.sent),
     billed: round2(r.billed),
-    state: stateOf(r.ordered, r.made, Number(r.sent), Number(r.billed)),
+    state: stateOf(r.ordered, r.made, Number(r.sent)),
   }));
 }
 
@@ -304,7 +314,8 @@ export function productDemand(f: Filters = {}): ProductDemand[] {
       groups.set(key, g);
     }
 
-    const out = Math.max(line.sent, line.billed);
+    // The dispatch record, as `stateOf` reads it — not the invoice.
+    const out = line.sent;
     g.ordered = round2(g.ordered + line.ordered);
     g.made = round2(g.made + line.made);
     g.shipped = round2(g.shipped + out);
