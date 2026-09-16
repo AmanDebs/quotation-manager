@@ -929,6 +929,10 @@ export interface MaterialSchedule {
   rows: {
     material_id: number; material_name: string; unit: string; total: number;
     by_date: Record<string, number>; unscheduled: number;
+    jobs: {
+      work_order_id: number; number: string; product_name: string | null; customer_name: string;
+      order_id: number; order_number: string; day: string; qty: number; pieces: number;
+    }[];
   }[];
   uncosted: { id: number; number: string; description: string }[];
   has_unscheduled: boolean;

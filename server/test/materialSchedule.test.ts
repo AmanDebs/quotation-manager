@@ -83,6 +83,26 @@ describe('the sheet', () => {
     assert.ok(s.uncosted.some((u) => u.id === j));
   });
 
+  test('a row carries the jobs behind it — product, customer, order — and they add up to it', () => {
+    const resin = makeMaterial();
+    const p = product(resin, 100);
+    const a = job(p, 10000, '2026-09-15');
+    shift(a, 4000);                                // 6,000 left → 600 kg
+    const b = job(p, 2000, '');                    // 200 kg, unscheduled
+    const r = rowFor(materialSchedule(), resin);
+    assert.equal(r.jobs.length, 2);
+    const ja = r.jobs.find((j) => j.work_order_id === a)!;
+    const jb = r.jobs.find((j) => j.work_order_id === b)!;
+    assert.equal(ja.qty, 600); assert.equal(ja.pieces, 6000); assert.equal(ja.day, '2026-09-15');
+    assert.equal(jb.qty, 200); assert.equal(jb.pieces, 2000); assert.equal(jb.day, '');
+    assert.equal(ja.qty + jb.qty, r.total);
+    const wo = db.prepare('SELECT w.number, p.name AS product, c.name AS customer, o.number AS order_number FROM work_orders w JOIN products p ON p.id = w.product_id JOIN orders o ON o.id = w.order_id JOIN customers c ON c.id = o.customer_id WHERE w.id = ?').get(a) as { number: string; product: string; customer: string; order_number: string };
+    assert.equal(ja.number, wo.number);
+    assert.equal(ja.product_name, wo.product);
+    assert.equal(ja.customer_name, wo.customer);
+    assert.equal(ja.order_number, wo.order_number);
+  });
+
   test('completed and cancelled jobs, and a plant filter', () => {
     const resin = makeMaterial();
     const p = product(resin, 100);
