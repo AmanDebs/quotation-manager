@@ -269,6 +269,38 @@ export function IncoTermsInput({
   );
 }
 
+/**
+ * When the goods will be ready, counted from the moment the deal is firm
+ * (the client's own wording, 2026-09-16: *"Within N weeks from advance
+ * receipt or order confirmation"*, six of them). Two to seven weeks, which
+ * covers what this catalogue is quoted at; the box stays free text for the
+ * rare longer or split-delivery promise, the INCO field's rule.
+ */
+export const DELIVERY_TIMELINES: Suggestion[] = [2, 3, 4, 5, 6, 7].map((n) => {
+  const s = `Within ${n} weeks from advance receipt or order confirmation`;
+  return { value: s, label: s };
+});
+
+/** The quotation's delivery timeline, offered from `DELIVERY_TIMELINES`. */
+export function DeliveryTimelineInput({
+  value, onChange, disabled,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <SuggestInput
+      options={DELIVERY_TIMELINES}
+      value={value}
+      onChange={onChange}
+      disabled={disabled}
+      label="Show delivery timelines"
+      placeholder="e.g. Within 4 weeks from advance receipt, or type your own"
+    />
+  );
+}
+
 /** How this document is to be paid, offered from the list its type is sold on. */
 export function PaymentTermsInput({
   value, onChange, disabled, isExport, placeholder,
