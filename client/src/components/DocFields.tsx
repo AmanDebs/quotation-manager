@@ -301,6 +301,34 @@ export function DeliveryTimelineInput({
   );
 }
 
+/**
+ * The loads an export is quoted in, in the form the client writes them
+ * (2026-09-16: *"1 X 40FT HC, 2 X 40FT HC, 1 X 20FT"*). Free text behind the
+ * list, since a five-container order is real and rare.
+ */
+export const CONTAINER_LOADS: Suggestion[] = ['1 X 40FT HC', '2 X 40FT HC', '1 X 20FT']
+  .map((s) => ({ value: s, label: s }));
+
+/** The Containers field, offered from `CONTAINER_LOADS`. */
+export function ContainersInput({
+  value, onChange, disabled,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <SuggestInput
+      options={CONTAINER_LOADS}
+      value={value}
+      onChange={onChange}
+      disabled={disabled}
+      label="Show container loads"
+      placeholder="e.g. 1 X 40FT HC, or type your own"
+    />
+  );
+}
+
 /** How this document is to be paid, offered from the list its type is sold on. */
 export function PaymentTermsInput({
   value, onChange, disabled, isExport, placeholder,

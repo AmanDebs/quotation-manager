@@ -6,7 +6,7 @@ import type { Quotation, Customer, LineItem, TaxType, ColumnConfig } from '../ty
 import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, StatusBadge, ReadOnlyFields, labelClass, FIELD_GRID, FIELD_GRID_PLAIN, SettledDocumentType, NOTES_ROWS } from '../components/ui';
 import { PdfLink } from '../components/PdfLink';
 import CompanySelect from '../components/CompanySelect';
-import { DocNumber, IncoTermsInput, PaymentTermsInput, DeliveryTimelineInput, HeaderCharges } from '../components/DocFields';
+import { DocNumber, IncoTermsInput, PaymentTermsInput, DeliveryTimelineInput, ContainersInput, HeaderCharges } from '../components/DocFields';
 import LineItemsEditor from '../components/LineItemsEditor';
 import FollowupButton from '../components/FollowupButton';
 import ApprovalStrip from '../components/ApprovalStrip';
@@ -465,7 +465,7 @@ export default function QuotationFormPage() {
               * when there is a value, so an empty field was already silent.
               */}
             {(!!draft.is_export || !!draft.container_count) && (
-              <Field label="Containers *"><Input disabled={readOnly} value={draft.container_count} onChange={(e) => set({ container_count: e.target.value })} placeholder="e.g. 5 X 40ft HQ" /></Field>
+              <Field label="Containers *"><ContainersInput disabled={readOnly} value={draft.container_count} onChange={(v) => set({ container_count: v })} /></Field>
             )}
             <div className={`col-span-full ${readOnly ? 'has-[[data-empty]]:hidden' : ''}`}>
               <span className={`mb-1 block ${labelClass(readOnly)}`}>Notes (printed on quotation) *</span>

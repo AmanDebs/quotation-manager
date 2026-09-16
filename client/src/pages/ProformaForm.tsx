@@ -6,7 +6,7 @@ import type { Proforma, Customer, LineItem, TaxType, Settings, ColumnConfig } fr
 import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, StatusBadge, SettledDocumentType, ReadOnlyFields, FIELD_GRID, FIELD_GRID_PLAIN, NOTES_ROWS } from '../components/ui';
 import { PdfLink } from '../components/PdfLink';
 import CompanySelect from '../components/CompanySelect';
-import { DocNumber, IncoTermsInput, PaymentTermsInput, HeaderCharges, ShipToFields } from '../components/DocFields';
+import { DocNumber, IncoTermsInput, PaymentTermsInput, ContainersInput, HeaderCharges, ShipToFields } from '../components/DocFields';
 import LineItemsEditor from '../components/LineItemsEditor';
 import ReadOnlyItems from '../components/ReadOnlyItems';
 import ContainerFitment from '../components/ContainerFitment';
@@ -508,7 +508,7 @@ export default function ProformaFormPage() {
               <Field label="Port of Loading *"><Input disabled={readOnly} value={draft.port_of_loading} onChange={(e) => set({ port_of_loading: e.target.value })} placeholder="e.g. Nhava Sheva" /></Field>
               <Field label="Port of Discharge *"><Input disabled={readOnly} value={draft.port_of_discharge} onChange={(e) => set({ port_of_discharge: e.target.value })} /></Field>
               <Field label="Final Destination *"><Input disabled={readOnly} value={draft.final_destination} onChange={(e) => set({ final_destination: e.target.value })} /></Field>
-              <Field label="Number of Containers *"><Input disabled={readOnly} value={draft.container_count} onChange={(e) => set({ container_count: e.target.value })} placeholder="e.g. 2 x 40ft HC" /></Field>
+              <Field label="Number of Containers *"><ContainersInput disabled={readOnly} value={draft.container_count} onChange={(v) => set({ container_count: v })} /></Field>
               <Field label="Partial Shipment">
                 <Select disabled={readOnly} value={draft.partial_shipment} onChange={(e) => set({ partial_shipment: e.target.value })}>
                   <option>Allowed</option>

@@ -6,7 +6,7 @@ import type { Order, OrderItem, Customer, TaxType, ColumnConfig } from '../types
 import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, Tabs, SettledDocumentType, FIELD_GRID, NOTES_ROWS } from '../components/ui';
 import { PdfLink } from '../components/PdfLink';
 import CompanySelect from '../components/CompanySelect';
-import { DocNumber, IncoTermsInput, PaymentTermsInput, HeaderCharges } from '../components/DocFields';
+import { DocNumber, IncoTermsInput, PaymentTermsInput, ContainersInput, HeaderCharges } from '../components/DocFields';
 import DispatchTab from '../components/DispatchTab';
 import LineItemsEditor from '../components/LineItemsEditor';
 import ColumnsControl, { newColumnConfig, hasColumnPrefs, orderColumns, ORDER_FORCED } from '../components/ColumnsControl';
@@ -382,7 +382,7 @@ export default function OrderFormPage() {
                 <Field label="INCO Terms *">
                   <IncoTermsInput isExport={!!draft.is_export} value={draft.inco_terms} onChange={(v) => set({ inco_terms: v })} />
                 </Field>
-                <Field label="Containers *"><Input value={draft.container_count} onChange={(e) => set({ container_count: e.target.value })} placeholder="e.g. 2 X 40ft HQ" /></Field>
+                <Field label="Containers *"><ContainersInput value={draft.container_count} onChange={(v) => set({ container_count: v })} /></Field>
                 {/*
                   Named to match the proforma and the invoice, so one word means
                   one thing along the chain and booking an order carries it
