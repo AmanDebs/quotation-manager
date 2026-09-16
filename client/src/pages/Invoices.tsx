@@ -69,7 +69,7 @@ export default function InvoicesPage() {
     <div>
       <PageHeader
         title="Commercial Invoices"
-        subtitle="“This is the final bill.”"
+        subtitle="“This is the final bill.” Export shipments only — domestic sales are invoiced in Tally."
         actions={
           <div className="flex items-center gap-2">
             <DownloadButton href={`/api/invoices/export${params.toString() ? `?${params}` : ''}`} />
@@ -77,7 +77,7 @@ export default function InvoicesPage() {
           </div>
         }
       />
-      {creating && <NewDocumentDialog basePath="/invoices" title="New Commercial Invoice" onClose={() => setCreating(false)} />}
+      {creating && <NewDocumentDialog basePath="/invoices" title="New Commercial Invoice" exportOnly onClose={() => setCreating(false)} />}
       <div className="mb-3 flex flex-wrap items-center gap-3">
         <ExportTabs value={exportFilter} onChange={setExportFilter} />
         {showCompany && (

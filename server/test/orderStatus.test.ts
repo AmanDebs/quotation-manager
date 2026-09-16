@@ -19,11 +19,17 @@ import { makeCustomer, makeInvoice } from './helpers/factory.js';
 
 let seq = 0;
 
-function order(status = 'pending'): number {
+/**
+ * An **export** order by default: those are invoiced here and close on the
+ * invoice walk, which is what the closing cases below exercise. A domestic
+ * sale is invoiced in Tally and closes on the dispatch record instead — its
+ * own cases pass `{ domestic: true }`.
+ */
+function order(status = 'pending', opts: { domestic?: boolean } = {}): number {
   const id = (db.prepare(
-    `INSERT INTO orders (number, date, customer_id, currency, tax_type, status)
-     VALUES (?, '2026-09-01', ?, 'INR', 'igst', ?) RETURNING id`
-  ).get(`SO/OS-${++seq}`, makeCustomer(), status) as { id: number }).id;
+    `INSERT INTO orders (number, date, customer_id, currency, tax_type, status, is_export)
+     VALUES (?, '2026-09-01', ?, 'INR', 'igst', ?, ?) RETURNING id`
+  ).get(`SO/OS-${++seq}`, makeCustomer(), status, opts.domestic ? 0 : 1) as { id: number }).id;
   db.prepare(
     `INSERT INTO order_items (order_id, description, qty, unit, unit_price, amount, total_pcs, sort_order)
      VALUES (?, '28mm Cap', 100, 'per 1000', 10, 1000, 100000, 0)`
@@ -289,6 +295,39 @@ describe('closing an order', () => {
    * never add up. Setting the status by hand clears the memory, so nothing
    * here can re-open it.
    */
+  /**
+   * A domestic sale is invoiced in Tally (2026-09-16), so this app never sees
+   * the bill and the lorry is the only record it can close on.
+   */
+  test('a domestic order closes on the dispatch record, not the invoice', () => {
+    const o = order('pending', { domestic: true });
+    billInFull(o, customerOf(o));
+    syncOrderStatus(o);
+    assert.equal(statusOf(o), 'partially_dispatched', 'an invoice closed a domestic order');
+
+    const trip = despatch(o);
+    db.prepare('INSERT INTO despatch_items (despatch_id, order_line, qty) VALUES (?, 0, 60000)').run(trip);
+    syncOrderStatus(o);
+    assert.equal(statusOf(o), 'partially_dispatched');
+
+    db.prepare('INSERT INTO despatch_items (despatch_id, order_line, qty) VALUES (?, 0, 40000)').run(trip);
+    syncOrderStatus(o);
+    assert.equal(statusOf(o), 'completed');
+
+    db.prepare('DELETE FROM despatch_items WHERE despatch_id = ?').run(trip);
+    db.prepare('DELETE FROM despatches WHERE id = ?').run(trip);
+    syncOrderStatus(o);
+    assert.equal(statusOf(o), 'partially_dispatched', 'the invoice still stands; the order is open again');
+  });
+
+  test('an export order fully dispatched but unbilled stays open', () => {
+    const o = order();
+    const trip = despatch(o);
+    db.prepare('INSERT INTO despatch_items (despatch_id, order_line, qty) VALUES (?, 0, 100000)').run(trip);
+    syncOrderStatus(o);
+    assert.equal(statusOf(o), 'partially_dispatched');
+  });
+
   test('but an order closed by hand stays closed', () => {
     const o = order();
     despatch(o);

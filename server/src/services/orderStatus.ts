@@ -78,8 +78,8 @@ export interface StatusFacts {
  * Null only for an order that does not exist or is cancelled.
  */
 export function impliedStatus(orderId: number): StatusFacts {
-  const order = db.prepare('SELECT status FROM orders WHERE id = ?').get(orderId) as
-    { status: string } | undefined;
+  const order = db.prepare('SELECT status, is_export FROM orders WHERE id = ?').get(orderId) as
+    { status: string; is_export: number } | undefined;
   if (!order || order.status === 'cancelled') return { implied: null, reason: '' };
 
   const items = db.prepare('SELECT total_pcs, qty, unit, is_charge FROM order_items WHERE order_id = ? ORDER BY sort_order, id')
@@ -164,12 +164,46 @@ export function impliedStatus(orderId: number): StatusFacts {
     implied = 'partially_dispatched';
     reason = despatched.c > 0 ? 'goods have been dispatched' : 'an invoice has been raised';
   }
-  if (fullyBilled(orderId)) {
+  /*
+   * What closes an order depends on where it is billed (2026-09-16, the
+   * client: *"They use Tally for domestic commercial invoice"*). An export is
+   * invoiced here, so it closes on the invoice walk as it always has — the
+   * money truth, and the conservative direction. A domestic sale is invoiced
+   * in Tally and this app never sees the bill, so the only record it can
+   * close on is the lorry: every goods line dispatched in full.
+   */
+  if (order.is_export ? fullyBilled(orderId) : fullyDispatched(orderId)) {
     implied = 'completed';
-    reason = 'every line has been billed in full';
+    reason = order.is_export ? 'every line has been billed in full' : 'every line has been dispatched in full';
   }
 
   return { implied, reason };
+}
+
+/**
+ * Has every goods line physically gone, by the dispatch record?
+ *
+ * The domestic order's closing rule: in pieces, by `piecesOrdered`'s one
+ * rule, against `despatch_items` summed by position. A line stating no piece
+ * count — weight-billed, or price-only — cannot be complete, the same
+ * refusal `fullyBilled` makes about a line with no quantity. Charge lines are
+ * excluded as everywhere else.
+ */
+function fullyDispatched(orderId: number): boolean {
+  const items = db.prepare(
+    'SELECT qty, unit, total_pcs, is_charge FROM order_items WHERE order_id = ? ORDER BY sort_order, id'
+  ).all(orderId) as { qty: number | null; unit: string; total_pcs: number | null; is_charge: number }[];
+  const goods = items.map((it, i) => ({ ...it, line: i })).filter((it) => !it.is_charge);
+  if (!goods.length) return false;
+  const sent = new Map<number, number>();
+  for (const r of db.prepare(
+    `SELECT di.order_line AS line, SUM(di.qty) AS qty FROM despatch_items di
+     JOIN despatches d ON d.id = di.despatch_id WHERE d.order_id = ? GROUP BY di.order_line`
+  ).all(orderId) as { line: number; qty: number }[]) sent.set(r.line, Number(r.qty) || 0);
+  return goods.every((it) => {
+    const target = piecesOrdered(it);
+    return target > 0 && (sent.get(it.line) ?? 0) + 1e-9 >= target;
+  });
 }
 
 /**

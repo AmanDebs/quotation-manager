@@ -468,6 +468,11 @@ function invoiceSideError(req: AuthedRequest, isExport: unknown): string | null 
 invoicesRouter.post('/', (req: AuthedRequest, res) => {
   const body = req.body ?? {};
   if (!body.customer_id) return res.status(400).json({ error: 'Customer is required' });
+  // Domestic sales are invoiced in Tally (the client, 2026-09-16); this app
+  // bills exports alone. Refused here rather than merely hidden on screen, so
+  // a link typed by hand cannot raise one either. Rows already on file are
+  // untouched — they list, print and settle as before.
+  if (!Number(body.is_export)) return res.status(409).json({ error: 'Domestic sales are invoiced in Tally, not here. Commercial invoices are raised for export shipments only.' });
   const side = invoiceSideError(req, body.is_export);
   if (side) return res.status(403).json({ error: side });
   if (!canAccessCustomer(req, Number(body.customer_id))) return res.status(403).json({ error: 'That customer is not assigned to you' });

@@ -8,16 +8,23 @@ import { Button, Modal, Input, EmptyState } from './ui';
 /**
  * Export vs domestic is chosen before anything else, because it decides the
  * numbering series, tax treatment, form fields and PDF layout.
+ *
+ * Except on an invoice, where the answer is settled: a domestic sale is
+ * invoiced in Tally (the client, 2026-09-16), so this app raises commercial
+ * invoices for exports alone and the dialog opens straight on the export
+ * customers. `exportOnly` states that; the server refuses a domestic POST
+ * regardless.
  */
 export default function NewDocumentDialog({
-  basePath, title, onClose,
+  basePath, title, onClose, exportOnly,
 }: {
+  exportOnly?: boolean;
   basePath: '/quotations' | '/proformas' | '/invoices';
   title: string;
   onClose: () => void;
 }) {
   const navigate = useNavigate();
-  const [type, setType] = useState<'export' | 'domestic' | null>(null);
+  const [type, setType] = useState<'export' | 'domestic' | null>(exportOnly ? 'export' : null);
   const [q, setQ] = useState('');
 
   const { data: customers = [] } = useQuery({
@@ -60,8 +67,9 @@ export default function NewDocumentDialog({
       ) : (
         <div className="space-y-3">
           <div className="flex items-center gap-2">
-            <button onClick={() => setType(null)} className="text-sm text-brand-600 hover:underline">← Back</button>
+            {!exportOnly && <button onClick={() => setType(null)} className="text-sm text-brand-600 hover:underline">← Back</button>}
             <span className="text-sm font-medium capitalize">{type}</span>
+            {exportOnly && <span className="text-xs text-slate-500">— domestic sales are invoiced in Tally</span>}
           </div>
           <Input placeholder="Search customers…" value={q} onChange={(e) => setQ(e.target.value)} autoFocus />
           <div className="max-h-80 overflow-y-auto rounded-md border border-slate-200">

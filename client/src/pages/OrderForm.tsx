@@ -220,7 +220,10 @@ export default function OrderFormPage() {
                     first and the order is booked from it — and would have made
                     a second proforma for an order that already has one. The
                     prefill endpoint stays: the invoice form borrows it. */}
-                <Button onClick={() => navigate(`/invoices/new?from_order=${id}`)}>→ Create Commercial Invoice</Button>
+                {/* Exports only: a domestic sale is invoiced in Tally (2026-09-16). */}
+                {!!draft.is_export && (
+                  <Button onClick={() => navigate(`/invoices/new?from_order=${id}`)}>→ Create Commercial Invoice</Button>
+                )}
               </>
             )}
           </div>
