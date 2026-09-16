@@ -120,8 +120,11 @@ const SQL = `
       JOIN despatches d ON d.id = di.despatch_id
       WHERE d.order_id = o.id AND di.order_line = l.pos
     ), 0) AS sent,
+    -- In pieces, like ordered and sent beside it: an invoice line is billed
+    -- in its own basis (3,245 per 1000), and summing that against a piece
+    -- count read a fully billed line as 0.1% shipped (2026-09-16).
     COALESCE((
-      SELECT SUM(ii.qty) FROM invoice_items ii
+      SELECT SUM(${PIECES_ORDERED_SQL('ii')}) FROM invoice_items ii
       WHERE ii.invoice_id IN (
         SELECT id FROM commercial_invoices
         WHERE order_id = o.id

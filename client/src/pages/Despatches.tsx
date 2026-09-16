@@ -42,9 +42,9 @@ import { usePagedList, PAGE_SIZE } from '../lib/usePagedList';
  */
 
 /**
- * Which order the trip is for. Open orders only, newest first: a completed
- * or cancelled order has nothing left to send, and offering it would let a
- * lorry be recorded against a closed book.
+ * Which order the trip is for, newest first. A cancelled order is left out;
+ * a completed one is offered (2026-09-16), because `completed` is measured
+ * on the invoice and on this desk the invoice regularly precedes the lorry.
  */
 function PickOrder({ onPick, onClose }: { onPick: (id: number) => void; onClose: () => void }) {
   const { data } = useQuery({
@@ -52,7 +52,7 @@ function PickOrder({ onPick, onClose }: { onPick: (id: number) => void; onClose:
     queryFn: () => api.get<{ rows: Order[] }>('/api/orders?page=1&limit=500'),
   });
   const [value, setValue] = useState('');
-  const open = (data?.rows ?? []).filter((o) => o.status !== 'completed' && o.status !== 'cancelled');
+  const open = (data?.rows ?? []).filter((o) => o.status !== 'cancelled');
   return (
     <Modal title="Record a dispatch" onClose={onClose}>
       <p className="mb-3 text-sm text-slate-600">Which sales order is this dispatch against?</p>

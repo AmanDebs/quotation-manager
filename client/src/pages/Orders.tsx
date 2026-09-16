@@ -12,12 +12,15 @@ import { useCan } from '../App';
 /**
  * A dispatch is recorded from the book (asked for 2026-09-14: "a button to
  * record Dispatch on right side of state on every sales order"). It opens
- * the record-a-dispatch page for that order, behind `dispatch: full`; a
- * completed or cancelled order has nothing left to send and gets no button,
- * which is the Dispatches page's own picker rule.
+ * the record-a-dispatch page for that order, behind `dispatch: full`. A
+ * cancelled order gets no button. A *completed* one keeps it (2026-09-16):
+ * `completed` is measured on the invoice walk, and on this desk the invoice
+ * regularly goes before the lorry, so a fully billed order is exactly the
+ * one whose goods are about to leave. The lines view goes one better and
+ * drops the button once every line has physically gone.
  */
 const recordDispatchUrl = (orderId: number) => `/despatches/new?order=${orderId}`;
-const CLOSED: ReadonlySet<string> = new Set(['completed', 'cancelled']);
+const CLOSED: ReadonlySet<string> = new Set(['cancelled']);
 
 export const ORDER_STATUSES: OrderStatus[] = [
   'pending', 'confirmed', 'scheduled', 'in_production', 'ready', 'partially_dispatched', 'completed', 'cancelled',
@@ -340,6 +343,12 @@ function LinesTable({ lines, pager }: {
     return acc;
   }, []);
   const dash = <span className="text-slate-300">—</span>;
+  // Orders whose every line on this page has physically gone — by the
+  // dispatch record, not the invoice — so the button is not offered.
+  const allSent = new Set(
+    [...new Set(lines.map((l) => l.order_id))].filter((id) =>
+      lines.filter((l) => l.order_id === id).every((l) => l.ordered > 0 && l.sent >= l.ordered)),
+  );
 
   return (
     <Card className="overflow-x-auto">
@@ -409,7 +418,7 @@ function LinesTable({ lines, pager }: {
                     </td>
                     {/* One line, clipped, with the whole name on hover — a
                         three-line customer name made every row three lines tall. */}
-                    <td className="max-w-[14rem] truncate py-2 pr-3" title={repeat ? undefined : l.customer_name}>
+                    <td className="max-w-[12rem] truncate py-2 pr-3" title={repeat ? undefined : l.customer_name}>
                       {repeat ? '' : l.customer_name}
                     </td>
                     {anyPort && (
@@ -421,7 +430,7 @@ function LinesTable({ lines, pager }: {
                         at the client's word) — the description is what was
                         typed on the document, on hover; a custom line has
                         only its description. */}
-                    <td className="min-w-[16rem] py-2 pr-3" title={l.description}>{l.product_name || l.description || dash}</td>
+                    <td className="min-w-[13rem] py-2 pr-3" title={l.description}>{l.product_name || l.description || dash}</td>
                     <td className="whitespace-nowrap py-2 pr-3 text-slate-500">{l.color || dash}</td>
                     <td className="py-2 pr-3 text-right tabular-nums">{l.ordered ? fmtQty(l.ordered) : dash}</td>
                     <td className="py-2 pr-3 text-right tabular-nums text-slate-500">
@@ -450,7 +459,7 @@ function LinesTable({ lines, pager }: {
                         about the order, carrying every line at once. */}
                     {canDispatch && (
                       <td className="py-2 text-right" onClick={(e) => e.stopPropagation()}>
-                        {!repeat && !CLOSED.has(l.order_status) && (
+                        {!repeat && !CLOSED.has(l.order_status) && !allSent.has(l.order_id) && (
                           <Button variant="secondary" className="whitespace-nowrap px-2 py-0.5 text-xs" onClick={() => navigate(recordDispatchUrl(l.order_id))}>Record dispatch</Button>
                         )}
                       </td>
