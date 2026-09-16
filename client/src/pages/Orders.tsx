@@ -356,8 +356,8 @@ function LinesTable({ lines, pager }: {
                 {/* The order's two production dates (2026-09-15, at the
                     client's word, in place of the one Promised column): the
                     original, and the revised one where the plan has moved. */}
-                <th className="pb-2 pr-3">Original Production Date</th>
-                <th className="pb-2 pr-3">Revised Production Date</th>
+                <th className="whitespace-nowrap pb-2 pr-3" title="Original Production Date">Orig. Prod.</th>
+                <th className="whitespace-nowrap pb-2 pr-3" title="Revised Production Date">Rev. Prod.</th>
                 <th className="pb-2 pr-3">Added By</th>
                 <th className="pb-2 pr-3">State</th>
                 {canDispatch && <th className="pb-2" />}
