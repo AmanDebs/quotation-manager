@@ -353,6 +353,9 @@ function LinesTable({ lines, pager }: {
                 <th className="pb-2 pr-3">Colour</th>
                 <th className="pb-2 pr-3 text-right">Qty</th>
                 <th className="pb-2 pr-3 text-right">Sent</th>
+                {/* What is still to go: ordered less what has gone, the way
+                    the Sent column reads it (2026-09-16, at the client's word). */}
+                <th className="pb-2 pr-3 text-right">Balance</th>
                 {/* The order's two production dates (2026-09-15, at the
                     client's word, in place of the one Promised column): the
                     original, and the revised one where the plan has moved. */}
@@ -403,6 +406,9 @@ function LinesTable({ lines, pager }: {
                     <td className="py-1.5 pr-3 text-right tabular-nums">{l.ordered ? fmtQty(l.ordered) : '—'}</td>
                     <td className="py-1.5 pr-3 text-right tabular-nums text-slate-500">
                       {l.sent || l.billed ? fmtQty(Math.max(l.sent, l.billed)) : '—'}
+                    </td>
+                    <td className="py-1.5 pr-3 text-right tabular-nums">
+                      {l.ordered ? fmtQty(Math.max(0, l.ordered - Math.max(l.sent, l.billed))) : '—'}
                     </td>
                     <td className={`whitespace-nowrap py-1.5 pr-3 ${overdue && !l.revised_date ? 'font-semibold text-red-600' : ''}`}>
                       {l.promised_date ? fmtDate(l.promised_date) : '—'}{overdue && !l.revised_date && ' ⚠'}
