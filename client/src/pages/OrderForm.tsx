@@ -347,7 +347,7 @@ export default function OrderFormPage() {
             </Field>
             <Field label="Handled By (SPOC)"><Input value={draft.spoc} onChange={(e) => set({ spoc: e.target.value })} placeholder="Who took this order" /></Field>
             <Field label="Customer's PO Number"><Input value={draft.po_number} onChange={(e) => set({ po_number: e.target.value })} /></Field>
-            <Field label="Customer's PO Date *"><Input type="date" value={draft.po_date} onChange={(e) => set({ po_date: e.target.value })} /></Field>
+            <Field label="Customer's PO Date"><Input type="date" value={draft.po_date} onChange={(e) => set({ po_date: e.target.value })} /></Field>
             {/* Back on 2026-09-15, alone of the production-plan dates the
                 form dropped on 2026-09-07: the Reports page's *Planned for
                 production* sheet is keyed on it, and a column nobody can

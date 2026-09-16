@@ -387,9 +387,10 @@ const RULES: Rule[] = [
   })),
 
   /*
-   * And every field on the sales order, with two exemptions the client named
-   * (2026-09-15: *"Make all fields mandatory in sales order except SPOC, PO
-   * Number"*). The order has no approval to gate, so these bite on the PDF
+   * And every field on the sales order, with three exemptions the client
+   * named (2026-09-15: *"Make all fields mandatory in sales order except SPOC,
+   * PO Number"*; 2026-09-16: *"customer PO date not mandatory"* — it arrives
+   * with the PO, which is often after the order is booked). The order has no approval to gate, so these bite on the PDF
    * and are listed on the form — the same words, from the same table.
    *
    * Not asked, and why: the advance figures, which legitimately read zero
@@ -400,7 +401,6 @@ const RULES: Rule[] = [
    */
   ...([
     ['so_received_via', 'order_through', 'Order Received Via'],
-    ['so_po_date', 'po_date', 'Customer PO Date'],
     ['so_promised', 'promised_date', 'Original Promised Date'],
     ['so_revised', 'revised_date', 'Revised Production Date'],
     ['so_payment_terms', 'payment_terms', 'Payment Terms'],
