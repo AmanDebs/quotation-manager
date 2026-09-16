@@ -523,7 +523,7 @@ export default function OrderFormPage() {
             * Internal remarks stay: that is where the running commentary on an
             * order goes, and it is read by nobody outside the office.
             */}
-          <Field label="Remarks (internal) *">
+          <Field label="Remarks (internal)">
             <Textarea rows={NOTES_ROWS} value={draft.remarks} onChange={(e) => set({ remarks: e.target.value })} />
           </Field>
         </Card>

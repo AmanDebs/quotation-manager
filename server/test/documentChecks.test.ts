@@ -387,13 +387,13 @@ describe('the sales order mandatory fields', () => {
   const finished = { order_through: 'Email', promised_date: '2026-09-20', revised_date: '2026-09-25' };
   const always: [string, string][] = [
     ['order_through', 'so_received_via'], ['promised_date', 'so_promised'], ['revised_date', 'so_revised'],
-    ['payment_terms', 'so_payment_terms'], ['remarks', 'so_remarks'],
+    ['payment_terms', 'so_payment_terms'],
   ];
   const exportOnly: [string, string][] = [
     ['inco_terms', 'so_inco'], ['container_count', 'so_containers'], ['port_of_discharge', 'so_port'],
   ];
-  test('a finished order blocks nothing, and the three exemptions are not asked', () => {
-    assert.deepEqual(keys(doc('orders', { ...finished, spoc: '', po_number: '', po_date: '' }), 'block'), []);
+  test('a finished order blocks nothing, and the four exemptions are not asked', () => {
+    assert.deepEqual(keys(doc('orders', { ...finished, spoc: '', po_number: '', po_date: '', remarks: '' }), 'block'), []);
     assert.deepEqual(keys(doc('orders', { ...finished, is_export: 1 }), 'block'), []);
   });
   test('each blank field blocks the order by name, on either type', () => {
@@ -427,7 +427,7 @@ describe('the sales order mandatory fields', () => {
     db.prepare("INSERT INTO order_items (order_id, description, qty, unit, unit_price, amount, sort_order) VALUES (?, 'Cap', 10, 'unit', 10, 100, 0)").run(id);
     const err = incompleteError('orders', id);
     assert.ok(err && err.startsWith('This sales order is not finished:') && err.includes('Revised Production Date is blank.'), err ?? 'no error');
-    db.prepare("UPDATE orders SET order_through = 'Email', promised_date = '2026-09-18', revised_date = '2026-09-20', payment_terms = '30 days', remarks = 'ok' WHERE id = ?").run(id);
+    db.prepare("UPDATE orders SET order_through = 'Email', promised_date = '2026-09-18', revised_date = '2026-09-20', payment_terms = '30 days' WHERE id = ?").run(id);
     assert.equal(incompleteError('orders', id), null);
   });
 });
