@@ -708,6 +708,8 @@ export interface OrderLine {
   order_line: number;
   product_id: number | null;
   description: string; code: string; color: string; unit: string;
+  /** The catalogue product's own name; null on a custom line naming none. */
+  product_name: string | null;
   ordered: number; amount: number;
   made: number; sent: number; billed: number;
   state: LineState;

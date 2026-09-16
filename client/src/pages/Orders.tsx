@@ -417,7 +417,11 @@ function LinesTable({ lines, pager }: {
                         {repeat ? '' : l.port_of_discharge || dash}
                       </td>
                     )}
-                    <td className="max-w-[22rem] py-2 pr-3" title={l.description}>{l.description || dash}</td>
+                    {/* The catalogue product, not the line's wording (2026-09-16,
+                        at the client's word) — the description is what was
+                        typed on the document, on hover; a custom line has
+                        only its description. */}
+                    <td className="min-w-[16rem] py-2 pr-3" title={l.description}>{l.product_name || l.description || dash}</td>
                     <td className="whitespace-nowrap py-2 pr-3 text-slate-500">{l.color || dash}</td>
                     <td className="py-2 pr-3 text-right tabular-nums">{l.ordered ? fmtQty(l.ordered) : dash}</td>
                     <td className="py-2 pr-3 text-right tabular-nums text-slate-500">

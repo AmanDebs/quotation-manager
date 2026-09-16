@@ -364,6 +364,7 @@ const lineColumns: Column<OrderLine>[] = [
   { header: 'Issued by', value: (r) => r.company_name },
   // Blank on a domestic order, which discharges at no port.
   { header: 'Dest port', value: (r) => r.port_of_discharge },
+  { header: 'Product', value: (r) => r.product_name ?? '' },
   { header: 'Item', value: (r) => r.description },
   { header: 'Code', value: (r) => r.code },
   { header: 'Colour', value: (r) => r.color },

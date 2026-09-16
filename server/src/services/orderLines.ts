@@ -55,6 +55,8 @@ export interface OrderLine {
   order_line: number;
   product_id: number | null;
   description: string;
+  /** The catalogue product's own name; null on a custom line naming none. */
+  product_name: string | null;
   code: string;
   color: string;
   unit: string;
@@ -104,7 +106,7 @@ const SQL = `
     o.customer_id, c.name AS customer_name, co.company_name,
     u.name AS created_by_name,
     o.is_export, o.status AS order_status, o.currency, o.port_of_discharge,
-    l.pos AS order_line, l.product_id, l.description, l.code, l.color, l.unit,
+    l.pos AS order_line, l.product_id, l.description, p.name AS product_name, l.code, l.color, l.unit,
     ${PIECES_ORDERED_SQL('l')} AS ordered,
     l.qty AS billing_qty,
     l.amount,
@@ -135,6 +137,8 @@ const SQL = `
   JOIN orders o ON o.id = l.order_id
   JOIN customers c ON c.id = o.customer_id
   LEFT JOIN companies co ON co.id = o.company_id
+  -- LEFT: a custom line names no product and must still list.
+  LEFT JOIN products p ON p.id = l.product_id
   -- LEFT, not JOIN: an order whose author has since been deleted must still list.
   LEFT JOIN users u ON u.id = o.created_by
   WHERE l.is_charge = 0`;
