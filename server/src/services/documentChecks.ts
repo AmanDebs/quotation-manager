@@ -259,22 +259,6 @@ const RULES: Rule[] = [
     },
   },
   {
-    // The boxed customs header on the export invoice and its packing list.
-    // Invoice only since 2026-09-12: on the proforma these are blocks below.
-    key: 'ports', level: 'warn', tables: ['commercial_invoices'], when: isExport,
-    check: (d) => {
-      const missing = [
-        !text(d.row.port_of_loading) && 'port of loading',
-        !text(d.row.port_of_discharge) && 'port of discharge',
-      ].filter(Boolean);
-      return missing.length ? `No ${missing.join(' or ')} stated.` : null;
-    },
-  },
-  {
-    key: 'origin', level: 'warn', tables: ['commercial_invoices'], when: isExport,
-    check: (d) => (text(d.row.country_of_origin) ? null : 'No country of origin stated.'),
-  },
-  {
     /*
      * The advance is paid against this document, so it has to say where to.
      *
@@ -284,20 +268,15 @@ const RULES: Rule[] = [
      * proforma: the document exists to collect money, and one that does not say
      * which account cannot do the only job it has.
      *
-     * Note it blocks on the proforma alone. A commercial invoice states an
-     * account too, but it is raised against goods already made and often
-     * settled from the advance banked here, so refusing to approve one over a
-     * blank account would stop a shipment for a field the proforma upstream has
-     * already carried.
+     * This sentence is the proforma's. The commercial invoice was deliberately
+     * not asked until 2026-09-16 — it is raised against goods already made and
+     * often settled from the advance banked here — and is asked now under its
+     * own name (`ci_bank`, below) since every field on it became mandatory.
      */
     key: 'bank', level: 'block', tables: ['proforma_invoices'],
     check: (d) => (text(d.row.bank_account)
       ? null
       : 'No bank account stated, and the advance is paid against this document.'),
-  },
-  {
-    key: 'payment_terms', level: 'warn', tables: ['commercial_invoices'],
-    check: (d) => (text(d.row.payment_terms) ? null : 'No payment terms stated.'),
   },
   /*
    * **Every field on the quotation form is mandatory** (the client, 2026-09-12,
@@ -354,9 +333,9 @@ const RULES: Rule[] = [
    * down, with the four exemptions named by the client — the buyer's PO
    * number and date arrive after the proforma is sent, and the consignee and
    * notify parties are often the buyer's own address, which the PDF already
-   * falls back to. The three warnings above that used to cover the proforma
-   * (`ports`, `origin`, `payment_terms`) now cover the invoice alone, since
-   * here they are blocks with a field name each. Customer, date, lines and
+   * falls back to. The three warnings that used to cover the proforma
+   * (`ports`, `origin`, `payment_terms`) covered the invoice alone from here
+   * until 2026-09-16, when the invoice took blocks of its own. Customer, date, lines and
    * the bank account were already blocks; issued-by, currency, tax and
    * partial-shipment carry defaults and cannot be blank. Delivery Terms is
    * retired and not asked for. Export-only fields are asked on an export.
@@ -383,6 +362,45 @@ const RULES: Rule[] = [
     ['pi_containers', 'container_count', 'Number of Containers'],
   ] as const).map(([key, column, label]): Rule => ({
     key, level: 'block', tables: ['proforma_invoices'], when: isExport,
+    check: (d) => (text(d.row[column]) ? null : `${label} is blank.`),
+  })),
+
+  /*
+   * **And every field on the commercial invoice** (2026-09-16, the client with
+   * a new invoice in front of them: *"make all fields mandatory"*). The last of
+   * the four documents to take the rule, and the three warnings that used to
+   * be the invoice's whole opinion about its header — `ports`, `origin`,
+   * `payment_terms` — are gone with it, each now a block naming its field.
+   *
+   * Exempt, and why: the **due date**, whose blank has a meaning of its own
+   * (*due on arrival*, the tracker reading the shipment's ETA in its place);
+   * the **consignee and both notify parties**, the proforma's own exemptions,
+   * since they are usually the buyer's address and the PDF falls back to it;
+   * and the **packing list's** fields, which are another document's. Issued-by,
+   * currency and tax carry defaults. The ARN is asked on an export because a
+   * fresh one is obtained per consignment — the company default in Settings
+   * still prints for an invoice raised before this that left it blank.
+   */
+  ...([
+    ['ci_payment_terms', 'payment_terms', 'Payment Terms'],
+    ['ci_inco', 'inco_terms', 'INCO Terms'],
+    ['ci_method', 'method_of_despatch', 'Method of Dispatch'],
+    ['ci_lot_no', 'lot_no', 'Lot No.'],
+    ['ci_prepared_by', 'prepared_by', 'Prepared By'],
+    ['ci_shipping', 'shipping_details', 'Shipping Details'],
+    ['ci_bank', 'bank_account', 'Bank Account'],
+  ] as const).map(([key, column, label]): Rule => ({
+    key, level: 'block', tables: ['commercial_invoices'],
+    check: (d) => (text(d.row[column]) ? null : `${label} is blank.`),
+  })),
+  ...([
+    ['ci_origin', 'country_of_origin', 'Country of Origin'],
+    ['ci_port_of_loading', 'port_of_loading', 'Port of Loading'],
+    ['ci_port_of_discharge', 'port_of_discharge', 'Port of Discharge'],
+    ['ci_final_destination', 'final_destination', 'Final Destination'],
+    ['ci_arn', 'arn_ref', 'ARN / LUT Reference'],
+  ] as const).map(([key, column, label]): Rule => ({
+    key, level: 'block', tables: ['commercial_invoices'], when: isExport,
     check: (d) => (text(d.row[column]) ? null : `${label} is blank.`),
   })),
 

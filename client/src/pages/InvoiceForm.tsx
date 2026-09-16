@@ -255,6 +255,13 @@ export default function InvoiceFormPage() {
     (v) => v.pi_description && v.pi_description !== v.description
   ) ?? [];
 
+  // An approved invoice always prints (the quotation's judgement: finished by
+  // whoever approved it, before the rule existed); an unapproved one waits on
+  // its blanks, and the button says which.
+  const pdfBlocked = !isNew && existing!.approval_status !== 'approved'
+    ? (existing!.checks ?? []).filter((f) => f.level === 'block').map((f) => f.message).join(' ') || undefined
+    : undefined;
+
   return (
     <div className="mx-auto max-w-7xl">
       <PageHeader
@@ -265,11 +272,16 @@ export default function InvoiceFormPage() {
             {!isNew && <StatusBadge status={existing!.status} />}
             {!isNew && (
               <>
-                <PdfLink href={`/api/pdf/invoice/${id}`} guard={pdf}><Button variant="secondary">📄 Invoice</Button></PdfLink>
+                {/* Every field is mandatory (2026-09-16), and an unfinished
+                    invoice does not print — the proforma's rule, one step on.
+                    The packing list and the QC report are other documents
+                    and keep printing; the three files that *are* the
+                    invoice take the gate. */}
+                <PdfLink href={`/api/pdf/invoice/${id}`} guard={pdf} blocked={pdfBlocked}><Button variant="secondary">📄 Invoice</Button></PdfLink>
                 <PdfLink href={`/api/pdf/packing-list/${existing!.packing?.id}`} guard={pdf}>
                   <Button variant="secondary" disabled={!existing!.packing}>📦 Packing List</Button>
                 </PdfLink>
-                <PdfLink href={`/api/pdf/invoice-with-packing/${id}`} guard={pdf}><Button>📄+📦 Both</Button></PdfLink>
+                <PdfLink href={`/api/pdf/invoice-with-packing/${id}`} guard={pdf} blocked={pdfBlocked}><Button>📄+📦 Both</Button></PdfLink>
                 {/*
                   * The quality summary that ships with the shipment. The
                   * standalone report is the `qc` function and so is offered
@@ -282,7 +294,7 @@ export default function InvoiceFormPage() {
                     <Button variant="secondary">🔬 QC Report</Button>
                   </PdfLink>
                 )}
-                <PdfLink href={`/api/pdf/invoice-with-qc/${id}`} guard={pdf}>
+                <PdfLink href={`/api/pdf/invoice-with-qc/${id}`} guard={pdf} blocked={pdfBlocked}>
                   <Button variant="secondary">📄+🔬 Invoice &amp; QC</Button>
                 </PdfLink>
                 <FollowupButton docType="invoice" docId={Number(id)} customerId={existing!.customer_id} />
@@ -404,17 +416,17 @@ export default function InvoiceFormPage() {
                 <option value="igst">IGST (inter-state)</option>
               </Select>
             </Field>
-            <Field label="INCO Terms">
+            <Field label="INCO Terms *">
               <IncoTermsInput isExport={!!draft.is_export} value={draft.inco_terms} onChange={(v) => set({ inco_terms: v })} />
             </Field>
-            <Field label="Payment Terms">
+            <Field label="Payment Terms *">
               <PaymentTermsInput
                 isExport={!!draft.is_export}
                 value={draft.payment_terms}
                 onChange={(v) => set({ payment_terms: v })}
               />
             </Field>
-            <Field label="Method of Dispatch">
+            <Field label="Method of Dispatch *">
               <Select value={draft.method_of_despatch} onChange={(e) => set({ method_of_despatch: e.target.value })}>
                 <option value="">— select —</option>
                 <option>By Sea</option>
@@ -422,12 +434,12 @@ export default function InvoiceFormPage() {
                 <option>By Road</option>
               </Select>
             </Field>
-            <Field label="Lot No."><Input value={draft.lot_no} onChange={(e) => set({ lot_no: e.target.value })} placeholder="e.g. 90/2025" /></Field>
+            <Field label="Lot No. *"><Input value={draft.lot_no} onChange={(e) => set({ lot_no: e.target.value })} placeholder="e.g. 90/2025" /></Field>
             {/* Per consignment, not per company: a fresh LUT/ARN is obtained for
                 each export shipment. Left blank, the company default in Settings
                 prints instead, so nothing already raised changes. */}
             {!!draft.is_export && (
-              <Field label="ARN / LUT Reference">
+              <Field label="ARN / LUT Reference *">
                 <Input
                   value={draft.arn_ref}
                   onChange={(e) => set({ arn_ref: e.target.value })}
@@ -435,11 +447,11 @@ export default function InvoiceFormPage() {
                 />
               </Field>
             )}
-            <Field label="Prepared By"><Input value={draft.prepared_by} onChange={(e) => set({ prepared_by: e.target.value })} /></Field>
-            <Field label="Shipping Details" className="sm:col-span-2">
+            <Field label="Prepared By *"><Input value={draft.prepared_by} onChange={(e) => set({ prepared_by: e.target.value })} /></Field>
+            <Field label="Shipping Details *" className="sm:col-span-2">
               <Input value={draft.shipping_details} onChange={(e) => set({ shipping_details: e.target.value })} placeholder="Vessel/flight, BL number, shipping line…" />
             </Field>
-            <Field label="Bank Account" className="col-span-full">
+            <Field label="Bank Account *" className="col-span-full">
               <Select value={draft.bank_account} onChange={(e) => set({ bank_account: e.target.value })}>
                 <option value="">— select bank account —</option>
                 {(settings?.bank_accounts ?? []).map((b, i) => (
@@ -470,10 +482,10 @@ export default function InvoiceFormPage() {
           </div>
           {!!draft.is_export && (
             <div className={`${FIELD_GRID} mb-3`}>
-              <Field label="Country of Origin"><Input value={draft.country_of_origin} onChange={(e) => set({ country_of_origin: e.target.value })} /></Field>
-              <Field label="Port of Loading"><PortOfLoadingInput value={draft.port_of_loading} onChange={(v) => set({ port_of_loading: v })} /></Field>
-              <Field label="Port of Discharge"><Input value={draft.port_of_discharge} onChange={(e) => set({ port_of_discharge: e.target.value })} /></Field>
-              <Field label="Final Destination"><Input value={draft.final_destination} onChange={(e) => set({ final_destination: e.target.value })} /></Field>
+              <Field label="Country of Origin *"><Input value={draft.country_of_origin} onChange={(e) => set({ country_of_origin: e.target.value })} /></Field>
+              <Field label="Port of Loading *"><PortOfLoadingInput value={draft.port_of_loading} onChange={(v) => set({ port_of_loading: v })} /></Field>
+              <Field label="Port of Discharge *"><Input value={draft.port_of_discharge} onChange={(e) => set({ port_of_discharge: e.target.value })} /></Field>
+              <Field label="Final Destination *"><Input value={draft.final_destination} onChange={(e) => set({ final_destination: e.target.value })} /></Field>
             </div>
           )}
 

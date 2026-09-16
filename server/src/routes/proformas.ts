@@ -362,8 +362,20 @@ proformasRouter.get('/prefill/from-order/:orderId', (req: AuthedRequest, res) =>
    * proforma_invoices.order_id and two proformas can each claim one order.
    */
   const linkedPi = db
-    .prepare('SELECT id FROM proforma_invoices WHERE order_id = ? ORDER BY id LIMIT 1')
-    .get(oid) as { id: number } | undefined;
+    .prepare('SELECT * FROM proforma_invoices WHERE order_id = ? ORDER BY id LIMIT 1')
+    .get(oid) as Record<string, unknown> | undefined;
+  /**
+   * What the proforma already said, carried forward (2026-09-16, the client
+   * with a new invoice in front of them: *"there are some details that I
+   * filled before, it should be pre filled"*). The order carries only part of
+   * the header — no port of loading, no bank account, no method of dispatch —
+   * and those were typed on the proforma the order was booked from, so the
+   * invoice was asking for them a second time. The order's own field wins
+   * where it has one (it is the later document), the proforma's fills the
+   * blank, and the customer record is the last resort for the parties.
+   */
+  const pi = linkedPi ?? {};
+  const first = (...vals: unknown[]) => String(vals.find((v) => String(v ?? '').trim()) ?? '');
   res.json({
     order_id: oid,
     pi_id: linkedPi?.id ?? null,
@@ -373,22 +385,28 @@ proformasRouter.get('/prefill/from-order/:orderId', (req: AuthedRequest, res) =>
     currency: o.currency,
     tax_type: o.tax_type,
     is_export: isExport ? 1 : 0,
-    payment_terms: o.payment_terms,
-    inco_terms: o.inco_terms,
-    container_count: o.container_count,
+    payment_terms: first(o.payment_terms, pi.payment_terms),
+    inco_terms: first(o.inco_terms, pi.inco_terms),
+    container_count: first(o.container_count, pi.container_count),
     freight: o.freight,
     insurance: o.insurance,
     po_number: o.po_number,
     po_date: o.po_date,
-    port_of_discharge: o.destination,
-    final_destination: o.destination,
-    method_of_despatch: o.transport,
-    prepared_by: o.spoc,
-    consignee: customer.consignee || '',
-    notify_party: customer.notify_party || '',
-    notify_party_2: customer.notify_party_2 || '',
-    country_of_origin: isExport ? 'India' : '',
-    quantity_tolerance: isExport ? '(±) 10% in value and quantity' : '',
+    port_of_loading: first(pi.port_of_loading),
+    port_of_discharge: first(o.port_of_discharge, pi.port_of_discharge, o.destination),
+    final_destination: first(pi.final_destination, o.destination),
+    method_of_despatch: first(o.transport, pi.method_of_despatch),
+    prepared_by: first(o.spoc, pi.prepared_by),
+    bank_account: first(pi.bank_account),
+    hs_code: first(pi.hs_code),
+    lead_time: first(pi.lead_time),
+    consignee: first(pi.consignee, customer.consignee),
+    notify_party: first(pi.notify_party, customer.notify_party),
+    notify_party_2: first(pi.notify_party_2, customer.notify_party_2),
+    ship_to_name: first(pi.ship_to_name),
+    ship_to_gstin: first(pi.ship_to_gstin),
+    country_of_origin: first(pi.country_of_origin, isExport ? 'India' : ''),
+    quantity_tolerance: first(pi.quantity_tolerance, isExport ? '(±) 10% in value and quantity' : ''),
     column_config: JSON.parse(String(o.column_config || '{}')),
     items,
   });
