@@ -412,11 +412,14 @@ export default function OrderFormPage() {
           </div>
 
           {/* The advance is part of the payment terms, not a subject of its own —
-              three fields did not earn a card between the order and its dates. */}
-          <div className="mt-3 grid grid-cols-1 gap-3 border-t border-slate-100 pt-3 sm:grid-cols-3">
-            <Field label={`Advance Due (${draft.currency})`}>
-              <Input type="number" min={0} step="any" value={draft.advance_due || ''} onChange={(e) => set({ advance_due: Number(e.target.value) })} />
-            </Field>
+              the fields did not earn a card between the order and its dates.
+              Advance Due went on 2026-09-17 at the client's word ("Remove this
+              advance due"): the terms already say what is due up front, and
+              a second figure typed beside them is one that can disagree. The
+              column stays and the draft round-trips it, so an order that
+              carries one is not zeroed by an ordinary save; nothing prints or
+              prefills it any more. */}
+          <div className="mt-3 grid grid-cols-1 gap-3 border-t border-slate-100 pt-3 sm:grid-cols-2">
             {/*
               Received and Date of Credit are **read from the proforma** once
               one is linked, not typed: they are what the bank shows, and a

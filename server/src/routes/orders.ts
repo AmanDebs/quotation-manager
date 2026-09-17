@@ -494,7 +494,10 @@ ordersRouter.get('/prefill/from-quotation/:quotationId', (req: AuthedRequest, re
  * The advance a set of payment terms asks for, in money, or 0 when it asks for
  * none. Reads the leading percentage of a term like "40% Advance and Balance
  * against shipping documents"; a credit term names no percentage and gives 0.
+ * Unused since 2026-09-17, when Advance Due left the order form — kept, with
+ * its regex, for the day the figure is wanted somewhere else.
  */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function advanceDueFrom(terms: string, total: number): number {
   const m = terms.match(/(\d+(?:\.\d+)?)\s*%\s*advance/i);
   if (!m || !total) return 0;
@@ -522,19 +525,10 @@ ordersRouter.get('/prefill/from-proforma/:piId', (req: AuthedRequest, res) => {
     tax_type: pi.tax_type,
     is_export: pi.is_export,
     payment_terms: pi.payment_terms,
-    /*
-     * What the terms say is due up front, as a starting figure.
-     *
-     * A **prefill, not a derivation** — unlike Advance *Received*, which is a
-     * fact the payment record owns. What is due is a commitment that can be
-     * renegotiated after the order is booked, so it is copied once and stays
-     * editable, in the shape every other carry-forward field uses.
-     *
-     * Gated on the terms actually naming a percentage: "30% Advance and
-     * Balance before Dispatch" gives 30, "30 Days Credit" gives nothing, and
-     * an unparseable line leaves the field blank rather than guessing zero.
-     */
-    advance_due: advanceDueFrom(String(pi.payment_terms ?? ''), Number(pi.grand_total) || 0),
+    // `advance_due` is no longer prefilled (2026-09-17): the order form has
+    // no box for it, and a figure copied into a column nobody can see is the
+    // header-freight hazard. `advanceDueFrom` below is kept for the day the
+    // figure is wanted again; the terms themselves carry across.
     /*
      * What has already been banked, in the same shape `GET /orders/:id`
      * returns, so the form shows one thing before and after the first save.

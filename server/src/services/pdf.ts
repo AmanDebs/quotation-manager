@@ -999,7 +999,6 @@ export function buildOrderPdf(id: number): TDocumentDefinitions {
     ...(o.freight_terms ? [['Freight Terms', o.freight_terms] as [string, string]] : []),
     ...(o.inco_terms ? [['INCO Terms', o.inco_terms] as [string, string]] : []),
     ...(o.container_count ? [['Containers', o.container_count] as [string, string]] : []),
-    ...(Number(o.advance_due) ? [['Advance Due', fmtMoney(o.advance_due, cur)] as [string, string]] : []),
     ...(advanceReceived
       ? [['Advance Received', `${fmtMoney(advanceReceived, cur)}${advanceDate ? ` on ${fmtDate(advanceDate)}` : ''}`] as [string, string]]
       : []),
