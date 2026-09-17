@@ -505,7 +505,7 @@ export default function InvoiceFormPage() {
           title="Line Items (final dispatch quantities)"
           actions={<ColumnsControl config={draft.column_config} onChange={(c) => set({ column_config: c })} columns={invoiceColumns()} />}
         >
-          <LineItemsEditor items={draft.items} onChange={(items) => set({ items })} currency={draft.currency} taxType={draft.tax_type} config={draft.column_config} omit={INVOICE_OMIT} forced={INVOICE_FORCED} />
+          <LineItemsEditor items={draft.items} onChange={(items) => set({ items })} currency={draft.currency} taxType={draft.tax_type} config={draft.column_config} omit={INVOICE_OMIT} forced={INVOICE_FORCED} requireHsn />
           <HeaderCharges
             freight={draft.freight}
             insurance={draft.insurance}

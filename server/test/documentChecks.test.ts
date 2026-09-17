@@ -106,22 +106,24 @@ describe('what deliberately does not stop one', () => {
     assert.deepEqual(keys(d, 'block'), []);
   });
 
-  test('a missing GSTIN or HSN warns and does not block', () => {
+  test('a missing GSTIN warns; a missing HSN blocks the invoice by line (2026-09-17)', () => {
     const d: CheckedDoc = {
-      ...doc('commercial_invoices', { tax_type: 'igst' }, [line({ hsn_code: '' })]),
+      ...doc('commercial_invoices', { tax_type: 'igst' }, [line({ hsn_code: '' }), line({ is_charge: 1, description: 'Freight', hsn_code: '' })]),
       customer: { gstin: '' },
     };
-    assert.deepEqual(keys(d, 'block'), []);
-    assert.deepEqual(keys(d, 'warn'), ['gstin', 'hsn']);
+    assert.deepEqual(keys(d, 'block'), ['hsn']);
+    assert.deepEqual(keys(d, 'warn'), ['gstin']);
+    assert.equal(evaluate(d).find((f) => f.key === 'hsn')?.message, 'Line 1 has no HSN code.');
   });
 
-  test('and an export document says nothing about GSTIN or HSN at all', () => {
+  test('and an export invoice says nothing about GSTIN, but still wants the HSN', () => {
     const d: CheckedDoc = {
       ...doc('commercial_invoices', { tax_type: 'none', is_export: 1, port_of_loading: 'Kolkata',
         port_of_discharge: 'Hamburg', country_of_origin: 'India' }, [line({ hsn_code: '' })]),
       customer: { gstin: '' },
     };
-    assert.deepEqual(keys(d), [], 'a zero-rated export has no GST to state');
+    assert.deepEqual(keys(d), ['hsn'], 'a zero-rated export has no GST to state, and clears customs under its HSN');
+    assert.deepEqual(keys(doc('proforma_invoices', { is_export: 1 }, [line({ hsn_code: '' })])), [], 'a proforma was asked for an HSN');
   });
 });
 
@@ -178,8 +180,8 @@ describe('the refusal itself', () => {
     const c = makeCustomer();
     const id = makeInvoice({ customerId: c, currency: 'INR', total: 500 });
     db.prepare(
-      `INSERT INTO invoice_items (invoice_id, description, color, qty, unit, unit_price, amount, sort_order)
-       VALUES (?, 'A thing', 'Natural', 10, 'unit', 50, 500, 0)`
+      `INSERT INTO invoice_items (invoice_id, description, color, hsn_code, qty, unit, unit_price, amount, sort_order)
+       VALUES (?, 'A thing', 'Natural', '3923', 10, 'unit', 50, 500, 0)`
     ).run(id);
     // The customer has no GSTIN and the line no HSN — both warnings, and the
     // invoice is domestic, so both fire. Neither may refuse the approval.

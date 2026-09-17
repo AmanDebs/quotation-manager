@@ -268,7 +268,15 @@ const RULES: Rule[] = [
       : 'The customer has no GSTIN recorded, which a GST invoice states.'),
   },
   {
-    key: 'hsn', level: 'warn', tables: ['commercial_invoices'], when: isDomestic,
+    /*
+     * A block on every commercial invoice since 2026-09-17 (the client: *"HSN
+     * should be mandatory in CI"*); a warning on a domestic one before that.
+     * The invoice is the document that prints the HSN per line, and since the
+     * invoice is export-only it is the customs code the consignment clears
+     * under. A charge line is not asked, as before — a fee carries no goods
+     * code of its own on this desk's paperwork.
+     */
+    key: 'hsn', level: 'block', tables: ['commercial_invoices'],
     check: (d) => {
       const bad = d.items
         .map((it, i) => (it.is_charge || text(it.hsn_code) ? 0 : i + 1))

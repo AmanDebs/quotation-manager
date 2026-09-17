@@ -165,7 +165,7 @@ function billedQty(it: LineItem): number | null {
  * Amounts shown are a client-side preview; the server recomputes on save.
  */
 export default function LineItemsEditor({
-  items, onChange, currency, taxType, showTax, config = {}, omit, forced, share,
+  items, onChange, currency, taxType, showTax, config = {}, omit, forced, requireHsn, share,
 }: {
   items: LineItem[];
   onChange: (items: LineItem[]) => void;
@@ -182,6 +182,12 @@ export default function LineItemsEditor({
    * take it away here.
    */
   forced?: string[];
+  /**
+   * Whether every goods line must name its HSN code (the commercial invoice,
+   * 2026-09-17). Marks the heading and tints a blank box; the server's rule
+   * is what refuses.
+   */
+  requireHsn?: boolean;
   /**
    * Each line's share of the container space this document's goods take up,
    * keyed by line index — the one figure the Container Fitment table gave that
@@ -382,7 +388,7 @@ export default function LineItemsEditor({
                   measured 85px, narrower than Tax %. */}
               <th className="w-64 min-w-[13rem] pb-2 pr-2 font-medium">Description</th>
               {show('image') && <th className="w-14 pb-2 pr-2 font-medium">Photo</th>}
-              {show('hsn') && <th className="w-28 pb-2 pr-2 font-medium">HSN</th>}
+              {show('hsn') && <th className="w-28 pb-2 pr-2 font-medium">HSN{requireHsn && <> <span className="text-rose-500">*</span></>}</th>}
               {show('pcs_per_pack') && <th className="w-24 pb-2 pr-2 text-right font-medium">Pcs/Box</th>}
               {show('packs') && <th className="w-20 pb-2 pr-2 text-right font-medium">Boxes</th>}
               {show('qty_20ft') && <th className="w-24 pb-2 pr-2 text-right font-medium">Boxes/20ft</th>}
@@ -443,7 +449,9 @@ export default function LineItemsEditor({
                   )}
                   {show('hsn') && (
                     <td className="py-2 pr-2">
-                      <Input value={it.hsn_code ?? ''} onChange={(e) => set(i, { hsn_code: e.target.value })} />
+                      <label className="block" data-missing={requireHsn && !charge && !(it.hsn_code ?? '').trim() ? '' : undefined}>
+                        <Input value={it.hsn_code ?? ''} onChange={(e) => set(i, { hsn_code: e.target.value })} />
+                      </label>
                     </td>
                   )}
                   {show('pcs_per_pack') && (

@@ -587,7 +587,7 @@ function forceColumns(cfg: ColumnConfig, forced: string[]): ColumnConfig {
 // mandatory field must be on the page it was demanded for.
 const QUOTATION_FORCED = ['color'];
 const PROFORMA_FORCED = ['total_pcs', 'amount', 'color'];
-const INVOICE_FORCED = ['amount', 'color'];
+const INVOICE_FORCED = ['amount', 'color', 'hsn'];
 const ORDER_FORCED = ['amount', 'color'];
 
 /**

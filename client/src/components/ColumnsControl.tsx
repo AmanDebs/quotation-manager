@@ -268,7 +268,8 @@ const NOT_TOGGLEABLE_OUTSIDE_QUOTATION = ['amount'];
  */
 export const QUOTATION_FORCED = ['color'];
 export const PROFORMA_FORCED = ['total_pcs', ...NOT_TOGGLEABLE_OUTSIDE_QUOTATION, 'color'];
-export const INVOICE_FORCED = [...NOT_TOGGLEABLE_OUTSIDE_QUOTATION, 'color'];
+// `hsn` too (2026-09-17): the invoice is the document that prints it per line, and it is mandatory there.
+export const INVOICE_FORCED = [...NOT_TOGGLEABLE_OUTSIDE_QUOTATION, 'color', 'hsn'];
 export const ORDER_FORCED = [...NOT_TOGGLEABLE_OUTSIDE_QUOTATION, 'color'];
 
 /** The tick-list for a proforma: its own omissions, plus what it always shows. */
