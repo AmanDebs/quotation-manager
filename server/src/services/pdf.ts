@@ -165,7 +165,7 @@ const BOX = '#4a4a4a';
 const boxedLayout = {
   hLineColor: BOX, vLineColor: BOX,
   hLineWidth: () => 0.6, vLineWidth: () => 0.6,
-  paddingTop: () => 3, paddingBottom: () => 3, paddingLeft: () => 5, paddingRight: () => 5,
+  paddingTop: () => 2, paddingBottom: () => 2, paddingLeft: () => 5, paddingRight: () => 5,
 };
 
 const gridLayout = {
@@ -1313,17 +1313,17 @@ export function buildProformaPdf(id: number): TDocumentDefinitions {
 /** The consignee and whichever notify parties are stated, over four columns; see the note where it is used. */
 function exportPartyRow(consignee: string, notify1: string, notify2: string): any[] {
   const notifies = [['Notify 1', notify1], ['Notify 2', notify2]].filter(([, v]) => String(v ?? '').trim());
-  if (notifies.length === 0) return [{ ...lv('Consignee', consignee), colSpan: 4, rowSpan: 2 }, {}, {}, {}];
+  if (notifies.length === 0) return [{ ...lv('Consignee', consignee), colSpan: 4 }, {}, {}, {}];
   if (notifies.length === 1) {
     return [
-      { ...lv('Consignee', consignee), colSpan: 2, rowSpan: 2 }, {},
-      { ...lv(notifies[0][0], notifies[0][1]), colSpan: 2, rowSpan: 2 }, {},
+      { ...lv('Consignee', consignee), colSpan: 2 }, {},
+      { ...lv(notifies[0][0], notifies[0][1]), colSpan: 2 }, {},
     ];
   }
   return [
-    { ...lv('Consignee', consignee), colSpan: 2, rowSpan: 2 }, {},
-    { ...lv('Notify 1', notify1), rowSpan: 2 },
-    { ...lv('Notify 2', notify2), rowSpan: 2 },
+    { ...lv('Consignee', consignee), colSpan: 2 }, {},
+    { ...lv('Notify 1', notify1) },
+    { ...lv('Notify 2', notify2) },
   ];
 }
 
@@ -1357,8 +1357,11 @@ function exportDocGrid(s: Row, opts: {
     registrationLine(s, opts.reg),
   ].filter(Boolean).join('\n');
 
+  // Runs of blank lines in the stored bank text collapse to one: the account
+  // is typed in Settings with its own spacing, and each empty line here is a
+  // whole line of the page (2026-09-17, "we can save some space").
   const rightBottom = opts.bankBlock
-    ? lv('Bank Details', `BENEFICIARY NAME: ${s.company_name}\n${opts.bankBlock}`)
+    ? lv('Bank Details', `BENEFICIARY NAME: ${s.company_name}\n${opts.bankBlock.replace(/\n(\s*\n)+/g, '\n')}`)
     : lv('Weights', opts.weightBlock || '—');
 
   return {
@@ -1398,20 +1401,41 @@ function exportDocGrid(s: Row, opts: {
         opts.reg.isExport
           ? exportPartyRow(opts.consignee || customerAddress(opts.buyer, false), opts.notify1, opts.notify2)
           : [
-              { ...lv('Consignee (Ship to)', opts.consignee || customerAddress(opts.buyer, false)), colSpan: 4, rowSpan: 2 }, {}, {}, {},
+              { ...lv('Consignee (Ship to)', opts.consignee || customerAddress(opts.buyer, false)), colSpan: 4 }, {}, {}, {},
             ],
-        [{}, {}, {}, {}],
-        [
-          lv('Type of Shipment', opts.shipmentType || opts.despatch || '—'),
-          lv('Method of Despatch', opts.despatch || '—'),
-          lv('Currency', opts.currency),
-          lv('Terms of Payment', opts.paymentTerms || '—'),
-        ],
-        [
-          lv('Port of Loading', opts.portLoading || '—'),
-          lv('Port of Discharge', opts.portDischarge || '—'),
-          { ...rightBottom, colSpan: 2 }, {},
-        ],
+        /*
+         * The bank block is the tallest thing in this grid — seven lines on
+         * Aglo's own account — and beside two one-line port cells it set the
+         * height of a row that was otherwise empty. On the invoice it now
+         * spans the right half of the last three rows instead, so its height
+         * is absorbed by six short cells rather than two (2026-09-17, "we can
+         * save some space": measured, the goods start 32pt higher on the
+         * client's invoice). The packing list has a one-line weights block
+         * there and keeps the two-row shape.
+         */
+        ...(opts.bankBlock
+          ? [
+              [
+                lv('Type of Shipment', opts.shipmentType || opts.despatch || '—'),
+                lv('Method of Despatch', opts.despatch || '—'),
+                { ...rightBottom, colSpan: 2, rowSpan: 3 }, {},
+              ],
+              [lv('Currency', opts.currency), lv('Terms of Payment', opts.paymentTerms || '—'), {}, {}],
+              [lv('Port of Loading', opts.portLoading || '—'), lv('Port of Discharge', opts.portDischarge || '—'), {}, {}],
+            ]
+          : [
+              [
+                lv('Type of Shipment', opts.shipmentType || opts.despatch || '—'),
+                lv('Method of Despatch', opts.despatch || '—'),
+                lv('Currency', opts.currency),
+                lv('Terms of Payment', opts.paymentTerms || '—'),
+              ],
+              [
+                lv('Port of Loading', opts.portLoading || '—'),
+                lv('Port of Discharge', opts.portDischarge || '—'),
+                { ...rightBottom, colSpan: 2 }, {},
+              ],
+            ]),
       ],
     },
     layout: boxedLayout,
