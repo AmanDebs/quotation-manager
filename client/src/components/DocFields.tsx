@@ -51,6 +51,11 @@ export type IncoTerm = Suggestion;
 export const INCO_TERMS_DOMESTIC: Suggestion[] = [
   { value: 'EX-Works', label: 'EX-Works' },
   { value: 'FOR', label: 'FOR (Free on Road)' },
+  // Two more on 2026-09-17, at the client's word with a domestic quotation
+  // in front of them, in their own spelling: goods collected at Kolkata, and
+  // goods delivered to the buyer's godown.
+  { value: 'EX-KOLKATA', label: 'EX-KOLKATA' },
+  { value: 'GODOWN DELIVERY', label: 'GODOWN DELIVERY' },
 ];
 
 export const INCO_TERMS_EXPORT: Suggestion[] = [
