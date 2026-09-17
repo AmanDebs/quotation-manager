@@ -4,7 +4,7 @@ import type { TDocumentDefinitions, Content } from 'pdfmake/interfaces';
 import { inflateSync } from 'node:zlib';
 import { db } from '../db/connection.js';
 import { amountInWords } from './amountInWords.js';
-import { round2, isPieceBasis, piecesPerBillingUnit, computeTotals } from './totals.js';
+import { round2, isPieceBasis, piecesPerBillingUnit, piecesOrdered, computeTotals } from './totals.js';
 import { invoiceReceivable, proformaAdvance, orderAdvance } from './receivables.js';
 import { paramsFor, specOwner, checksForWorkOrder } from './qc.js';
 import { batchById, batchesOnDespatch, batchesOnCreditNote } from './batch.js';
@@ -1193,28 +1193,7 @@ export function buildProformaPdf(id: number): TDocumentDefinitions {
    * per-piece rate converts up instead of being restated. A line billed on some
    * other basis (kg) has no piece rate at all, so it shows its own unit price.
    */
-  /**
-   * A rate per 1000 pieces can only be *read off* a line that has at least a
-   * thousand of them. Below that the division extrapolates: a one-off charge
-   * entered as a line — "Indicative Freight (1 x 40FT HQ)", quantity 1 —
-   * divides its whole value by one piece and prints 45,00,000 against a
-   * $4,500 line. Such a line shows its own price instead. A line marked as a
-   * charge says so outright; the threshold still catches the ones raised
-   * before the flag existed.
-   */
-  const quotableInThousands = (it: Row) =>
-    !it.is_charge && isPieceBasis(it.unit) && Number(it.total_pcs) >= 1000;
-
-  const per1000Rate = (it: Row): string =>
-    (quotableInThousands(it)
-      ? fmtNum(round2((it.amount / it.total_pcs) * 1000), 2)
-      // A charge has no rate — the amount beside it is the whole story, and
-      // "4,500 /unit" only invites the reader to look for the missing quantity.
-      : it.is_charge ? ''
-      : `${fmtNum(it.unit_price, 3)}${it.unit ? ` /${it.unit}` : ''}`);
-  // Only call the column "/1000 Pcs" when something on the document actually is
-  // a piece rate — on a wholly weight-billed proforma that heading would lie.
-  const rateLabel = items.some(quotableInThousands) ? `${cur}/1000 Pcs` : `Price ${cur}`;
+  const rateLabel = rateLabelFor(items, cur);
 
   const specs: ColumnSpec[] = [
     { key: 'sl', label: 'SL No.', width: 20, align: 'center', always: true, value: (_it, i) => String(i + 1) },
@@ -1249,7 +1228,8 @@ export function buildProformaPdf(id: number): TDocumentDefinitions {
       // here while the closing total keeps it. A charge has no quantity to
       // state — its billed 1 is an artefact of the arithmetic, not a count.
       value: (it) => (it.is_charge ? ''
-        : it.total_pcs != null ? fmtNum(it.total_pcs, isPieceBasis(it.unit) ? 0 : 3)
+        : piecesOf(it) != null ? fmtNum(piecesOf(it), 0)
+        : it.total_pcs != null ? fmtNum(it.total_pcs, 3)
         : it.qty != null ? `${fmtNum(it.qty)} ${it.unit}` : '—'),
       // One figure per rate basis — see qtyTotal. Falls back to qty for the
       // same reason the cell does, so a proforma raised before Total Qty
@@ -1323,6 +1303,41 @@ function withoutBlankLines(text: string): string {
     .filter((line) => line.replace(/[\s\u200b\u200c\u200d\u2060\ufeff]/g, '') !== '')
     .join('\n');
 }
+
+/**
+ * Pieces on a goods line, by the one rule (`piecesOrdered`: the packing count,
+ * else the billed quantity converted by its basis) — `null` on a charge or a
+ * weight-billed line, which has no pieces to state. Shared by the proforma and
+ * the commercial invoice since 2026-09-17, when the invoice printed *342 per
+ * 1000* under Quantity against the proforma's *3,42,000* (the client: *"Some
+ * error in Quantity. Rate format is also different from PI"*): the two
+ * documents describe one shipment and have to say the same thing about it.
+ */
+const piecesOf = (it: Row): number | null =>
+  (it.is_charge || !isPieceBasis(it.unit) ? null : piecesOrdered({ qty: it.qty, unit: it.unit, total_pcs: it.total_pcs }));
+
+/**
+ * A rate per 1000 pieces can only be *read off* a line that has at least a
+ * thousand of them. Below that the division extrapolates: a one-off charge
+ * entered as a line — "Indicative Freight (1 x 40FT HQ)", quantity 1 —
+ * divides its whole value by one piece and prints 45,00,000 against a
+ * $4,500 line. Such a line shows its own price instead. A line marked as a
+ * charge says so outright; the threshold still catches the ones raised
+ * before the flag existed.
+ */
+const quotableInThousands = (it: Row) => (piecesOf(it) ?? 0) >= 1000;
+
+const per1000Rate = (it: Row): string =>
+  (quotableInThousands(it)
+    ? fmtNum(round2((it.amount / piecesOf(it)!) * 1000), 2)
+    // A charge has no rate — the amount beside it is the whole story, and
+    // "4,500 /unit" only invites the reader to look for the missing quantity.
+    : it.is_charge ? ''
+    : `${fmtNum(it.unit_price, 3)}${it.unit ? ` /${it.unit}` : ''}`);
+
+// Only call the column "/1000 Pcs" when something on the document actually is
+// a piece rate — on a wholly weight-billed document that heading would lie.
+const rateLabelFor = (items: Row[], cur: string) => (items.some(quotableInThousands) ? `${cur}/1000 Pcs` : `Price ${cur}`);
 
 /** The consignee and whichever notify parties are stated, over four columns; see the note where it is used. */
 function exportPartyRow(consignee: string, notify1: string, notify2: string): any[] {
@@ -1514,8 +1529,11 @@ export function buildInvoicePdf(id: number): TDocumentDefinitions {
     // its billed quantity of 1 is arithmetic, not a count of anything shipped.
     // Directly after the goods (2026-09-17, the client: "HSN should be after description").
     { key: 'hsn', label: 'HSN Code', width: 45, align: 'center', value: (it) => String(it.hsn_code || '') },
-    { key: 'qty', label: 'Quantity', width: 58, align: 'right', always: true, value: (it) => (it.is_charge ? '' : it.qty != null ? `${fmtNum(it.qty)} ${it.unit}` : '—') },
-    { key: 'unit_price', label: 'Rate', width: 55, align: 'right', always: true, value: (it) => (it.is_charge ? '' : `${fmtNum(it.unit_price, 3)}/${it.unit === 'per 1000' ? '1000' : it.unit}`) },
+    // Pieces on a piece basis, in the proforma's words, and the proforma's own
+    // per-1000 rate beside them (2026-09-17): the two documents describe one
+    // shipment. A weight-billed line still states its kilos and its own price.
+    { key: 'qty', label: 'Quantity', width: 58, align: 'right', always: true, value: (it) => (it.is_charge ? '' : piecesOf(it) != null ? `${fmtNum(piecesOf(it), 0)} Pcs` : it.qty != null ? `${fmtNum(it.qty)} ${it.unit}` : '—') },
+    { key: 'unit_price', label: rateLabelFor(items, cur), width: 55, align: 'right', always: true, value: per1000Rate },
     { key: 'color', label: 'Color', width: 46, align: 'center', value: (it) => String(it.color || '') },
     { key: 'packs', label: 'Boxes', width: 40, align: 'right', value: (it) => (it.packs != null ? fmtNum(it.packs, 0) : '') },
     ...(showTax ? [{ key: 'tax', label: 'Tax %', width: 28, align: 'right' as const, value: (it: Row) => `${it.tax_pct ?? 0}%` }] : []),

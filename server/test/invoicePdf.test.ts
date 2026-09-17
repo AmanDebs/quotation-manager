@@ -328,3 +328,29 @@ describe('the notify cells on an export invoice', () => {
     assert.equal(g.n1, true); assert.equal(g.n2, true);
   });
 });
+
+/**
+ * Quantity in pieces and the rate per 1000, the proforma's own words
+ * (2026-09-17, the client with the two side by side: *"Some error in
+ * Quantity. Rate format is also different from PI"*). A line entered as
+ * `342 per 1000` with no packing figure had printed *342 per 1000* — a
+ * figure a buyer reads as 342 pieces — beside *20.67/1000*, where the
+ * proforma had said 3,42,000 and 20.67 under USD/1000 Pcs.
+ */
+describe('the invoice states pieces and a per-1000 rate, as the proforma does', () => {
+  test('a per-1000 line with no packing figure prints its pieces and the derived rate', () => {
+    const id = makeInvoice({ customerId: cust, currency: 'USD', total: 7069.14 });
+    addItem(id, { description: '29/21 CTC Preforms', qty: 342, unit: 'per 1000', unit_price: 20.67, amount: 7069.14, packs: 114 });
+    const rows = itemsTableRows(id).map((r) => r.join(' | ')).join('\n');
+    assert.match(rows, /USD\/1000 Pcs/, 'the rate column is not labelled as the proforma labels it');
+    assert.match(rows, /3,42,000 Pcs \| 20\.67/, rows);
+    assert.doesNotMatch(rows, /342 per 1000/, 'the billing quantity leaked onto the page');
+  });
+  test('a weight-billed line still states its kilos and its own price', () => {
+    const id = makeInvoice({ customerId: cust, currency: 'USD', total: 1200 });
+    addItem(id, { description: 'Regrind', qty: 600, unit: 'kg', unit_price: 2, amount: 1200 });
+    const rows = itemsTableRows(id).map((r) => r.join(' | ')).join('\n');
+    assert.match(rows, /Price USD/);
+    assert.match(rows, /600 kg \| 2 \/kg/, rows);
+  });
+});
