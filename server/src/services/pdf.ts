@@ -1498,11 +1498,12 @@ export function buildInvoicePdf(id: number): TDocumentDefinitions {
     { key: 'description', label: 'Description of Goods', width: '*', always: true, value: (it) => String(it.description) },
     // A charge line (freight, insurance) states its amount and nothing else —
     // its billed quantity of 1 is arithmetic, not a count of anything shipped.
+    // Directly after the goods (2026-09-17, the client: "HSN should be after description").
+    { key: 'hsn', label: 'HSN Code', width: 45, align: 'center', value: (it) => String(it.hsn_code || '') },
     { key: 'qty', label: 'Quantity', width: 58, align: 'right', always: true, value: (it) => (it.is_charge ? '' : it.qty != null ? `${fmtNum(it.qty)} ${it.unit}` : '—') },
     { key: 'unit_price', label: 'Rate', width: 55, align: 'right', always: true, value: (it) => (it.is_charge ? '' : `${fmtNum(it.unit_price, 3)}/${it.unit === 'per 1000' ? '1000' : it.unit}`) },
     { key: 'color', label: 'Color', width: 46, align: 'center', value: (it) => String(it.color || '') },
     { key: 'packs', label: 'Boxes', width: 40, align: 'right', value: (it) => (it.packs != null ? fmtNum(it.packs, 0) : '') },
-    { key: 'hsn', label: 'HSN Code', width: 45, align: 'center', value: (it) => String(it.hsn_code || '') },
     ...(showTax ? [{ key: 'tax', label: 'Tax %', width: 28, align: 'right' as const, value: (it: Row) => `${it.tax_pct ?? 0}%` }] : []),
     { key: 'amount', label: `Amount ${cur}${inv.inco_terms ? ` (${String(inv.inco_terms).split(' ')[0]})` : ''}`, width: 62, align: 'right', always: true, value: (it) => fmtMoney(it.amount, cur) },
   ];
