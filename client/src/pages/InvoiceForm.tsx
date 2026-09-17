@@ -108,29 +108,34 @@ export default function InvoiceFormPage() {
   const [draft, setDraft] = useState<Draft>(emptyDraft());
   const [prefilled, setPrefilled] = useState(false);
   /*
-   * Which packing rows carry a weight somebody typed, by row and by column.
-   * The rest follow the catalogue (`packingWeights`): a **default, not a
+   * Which packing rows carry a figure somebody typed, by row and by column
+   * — the box count as well as the two weights (2026-09-17: *"Package should
+   * automatically pick from CI"*, so it follows the invoice line's boxes).
+   * The rest follow the line and the catalogue (`packingWeights`): a **default, not a
    * rule**, the box-count rule the dispatch form follows — once a figure is
    * typed it is never recomputed, since what matters is what the scale said,
    * and a row that arrives already carrying a weight is treated as typed for
    * the same reason. Derived rows re-follow the line as its pieces or boxes
    * are edited.
    */
-  const [typedWeight, setTypedWeight] = useState<Record<number, { net?: boolean; gross?: boolean }>>({});
-  const markTyped = (i: number, key: 'net' | 'gross') =>
+  const [typedWeight, setTypedWeight] = useState<Record<number, { net?: boolean; gross?: boolean; packages?: boolean }>>({});
+  const markTyped = (i: number, key: 'net' | 'gross' | 'packages') =>
     setTypedWeight((t) => ({ ...t, [i]: { ...t[i], [key]: true } }));
   const weightOf = (productId: number | null | undefined) =>
     productId ? products.find((p) => p.id === productId)?.weight_grams ?? null : null;
   const derivedWeights = draft.items.map((line) => packingWeights(line, weightOf(line.product_id)));
   useEffect(() => {
-    if (products.length === 0) return;
     setDraft((d) => {
       const items = [...d.packing.items];
       let changed = false;
       d.items.forEach((line, i) => {
-        const w = packingWeights(line, weightOf(line.product_id));
+        const w = products.length ? packingWeights(line, weightOf(line.product_id)) : null;
         const row = items[i] ?? emptyPackingItem();
         const patch: Partial<PackingListItem> = {};
+        // The box count is the invoice line's own, in the words the PDF prints.
+        const boxes = line.is_charge ? null : boxesOn(line);
+        const packages = boxes == null ? '' : `${fmtQty(boxes)} CTN`;
+        if (packages && !typedWeight[i]?.packages && row.packages !== packages) patch.packages = packages;
         if (w && !typedWeight[i]?.net && row.net_weight !== w.net) patch.net_weight = w.net;
         // Gross builds on the net that stands — the typed one where somebody
         // weighed the goods, else the catalogue's — plus the carton allowance.
@@ -172,7 +177,7 @@ export default function InvoiceFormPage() {
         ...rest
       } = existing;
       // A saved weight is a figure somebody put there; keep it whatever the catalogue says.
-      setTypedWeight(Object.fromEntries((existing.packing?.items ?? []).map((p, i) => [i, { net: !!p.net_weight, gross: !!p.gross_weight }])));
+      setTypedWeight(Object.fromEntries((existing.packing?.items ?? []).map((p, i) => [i, { net: !!p.net_weight, gross: !!p.gross_weight, packages: !!p.packages.trim() }])));
       setDraft({
         ...(rest as unknown as Draft),
         column_config: existing.column_config ?? {},
@@ -613,7 +618,7 @@ export default function InvoiceFormPage() {
                           </div>
                         </td>
                         <td className="py-1.5 pr-2">
-                          <Input value={p.packages} onChange={(e) => setPackingItem(i, { packages: e.target.value })} placeholder="e.g. 130 CTN" />
+                          <Input value={p.packages} onChange={(e) => { markTyped(i, 'packages'); setPackingItem(i, { packages: e.target.value }); }} placeholder="e.g. 130 CTN" />
                         </td>
                         <td className="py-1.5 pr-2">
                           <Input value={p.dimensions} onChange={(e) => setPackingItem(i, { dimensions: e.target.value })} placeholder="60x40x40 cm" />
