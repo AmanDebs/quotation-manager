@@ -296,3 +296,35 @@ describe('the invoice prints no terms block', () => {
     assert.ok(joined.includes('TERMS & CONDITIONS'), 'the proforma lost its terms too');
   });
 });
+
+/**
+ * A blank notify party is not printed (2026-09-17, the client with the page in
+ * front of them: *"Do not print notify if they are empty"*). The consignee
+ * takes the width the missing party leaves; both stated prints as it always did.
+ */
+describe('the notify cells on an export invoice', () => {
+  const grid = (notify1: string, notify2: string) => {
+    const cust = makeCustomer();
+    const id = makeInvoice({ customerId: cust, currency: 'USD', total: 100 });
+    db.prepare('UPDATE commercial_invoices SET is_export = 1, consignee = ?, notify_party = ?, notify_party_2 = ? WHERE id = ?')
+      .run('Africa Industrias LDA', notify1, notify2, id);
+    addItem(id, { description: 'Preform', qty: 1, unit: 'unit', unit_price: 100, amount: 100 });
+    const joined = JSON.stringify(buildInvoicePdf(id).content);
+    // Labels print uppercased (`lv`).
+    return { n1: joined.includes('NOTIFY 1'), n2: joined.includes('NOTIFY 2') };
+  };
+  test('neither stated: no notify cell at all', () => {
+    const g = grid('', '');
+    assert.equal(g.n1, false); assert.equal(g.n2, false);
+  });
+  test('one stated: that one alone', () => {
+    const g = grid('Global Freight, Hamburg', '');
+    assert.equal(g.n1, true); assert.equal(g.n2, false);
+    const h = grid('', 'Nordbank, Mauritius');
+    assert.equal(h.n1, false); assert.equal(h.n2, true);
+  });
+  test('both stated: both, as before', () => {
+    const g = grid('Global Freight, Hamburg', 'Nordbank, Mauritius');
+    assert.equal(g.n1, true); assert.equal(g.n2, true);
+  });
+});

@@ -1310,6 +1310,23 @@ export function buildProformaPdf(id: number): TDocumentDefinitions {
 /* Boxed export header shared by Commercial Invoice and Packing List   */
 /* (modeled on the AP/EX-101 samples)                                  */
 /* ------------------------------------------------------------------ */
+/** The consignee and whichever notify parties are stated, over four columns; see the note where it is used. */
+function exportPartyRow(consignee: string, notify1: string, notify2: string): any[] {
+  const notifies = [['Notify 1', notify1], ['Notify 2', notify2]].filter(([, v]) => String(v ?? '').trim());
+  if (notifies.length === 0) return [{ ...lv('Consignee', consignee), colSpan: 4, rowSpan: 2 }, {}, {}, {}];
+  if (notifies.length === 1) {
+    return [
+      { ...lv('Consignee', consignee), colSpan: 2, rowSpan: 2 }, {},
+      { ...lv(notifies[0][0], notifies[0][1]), colSpan: 2, rowSpan: 2 }, {},
+    ];
+  }
+  return [
+    { ...lv('Consignee', consignee), colSpan: 2, rowSpan: 2 }, {},
+    { ...lv('Notify 1', notify1), rowSpan: 2 },
+    { ...lv('Notify 2', notify2), rowSpan: 2 },
+  ];
+}
+
 function exportDocGrid(s: Row, opts: {
   refCells: Cell[];       // right-top: invoice no/date, order refs
   consignee: string;
@@ -1370,13 +1387,16 @@ function exportDocGrid(s: Row, opts: {
          *
          * Blank consignee still falls back to the buyer's own address, so a
          * document delivering to the billing address reads exactly as before.
+         *
+         * And on an export a notify party that is blank is not printed either
+         * (2026-09-17, the client with the page in front of them: *"Do not
+         * print notify if they are empty"*) — a cell reading `Notify 1: —`
+         * is a dead box on a customs document. The consignee takes the width
+         * the missing party leaves: the whole row with neither, half of it
+         * with one. Both stated prints exactly as it always did.
          */
         opts.reg.isExport
-          ? [
-              { ...lv('Consignee', opts.consignee || customerAddress(opts.buyer, false)), colSpan: 2, rowSpan: 2 }, {},
-              { ...lv('Notify 1', opts.notify1 || '—'), rowSpan: 2 },
-              { ...lv('Notify 2', opts.notify2 || '—'), rowSpan: 2 },
-            ]
+          ? exportPartyRow(opts.consignee || customerAddress(opts.buyer, false), opts.notify1, opts.notify2)
           : [
               { ...lv('Consignee (Ship to)', opts.consignee || customerAddress(opts.buyer, false)), colSpan: 4, rowSpan: 2 }, {}, {}, {},
             ],
