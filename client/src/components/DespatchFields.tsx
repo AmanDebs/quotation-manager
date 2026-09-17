@@ -106,9 +106,11 @@ const items = order.items ?? [];
 
 
 export function DespatchFields({
-  draft, items, ownSent, locations, transporters, invoices, isExport, orderBatches, onChange,
+  draft, items, ownSent, locations, transporters, invoices, isExport, orderBatches, orderDate, onChange,
 }: {
   draft: Partial<Despatch>;
+  /** The sales order's own date: a trip cannot leave before it (the server refuses one that does). */
+  orderDate?: string;
   items: NonNullable<Order['items']>;
   /** Pieces already on file for *this* despatch, per line, to be excluded. */
   ownSent: Map<number, number>;
@@ -149,7 +151,9 @@ export function DespatchFields({
     <div className="space-y-4">
       <Card title="Trip">
       <div className={FIELD_GRID}>
-        <Field label="Date *"><Input type="date" value={draft.date ?? ''} onChange={(e) => set({ date: e.target.value })} /></Field>
+        {/* Bounded on the box (2026-09-17): not before the order, not after today.
+            The server refuses either anyway; this keeps the picker honest. */}
+        <Field label="Date *"><Input type="date" min={orderDate || undefined} max={today()} value={draft.date ?? ''} onChange={(e) => set({ date: e.target.value })} /></Field>
         <Field label="Out of which plant">
           <Select value={draft.location_id ?? ''} onChange={(e) => set({ location_id: e.target.value ? Number(e.target.value) : null })}>
             <option value="">— none —</option>
@@ -190,8 +194,8 @@ export function DespatchFields({
             <Field label="Container number"><Input value={draft.container_no ?? ''} onChange={(e) => set({ container_no: e.target.value })} placeholder="e.g. 262183004" /></Field>
             {/* Real dates, unlike Tentative delivery above: an arrivals list has
                 to sort and count down, which "5-6 Days" cannot do. */}
-            <Field label="ETD"><Input type="date" value={draft.etd ?? ''} onChange={(e) => set({ etd: e.target.value })} /></Field>
-            <Field label="ETA"><Input type="date" value={draft.eta ?? ''} onChange={(e) => set({ eta: e.target.value })} /></Field>
+            <Field label="ETD"><Input type="date" min={draft.date || undefined} value={draft.etd ?? ''} onChange={(e) => set({ etd: e.target.value })} /></Field>
+            <Field label="ETA"><Input type="date" min={draft.etd || draft.date || undefined} value={draft.eta ?? ''} onChange={(e) => set({ eta: e.target.value })} /></Field>
             <Field label="Documents">
               <Select value={draft.docs_status ?? ''} onChange={(e) => set({ docs_status: e.target.value })}>
                 <option value="">Not sent</option>

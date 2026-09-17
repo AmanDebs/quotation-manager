@@ -4,7 +4,7 @@ import { round2 } from '../services/totals.js';
 import type { AuthedRequest } from '../middleware/auth.js';
 import { scopeClause, canAccessCustomer } from '../middleware/scope.js';
 import { qcBlockError } from '../services/qc.js';
-import { despatchLimitError } from '../services/despatchLimits.js';
+import { despatchLimitError, despatchDateError } from '../services/despatchLimits.js';
 import { syncOrderStatus } from '../services/orderStatus.js';
 import { listBody } from '../services/pagination.js';
 import { searchClause } from '../services/search.js';
@@ -320,6 +320,8 @@ despatchesRouter.post('/', (req: AuthedRequest, res) => {
     return res.status(404).json({ error: 'Sales order not found' });
   }
   if (!String(body.date ?? '').trim()) return res.status(400).json({ error: 'Date is required' });
+  const badDate = despatchDateError(order.id, String(body.date), { etd: body.etd, eta: body.eta });
+  if (badDate) return res.status(400).json({ error: badDate });
   const items = Array.isArray(body.items) ? (body.items as ItemInput[]) : [];
   if (!items.some((it) => numOrNull(it.qty) !== null || numOrNull(it.packs) !== null)) {
     return res.status(400).json({ error: 'Record what went — pieces or boxes on at least one line' });
@@ -427,6 +429,8 @@ despatchesRouter.put('/:id', (req: AuthedRequest, res) => {
   if (docsStatus === null) return res.status(400).json({ error: 'Documents status must be one of: sent, received' });
   const docsMethod = oneOf(DOCS_METHODS, v('docs_method'));
   if (docsMethod === null) return res.status(400).json({ error: 'Documents method must be one of: telex, courier' });
+  const badDate = despatchDateError(Number(existing.order_id), String(v('date')), { etd: String(v('etd')), eta: String(v('eta')) });
+  if (badDate) return res.status(400).json({ error: badDate });
   if (Array.isArray(body.items)) {
     const stopped = qcBlockError(Number(existing.order_id), body.items as ItemInput[]);
     if (stopped) return res.status(409).json({ error: stopped });
@@ -485,6 +489,10 @@ despatchesRouter.patch('/:id/sea-leg', (req: AuthedRequest, res) => {
   if (docsStatus === null) return res.status(400).json({ error: 'Documents status must be one of: sent, received' });
   const docsMethod = oneOf(DOCS_METHODS, v('docs_method'));
   if (docsMethod === null) return res.status(400).json({ error: 'Documents method must be one of: telex, courier' });
+  // The trip's own date is not revised here, but the sea leg is, and it has
+  // to stay in order with it.
+  const badDate = despatchDateError(Number(existing.order_id), String(existing.date), { etd: v('etd'), eta: v('eta') });
+  if (badDate) return res.status(400).json({ error: badDate });
   // The invoice tracker links a trip it found through the order to the
   // invoice it is looking at. Same rule as the PUT: the invoice must be the
   // same customer's, or a lorry would be billed on somebody else's paper.

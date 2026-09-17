@@ -123,3 +123,56 @@ export function despatchLimitError(
 function fmt(n: number): string {
   return new Intl.NumberFormat('en-IN').format(round2(n));
 }
+
+/**
+ * When a trip may say it left (2026-09-17, the client with the form in front
+ * of them: *"You can make it back date or even put future dispatch date -
+ * pls check"*). The register is the physical record, so a date the lorry
+ * could not have left on is refused rather than recorded.
+ *
+ * Three refusals, most specific first. **Not before the sales order** — a
+ * consignment cannot leave against an order that did not yet exist. **Not
+ * after today** — a lorry that has not left is a plan, not a record; the
+ * ETD/ETA fields beside it are where a future date belongs. And the sea leg
+ * in order: a vessel cannot sail before the goods left the plant, nor arrive
+ * before it sailed, so ETD is on or after the trip and ETA on or after ETD,
+ * each only where stated.
+ *
+ * "Today" is the date on this desk (`Asia/Kolkata`), not the server's UTC
+ * day: a lorry recorded at 2 a.m. on the 18th is on the 18th, and refusing
+ * it because Greenwich is still on the 17th would refuse a real trip. Every
+ * other date rule here reads UTC and calls the lag "the safe direction" —
+ * a lapse arriving late — but here the lag would be the unsafe one.
+ *
+ * Back-dating *within* the order's life is deliberately allowed: the lorry
+ * left yesterday and is being recorded this morning, which is how the desk
+ * sheet is actually kept. Answered 400, like the ceiling: the figure is wrong.
+ */
+export function todayInKolkata(now = new Date()): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
+}
+
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+export function despatchDateError(
+  orderId: number,
+  date: string,
+  seaLeg: { etd?: string | null; eta?: string | null } = {},
+  today = todayInKolkata(),
+): string | null {
+  const d = String(date ?? '').trim();
+  if (!ISO_DATE.test(d)) return 'Dispatch date must be a date (YYYY-MM-DD).';
+  const order = db.prepare('SELECT number, date FROM orders WHERE id = ?').get(orderId) as { number: string; date: string } | undefined;
+  if (order && order.date && d < order.date) {
+    return `Dispatch date ${d} is before the sales order ${order.number} was booked on ${order.date}. Goods cannot leave against an order that did not yet exist.`;
+  }
+  if (d > today) {
+    return `Dispatch date ${d} is in the future. Record a trip on the day it leaves; a planned sailing goes in ETD.`;
+  }
+  const etd = String(seaLeg.etd ?? '').trim();
+  const eta = String(seaLeg.eta ?? '').trim();
+  if (etd && etd < d) return `ETD ${etd} is before the dispatch date ${d}: the vessel cannot sail before the goods left the plant.`;
+  if (eta && etd && eta < etd) return `ETA ${eta} is before ETD ${etd}: a vessel cannot arrive before it sails.`;
+  if (eta && !etd && eta < d) return `ETA ${eta} is before the dispatch date ${d}.`;
+  return null;
+}

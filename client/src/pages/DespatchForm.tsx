@@ -123,6 +123,7 @@ export default function DespatchFormPage() {
       <DespatchFields
         draft={draft}
         items={order.items ?? []}
+        orderDate={order.date}
         ownSent={ownSent}
         locations={locations}
         transporters={transporters}
