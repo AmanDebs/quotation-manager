@@ -470,8 +470,8 @@ export default function InvoiceFormPage() {
             <Field label="Tax">
               <Select value={draft.tax_type} onChange={(e) => set({ tax_type: e.target.value as TaxType })}>
                 <option value="none">No tax (export)</option>
-                <option value="cgst_sgst">CGST + SGST (intra-state)</option>
-                <option value="igst">IGST (inter-state)</option>
+                <option value="cgst_sgst">CGST + SGST (buyer in the same state)</option>
+                <option value="igst">IGST (buyer in another state)</option>
               </Select>
             </Field>
             <Field label="INCO Terms *">

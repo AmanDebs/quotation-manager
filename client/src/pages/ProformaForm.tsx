@@ -410,8 +410,8 @@ export default function ProformaFormPage() {
             <Field label="Tax">
               <Select disabled={readOnly} value={draft.tax_type} onChange={(e) => set({ tax_type: e.target.value as TaxType })}>
                 <option value="none">No tax (export)</option>
-                <option value="cgst_sgst">CGST + SGST (intra-state)</option>
-                <option value="igst">IGST (inter-state)</option>
+                <option value="cgst_sgst">CGST + SGST (buyer in the same state)</option>
+                <option value="igst">IGST (buyer in another state)</option>
               </Select>
             </Field>
             <Field label="Production Lead Time *"><Input disabled={readOnly} value={draft.lead_time} onChange={(e) => set({ lead_time: e.target.value })} placeholder="e.g. 4 weeks from advance" /></Field>
