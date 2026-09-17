@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import { useCan, useUser } from '../App';
-import type { Invoice, Customer, LineItem, TaxType, Settings, ColumnConfig, PackingListItem } from '../types';
+import type { Invoice, Customer, LineItem, TaxType, Settings, ColumnConfig, PackingListItem, Product } from '../types';
 import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, StatusBadge, SettledDocumentType, FIELD_GRID, TH_CLASS } from '../components/ui';
 import { PdfLink } from '../components/PdfLink';
 import CompanySelect from '../components/CompanySelect';
@@ -16,6 +16,7 @@ import ColumnsControl, { PACKING_COLUMNS, newColumnConfig, hasColumnPrefs, invoi
 import { fmtQty, fmtDate, fmtMoney, today } from '../lib/format';
 import { useDefaultOnce } from '../lib/useDefaultOnce';
 import { useUnsavedChanges } from '../lib/useUnsavedChanges';
+import { packingWeights, grossFor, boxesOn, BOX_TARE_KG } from '../lib/packing';
 import HistoryCard from '../components/HistoryCard';
 
 interface Draft {
@@ -96,6 +97,8 @@ export default function InvoiceFormPage() {
 
   const { data: customers = [] } = useQuery({ queryKey: ['customers', ''], queryFn: () => api.get<Customer[]>('/api/customers') });
   const { data: settings } = useQuery({ queryKey: ['settings'], queryFn: () => api.get<Settings>('/api/settings') });
+  // The same query the line editor runs, for each line's weight per piece.
+  const { data: products = [] } = useQuery({ queryKey: ['products', ''], queryFn: () => api.get<Product[]>('/api/products') });
   const { data: existing, error: loadError } = useQuery({
     queryKey: ['invoice', id],
     queryFn: () => api.get<Invoice>(`/api/invoices/${id}`),
@@ -104,6 +107,43 @@ export default function InvoiceFormPage() {
 
   const [draft, setDraft] = useState<Draft>(emptyDraft());
   const [prefilled, setPrefilled] = useState(false);
+  /*
+   * Which packing rows carry a weight somebody typed, by row and by column.
+   * The rest follow the catalogue (`packingWeights`): a **default, not a
+   * rule**, the box-count rule the dispatch form follows — once a figure is
+   * typed it is never recomputed, since what matters is what the scale said,
+   * and a row that arrives already carrying a weight is treated as typed for
+   * the same reason. Derived rows re-follow the line as its pieces or boxes
+   * are edited.
+   */
+  const [typedWeight, setTypedWeight] = useState<Record<number, { net?: boolean; gross?: boolean }>>({});
+  const markTyped = (i: number, key: 'net' | 'gross') =>
+    setTypedWeight((t) => ({ ...t, [i]: { ...t[i], [key]: true } }));
+  const weightOf = (productId: number | null | undefined) =>
+    productId ? products.find((p) => p.id === productId)?.weight_grams ?? null : null;
+  const derivedWeights = draft.items.map((line) => packingWeights(line, weightOf(line.product_id)));
+  useEffect(() => {
+    if (products.length === 0) return;
+    setDraft((d) => {
+      const items = [...d.packing.items];
+      let changed = false;
+      d.items.forEach((line, i) => {
+        const w = packingWeights(line, weightOf(line.product_id));
+        const row = items[i] ?? emptyPackingItem();
+        const patch: Partial<PackingListItem> = {};
+        if (w && !typedWeight[i]?.net && row.net_weight !== w.net) patch.net_weight = w.net;
+        // Gross builds on the net that stands — the typed one where somebody
+        // weighed the goods, else the catalogue's — plus the carton allowance.
+        const netBase = typedWeight[i]?.net ? row.net_weight : w?.net;
+        if (!line.is_charge && netBase && !typedWeight[i]?.gross) {
+          const gross = grossFor(netBase, line);
+          if (gross != null && row.gross_weight !== gross) patch.gross_weight = gross;
+        }
+        if (Object.keys(patch).length) { items[i] = { ...row, ...patch }; changed = true; }
+      });
+      return changed ? { ...d, packing: { ...d.packing, items } } : d;
+    });
+  }, [draft.items, products, typedWeight]); // eslint-disable-line react-hooks/exhaustive-deps
   /*
    * The due date on a saved invoice is held apart from the draft and saved
    * the moment it is picked, through `PATCH /due-date` (the tracker's route):
@@ -131,6 +171,8 @@ export default function InvoiceFormPage() {
         packing: _pk,
         ...rest
       } = existing;
+      // A saved weight is a figure somebody put there; keep it whatever the catalogue says.
+      setTypedWeight(Object.fromEntries((existing.packing?.items ?? []).map((p, i) => [i, { net: !!p.net_weight, gross: !!p.gross_weight }])));
       setDraft({
         ...(rest as unknown as Draft),
         column_config: existing.column_config ?? {},
@@ -577,10 +619,17 @@ export default function InvoiceFormPage() {
                           <Input value={p.dimensions} onChange={(e) => setPackingItem(i, { dimensions: e.target.value })} placeholder="60x40x40 cm" />
                         </td>
                         <td className="py-1.5 pr-2">
-                          <Input type="number" min={0} step="any" value={p.net_weight || ''} onChange={(e) => setPackingItem(i, { net_weight: Number(e.target.value) })} />
+                          <Input type="number" min={0} step="any" value={p.net_weight || ''} onChange={(e) => { markTyped(i, 'net'); setPackingItem(i, { net_weight: Number(e.target.value) }); }} />
+                          {/* Where the figure came from, so it is checkable rather than magic. */}
+                          {derivedWeights[i] && !typedWeight[i]?.net && (
+                            <div className="mt-0.5 text-[11px] leading-4 text-slate-400">{weightOf(it.product_id)} g/pc</div>
+                          )}
                         </td>
                         <td className="py-1.5 pr-2">
-                          <Input type="number" min={0} step="any" value={p.gross_weight || ''} onChange={(e) => setPackingItem(i, { gross_weight: Number(e.target.value) })} />
+                          <Input type="number" min={0} step="any" value={p.gross_weight || ''} onChange={(e) => { markTyped(i, 'gross'); setPackingItem(i, { gross_weight: Number(e.target.value) }); }} />
+                          {!it.is_charge && (typedWeight[i]?.net ? !!p.net_weight : !!derivedWeights[i]) && boxesOn(it) != null && !typedWeight[i]?.gross && (
+                            <div className="mt-0.5 text-[11px] leading-4 text-slate-400">+{BOX_TARE_KG} kg × {fmtQty(boxesOn(it))} box</div>
+                          )}
                         </td>
                       </tr>
                     );
