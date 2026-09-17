@@ -258,7 +258,7 @@ const NOT_TOGGLEABLE_OUTSIDE_QUOTATION = ['amount'];
  * never two that can disagree — which leaves Total Qty as the proforma's
  * *only* quantity column. Hidden, the document cannot say how much of what is
  * being bought, and the amount it inherits is blank because nothing can be
- * typed to produce one. Orders and invoices keep Qty, so they do not need it.
+ * typed to produce one. The order keeps Qty and does not need it; the invoice dropped Qty on 2026-09-17 and does.
  */
 /**
  * `color` is forced on all four selling documents since 2026-09-17: every
@@ -269,7 +269,9 @@ const NOT_TOGGLEABLE_OUTSIDE_QUOTATION = ['amount'];
 export const QUOTATION_FORCED = ['color'];
 export const PROFORMA_FORCED = ['total_pcs', ...NOT_TOGGLEABLE_OUTSIDE_QUOTATION, 'color'];
 // `hsn` too (2026-09-17): the invoice is the document that prints it per line, and it is mandatory there.
-export const INVOICE_FORCED = [...NOT_TOGGLEABLE_OUTSIDE_QUOTATION, 'color', 'hsn'];
+// And `total_pcs`, for the proforma's reason: `qty` left the invoice editor the same day (the client,
+// with both columns on screen: "qty beside color is extra"), so Total Qty is its only quantity column.
+export const INVOICE_FORCED = [...NOT_TOGGLEABLE_OUTSIDE_QUOTATION, 'color', 'hsn', 'total_pcs'];
 export const ORDER_FORCED = [...NOT_TOGGLEABLE_OUTSIDE_QUOTATION, 'color'];
 
 /** The tick-list for a proforma: its own omissions, plus what it always shows. */
@@ -278,10 +280,12 @@ export function proformaColumns(isExport: boolean): ToggleableColumn[] {
 }
 
 /**
- * A commercial invoice keeps Qty and the HSN code — it is the document that
- * prints both — so its only omissions are the order-only columns.
+ * A commercial invoice drops Qty as the proforma does (2026-09-17 — one
+ * quantity per line, never two that can disagree; Total Qty is the billing
+ * quantity in the rate's own basis) and keeps the HSN code, being the
+ * document that prints it.
  */
-export const INVOICE_OMIT = [...ORDER_ONLY_COLUMNS];
+export const INVOICE_OMIT = ['qty', ...ORDER_ONLY_COLUMNS];
 
 export function invoiceColumns(): ToggleableColumn[] {
   return columnsFor([...INVOICE_OMIT, ...INVOICE_FORCED]);

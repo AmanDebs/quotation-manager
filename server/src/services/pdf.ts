@@ -579,15 +579,15 @@ function forceColumns(cfg: ColumnConfig, forced: string[]): ColumnConfig {
 }
 
 /**
- * `total_pcs` on the proforma: `qty` is omitted there, which leaves Total Qty
- * as its only quantity column. Orders and invoices keep Qty and so do not need
- * it forced.
+ * `total_pcs` on the proforma and, since 2026-09-17, the invoice: `qty` is
+ * omitted from both editors, which leaves Total Qty as their only quantity
+ * column. The order keeps Qty and so does not need it forced.
  */
 // `color` on all four since 2026-09-17: a goods line must name one, and a
 // mandatory field must be on the page it was demanded for.
 const QUOTATION_FORCED = ['color'];
 const PROFORMA_FORCED = ['total_pcs', 'amount', 'color'];
-const INVOICE_FORCED = ['amount', 'color', 'hsn'];
+const INVOICE_FORCED = ['amount', 'color', 'hsn', 'total_pcs'];
 const ORDER_FORCED = ['amount', 'color'];
 
 /**
