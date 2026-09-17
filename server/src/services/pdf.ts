@@ -1310,6 +1310,20 @@ export function buildProformaPdf(id: number): TDocumentDefinitions {
 /* Boxed export header shared by Commercial Invoice and Packing List   */
 /* (modeled on the AP/EX-101 samples)                                  */
 /* ------------------------------------------------------------------ */
+/**
+ * A block of typed text with its empty lines dropped. A line counts as empty
+ * when nothing in it would print — whitespace, and the zero-width and
+ * byte-order characters a paste from a bank's PDF leaves behind, which `\s`
+ * does not match and which is why a first cut of this (a `\n\s*\n` collapse)
+ * left the gap on the page exactly as it was.
+ */
+function withoutBlankLines(text: string): string {
+  return text
+    .split(/\r?\n/)
+    .filter((line) => line.replace(/[\s\u200b\u200c\u200d\u2060\ufeff]/g, '') !== '')
+    .join('\n');
+}
+
 /** The consignee and whichever notify parties are stated, over four columns; see the note where it is used. */
 function exportPartyRow(consignee: string, notify1: string, notify2: string): any[] {
   const notifies = [['Notify 1', notify1], ['Notify 2', notify2]].filter(([, v]) => String(v ?? '').trim());
@@ -1361,7 +1375,7 @@ function exportDocGrid(s: Row, opts: {
   // is typed in Settings with its own spacing, and each empty line here is a
   // whole line of the page (2026-09-17, "we can save some space").
   const rightBottom = opts.bankBlock
-    ? lv('Bank Details', `BENEFICIARY NAME: ${s.company_name}\n${opts.bankBlock.replace(/\n(\s*\n)+/g, '\n')}`)
+    ? lv('Bank Details', `BENEFICIARY NAME: ${s.company_name}\n${withoutBlankLines(opts.bankBlock)}`)
     : lv('Weights', opts.weightBlock || '—');
 
   return {
