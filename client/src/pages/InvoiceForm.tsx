@@ -16,7 +16,8 @@ import ColumnsControl, { PACKING_COLUMNS, newColumnConfig, hasColumnPrefs, invoi
 import { fmtQty, fmtDate, fmtMoney, today } from '../lib/format';
 import { useDefaultOnce } from '../lib/useDefaultOnce';
 import { useUnsavedChanges } from '../lib/useUnsavedChanges';
-import { packingWeights, grossFor, boxesOn, BOX_TARE_KG } from '../lib/packing';
+import { packingWeights, grossFor, boxesOn, shippingMarks, BOX_TARE_KG } from '../lib/packing';
+import { useCompanies } from '../components/CompanySelect';
 import HistoryCard from '../components/HistoryCard';
 
 interface Draft {
@@ -119,6 +120,15 @@ export default function InvoiceFormPage() {
    * are edited.
    */
   const [typedWeight, setTypedWeight] = useState<Record<number, { net?: boolean; gross?: boolean; packages?: boolean }>>({});
+  // And the shipping marks, the same rule for the one field over the rows.
+  const [typedMarks, setTypedMarks] = useState(false);
+  const companies = useCompanies();
+  const company = companies.find((c) => c.id === draft.company_id) ?? companies.find((c) => c.is_default) ?? companies[0];
+  const derivedMarks = shippingMarks(draft.items, company?.company_name ?? settings?.company_name ?? '', draft.port_of_discharge || draft.final_destination);
+  useEffect(() => {
+    if (typedMarks || !derivedMarks) return;
+    setDraft((d) => (d.packing.shipping_marks === derivedMarks ? d : { ...d, packing: { ...d.packing, shipping_marks: derivedMarks } }));
+  }, [derivedMarks, typedMarks]);
   const markTyped = (i: number, key: 'net' | 'gross' | 'packages') =>
     setTypedWeight((t) => ({ ...t, [i]: { ...t[i], [key]: true } }));
   const weightOf = (productId: number | null | undefined) =>
@@ -178,6 +188,7 @@ export default function InvoiceFormPage() {
       } = existing;
       // A saved weight is a figure somebody put there; keep it whatever the catalogue says.
       setTypedWeight(Object.fromEntries((existing.packing?.items ?? []).map((p, i) => [i, { net: !!p.net_weight, gross: !!p.gross_weight, packages: !!p.packages.trim() }])));
+      setTypedMarks(!!(existing.packing?.shipping_marks ?? '').trim());
       setDraft({
         ...(rest as unknown as Draft),
         column_config: existing.column_config ?? {},
@@ -588,7 +599,7 @@ export default function InvoiceFormPage() {
               <Input type="date" value={draft.packing.date} onChange={(e) => setPacking({ date: e.target.value })} />
             </Field>
             <Field label="Shipping Marks" className="sm:col-span-2">
-              <Input value={draft.packing.shipping_marks} onChange={(e) => setPacking({ shipping_marks: e.target.value })} placeholder="e.g. 1-590/AGLO POLY/NACALA" />
+              <Input value={draft.packing.shipping_marks} onChange={(e) => { setTypedMarks(true); setPacking({ shipping_marks: e.target.value }); }} placeholder="e.g. 1-590/AGLO POLY/NACALA" />
             </Field>
           </div>
 

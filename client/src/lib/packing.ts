@@ -52,3 +52,22 @@ export function packingWeights(line: PackedLine, weightGrams: number | null | un
   const net = r2((Number(weightGrams) * pieces) / 1000);
   return { net, gross: grossFor(net, line) };
 }
+
+/**
+ * The shipping marks, in the shape of the AP/EX-101 sample (*1-590/AGLO
+ * POLY/NACALA*; 2026-09-17, the client: *"Shipping Marks also auto fill from
+ * CI"*): the cartons numbered 1 to N over every goods line (a part box is a
+ * box on the lorry, so the count is rounded up), the exporter's name cut to
+ * its first two words, and the port the goods discharge at — the final
+ * destination where no port is named — up to its first comma. Blank with no
+ * boxes to number; a segment the record does not carry is left out rather
+ * than filled with a placeholder. Free text on the form, so the sample's own
+ * *AGLO POLY* is one edit away.
+ */
+export function shippingMarks(lines: PackedLine[], companyName: string, destination: string): string {
+  const boxes = lines.reduce((sum, l) => sum + (l.is_charge ? 0 : boxesOn(l) ?? 0), 0);
+  if (!(boxes > 0)) return '';
+  const exporter = companyName.trim().split(/\s+/).slice(0, 2).join(' ').toUpperCase();
+  const port = destination.split(',')[0].trim().toUpperCase();
+  return [`1-${Math.ceil(boxes)}`, exporter, port].filter(Boolean).join('/');
+}
