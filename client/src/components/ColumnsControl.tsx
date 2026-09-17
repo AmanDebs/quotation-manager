@@ -130,7 +130,7 @@ export function quotationOmit(isExport: boolean): string[] {
 }
 
 export function quotationColumns(isExport: boolean): ToggleableColumn[] {
-  return columnsFor(quotationOmit(isExport));
+  return columnsFor([...quotationOmit(isExport), ...QUOTATION_FORCED]);
 }
 
 export function proformaOmit(isExport: boolean): string[] {
@@ -260,9 +260,16 @@ const NOT_TOGGLEABLE_OUTSIDE_QUOTATION = ['amount'];
  * being bought, and the amount it inherits is blank because nothing can be
  * typed to produce one. Orders and invoices keep Qty, so they do not need it.
  */
-export const PROFORMA_FORCED = ['total_pcs', ...NOT_TOGGLEABLE_OUTSIDE_QUOTATION];
-export const INVOICE_FORCED = NOT_TOGGLEABLE_OUTSIDE_QUOTATION;
-export const ORDER_FORCED = NOT_TOGGLEABLE_OUTSIDE_QUOTATION;
+/**
+ * `color` is forced on all four selling documents since 2026-09-17: every
+ * goods line must name its colour (the client's word), and a mandatory field
+ * behind a hidden column is a block nobody can see to clear. The quotation,
+ * which forces nothing else, forces this.
+ */
+export const QUOTATION_FORCED = ['color'];
+export const PROFORMA_FORCED = ['total_pcs', ...NOT_TOGGLEABLE_OUTSIDE_QUOTATION, 'color'];
+export const INVOICE_FORCED = [...NOT_TOGGLEABLE_OUTSIDE_QUOTATION, 'color'];
+export const ORDER_FORCED = [...NOT_TOGGLEABLE_OUTSIDE_QUOTATION, 'color'];
 
 /** The tick-list for a proforma: its own omissions, plus what it always shows. */
 export function proformaColumns(isExport: boolean): ToggleableColumn[] {

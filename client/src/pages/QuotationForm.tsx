@@ -11,7 +11,7 @@ import LineItemsEditor from '../components/LineItemsEditor';
 import FollowupButton from '../components/FollowupButton';
 import ApprovalStrip from '../components/ApprovalStrip';
 import InternalNotes from '../components/InternalNotes';
-import ColumnsControl, { quotationColumns, quotationOmit, newColumnConfig } from '../components/ColumnsControl';
+import ColumnsControl, { quotationColumns, quotationOmit, newColumnConfig, QUOTATION_FORCED } from '../components/ColumnsControl';
 import { fmtMoney, fmtDate, today, addDays, DEFAULT_VALIDITY_DAYS } from '../lib/format';
 import { useDefaultNotes } from '../lib/useDefaultNotes';
 import { useUser } from '../App';
@@ -482,7 +482,7 @@ export default function QuotationFormPage() {
             <ReadOnlyItems items={draft.items} currency={draft.currency} />
           ) : (
             <>
-              <LineItemsEditor items={draft.items} onChange={(items) => set({ items })} currency={draft.currency} taxType={draft.tax_type} config={draft.column_config} omit={quotationOmit(!!draft.is_export)} />
+              <LineItemsEditor items={draft.items} onChange={(items) => set({ items })} currency={draft.currency} taxType={draft.tax_type} config={draft.column_config} omit={quotationOmit(!!draft.is_export)} forced={QUOTATION_FORCED} />
               <HeaderCharges
                 freight={draft.freight}
                 insurance={draft.insurance}

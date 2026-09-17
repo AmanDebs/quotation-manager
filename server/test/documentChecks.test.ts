@@ -13,7 +13,7 @@ import { makeCustomer, makeInvoice } from './helpers/factory.js';
  */
 
 const line = (over: Partial<CheckedItem> = {}): CheckedItem => ({
-  description: 'A thing', qty: 100, unit: 'unit', total_pcs: null, hsn_code: '3923', is_charge: 0, ...over,
+  description: 'A thing', color: 'Natural', qty: 100, unit: 'unit', total_pcs: null, hsn_code: '3923', is_charge: 0, ...over,
 });
 
 const doc = (table: CheckedDoc['table'], row: Record<string, unknown> = {}, items = [line()]): CheckedDoc => ({
@@ -58,6 +58,18 @@ describe('what stops an approval', () => {
     // 1-based and counting every line, charges included — the editor's own
     // numbering, not the internal position rule.
     assert.equal(found?.message, 'Line 2, 3 has no description.');
+  });
+
+  test('a goods line with no colour, named by the number the editor shows; a charge is not asked', () => {
+    // Every goods line names its colour on all four selling documents (2026-09-17).
+    for (const table of ['quotations', 'proforma_invoices', 'orders', 'commercial_invoices'] as const) {
+      const d = doc(table, table === 'orders' ? { promised_date: '2026-09-20', revised_date: '2026-09-25' } : {},
+        [line({ is_charge: 1, description: 'Freight', color: '' }), line({ color: '' }), line(), line({ color: '  ' })]);
+      const found = evaluate(d).find((f) => f.key === 'color');
+      assert.equal(found?.level, 'block', table);
+      assert.equal(found?.message, 'Line 2, 4 has no colour.', table);
+    }
+    assert.equal(keys(doc('credit_notes', {}, [line({ color: '' })])).includes('color'), false, 'a credit note was asked for a colour');
   });
 
   test('a document that is nothing but charges', () => {
@@ -166,8 +178,8 @@ describe('the refusal itself', () => {
     const c = makeCustomer();
     const id = makeInvoice({ customerId: c, currency: 'INR', total: 500 });
     db.prepare(
-      `INSERT INTO invoice_items (invoice_id, description, qty, unit, unit_price, amount, sort_order)
-       VALUES (?, 'A thing', 10, 'unit', 50, 500, 0)`
+      `INSERT INTO invoice_items (invoice_id, description, color, qty, unit, unit_price, amount, sort_order)
+       VALUES (?, 'A thing', 'Natural', 10, 'unit', 50, 500, 0)`
     ).run(id);
     // The customer has no GSTIN and the line no HSN — both warnings, and the
     // invoice is domestic, so both fire. Neither may refuse the approval.
@@ -469,7 +481,7 @@ describe('the sales order mandatory fields', () => {
       `INSERT INTO orders (number, date, customer_id, company_id, currency, tax_type, status, grand_total)
        VALUES ('SO/CHK-1', '2026-09-01', ?, 1, 'INR', 'igst', 'pending', 100) RETURNING id`
     ).get(c) as { id: number }).id);
-    db.prepare("INSERT INTO order_items (order_id, description, qty, unit, unit_price, amount, sort_order) VALUES (?, 'Cap', 10, 'unit', 10, 100, 0)").run(id);
+    db.prepare("INSERT INTO order_items (order_id, description, color, qty, unit, unit_price, amount, sort_order) VALUES (?, 'Cap', 'Natural', 10, 'unit', 10, 100, 0)").run(id);
     const err = incompleteError('orders', id);
     assert.ok(err && err.startsWith('This sales order is not finished:') && err.includes('Revised Production Date is blank.'), err ?? 'no error');
     db.prepare("UPDATE orders SET promised_date = '2026-09-18', revised_date = '2026-09-20', payment_terms = '30 days' WHERE id = ?").run(id);

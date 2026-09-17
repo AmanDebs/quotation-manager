@@ -49,6 +49,7 @@ export interface Finding {
 
 export interface CheckedItem {
   description?: string | null;
+  color?: string | null;
   hsn_code?: string | null;
   qty?: number | null;
   total_pcs?: number | null;
@@ -145,6 +146,23 @@ const RULES: Rule[] = [
     check: (d) => {
       const bad = d.items.map((it, i) => (text(it.description) ? 0 : i + 1)).filter(Boolean);
       return bad.length ? `Line ${bad.join(', ')} has no description.` : null;
+    },
+  },
+  {
+    /*
+     * Every goods line names its colour (2026-09-17, the client: *"Colour –
+     * make it mandatory in all Quotation, PI and SO and CI"*). The four selling
+     * documents, and a charge line is not asked — `computeTotals` clears its
+     * colour on every save, a fee having none. Numbered as the editor numbers
+     * its rows, charges included, the description rule's own convention. The
+     * Colour column is forced on all four editors and PDFs for the same
+     * reason `amount` is: a mandatory field behind a hidden column is a block
+     * nobody can see to clear.
+     */
+    key: 'color', level: 'block', tables: SELLING,
+    check: (d) => {
+      const bad = d.items.map((it, i) => (it.is_charge || text(it.color) ? 0 : i + 1)).filter(Boolean);
+      return bad.length ? `Line ${bad.join(', ')} has no colour.` : null;
     },
   },
   {

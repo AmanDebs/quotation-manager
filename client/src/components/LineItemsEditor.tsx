@@ -389,7 +389,7 @@ export default function LineItemsEditor({
               {show('qty_40ft') && <th className="w-24 pb-2 pr-2 text-right font-medium">Boxes/40ft</th>}
               {show('total_pcs') && <th className="w-28 pb-2 pr-2 text-right font-medium">Total Qty</th>}
               {show('qty') && <th className="w-24 pb-2 pr-2 text-right font-medium">Qty</th>}
-              {show('color') && <th className="w-24 pb-2 pr-2 font-medium">Colour</th>}
+              {show('color') && <th className="w-24 pb-2 pr-2 font-medium">Colour <span className="text-rose-500">*</span></th>}
               {show('unit_price') && <th className="w-28 pb-2 pr-2 text-right font-medium">Unit Price</th>}
               <th className="w-28 pb-2 pr-2 font-medium">Unit</th>
               {taxVisible && <th className="w-16 pb-2 pr-2 text-right font-medium">Tax %</th>}
@@ -523,7 +523,13 @@ export default function LineItemsEditor({
                   {show('color') && (
                     <td className="py-2 pr-2">
                       {charge ? none : (
-                        <Input value={it.color ?? ''} onChange={(e) => set(i, { color: e.target.value })} placeholder="Natural" />
+                        /* Mandatory on every goods line (2026-09-17); the
+                           wrapper takes the same `data-missing` mark `Field`
+                           puts on a blank header field, so the one CSS rule
+                           tints this box too. */
+                        <label className="block" data-missing={(it.color ?? '').trim() ? undefined : ''}>
+                          <Input value={it.color ?? ''} onChange={(e) => set(i, { color: e.target.value })} placeholder="Natural" />
+                        </label>
                       )}
                     </td>
                   )}

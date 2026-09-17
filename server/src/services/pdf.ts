@@ -583,9 +583,12 @@ function forceColumns(cfg: ColumnConfig, forced: string[]): ColumnConfig {
  * as its only quantity column. Orders and invoices keep Qty and so do not need
  * it forced.
  */
-const PROFORMA_FORCED = ['total_pcs', 'amount'];
-const INVOICE_FORCED = ['amount'];
-const ORDER_FORCED = ['amount'];
+// `color` on all four since 2026-09-17: a goods line must name one, and a
+// mandatory field must be on the page it was demanded for.
+const QUOTATION_FORCED = ['color'];
+const PROFORMA_FORCED = ['total_pcs', 'amount', 'color'];
+const INVOICE_FORCED = ['amount', 'color'];
+const ORDER_FORCED = ['amount', 'color'];
 
 /**
  * Builds the line-items table honouring the document's column_config:
@@ -786,7 +789,7 @@ export function buildQuotationPdf(id: number): TDocumentDefinitions {
   const cur = q.currency;
   const showTax = q.tax_type !== 'none';
   const hasQty = items.some((it) => it.qty != null);
-  const cfg: ColumnConfig = JSON.parse(String(q.column_config || '{}'));
+  const cfg = forceColumns(JSON.parse(String(q.column_config || '{}')) as ColumnConfig, QUOTATION_FORCED);
   /**
    * A quotation may be sent as a rate-and-packing price list.
    *
