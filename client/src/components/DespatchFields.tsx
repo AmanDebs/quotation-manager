@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import type { Order, Despatch, DespatchItem, Location, Transporter, OrderBatch } from '../types';
 import { Input, Textarea, Select, Field, Card, FIELD_GRID, TH_CLASS, CAPTION_CLASS } from './ui';
 import { fmtQty, today } from '../lib/format';
@@ -38,6 +37,20 @@ function boxesFor(pieces: number | null | undefined, pcsPerPack: number | null |
   const per = Number(pcsPerPack) || 0;
   if (!per || pieces == null || !Number.isFinite(Number(pieces))) return null;
   return Math.round((Number(pieces) / per) * 100) / 100;
+}
+
+/**
+ * The same arithmetic read the other way: pieces for a number of boxes
+ * (2026-09-18, the client with the form in front of them: *"after changing
+ * boxes the qty did not get updated"*). A count is as often taken in boxes as
+ * in pieces — the lorry is loaded by the carton — so whichever of the two is
+ * typed into drives the other. Whole pieces; a part box at 500/box is still
+ * 250 pieces, never 250.4.
+ */
+function piecesFor(boxes: number | null | undefined, pcsPerPack: number | null | undefined): number | null {
+  const per = Number(pcsPerPack) || 0;
+  if (!per || boxes == null || !Number.isFinite(Number(boxes))) return null;
+  return Math.round(Number(boxes) * per);
 }
 
 export function newTrip(order: Order, locations: Location[], transporters: Transporter[]): Partial<Despatch> {
@@ -128,23 +141,24 @@ export function DespatchFields({
     set({ items: rows.map((r, idx) => (idx === i ? { ...r, ...patch } : r)) });
 
   /*
-   * Which rows have had their box count typed into.
-   *
-   * Boxes follow the pieces — that is the point — but a **default, not a
-   * rule**: the figure that matters is what actually went on the lorry, and
-   * once somebody has counted it the app must not quietly recompute it from a
-   * pcs-per-box the catalogue happens to hold. A row that arrives already
-   * carrying a count is treated as touched for the same reason: on an edit
-   * those numbers were recorded off the real trip.
+   * Pieces and boxes are one figure in two units, and the one being typed
+   * into drives the other (2026-09-18). Until then boxes followed the pieces
+   * and a typed box count was frozen — right for a count taken off the real
+   * lorry, and wrong the moment the count was the *boxes*: changing 500 to
+   * 450 left the pieces at 30,00,000, which the user found. So the rule is
+   * simply that the last figure typed is the truth and the other is read from
+   * it at the line's pcs-per-box; on a line stating none, nothing is derived
+   * either way. A saved row keeps both figures exactly as they were until
+   * somebody types — deriving nothing is what protects a count recorded off
+   * the real trip, and typing into it is the one thing that says otherwise.
    */
-  const [typedBoxes, setTypedBoxes] = useState<Set<number>>(
-    () => new Set(rows.map((r, i) => (r.packs != null ? i : -1)).filter((i) => i >= 0)),
-  );
-
-  /** Pieces changed: carry the box count with it, unless it has been typed. */
   const setPieces = (i: number, qty: number | null) => {
-    const derived = typedBoxes.has(i) ? undefined : boxesFor(qty, items[rows[i].order_line]?.pcs_per_pack);
-    setRow(i, derived === undefined ? { qty } : { qty, packs: derived });
+    const packs = boxesFor(qty, items[rows[i].order_line]?.pcs_per_pack);
+    setRow(i, packs === null && qty !== null ? { qty } : { qty, packs });
+  };
+  const setBoxes = (i: number, packs: number | null) => {
+    const qty = piecesFor(packs, items[rows[i].order_line]?.pcs_per_pack);
+    setRow(i, qty === null && packs !== null ? { packs } : { qty, packs });
   };
 
   return (
@@ -289,12 +303,11 @@ export function DespatchFields({
                   className="w-full text-right tabular-nums"
                   value={r.packs ?? ''}
                   placeholder={line?.pcs_per_pack ? '' : '—'}
-                  onChange={(e) => {
-                    setTypedBoxes((prev) => new Set(prev).add(i));
-                    setRow(i, { packs: e.target.value === '' ? null : Number(e.target.value) });
-                  }}
+                  onChange={(e) => setBoxes(i, e.target.value === '' ? null : Number(e.target.value))}
                 />
-                {!!line?.pcs_per_pack && !typedBoxes.has(i) && (
+                {/* Always shown where the line states one: it is the figure the
+                    two boxes are read from each other by. */}
+                {!!line?.pcs_per_pack && (
                   <div className="mt-0.5 text-xs text-slate-400">{fmtQty(line.pcs_per_pack)}/box</div>
                 )}
               </td>
