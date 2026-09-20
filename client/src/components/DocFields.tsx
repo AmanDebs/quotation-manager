@@ -12,10 +12,16 @@ import { fmtMoney } from '../lib/format';
  * a 409 — so the field states the number and refuses the argument. The server
  * still accepts a number on PUT; this is a decision about the form, not a lock.
  */
-export function DocNumber({ value, title }: { value?: string | null; title: string }) {
+export function DocNumber({ value, title, onChange }: { value?: string | null; title: string; onChange?: (v: string) => void }) {
   // The grey box says "settled, unlike its neighbours". On a read-only
   // document nothing is editable, so it would be the only box on the card.
   if (useReadOnlyFields()) return <StaticValue title={title}>{value}</StaticValue>;
+  // Given a setter it is an ordinary box (2026-09-20, the client on the
+  // commercial invoice: "make invoice number editable") — the series issues
+  // the number and a person may overrule it, a real Aglo document being
+  // AGLO/EX/25-26/118A. Uniqueness is the server's: a number already on
+  // another document of this company answers 409 from the index.
+  if (onChange) return <Input value={value ?? ''} onChange={(e) => onChange(e.target.value)} title={title} className="font-medium" />;
   return (
     <div
       className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-sm text-slate-600"

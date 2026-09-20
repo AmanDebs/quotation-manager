@@ -180,7 +180,7 @@ export default function InvoiceFormPage() {
   useEffect(() => {
     if (existing) {
       const {
-        id: _id, number: _n, status: _s, subtotal: _st, tax_total: _tt, grand_total: _gt,
+        id: _id, status: _s, subtotal: _st, tax_total: _tt, grand_total: _gt,
         customer_name: _cn, pi_number: _pn, variance: _v, payments: _p, amount_received: _ar, balance_due: _bd, advance_applied: _av,
         approval_status: _as, approved_at: _aa, approval_note: _an, approved_by_name: _ab, created_by_name: _cb,
         packing: _pk,
@@ -430,7 +430,8 @@ export default function InvoiceFormPage() {
               <Field label="Invoice Number">
                 <DocNumber
                   value={draft.number}
-                  title="Assigned from this company's numbering series when the invoice was created"
+                  onChange={(v) => set({ number: v })}
+                  title="Assigned from this company's numbering series when the invoice was created; editable, and must be unique"
                 />
               </Field>
             )}
