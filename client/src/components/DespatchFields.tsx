@@ -125,8 +125,8 @@ export function DespatchFields({
   /** The sales order's own date: a trip cannot leave before it (the server refuses one that does). */
   orderDate?: string;
   items: NonNullable<Order['items']>;
-  /** Pieces already on file for *this* despatch, per line, to be excluded. */
-  ownSent: Map<number, number>;
+  /** Pieces and boxes already on file for *this* despatch, per line, to be excluded. */
+  ownSent: Map<number, { qty: number; packs: number }>;
   orderBatches: OrderBatch[];
   locations: Location[];
   transporters: Transporter[];
@@ -234,17 +234,29 @@ export function DespatchFields({
       <Card title="Lines">
       <table className="w-full text-sm">
         <thead>
+          {/* Ordered, sent on other trips, what is left, and this trip — the
+              figures the pieces box is checked against, asked for as columns
+              (2026-09-15) rather than a caption under the line; each in
+              quantity and boxes since 2026-09-20 ("make 4 columns Ordered >>
+              Sent >> Balance >> Current Dispatch and two sub columns in each
+              Quantity and boxes"), the lorry being loaded by the carton. */}
           <tr className={TH_CLASS}>
-            <th className="pb-2 pr-2">Line</th>
-            {/* Ordered, sent on other trips, and what is left — the figures
-                the pieces box is checked against, asked for as columns
-                (2026-09-15) rather than a caption under the line. */}
-            <th className="w-28 pb-2 pr-2 text-right">Ordered</th>
-            <th className="w-28 pb-2 pr-2 text-right" title="Sent on other trips">Sent</th>
-            <th className="w-28 pb-2 pr-2 text-right">Left to send</th>
-            <th className="w-32 pb-2 pr-2 text-right">Pieces</th>
-            <th className="w-24 pb-2 pr-2 text-right">Boxes</th>
-            <th className="pb-2 pr-2">Note</th>
+            <th rowSpan={2} className="pb-2 pr-2 align-bottom">Line</th>
+            <th colSpan={2} className="border-l border-slate-200 pb-1 pl-2 pr-2 text-center">Ordered</th>
+            <th colSpan={2} className="border-l border-slate-200 pb-1 pl-2 pr-2 text-center" title="Sent on other trips">Sent</th>
+            <th colSpan={2} className="border-l border-slate-200 pb-1 pl-2 pr-2 text-center">Balance</th>
+            <th colSpan={2} className="border-l border-slate-200 pb-1 pl-2 pr-2 text-center">Current dispatch</th>
+            <th rowSpan={2} className="border-l border-slate-200 pb-2 pl-2 pr-2 align-bottom">Note</th>
+          </tr>
+          <tr className={`${TH_CLASS} text-slate-400`}>
+            <th className="w-24 border-l border-slate-200 pb-2 pl-2 pr-2 text-right font-normal">Quantity</th>
+            <th className="w-20 pb-2 pr-2 text-right font-normal">Boxes</th>
+            <th className="w-24 border-l border-slate-200 pb-2 pl-2 pr-2 text-right font-normal">Quantity</th>
+            <th className="w-20 pb-2 pr-2 text-right font-normal">Boxes</th>
+            <th className="w-24 border-l border-slate-200 pb-2 pl-2 pr-2 text-right font-normal">Quantity</th>
+            <th className="w-20 pb-2 pr-2 text-right font-normal">Boxes</th>
+            <th className="w-32 border-l border-slate-200 pb-2 pl-2 pr-2 text-right font-normal">Quantity</th>
+            <th className="w-24 pb-2 pr-2 text-right font-normal">Boxes</th>
           </tr>
         </thead>
         <tbody>
@@ -265,10 +277,26 @@ export function DespatchFields({
             // Everything sent on this order *except* what this despatch itself
             // already has on file — the server's own `exceptDespatchId` rule,
             // without which an edit counts a trip against itself.
-            const sentElsewhere = (line?.despatched?.qty ?? 0) - (ownSent.get(r.order_line) ?? 0);
+            const own = ownSent.get(r.order_line) ?? { qty: 0, packs: 0 };
+            const sentElsewhere = (line?.despatched?.qty ?? 0) - own.qty;
             const left = ordered ? Math.max(0, ordered - sentElsewhere) : null;
             const ceiling = left === null ? undefined : Math.round(left * 1.1);
             const over = ceiling !== undefined && (r.qty ?? 0) > ceiling;
+            /*
+             * The same three figures in boxes. Ordered is the line's own box
+             * count, else its pieces at the catalogue's pcs-per-box; sent is
+             * what the other trips recorded, box counts being typed off the
+             * lorry rather than derived; balance is their difference, so the
+             * column adds up on its own rather than re-deriving from pieces
+             * and disagreeing with the trips by a part box. A line stating
+             * neither boxes nor pcs-per-box says nothing, not 0.
+             */
+            const orderedBoxes = line ? (line.packs || boxesFor(ordered, line.pcs_per_pack)) : null;
+            const sentBoxes = orderedBoxes != null ? Math.max(0, (line?.despatched?.packs ?? 0) - own.packs) : null;
+            const leftBoxes = orderedBoxes != null && sentBoxes != null ? Math.max(0, Math.round((orderedBoxes - sentBoxes) * 100) / 100) : null;
+            const num = (v: number | null, cls = 'text-slate-500') => (
+              <td className={`py-2 pr-2 text-right tabular-nums ${cls}`}>{v != null ? fmtQty(v) : '—'}</td>
+            );
             return (
             <tr key={i} className="border-b border-slate-100">
               <td className="py-2 pr-2">
@@ -283,10 +311,13 @@ export function DespatchFields({
               </td>
               {/* A weight-billed line states no piece count, and says nothing
                   rather than 0 — the ceiling below follows the same rule. */}
-              <td className="py-2 pr-2 text-right tabular-nums text-slate-500">{ordered ? fmtQty(ordered) : '—'}</td>
-              <td className="py-2 pr-2 text-right tabular-nums text-slate-500">{ordered ? fmtQty(Math.max(0, sentElsewhere)) : '—'}</td>
-              <td className={`py-2 pr-2 text-right tabular-nums font-medium ${left === 0 ? 'text-slate-400' : ''}`}>{left !== null ? fmtQty(left) : '—'}</td>
-              <td className="py-2 pr-2">
+              {num(ordered || null, 'border-l border-slate-100 pl-2 text-slate-500')}
+              {num(orderedBoxes)}
+              {num(ordered ? Math.max(0, sentElsewhere) : null, 'border-l border-slate-100 pl-2 text-slate-500')}
+              {num(sentBoxes)}
+              {num(left, `border-l border-slate-100 pl-2 font-medium ${left === 0 ? 'text-slate-400' : 'text-slate-900'}`)}
+              {num(leftBoxes, `font-medium ${leftBoxes === 0 ? 'text-slate-400' : 'text-slate-900'}`)}
+              <td className="border-l border-slate-100 py-2 pl-2 pr-2">
                 <Input
                   type="number" min={0} max={ceiling} step="any"
                   className={`w-full text-right tabular-nums ${over ? 'border-red-400 focus:border-red-500' : ''}`}
@@ -311,7 +342,7 @@ export function DespatchFields({
                   <div className="mt-0.5 text-xs text-slate-400">{fmtQty(line.pcs_per_pack)}/box</div>
                 )}
               </td>
-              <td className="py-2 pr-2">
+              <td className="border-l border-slate-100 py-2 pl-2 pr-2">
                 <Input value={r.notes ?? ''} onChange={(e) => setRow(i, { notes: e.target.value })} />
               </td>
             </tr>

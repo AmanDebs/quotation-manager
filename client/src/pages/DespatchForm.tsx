@@ -98,8 +98,11 @@ export default function DespatchFormPage() {
    * itself (`despatchLimitError` takes an `exceptDespatchId`). Read from the
    * saved record, not from the draft being typed into.
    */
-  const ownSent = new Map<number, number>();
-  for (const it of despatch?.items ?? []) ownSent.set(it.order_line, (ownSent.get(it.order_line) ?? 0) + (it.qty ?? 0));
+  const ownSent = new Map<number, { qty: number; packs: number }>();
+  for (const it of despatch?.items ?? []) {
+    const prev = ownSent.get(it.order_line) ?? { qty: 0, packs: 0 };
+    ownSent.set(it.order_line, { qty: prev.qty + (it.qty ?? 0), packs: prev.packs + (it.packs ?? 0) });
+  }
 
   const buttons = (
     <>
