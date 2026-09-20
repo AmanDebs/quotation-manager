@@ -64,6 +64,17 @@ export const INCO_TERMS_DOMESTIC: Suggestion[] = [
   { value: 'GODOWN DELIVERY', label: 'GODOWN DELIVERY' },
 ];
 
+/**
+ * What a purchase is bought on (2026-09-20, the client: *"Terms dropdown will
+ * be FOR and Ex-Factory"*) — the supplier's side of the domestic list, in the
+ * two words this desk uses for it. Free text as ever, an import naming its
+ * own basis (FOB Jebel Ali) in the same box.
+ */
+export const PURCHASE_TERMS: Suggestion[] = [
+  { value: 'FOR', label: 'FOR (Free on Road)' },
+  { value: 'Ex-Factory', label: 'Ex-Factory' },
+];
+
 export const INCO_TERMS_EXPORT: Suggestion[] = [
   { value: 'EX-Works', label: 'EX-Works' },
   { value: 'FOB', label: 'FOB (Free on Board)' },
@@ -365,6 +376,20 @@ export function PortOfLoadingInput({
       disabled={disabled}
       label="Show ports of loading"
       placeholder="e.g. Nhava Sheva Port, or type your own"
+    />
+  );
+}
+
+/** The purchase order's delivery basis: FOR or Ex-Factory, or typed. */
+export function PurchaseTermsInput({ value, onChange, disabled }: { value: string; onChange: (v: string) => void; disabled?: boolean }) {
+  return (
+    <SuggestInput
+      options={PURCHASE_TERMS}
+      value={value}
+      onChange={onChange}
+      disabled={disabled}
+      label="Show terms"
+      placeholder="e.g. FOR, or type your own"
     />
   );
 }
