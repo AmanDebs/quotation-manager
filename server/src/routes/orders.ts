@@ -8,7 +8,7 @@ import { despatchedByOrder } from './despatches.js';
 import { orderMaterialCost } from '../services/costing.js';
 import { orderAdvance, advanceForProforma } from '../services/receivables.js';
 import { withStock, orderLines, productDemand, countOrderLines, orderSearchClause,
-  type Filters, type OrderLine, type ProductDemand } from '../services/orderLines.js';
+  type Filters, type OrderLine, type ProductDemand, statusList } from '../services/orderLines.js';
 import { buildXlsx, attachmentName, type Column } from '../services/xlsx.js';
 import { allows, type AuthedRequest } from '../middleware/auth.js';
 import { scopeClause, canAccessCustomer, linkError, customerChangeError } from '../middleware/scope.js';
@@ -260,7 +260,8 @@ function orderListWhere(req: AuthedRequest): { where: string[]; params: unknown[
   const params: unknown[] = [];
   const scope = scopeClause(req, 'o.customer_id');
   if (scope.sql) { where.push(scope.sql); params.push(...scope.params); }
-  if (req.query.status) { where.push('o.status = ?'); params.push(String(req.query.status)); }
+  const statuses = statusList(req.query.status ? String(req.query.status) : undefined);
+  if (statuses.length) { where.push(`o.status IN (${statuses.map(() => '?').join(', ')})`); params.push(...statuses); }
   if (req.query.export === '1' || req.query.export === '0') { where.push('o.is_export = ?'); params.push(Number(req.query.export)); }
   // Narrow to one selling entity. Ignored when the group has just one.
   if (Number(req.query.company) > 0) { where.push('o.company_id = ?'); params.push(Number(req.query.company)); }

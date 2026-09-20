@@ -226,11 +226,21 @@ function stateOf(ordered: number, made: number, sent: number, scheduledJobs: num
  * The filters as SQL, kept apart from the query so the paged list and its
  * count are built from one description of "which lines".
  */
+/** `status` as the routes take it: a comma list, `all` or blank meaning no filter. */
+export function statusList(status: string | undefined): string[] {
+  const s = String(status ?? '').trim();
+  if (!s || s === 'all') return [];
+  return s.split(',').map((v) => v.trim()).filter(Boolean);
+}
+
 function lineWhere(f: Filters): { sql: string; params: unknown[] } {
   const where: string[] = [];
   const params: unknown[] = [];
   if (f.scopeSql) { where.push(`o.${f.scopeSql}`); params.push(...(f.scopeParams ?? [])); }
-  if (f.status) { where.push('o.status = ?'); params.push(f.status); }
+  // A comma list, as the quotation and proforma lists take (2026-09-20):
+  // "scheduled or partly sent" is not a question one value can ask.
+  const statuses = statusList(f.status);
+  if (statuses.length) { where.push(`o.status IN (${statuses.map(() => '?').join(', ')})`); params.push(...statuses); }
   if (f.isExport === 0 || f.isExport === 1) { where.push('o.is_export = ?'); params.push(f.isExport); }
   if (f.companyId) { where.push('o.company_id = ?'); params.push(f.companyId); }
   if (f.openOnly) where.push("o.status NOT IN ('completed','cancelled')");

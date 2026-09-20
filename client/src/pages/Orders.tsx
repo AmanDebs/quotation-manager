@@ -3,7 +3,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Order, OrderStatus, OrderLine, ProductDemand, LineState } from '../types';
-import { Button, Select, Input, PageHeader, EmptyState, Card, ExportTabs, ErrorText, Pagination, DownloadButton, SegmentedTabs, TH_CLASS } from '../components/ui';
+import { Button, Select, Input, PageHeader, EmptyState, Card, ExportTabs, ErrorText, Pagination, DownloadButton, SegmentedTabs, TH_CLASS, MultiSelectFilter } from '../components/ui';
 import { useCompanies } from '../components/CompanySelect';
 import { fmtDate, fmtMoney, fmtQty, today } from '../lib/format';
 import { usePagedList, PAGE_SIZE, type PagedList } from '../lib/usePagedList';
@@ -40,6 +40,13 @@ export const ORDER_STATUSES: OrderStatus[] = [
 const RETIRED: ReadonlySet<string> = new Set(['confirmed', 'in_production', 'ready']);
 export const offeredStatuses = (current?: string): OrderStatus[] =>
   ORDER_STATUSES.filter((s) => !RETIRED.has(s) || s === current);
+/**
+ * What the list's filter offers (2026-09-20, the client: "add these status
+ * checkboxes in sales order filter"): the four the row reads plus Cancelled.
+ * A retired status is not offered a box — the client's list has no word for
+ * it — but *All statuses*, the default, still shows every row on file.
+ */
+const FILTER_STATUSES: OrderStatus[] = offeredStatuses();
 
 /**
  * The order's vocabulary, where it differs from the value that is stored.
@@ -144,9 +151,19 @@ export default function OrdersPage() {
   };
 
   const [companyFilter, setCompanyFilter] = useState('');
-  const [statusFilter, setStatusFilter] = useState('');
+  // In the URL rather than component state, so the dashboard's links
+  // (`?status=`, `?open=1`) land on the filter they name and a filtered
+  // book can be bookmarked. `open` reads `'1'` or nothing.
+  const statusFilter = search.get('status') ?? '';
+  const openOnly = search.get('open') === '1';
+  const setParam = (key: string, value: string) => {
+    const next = new URLSearchParams(search);
+    if (value) next.set(key, value); else next.delete(key);
+    setSearch(next, { replace: true });
+  };
+  const setStatusFilter = (v: string) => setParam('status', v);
+  const setOpenOnly = (on: boolean) => setParam('open', on ? '1' : '');
   const [exportFilter, setExportFilter] = useState('');
-  const [openOnly, setOpenOnly] = useState(false);
   const can = useCan();
   const canDispatch = can('dispatch', 'full');
 
@@ -214,10 +231,13 @@ export default function OrdersPage() {
             ))}
           </Select>
         )}
-        <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="max-w-52">
-          <option value="">All statuses</option>
-          {ORDER_STATUSES.map((s) => <option key={s} value={s}>{orderStatusLabel(s)}</option>)}
-        </Select>
+        <MultiSelectFilter
+          options={FILTER_STATUSES.map((s) => ({ key: s, label: orderStatusLabel(s) }))}
+          value={statusFilter}
+          onChange={setStatusFilter}
+          defaultLabel="All statuses"
+          allLabel="All statuses"
+        />
         <label className="flex items-center gap-1.5 text-sm text-slate-600">
           <input type="checkbox" checked={openOnly} onChange={(e) => setOpenOnly(e.target.checked)} />
           Open sales orders only
