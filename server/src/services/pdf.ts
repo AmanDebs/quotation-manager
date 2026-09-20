@@ -2102,12 +2102,32 @@ export function buildPurchaseOrderPdf(id: number): TDocumentDefinitions {
   // person the office already deals with there.
   const attn = String(po.attn || sup?.contact_person || '');
 
-  const shipLines = String(po.ship_to || '').split('\n').filter(Boolean);
-  if (!shipLines.length) {
-    // Nothing typed, so the plant it is being delivered to stands in — which
-    // is what the receipts default to anyway.
-    shipLines.push(String(s.company_name || ''), loc ? String(loc.name) : '');
-  }
+  /*
+   * Bill-to and ship-to, each with its GSTIN (2026-09-20, the client: "Ship
+   * to with GST no and Bill To with GST No is required"). Typed where they
+   * differ from the issuing company; blank, the company's own address and
+   * registration stand in for bill-to, and the plant for ship-to — the same
+   * company's GSTIN, a plant in the state being under the one registration,
+   * and typed over where it is not.
+   */
+  const companyLines = [
+    String(s.company_name || ''),
+    ...String(s.address || '').split('\n'),
+    [s.city, s.state, s.pincode].filter(Boolean).join(', '),
+  ].filter(Boolean);
+  const gstinLine = (own: unknown) => (String(own || s.gstin || '').trim() ? `GSTIN: ${String(own || s.gstin).trim()}` : '');
+  const billLines = [
+    ...(String(po.bill_to || '').trim() ? String(po.bill_to).split('\n').filter(Boolean) : companyLines),
+    gstinLine(po.bill_to_gstin),
+  ].filter(Boolean);
+  const shipLines = [
+    ...(String(po.ship_to || '').trim()
+      ? String(po.ship_to).split('\n').filter(Boolean)
+      // Nothing typed, so the plant it is being delivered to stands in —
+      // which is what the receipts default to anyway.
+      : [String(s.company_name || ''), loc ? String(loc.name) : '', ...String(loc?.address || '').split('\n')]),
+    gstinLine(po.ship_to_gstin),
+  ].filter(Boolean);
 
   const stack = (title: string, lines: string[]): Cell => ({
     stack: [
@@ -2118,13 +2138,13 @@ export function buildPurchaseOrderPdf(id: number): TDocumentDefinitions {
 
   const header: Content = {
     table: {
-      widths: ['*', '*', 78, 78],
+      widths: ['*', '*', '*', 84],
       body: [
         [
           stack('VENDOR', vendorLines.length ? vendorLines : ['—']),
+          stack('BILL TO', billLines.length ? billLines : ['—']),
           stack('SHIP TO', shipLines.length ? shipLines : ['—']),
-          lv('PO No.', String(po.number)),
-          lv('Date', fmtDate(String(po.date))),
+          { stack: [...(lv('PO No.', String(po.number)).stack as Content[]), { text: ' ', fontSize: 3 }, ...(lv('Date', fmtDate(String(po.date))).stack as Content[])] },
         ],
         [
           lv('Kind Attn', attn),
@@ -2132,12 +2152,20 @@ export function buildPurchaseOrderPdf(id: number): TDocumentDefinitions {
           lv('Expected', po.expected_date ? fmtDate(String(po.expected_date)) : ''),
           lv('Currency', cur),
         ],
-        [
-          lv('Terms (FOB)', String(po.inco_terms || '')),
-          lv('Payment Terms', String(po.payment_terms || '')),
-          lv('Transport', String(po.transport || '')),
-          lv('Ship Via', String(po.ship_via || '')),
-        ],
+        // Transport and Ship Via left the form on 2026-09-20; an order still
+        // carrying either prints it, and one carrying neither gives the room
+        // to the payment terms rather than printing two dead cells.
+        String(po.transport || '').trim() || String(po.ship_via || '').trim()
+          ? [
+              lv('Terms', String(po.inco_terms || '')),
+              lv('Payment Terms', String(po.payment_terms || '')),
+              lv('Transport', String(po.transport || '')),
+              lv('Ship Via', String(po.ship_via || '')),
+            ]
+          : [
+              lv('Terms', String(po.inco_terms || '')),
+              { ...lv('Payment Terms', String(po.payment_terms || '')), colSpan: 3 }, {}, {},
+            ],
       ],
     },
     layout: boxedLayout,

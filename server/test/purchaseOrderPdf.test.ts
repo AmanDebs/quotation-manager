@@ -39,12 +39,13 @@ let seq = 0;
 function makePo(header: Record<string, unknown>, lines: Line[]): number {
   const sup = db.prepare("INSERT INTO suppliers (name, address) VALUES ('Alternicq Polymers', '12 Industrial Road, Kolkata')").run();
   const cols = ['number', 'supplier_id', 'date', 'currency', 'tax_type', 'subtotal', 'tax_total', 'tcs_pct', 'tcs_amount', 'grand_total',
-    'attn', 'vendor_ref', 'ship_to', 'inco_terms', 'transport', 'ship_via', 'packing', 'payment_terms', 'notes'];
+    'attn', 'vendor_ref', 'ship_to', 'inco_terms', 'transport', 'ship_via', 'packing', 'payment_terms', 'notes',
+    'bill_to', 'bill_to_gstin', 'ship_to_gstin'];
   const values: Record<string, unknown> = {
     number: `PO/TEST/${++seq}`, supplier_id: Number(sup.lastInsertRowid), date: '2026-09-04',
     currency: 'INR', tax_type: 'igst', subtotal: 0, tax_total: 0, tcs_pct: 0, tcs_amount: 0, grand_total: 0,
     attn: '', vendor_ref: '', ship_to: '', inco_terms: '', transport: '', ship_via: '', packing: '',
-    payment_terms: '', notes: '', ...header,
+    payment_terms: '', notes: '', bill_to: '', bill_to_gstin: '', ship_to_gstin: '', ...header,
   };
   const po = db.prepare(
     `INSERT INTO purchase_orders (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`
@@ -75,6 +76,17 @@ describe('what the purchase order states', () => {
   });
 
   /** The reference document's line table, column for column. */
+  test('bill-to and ship-to print with a GSTIN each, the company standing in where blank', () => {
+    db.prepare("UPDATE companies SET gstin = '19AAACA0000A1Z5' WHERE id = 1").run();
+    const blank = textsOf(buildPurchaseOrderPdf(makePo({}, [GOODS])));
+    assert.ok(blank.includes('BILL TO') && blank.includes('SHIP TO'));
+    // Three: the letterhead's own, then one standing in on each block.
+    assert.equal(blank.filter((t) => t === 'GSTIN: 19AAACA0000A1Z5').length, 3, 'the company GSTIN should stand in on both blocks');
+    const typed = textsOf(buildPurchaseOrderPdf(makePo({ bill_to: 'Aglo Packaging\nHaldia', bill_to_gstin: '19BBBBB1111B1Z1', ship_to: 'PACK SKRL', ship_to_gstin: '19CCCCC2222C1Z2' }, [GOODS])));
+    assert.ok(typed.includes('Aglo Packaging') && typed.includes('GSTIN: 19BBBBB1111B1Z1'));
+    assert.ok(typed.includes('PACK SKRL') && typed.includes('GSTIN: 19CCCCC2222C1Z2'));
+  });
+
   test('the line table is the packing-shaped one', () => {
     const texts = textsOf(buildPurchaseOrderPdf(makePo({}, [GOODS])));
     for (const want of ['DESCRIPTION', 'NO. OF CART./BAGS', 'PCS./KGS. IN CART.', 'TOTAL QUANTITY', 'UNIT PRICE', 'TOTAL']) {

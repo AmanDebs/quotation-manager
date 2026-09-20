@@ -626,6 +626,8 @@ export interface PurchaseOrder {
   is_import?: number;
   /** The header this document's own paperwork prints. */
   attn?: string; vendor_ref?: string; ship_to?: string;
+  /** Bill-to and the two GSTINs (2026-09-20); blank prints the issuing company's own. */
+  bill_to?: string; bill_to_gstin?: string; ship_to_gstin?: string;
   inco_terms?: string; transport?: string; ship_via?: string; packing?: string;
   /** Tax collected at source: a percentage of the whole, not of a line. */
   tcs_pct?: number; tcs_amount?: number;

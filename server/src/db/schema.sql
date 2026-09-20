@@ -1172,6 +1172,12 @@ CREATE TABLE IF NOT EXISTS purchase_orders (
   attn TEXT NOT NULL DEFAULT '',
   vendor_ref TEXT NOT NULL DEFAULT '',
   ship_to TEXT NOT NULL DEFAULT '',
+  -- Bill-to and the two registrations (2026-09-20, the client: "Ship to with
+  -- GST no and Bill To with GST No is required"). Blank means the issuing
+  -- company's own address and GSTIN print, and for ship-to the plant.
+  bill_to TEXT NOT NULL DEFAULT '',
+  bill_to_gstin TEXT NOT NULL DEFAULT '',
+  ship_to_gstin TEXT NOT NULL DEFAULT '',
   inco_terms TEXT NOT NULL DEFAULT '',
   transport TEXT NOT NULL DEFAULT '',
   ship_via TEXT NOT NULL DEFAULT '',

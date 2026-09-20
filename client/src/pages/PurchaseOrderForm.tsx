@@ -311,9 +311,24 @@ export default function PurchaseOrderFormPage() {
             <Field label="Vendor ID"><Input value={draft.vendor_ref ?? ''} onChange={(e) => set({ vendor_ref: e.target.value })} placeholder="Their reference for us" /></Field>
             {!!existing?.transport && <Field label="Transport"><Input value={draft.transport ?? ''} onChange={(e) => set({ transport: e.target.value })} /></Field>}
             {!!existing?.ship_via && <Field label="Ship via"><Input value={draft.ship_via ?? ''} onChange={(e) => set({ ship_via: e.target.value })} /></Field>}
+            {/* Bill-to and ship-to with their registrations (2026-09-20, the
+                client: "Ship to with GST no and Bill To with GST No is
+                required"). Blank prints the issuing company's own address
+                and GSTIN, and the plant for ship-to; typed where they differ. */}
+            <Field label="Bill to" className="sm:col-span-2">
+              <Textarea rows={2} value={draft.bill_to ?? ''} onChange={(e) => set({ bill_to: e.target.value })} placeholder="Leave blank to print the issuing company's address" />
+            </Field>
+            <Field label="Bill to GSTIN">
+              <Input value={draft.bill_to_gstin ?? ''} onChange={(e) => set({ bill_to_gstin: e.target.value })} placeholder="Blank = the company's own" />
+            </Field>
+            <div className="hidden xl:block" />
             <Field label="Ship to" className="sm:col-span-2">
               <Textarea rows={2} value={draft.ship_to ?? ''} onChange={(e) => set({ ship_to: e.target.value })} placeholder="Leave blank to print the plant above" />
             </Field>
+            <Field label="Ship to GSTIN">
+              <Input value={draft.ship_to_gstin ?? ''} onChange={(e) => set({ ship_to_gstin: e.target.value })} placeholder="Blank = the company's own" />
+            </Field>
+            <div className="hidden xl:block" />
             <Field label="Packing" className="sm:col-span-2">
               <Input value={draft.packing ?? ''} onChange={(e) => set({ packing: e.target.value })} placeholder="e.g. plain boxes, export standard" />
             </Field>
