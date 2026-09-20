@@ -1160,6 +1160,8 @@ export interface PackingList {
   shipping_marks: string; lot_no: string; remarks: string;
   /** The container the whole list travelled in; mandatory on an export (2026-09-20). */
   container_no?: string;
+  /** The Invoice Reference block as typed; blank prints the invoice's own number, date and P.I. */
+  invoice_reference?: string;
   invoice?: Record<string, unknown>;
   customer_name?: string; invoice_number?: string;
   total_gross?: number; total_net?: number;

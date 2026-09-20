@@ -201,6 +201,7 @@ addColumnIfMissing('packing_list_items', 'hsn_code', "TEXT NOT NULL DEFAULT ''")
 // column beside it lasted one commit and is kept unwritten.
 addColumnIfMissing('packing_list_items', 'container_no', "TEXT NOT NULL DEFAULT ''");
 addColumnIfMissing('packing_lists', 'container_no', "TEXT NOT NULL DEFAULT ''");
+addColumnIfMissing('packing_lists', 'invoice_reference', "TEXT NOT NULL DEFAULT ''");
 addColumnIfMissing('quotations', 'freight', 'REAL NOT NULL DEFAULT 0');
 addColumnIfMissing('quotations', 'insurance', 'REAL NOT NULL DEFAULT 0');
 addColumnIfMissing('quotations', 'inco_terms', "TEXT NOT NULL DEFAULT ''");

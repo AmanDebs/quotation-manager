@@ -150,6 +150,15 @@ describe('the packing list states its container', () => {
   test('and prints no such cell on a list stating none', () => {
     assert.ok(!/Container No\./i.test(flat(list(''))));
   });
+  test('the invoice reference is the invoice\u2019s own unless typed, and then verbatim', () => {
+    const pl = list('MSKU3333333');
+    const number = String((db.prepare('SELECT i.number FROM commercial_invoices i JOIN packing_lists p ON p.invoice_id = i.id WHERE p.id = ?').get(pl) as { number: string }).number);
+    assert.ok(flat(pl).includes(`${number} DATED`));
+    db.prepare("UPDATE packing_lists SET invoice_reference = 'AS PER CI 118A & PI 094' WHERE id = ?").run(pl);
+    const after = flat(pl);
+    assert.ok(after.includes('AS PER CI 118A & PI 094'));
+    assert.ok(!after.includes(`${number} DATED`));
+  });
 });
 
 describe('the money sits in the items table', () => {

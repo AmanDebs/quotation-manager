@@ -19,6 +19,7 @@ interface Draft {
   lot_no: string;
   remarks: string;
   container_no: string;
+  invoice_reference: string;
   items: PackingListItem[];
 }
 
@@ -39,7 +40,7 @@ export default function PackingListFormPage() {
     enabled: !isNew,
   });
 
-  const [draft, setDraft] = useState<Draft>({ customer_id: '', invoice_id: null, date: today(), shipping_marks: '', lot_no: '', remarks: '', container_no: '', items: [] });
+  const [draft, setDraft] = useState<Draft>({ customer_id: '', invoice_id: null, date: today(), shipping_marks: '', lot_no: '', remarks: '', container_no: '', invoice_reference: '', items: [] });
   const [prefilled, setPrefilled] = useState(false);
 
   useEffect(() => {
@@ -53,6 +54,7 @@ export default function PackingListFormPage() {
         lot_no: existing.lot_no ?? '',
         remarks: existing.remarks,
         container_no: existing.container_no ?? '',
+        invoice_reference: existing.invoice_reference ?? '',
         items: existing.items ?? [],
       });
     }
@@ -153,6 +155,9 @@ export default function PackingListFormPage() {
             <Field label="Container No."><Input value={draft.container_no} onChange={(e) => set({ container_no: e.target.value })} placeholder="e.g. MSKU1234567" /></Field>
             <Field label="Shipping Marks" className="col-span-full">
               <Textarea rows={2} value={draft.shipping_marks} onChange={(e) => set({ shipping_marks: e.target.value })} placeholder="Marks and numbers printed on packages…" />
+            </Field>
+            <Field label="Invoice Reference (printed)" className="col-span-full">
+              <Textarea rows={2} value={draft.invoice_reference} onChange={(e) => set({ invoice_reference: e.target.value })} placeholder="Blank = the linked invoice's number and date, with the P.I. under it" />
             </Field>
           </div>
         </Card>

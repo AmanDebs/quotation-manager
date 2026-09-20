@@ -1870,7 +1870,11 @@ export function buildPackingListPdf(id: number): TDocumentDefinitions {
   const refCells: Cell[] = [
     lv('Packing List No.  /  Date', `${pl.number}   ${fmtDate(pl.date)}`),
     { text: ' ', fontSize: 3 },
-    lv('Invoice Reference', inv ? `${inv.number} DATED ${fmtDate(inv.date)}${pi ? `\nP.I. NO: ${pi.number} DATED ${fmtDate(pi.date)}` : ''}` : '—'),
+    // Typed where the desk wants other words in that box (2026-09-20, the
+    // client: "Add a option to edit invoice reference"); derived from the
+    // invoice and its proforma otherwise, as it always was.
+    lv('Invoice Reference', String(pl.invoice_reference || '').trim()
+      || (inv ? `${inv.number} DATED ${fmtDate(inv.date)}${pi ? `\nP.I. NO: ${pi.number} DATED ${fmtDate(pi.date)}` : ''}` : '—')),
     { text: ' ', fontSize: 3 },
     lv('Other Reference(s)', pl.lot_no ? `Lot No. ${pl.lot_no}` : '—'),
     // One list, one container (2026-09-20); a list raised before this, or a

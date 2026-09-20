@@ -68,6 +68,8 @@ interface PackingDraft {
   remarks: string;
   /** The container the whole list travelled in; mandatory on an export. */
   container_no: string;
+  /** The Invoice Reference block as typed; blank prints the derived one. */
+  invoice_reference: string;
   column_config: ColumnConfig;
   items: PackingListItem[];
 }
@@ -82,7 +84,7 @@ const emptyDraft = (): Draft => ({
   is_export: 0, country_of_origin: '', port_of_loading: '', port_of_discharge: '', final_destination: '',
   notify_party_2: '', method_of_despatch: '', lot_no: '', arn_ref: '', prepared_by: '',
   remarks: '', tax_type: 'igst', column_config: newColumnConfig(), items: [],
-  packing: { date: today(), shipping_marks: '', remarks: '', container_no: '', column_config: {}, items: [] },
+  packing: { date: today(), shipping_marks: '', remarks: '', container_no: '', invoice_reference: '', column_config: {}, items: [] },
 });
 
 export default function InvoiceFormPage() {
@@ -219,6 +221,7 @@ export default function InvoiceFormPage() {
           shipping_marks: existing.packing?.shipping_marks ?? '',
           remarks: existing.packing?.remarks ?? '',
           container_no: existing.packing?.container_no ?? '',
+          invoice_reference: existing.packing?.invoice_reference ?? '',
           column_config: existing.packing?.column_config ?? {},
           items: existing.packing?.items ?? [],
         },
@@ -627,6 +630,13 @@ export default function InvoiceFormPage() {
             </Field>
             <Field label="Shipping Marks" className="sm:col-span-2">
               <Input value={draft.packing.shipping_marks} onChange={(e) => { setTypedMarks(true); setPacking({ shipping_marks: e.target.value }); }} placeholder="e.g. 1-590/AGLO POLY/NACALA" />
+            </Field>
+            {/* The Invoice Reference block on the printed list, where the
+                desk wants other words in it (2026-09-20). */}
+            <Field label="Invoice Reference (printed)" className="sm:col-span-2">
+              <Textarea rows={2} value={draft.packing.invoice_reference} onChange={(e) => setPacking({ invoice_reference: e.target.value })}
+                placeholder={existing ? `${existing.number} DATED ${fmtDate(existing.date)}${existing.pi_number ? `\nP.I. NO: ${existing.pi_number} DATED …` : ''}` : "Blank = this invoice's number and date, with the P.I. under it"} />
+              <div className="mt-0.5 text-[11px] leading-4 text-slate-400">Blank prints this invoice's number and date, with the P.I. under it.</div>
             </Field>
           </div>
 

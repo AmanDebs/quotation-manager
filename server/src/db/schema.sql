@@ -570,6 +570,9 @@ CREATE TABLE IF NOT EXISTS packing_lists (
   -- The container the whole list travelled in (2026-09-20): one list, one
   -- container, and on an export it is mandatory.
   container_no TEXT NOT NULL DEFAULT '',
+  -- What the Invoice Reference block prints, typed (2026-09-20). Blank means
+  -- derived from the linked invoice at render time, as it always was.
+  invoice_reference TEXT NOT NULL DEFAULT '',
   lot_no TEXT NOT NULL DEFAULT '',
   remarks TEXT NOT NULL DEFAULT '',
   created_by INTEGER REFERENCES users(id),
