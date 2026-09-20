@@ -8,7 +8,7 @@ import { PdfLink } from '../components/PdfLink';
 import CompanySelect, { useCompanies } from '../components/CompanySelect';
 import { DocNumber, PaymentTermsInput, PurchaseTermsInput } from '../components/DocFields';
 import HistoryCard from '../components/HistoryCard';
-import { productTypeLabel } from './Products';
+import { productTypeLabel, unitOptions } from './Products';
 import { fmtMoney, today } from '../lib/format';
 import { PIECES_PER_BILLING_UNIT, piecesOrdered } from '../lib/pieces';
 import { useUnsavedChanges } from '../lib/useUnsavedChanges';
@@ -454,7 +454,15 @@ export default function PurchaseOrderFormPage() {
                     <td className="py-2 pr-2"><Input type="number" min={0} step="any" className="w-full text-right tabular-nums" value={it.packs ?? ''} onChange={(e) => setPacking(i, { packs: e.target.value === '' ? null : Number(e.target.value) })} /></td>
                     <td className="py-2 pr-2"><Input type="number" min={0} step="any" className="w-full text-right tabular-nums" value={it.pcs_per_pack ?? ''} onChange={(e) => setPacking(i, { pcs_per_pack: e.target.value === '' ? null : Number(e.target.value) })} /></td>
                     <td className="py-2 pr-2"><Input type="number" min={0} step="any" className="w-full text-right tabular-nums" value={qtyShown(it) ?? ''} onChange={(e) => setQty(i, e.target.value === '' ? null : Number(e.target.value))} /></td>
-                    <td className="py-2 pr-2"><Input value={it.unit} onChange={(e) => setPacking(i, { unit: e.target.value })} /></td>
+                    {/* The catalogue's units, as the proforma's editor offers
+                        them (2026-09-20, the client: "Like in proforma there
+                        should be dropdown in unit"); a unit a saved line holds
+                        that the list no longer carries stays on it. */}
+                    <td className="py-2 pr-2">
+                      <Select value={it.unit} onChange={(e) => setPacking(i, { unit: e.target.value })}>
+                        {unitOptions(it.unit).map((u) => <option key={u} value={u}>{u}</option>)}
+                      </Select>
+                    </td>
                     <td className="py-2 pr-2"><Input type="number" min={0} step="any" className="w-full text-right tabular-nums" value={it.rate || ''} onChange={(e) => setItem(i, { rate: Number(e.target.value) })} /></td>
                     <td className="py-2 pr-2"><Input type="number" min={0} step="any" className="w-full text-right tabular-nums" value={it.tax_pct ?? ''} onChange={(e) => setItem(i, { tax_pct: Number(e.target.value) })} /></td>
                     <td className="py-2 pr-2 text-right tabular-nums">{fmtMoney((it.qty ?? 0) * (it.rate || 0), cur)}</td>
