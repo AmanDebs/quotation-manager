@@ -6,7 +6,7 @@ import type { PurchaseOrder, PoItem, Supplier, Material, Location, TaxType, Prod
 import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, SettledDocumentType, SearchSelect, FIELD_GRID, TH_CLASS, type SearchOption } from '../components/ui';
 import { PdfLink } from '../components/PdfLink';
 import CompanySelect from '../components/CompanySelect';
-import { DocNumber } from '../components/DocFields';
+import { DocNumber, PaymentTermsInput } from '../components/DocFields';
 import HistoryCard from '../components/HistoryCard';
 import { productTypeLabel } from './Products';
 import { fmtMoney, today } from '../lib/format';
@@ -284,7 +284,14 @@ export default function PurchaseOrderFormPage() {
                 onChange={(e) => set({ tcs_pct: e.target.value === '' ? 0 : Number(e.target.value) })}
               />
             </Field>
-            <Field label="Payment Terms"><Input value={draft.payment_terms ?? ''} onChange={(e) => set({ payment_terms: e.target.value })} /></Field>
+            {/* The same list the domestic quotation offers (2026-09-20, the
+                client: "Add the same payment terms dropdown as domestic
+                quotation"); an import takes the export-side list, a
+                consignment on a bill of lading being settled the same way
+                whichever side of it we are on. Free text still, as there. */}
+            <Field label="Payment Terms">
+              <PaymentTermsInput isExport={!!draft.is_import} value={draft.payment_terms ?? ''} onChange={(v) => set({ payment_terms: v })} />
+            </Field>
             <Field label="Terms (FOB / Ex-factory)"><Input value={draft.inco_terms ?? ''} onChange={(e) => set({ inco_terms: e.target.value })} /></Field>
           </div>
         </Card>
