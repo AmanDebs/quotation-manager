@@ -385,13 +385,19 @@ describe('the notify cells on an export invoice', () => {
     db.prepare('UPDATE commercial_invoices SET is_export = 1, consignee = ?, notify_party = ?, notify_party_2 = ? WHERE id = ?')
       .run('Africa Industrias LDA', notify1, notify2, id);
     addItem(id, { description: 'Preform', qty: 1, unit: 'unit', unit_price: 100, amount: 100 });
-    const joined = JSON.stringify(buildInvoicePdf(id).content);
+    const content = buildInvoicePdf(id).content as Node[];
+    const joined = JSON.stringify(content);
+    // The customs grid is the first table; its top-left cell is the exporter's.
+    const grid = content.find((n) => n && n.table && JSON.stringify(n).includes('EXPORTER / BENEFICIARY'))!;
+    const topLeft = JSON.stringify(grid.table.body[0][0]);
     // Labels print uppercased (`lv`).
-    return { n1: joined.includes('NOTIFY 1'), n2: joined.includes('NOTIFY 2') };
+    return { n1: joined.includes('NOTIFY 1'), n2: joined.includes('NOTIFY 2'), rows: grid.table.body.length, consigneeInExporterCell: topLeft.includes('CONSIGNEE') && topLeft.includes('Africa Industrias LDA') };
   };
-  test('neither stated: no notify cell at all', () => {
+  test('neither stated: no notify cell, and the consignee joins the exporter cell in place of its own row', () => {
     const g = grid('', '');
     assert.equal(g.n1, false); assert.equal(g.n2, false);
+    assert.equal(g.consigneeInExporterCell, true);
+    assert.equal(g.rows, grid('Global Freight, Hamburg', '').rows - 1);
   });
   test('one stated: that one alone', () => {
     const g = grid('Global Freight, Hamburg', '');
@@ -399,9 +405,10 @@ describe('the notify cells on an export invoice', () => {
     const h = grid('', 'Nordbank, Mauritius');
     assert.equal(h.n1, false); assert.equal(h.n2, true);
   });
-  test('both stated: both, as before', () => {
+  test('both stated: both, as before, with the consignee on its own row', () => {
     const g = grid('Global Freight, Hamburg', 'Nordbank, Mauritius');
     assert.equal(g.n1, true); assert.equal(g.n2, true);
+    assert.equal(g.consigneeInExporterCell, false);
   });
 });
 

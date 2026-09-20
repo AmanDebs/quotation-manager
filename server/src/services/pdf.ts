@@ -1414,12 +1414,30 @@ function exportDocGrid(s: Row, opts: {
     ? lv('Bank Details', `BENEFICIARY NAME: ${s.company_name}\n${withoutBlankLines(opts.bankBlock)}`)
     : lv('Weights', opts.weightBlock || '—');
 
+  /*
+   * With nobody to notify, the consignee joins the exporter's cell rather
+   * than taking a row of its own (2026-09-20, the client with the page in
+   * front of them: *"When there is no notify we can add Consignee to the
+   * first exporter/beneficiary block"*). That cell spans two rows beside
+   * the reference stack and the origin/destination pair, and is the shorter
+   * side by four or five lines — room the consignee's address fits into —
+   * so the party row goes and the goods start a row higher. With a notify
+   * party stated the row is kept, since the parties read side by side there.
+   */
+  const consigneeText = opts.consignee || customerAddress(opts.buyer, false);
+  const consigneeLabel = opts.reg.isExport ? 'Consignee' : 'Consignee (Ship to)';
+  const anyNotify = opts.reg.isExport && [opts.notify1, opts.notify2].some((v) => String(v ?? '').trim());
+  const exporterCell = lv('Exporter / Beneficiary (Shipper)', companyBlock);
+  const topLeft: Cell = anyNotify
+    ? { ...exporterCell, colSpan: 2, rowSpan: 2 }
+    : { stack: [...(exporterCell.stack as Content[]), { text: ' ', fontSize: 4 }, ...(lv(consigneeLabel, consigneeText).stack as Content[])], colSpan: 2, rowSpan: 2 };
+
   return {
     table: {
       widths: ['*', '*', '*', '*'],
       body: [
         [
-          { ...lv('Exporter / Beneficiary (Shipper)', companyBlock), colSpan: 2, rowSpan: 2 }, {},
+          topLeft, {},
           { ...lv('', ''), colSpan: 2, stack: opts.refCells }, {},
         ],
         [
@@ -1448,11 +1466,7 @@ function exportDocGrid(s: Row, opts: {
          * the missing party leaves: the whole row with neither, half of it
          * with one. Both stated prints exactly as it always did.
          */
-        opts.reg.isExport
-          ? exportPartyRow(opts.consignee || customerAddress(opts.buyer, false), opts.notify1, opts.notify2)
-          : [
-              { ...lv('Consignee (Ship to)', opts.consignee || customerAddress(opts.buyer, false)), colSpan: 4 }, {}, {}, {},
-            ],
+        ...(anyNotify ? [exportPartyRow(consigneeText, opts.notify1, opts.notify2)] : []),
         /*
          * The bank block is the tallest thing in this grid — seven lines on
          * Aglo's own account — and beside two one-line port cells it set the
