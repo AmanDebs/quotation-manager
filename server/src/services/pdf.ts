@@ -2146,12 +2146,20 @@ export function buildPurchaseOrderPdf(id: number): TDocumentDefinitions {
           stack('SHIP TO', shipLines.length ? shipLines : ['—']),
           { stack: [...(lv('PO No.', String(po.number)).stack as Content[]), { text: ' ', fontSize: 3 }, ...(lv('Date', fmtDate(String(po.date))).stack as Content[])] },
         ],
-        [
-          lv('Kind Attn', attn),
-          lv('Vendor ID', String(po.vendor_ref || '')),
-          lv('Expected', po.expected_date ? fmtDate(String(po.expected_date)) : ''),
-          lv('Currency', cur),
-        ],
+        // Vendor ID left the form on 2026-09-20 with Transport; an order still
+        // carrying one prints it, otherwise Kind Attn takes its room.
+        String(po.vendor_ref || '').trim()
+          ? [
+              lv('Kind Attn', attn),
+              lv('Vendor ID', String(po.vendor_ref || '')),
+              lv('Expected', po.expected_date ? fmtDate(String(po.expected_date)) : ''),
+              lv('Currency', cur),
+            ]
+          : [
+              { ...lv('Kind Attn', attn), colSpan: 2 }, {},
+              lv('Expected', po.expected_date ? fmtDate(String(po.expected_date)) : ''),
+              lv('Currency', cur),
+            ],
         // Transport and Ship Via left the form on 2026-09-20; an order still
         // carrying either prints it, and one carrying neither gives the room
         // to the payment terms rather than printing two dead cells.

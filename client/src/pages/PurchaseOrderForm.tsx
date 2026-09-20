@@ -336,7 +336,8 @@ export default function PurchaseOrderFormPage() {
         <Card title="Supplier & Shipment">
           <div className={FIELD_GRID}>
             <Field label="Kind Attn"><Input value={draft.attn ?? ''} onChange={(e) => set({ attn: e.target.value })} placeholder="Who at the supplier" /></Field>
-            <Field label="Vendor ID"><Input value={draft.vendor_ref ?? ''} onChange={(e) => set({ vendor_ref: e.target.value })} placeholder="Their reference for us" /></Field>
+            {/* Vendor ID left the form with Transport (2026-09-20); shown only on an order already carrying one. */}
+            {!!existing?.vendor_ref && <Field label="Vendor ID"><Input value={draft.vendor_ref ?? ''} onChange={(e) => set({ vendor_ref: e.target.value })} /></Field>}
             {!!existing?.transport && <Field label="Transport"><Input value={draft.transport ?? ''} onChange={(e) => set({ transport: e.target.value })} /></Field>}
             {!!existing?.ship_via && <Field label="Ship via"><Input value={draft.ship_via ?? ''} onChange={(e) => set({ ship_via: e.target.value })} /></Field>}
             {/* Bill-to and ship-to with their registrations (2026-09-20, the
