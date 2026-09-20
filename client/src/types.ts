@@ -794,6 +794,8 @@ export interface Quotation {
   validity_date: string; payment_terms: string; delivery_terms: string;
   /** Printed on the quotation as the NOTES & TERMS bullets. */
   notes: string;
+  /** The soonest open follow-up on this quotation, or null — the list's bell reads it. */
+  next_followup?: string | null;
   /** Never printed — the team's own record. Saved through its own endpoint. */
   internal_notes?: string;
   freight: number; insurance: number; inco_terms: string; container_count: string; prepared_by: string;

@@ -6,8 +6,10 @@ import type { Quotation } from '../types';
 import { Button, Select, Input, PageHeader, EmptyState, Card, ExportTabs, ErrorText, Pagination, DownloadButton, MultiSelectFilter, TH_CLASS } from '../components/ui';
 import NewDocumentDialog from '../components/NewDocumentDialog';
 import InternalNotes from '../components/InternalNotes';
+import { FollowupDialog } from '../components/FollowupButton';
+import { Icon } from '../components/icons';
 import { useCompanies } from '../components/CompanySelect';
-import { fmtDate, fmtMoney } from '../lib/format';
+import { fmtDate, fmtMoney, today } from '../lib/format';
 import { useUrlFilter } from '../lib/useUrlFilter';
 import { usePagedList, PAGE_SIZE } from '../lib/usePagedList';
 
@@ -103,6 +105,9 @@ export default function QuotationsPage() {
   // Which rows have their note panel open. Keyed by quotation id rather than
   // index, so filtering the list cannot open the wrong one.
   const [openNotes, setOpenNotes] = useState<Set<number>>(new Set());
+  // The quotation a follow-up is being scheduled on from its row (2026-09-20,
+  // the client: "Add a follow up button beside notes button").
+  const [chasing, setChasing] = useState<Quotation | null>(null);
 
   const toggleNote = (id: number) =>
     setOpenNotes((prev) => {
@@ -149,6 +154,13 @@ export default function QuotationsPage() {
         }
       />
       {creating && <NewDocumentDialog basePath="/quotations" title="New Quotation" onClose={() => setCreating(false)} />}
+      {chasing && (
+        <FollowupDialog
+          docType="quotation" docId={chasing.id} customerId={chasing.customer_id}
+          onClose={() => setChasing(null)}
+          onCreated={() => queryClient.invalidateQueries({ queryKey: ['quotations'] })}
+        />
+      )}
       <div className="mb-3 flex flex-wrap items-center gap-3">
         <ExportTabs value={exportFilter} onChange={setExportFilter} />
         {showCompany && (
@@ -202,12 +214,14 @@ export default function QuotationsPage() {
                 <th className="pb-2 pr-3 text-right">Total</th>
                 <th className="pb-2 pr-3">Status</th>
                 <th className="pb-2 pr-3">Approval</th>
-                <th className="w-8 pb-2" />
+                <th className="w-14 pb-2" />
               </tr>
             </thead>
             {quotations.map((q) => {
               const noteOpen = openNotes.has(q.id);
               const hasNote = !!q.internal_notes?.trim();
+              const chase = q.next_followup || '';
+              const chaseDue = !!chase && chase <= today();
               return (
               <tbody key={q.id} className="border-b border-slate-100 last:border-0">
                 <tr className="cursor-pointer hover:bg-slate-50" onClick={() => navigate(`/quotations/${q.id}`)}>
@@ -255,7 +269,18 @@ export default function QuotationsPage() {
                     )}
                   </td>
                   {/* Opens the note in place — the click must not open the quotation. */}
-                  <td className="py-2 text-right" onClick={(e) => e.stopPropagation()}>
+                  <td className="py-2 text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                    {/* A chase on this quotation: tinted once one is scheduled, red
+                        once it is due, and the sidebar's Follow-ups badge counts it.
+                        Drawn rather than an emoji so the tint actually shows. */}
+                    <button
+                      onClick={() => setChasing(q)}
+                      className={`rounded px-1 focus:outline-none focus:ring-1 focus:ring-brand-600 ${
+                        chaseDue ? 'text-red-600' : chase ? 'text-brand-600' : 'text-slate-300 hover:text-slate-500'
+                      }`}
+                      title={chase ? `Follow-up ${chaseDue ? 'due' : 'scheduled for'} ${fmtDate(chase)} — schedule another` : 'Schedule a follow-up'}
+                      aria-label={`Schedule a follow-up on ${q.number}`}
+                    ><Icon name="bell" className="inline-block align-[-3px]" /></button>
                     <button
                       onClick={() => toggleNote(q.id)}
                       aria-expanded={noteOpen}

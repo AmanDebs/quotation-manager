@@ -193,6 +193,34 @@ export default function Layout({ user, onLogout, children }: { user: User; onLog
     enabled: can('approval'),
     refetchInterval: 60_000,
   });
+  /*
+   * Follow-ups due today or overdue (2026-09-20, the client: "if a customer
+   * ask to follow up the user gets a notification"). The dashboard has
+   * always listed them, but only the dashboard; this puts the count on the
+   * sidebar entry on every page, refreshed each minute so a chase that
+   * turns due while the app sits open shows up without a reload. Keyed
+   * under `['followups', …]` so scheduling or closing one anywhere refreshes
+   * it by prefix.
+   */
+  const { data: chases } = useQuery({
+    queryKey: ['followups', 'count'],
+    queryFn: () => api.get<{ due: number; overdue: number }>('/api/followups/count'),
+    enabled: can('followup'),
+    refetchInterval: 60_000,
+  });
+  /** What each entry's badge says, and how urgently: only the two that have one. */
+  const badge = (to: string): { count: number; tone: string; title: string } | null => {
+    if (to === '/approvals' && approvals?.pending) {
+      return { count: approvals.pending, tone: 'bg-amber-400 text-slate-900', title: `${approvals.pending} awaiting approval` };
+    }
+    if (to === '/followups' && chases?.due) {
+      return chases.overdue
+        ? { count: chases.due, tone: 'bg-red-500 text-white', title: `${chases.due} follow-ups due, ${chases.overdue} overdue` }
+        : { count: chases.due, tone: 'bg-amber-400 text-slate-900', title: `${chases.due} follow-ups due today` };
+    }
+    return null;
+  };
+  const headerBadges = [badge('/approvals'), badge('/followups')].filter((b): b is NonNullable<typeof b> => !!b);
 
   const logout = async () => {
     await api.post('/api/auth/logout');
@@ -225,16 +253,20 @@ export default function Layout({ user, onLogout, children }: { user: User; onLog
           {isActive && <span className="absolute inset-y-1.5 -left-1 w-0.5 rounded-full bg-brand-400" aria-hidden="true" />}
           <Icon name={item.icon} />
           <span className={`flex-1 ${rail ? 'md:hidden' : ''}`}>{item.label}</span>
-          {item.to === '/approvals' && !!approvals?.pending && (
-            <>
-              <span className={`rounded-full bg-amber-400 px-1.5 text-xs font-bold text-slate-900 ${rail ? 'md:hidden' : ''}`}>
-                {approvals.pending}
-              </span>
-              {/* The count will not fit on the rail, but "there is something
-                  waiting" still has to survive the fold. */}
-              {rail && <span className="ml-0.5 hidden h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400 md:block" aria-hidden="true" />}
-            </>
-          )}
+          {(() => {
+            const b = badge(item.to);
+            if (!b) return null;
+            return (
+              <>
+                <span className={`rounded-full px-1.5 text-xs font-bold ${b.tone} ${rail ? 'md:hidden' : ''}`} title={b.title}>
+                  {b.count}
+                </span>
+                {/* The count will not fit on the rail, but "there is something
+                    waiting" still has to survive the fold. */}
+                {rail && <span className={`ml-0.5 hidden h-1.5 w-1.5 shrink-0 rounded-full md:block ${b.tone.split(' ')[0]}`} aria-hidden="true" />}
+              </>
+            );
+          })()}
         </>
       )}
     </NavLink>
@@ -259,9 +291,11 @@ export default function Layout({ user, onLogout, children }: { user: User; onLog
           <Icon name="menu" size={18} />
         </button>
         <span className="font-semibold">ERP Tool</span>
-        {can('approval') && !!approvals?.pending && (
-          <span className="ml-auto rounded-full bg-amber-400 px-1.5 text-xs font-bold text-slate-900">
-            {approvals.pending}
+        {headerBadges.length > 0 && (
+          <span className="ml-auto flex items-center gap-1.5">
+            {headerBadges.map((b) => (
+              <span key={b.title} className={`rounded-full px-1.5 text-xs font-bold ${b.tone}`} title={b.title}>{b.count}</span>
+            ))}
           </span>
         )}
       </header>

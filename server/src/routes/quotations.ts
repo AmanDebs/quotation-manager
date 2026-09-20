@@ -24,7 +24,10 @@ const listSql = `
          -- what locks the quotation, so the form can say so and link to it --
          -- and deleting that proforma is what unlocks this one again.
          (SELECT pi.id FROM proforma_invoices pi WHERE pi.quotation_id = q.id ORDER BY pi.id LIMIT 1) AS converted_pi_id,
-         (SELECT pi.number FROM proforma_invoices pi WHERE pi.quotation_id = q.id ORDER BY pi.id LIMIT 1) AS converted_pi_number
+         (SELECT pi.number FROM proforma_invoices pi WHERE pi.quotation_id = q.id ORDER BY pi.id LIMIT 1) AS converted_pi_number,
+         -- The soonest open follow-up on this quotation, so the list's bell
+         -- can say a chase is already scheduled and when (2026-09-20).
+         (SELECT MIN(f.due_date) FROM followups f WHERE f.doc_type = 'quotation' AND f.doc_id = q.id AND f.done = 0) AS next_followup
   FROM quotations q
   JOIN customers c ON c.id = q.customer_id
   -- LEFT, not JOIN: a document must still list if its company row is gone.

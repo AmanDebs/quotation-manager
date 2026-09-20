@@ -31,6 +31,27 @@ followupsRouter.get('/', (req: AuthedRequest, res) => {
   }));
 });
 
+/**
+ * What wants a human today, for the badge on the sidebar's Follow-ups entry
+ * (2026-09-20, the client, with the quotations list in front of them: *"if a
+ * customer ask to follow up the user gets a notification"*). The dashboard
+ * has listed today's and the overdue chases since it was written, but only
+ * on the dashboard; this is the same figure read on every page, the shape
+ * `/api/approvals/count` takes for the approvals queue. Pending, due today
+ * or earlier, scoped like the list — a chase on another owner's customer
+ * is not this person's to be nagged about. `date('now')` is UTC, as the
+ * dashboard's `today` is; the safe direction is that a chase turns due a
+ * few hours late rather than early. Declared above `/:id`.
+ */
+followupsRouter.get('/count', (req: AuthedRequest, res) => {
+  const scope = scopeClause(req, 'f.customer_id');
+  const row = db.prepare(
+    `SELECT COUNT(*) AS due, SUM(CASE WHEN f.due_date < date('now') THEN 1 ELSE 0 END) AS overdue
+     FROM followups f WHERE f.done = 0 AND f.due_date <= date('now')${scope.sql ? ` AND (${scope.sql})` : ''}`
+  ).get(...scope.params) as { due: number; overdue: number | null };
+  res.json({ due: row.due, overdue: row.overdue ?? 0 });
+});
+
 followupsRouter.post('/', (req: AuthedRequest, res) => {
   const body = req.body ?? {};
   if (!body.due_date) return res.status(400).json({ error: 'Due date is required' });
