@@ -1,14 +1,15 @@
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type {
-  PurchaseOrder, PoStatus, PoItem, Supplier, Material, Location, TaxType, Product,
+  PurchaseOrder, PoStatus, Supplier, Location, TaxType,
   ShortfallDraft, ShortfallDraftLine,
 } from '../types';
-import { PageHeader, Card, Select, Input, Textarea, Field, Button, EmptyState, ErrorText, Modal, Pagination, SearchSelect, SettledDocumentType, SegmentedTabs, type SearchOption, CAPTION_CLASS, TH_CLASS } from '../components/ui';
-import { productTypeLabel } from './Products';
+import { PageHeader, Card, Select, Input, Field, Button, EmptyState, ErrorText, Modal, Pagination, SegmentedTabs, CAPTION_CLASS, TH_CLASS } from '../components/ui';
 import { fmtMoney, fmtQty, fmtDate, today } from '../lib/format';
 import { usePagedList, PAGE_SIZE } from '../lib/usePagedList';
+import type { PoDraft } from './PurchaseOrderForm';
 
 /**
  * Buying material. Manager-only in full, so there is no read-only mode here.
@@ -16,35 +17,27 @@ import { usePagedList, PAGE_SIZE } from '../lib/usePagedList';
  * How much has arrived is never stored: every line's received figure is a sum
  * over the receipt rows in the ledger, which is what lets a part delivery be
  * booked without keying the same number twice.
+ *
+ * The order itself is a page of its own since 2026-09-20 (`PurchaseOrderForm`);
+ * this list keeps what a list does — the rows, receiving, cancelling,
+ * deleting — and the shortfall picker, which hands its draft to the page.
  */
 
-// The order of the keys below is the ladder; `statusStyle` is the list itself,
+// The order of the keys below is the ladder; `poStatusStyle` is the list itself,
 // so a separate STATUSES array was one more place to forget to update.
-const statusStyle: Record<PoStatus, string> = {
+export const poStatusStyle: Record<PoStatus, string> = {
   draft: 'bg-slate-100 text-slate-600',
   sent: 'bg-blue-100 text-blue-700',
   part_received: 'bg-amber-100 text-amber-700',
   received: 'bg-green-100 text-green-700',
   cancelled: 'bg-red-100 text-red-700',
 };
-
-type Draft = Partial<PurchaseOrder> & { items: PoItem[] };
-
-const emptyItem = (): PoItem => ({ material_id: null, product_id: null, description: '', qty: null, unit: 'kg', rate: 0, tax_pct: 18 });
-
-/*
- * A line names a material or a product, so the picker's value has to say which
- * — `m:3` and `p:3` are different things. Encoded rather than kept as two
- * fields on the control, so there is exactly one selected value and it cannot
- * end up meaning both.
- */
-const itemKey = (it: PoItem): string =>
-  it.material_id ? `m:${it.material_id}` : it.product_id ? `p:${it.product_id}` : '';
+export const poStatusLabel = (s: PoStatus) => s.replace(/_/g, ' ');
 
 export default function PurchaseOrdersPage() {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const [openOnly, setOpenOnly] = useState(false);
-  const [editing, setEditing] = useState<Draft | null>(null);
   const [receiving, setReceiving] = useState<PurchaseOrder | null>(null);
   const [fromShortfall, setFromShortfall] = useState(false);
 
@@ -54,64 +47,13 @@ export default function PurchaseOrdersPage() {
   );
   const pos = list.rows;
   const { data: suppliers = [] } = useQuery({ queryKey: ['master', 'suppliers', false], queryFn: () => api.get<Supplier[]>('/api/suppliers') });
-  const { data: materials = [] } = useQuery({ queryKey: ['master', 'materials', false], queryFn: () => api.get<Material[]>('/api/materials') });
   const { data: locations = [] } = useQuery({ queryKey: ['master', 'locations', false], queryFn: () => api.get<Location[]>('/api/locations') });
-  // Aglo buys finished and semi-finished goods in as well as resin, so the
-  // catalogue is on the picker beside the materials.
-  const { data: products = [] } = useQuery({ queryKey: ['products', ''], queryFn: () => api.get<Product[]>('/api/products') });
-
-  /**
-   * One picker over both masters.
-   *
-   * The kind is in the hint and in the keywords, so typing "resin" or
-   * "preform" narrows the list to one master without a second control asking
-   * which one first — the question is "what am I buying", not "which table is
-   * it in". Materials lead, because most purchase orders are for resin.
-   */
-  const buyOptions = useMemo<SearchOption[]>(() => [
-    { value: '', label: '— custom —', sticky: true },
-    ...materials.map((m) => ({
-      value: `m:${m.id}`,
-      label: m.name,
-      hint: ['Material', m.category, m.unit].filter(Boolean).join(' · '),
-      keywords: `material ${m.category ?? ''} ${m.hsn_code ?? ''}`,
-    })),
-    ...products.map((p) => ({
-      value: `p:${p.id}`,
-      label: p.name,
-      hint: ['Product', productTypeLabel(p.product_type), p.unit].filter(Boolean).join(' · '),
-      keywords: `product ${productTypeLabel(p.product_type)} ${p.hsn_code ?? ''}`,
-    })),
-  ], [materials, products]);
-
-  /** Picking either master fills the unit from **that master's** own column. */
-  const pickItem = (i: number, value: string) => {
-    if (!value) return setItem(i, { material_id: null, product_id: null });
-    const [kind, rawId] = value.split(':');
-    const id = Number(rawId);
-    if (kind === 'm') {
-      const m = materials.find((x) => x.id === id);
-      setItem(i, { material_id: id, product_id: null, description: m?.name ?? '', unit: m?.unit || 'kg' });
-    } else {
-      const p = products.find((x) => x.id === id);
-      setItem(i, {
-        material_id: null, product_id: id, description: p?.name ?? '', unit: p?.unit || 'unit',
-        pcs_per_pack: p?.pcs_per_pack ?? null,
-      });
-    }
-  };
-
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
     queryClient.invalidateQueries({ queryKey: ['stock'] });
     queryClient.invalidateQueries({ queryKey: ['stock-shortfall'] });
   };
 
-  const save = useMutation({
-    mutationFn: (d: Draft) =>
-      d.id ? api.put<PurchaseOrder>(`/api/purchase-orders/${d.id}`, d) : api.post<PurchaseOrder>('/api/purchase-orders', d),
-    onSuccess: () => { refresh(); setEditing(null); },
-  });
   const setStatus = useMutation({
     mutationFn: ({ id, status }: { id: number; status: PoStatus }) => api.post(`/api/purchase-orders/${id}/status`, { status }),
     onSuccess: refresh,
@@ -121,30 +63,16 @@ export default function PurchaseOrdersPage() {
     onSuccess: refresh,
   });
 
-  const set = (patch: Partial<Draft>) => setEditing((prev) => (prev ? { ...prev, ...patch } : prev));
-  const setItem = (i: number, patch: Partial<PoItem>) =>
-    setEditing((prev) => prev ? { ...prev, items: prev.items.map((it, idx) => (idx === i ? { ...it, ...patch } : it)) } : prev);
-
-  const openNew = () => {
-    save.reset();
-    setEditing({
-      supplier_id: suppliers[0]?.id, location_id: locations[0]?.id ?? null,
-      date: today(), expected_date: '', currency: 'INR', tax_type: 'igst' as TaxType,
-      payment_terms: '', notes: '', items: [emptyItem()],
-    });
-  };
-
   /**
    * Turn one supplier's slice of the shortfall into a draft, then hand it to
-   * the ordinary edit modal. The server has already worked out the quantities,
-   * the suggested rates and who we last bought each material from; nothing is
+   * the order's page. The server has already worked out the quantities, the
+   * suggested rates and who we last bought each material from; nothing is
    * recomputed here, and nothing is saved until the buyer presses Save like
    * any other purchase order.
    */
   const openFromShortfall = (draft: ShortfallDraft, supplierId: number, lines: ShortfallDraftLine[]) => {
-    save.reset();
     setFromShortfall(false);
-    setEditing({
+    const handed: PoDraft = {
       supplier_id: supplierId,
       location_id: draft.location_id ?? locations[0]?.id ?? null,
       date: draft.date,
@@ -157,17 +85,9 @@ export default function PurchaseOrdersPage() {
       // were for deciding, not for recording.
       items: lines.map(({ material_id, description, unit, qty, rate, tax_pct }) =>
         ({ material_id, description, unit, qty, rate, tax_pct })),
-    });
+    };
+    navigate('/purchase-orders/new', { state: { draft: handed } });
   };
-
-  const openExisting = async (po: PurchaseOrder) => {
-    save.reset();
-    const full = await api.get<PurchaseOrder>(`/api/purchase-orders/${po.id}`);
-    setEditing({ ...full, items: full.items ?? [] });
-  };
-
-  // Preview only — the server recomputes on save, as it does for every document.
-  const preview = (editing?.items ?? []).reduce((s, it) => s + (it.qty ?? 0) * (it.rate || 0), 0);
 
   return (
     <div>
@@ -179,7 +99,7 @@ export default function PurchaseOrdersPage() {
             <Button variant="secondary" onClick={() => setFromShortfall(true)} disabled={suppliers.length === 0}>
               From shortfall
             </Button>
-            <Button onClick={openNew} disabled={suppliers.length === 0}>+ New PO</Button>
+            <Button onClick={() => navigate('/purchase-orders/new')} disabled={suppliers.length === 0}>+ New PO</Button>
           </div>
         }
       />
@@ -219,15 +139,15 @@ export default function PurchaseOrdersPage() {
             <tbody>
               {pos.map((po) => (
                 <tr key={po.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50">
-                  <td className="py-2 pr-3 font-medium">{po.number}</td>
+                  <td className="py-2 pr-3 font-medium"><Link to={`/purchase-orders/${po.id}`} className="text-brand-700 hover:underline">{po.number}</Link></td>
                   <td className="py-2 pr-3">{fmtDate(po.date)}</td>
                   <td className="py-2 pr-3">{po.supplier_name}</td>
                   <td className="py-2 pr-3 text-slate-500">{po.location_name ?? '—'}</td>
                   <td className="py-2 pr-3 text-slate-500">{po.expected_date ? fmtDate(po.expected_date) : '—'}</td>
                   <td className="py-2 pr-3 text-right tabular-nums">{fmtMoney(po.grand_total, po.currency)}</td>
                   <td className="py-2 pr-3">
-                    <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${statusStyle[po.status]}`}>
-                      {po.status.replace(/_/g, ' ')}
+                    <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${poStatusStyle[po.status]}`}>
+                      {poStatusLabel(po.status)}
                     </span>
                   </td>
                   <td className="whitespace-nowrap py-2 text-right">
@@ -239,7 +159,7 @@ export default function PurchaseOrdersPage() {
                     <a href={`/api/pdf/purchase-order/${po.id}`} target="_blank" rel="noreferrer">
                       <Button variant="ghost">PDF</Button>
                     </a>
-                    <Button variant="ghost" onClick={() => openExisting(po)}>Edit</Button>
+                    <Link to={`/purchase-orders/${po.id}`}><Button variant="ghost">Edit</Button></Link>
                     {po.status !== 'cancelled' && (
                       <Button variant="ghost" onClick={() => setStatus.mutate({ id: po.id, status: 'cancelled' })}>Cancel</Button>
                     )}
@@ -261,135 +181,6 @@ export default function PurchaseOrdersPage() {
           onPage={list.setPage} noun="purchase orders"
         />
       </Card>
-
-      {editing && (
-        <Modal title={editing.id ? `Edit ${editing.number}` : 'New purchase order'} onClose={() => setEditing(null)} wide>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <Field label="Supplier *">
-              <Select value={editing.supplier_id ?? ''} onChange={(e) => set({ supplier_id: Number(e.target.value) })}>
-                {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-              </Select>
-            </Field>
-            <Field label="Deliver to">
-              <Select value={editing.location_id ?? ''} onChange={(e) => set({ location_id: e.target.value ? Number(e.target.value) : null })}>
-                <option value="">— none —</option>
-                {locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
-              </Select>
-            </Field>
-            <Field label="Date"><Input type="date" value={editing.date ?? ''} onChange={(e) => set({ date: e.target.value })} /></Field>
-            <Field label="Expected"><Input type="date" value={editing.expected_date ?? ''} onChange={(e) => set({ expected_date: e.target.value })} /></Field>
-            <Field label="Tax">
-              <Select value={editing.tax_type ?? 'igst'} onChange={(e) => set({ tax_type: e.target.value as TaxType })}>
-                <option value="igst">IGST</option>
-                <option value="cgst_sgst">CGST + SGST</option>
-                <option value="none">None</option>
-              </Select>
-            </Field>
-            <Field label="Payment terms"><Input value={editing.payment_terms ?? ''} onChange={(e) => set({ payment_terms: e.target.value })} /></Field>
-            <Field label="Kind Attn"><Input value={editing.attn ?? ''} onChange={(e) => set({ attn: e.target.value })} placeholder="Who at the supplier" /></Field>
-            <Field label="Vendor ID"><Input value={editing.vendor_ref ?? ''} onChange={(e) => set({ vendor_ref: e.target.value })} placeholder="Their reference for us" /></Field>
-            <Field label="Terms (FOB / Ex-factory)"><Input value={editing.inco_terms ?? ''} onChange={(e) => set({ inco_terms: e.target.value })} /></Field>
-            <Field label="Transport"><Input value={editing.transport ?? ''} onChange={(e) => set({ transport: e.target.value })} /></Field>
-            <Field label="Ship via"><Input value={editing.ship_via ?? ''} onChange={(e) => set({ ship_via: e.target.value })} /></Field>
-            <Field label="TCS %">
-              <Input
-                type="number" min={0} step="any" className="w-full text-right tabular-nums"
-                value={editing.tcs_pct || ''}
-                onChange={(e) => set({ tcs_pct: e.target.value === '' ? 0 : Number(e.target.value) })}
-              />
-            </Field>
-            <Field label="Ship to" className="sm:col-span-2">
-              <Textarea rows={2} value={editing.ship_to ?? ''} onChange={(e) => set({ ship_to: e.target.value })} placeholder="Leave blank to print the plant above" />
-            </Field>
-            <Field label="Packing">
-              <Input value={editing.packing ?? ''} onChange={(e) => set({ packing: e.target.value })} placeholder="e.g. plain boxes, export standard" />
-            </Field>
-          </div>
-
-          {/*
-            * Editable only while the order is new, then stated — the number is
-            * drawn from the domestic or the import series and never reissued,
-            * so the server refuses a change afterwards. Same control and same
-            * reason as on the proforma.
-            */}
-          <div className="mt-3">
-            {editing.id ? (
-              <SettledDocumentType isExport={!!editing.is_import} number={editing.number} />
-            ) : (
-              <Select
-                className="w-56"
-                value={editing.is_import ? '1' : '0'}
-                onChange={(e) => set({ is_import: e.target.value === '1' ? 1 : 0, tax_type: e.target.value === '1' ? 'none' : (editing.tax_type === 'none' ? 'igst' : editing.tax_type) })}
-              >
-                <option value="0">Domestic purchase</option>
-                <option value="1">Import</option>
-              </Select>
-            )}
-          </div>
-
-          <table className="mt-4 w-full text-sm">
-            <thead>
-              <tr className={TH_CLASS}>
-                <th className="pb-2 pr-2">Material or product</th>
-                <th className="w-20 pb-2 pr-2 text-right">Boxes</th>
-                <th className="w-20 pb-2 pr-2 text-right">Pcs/Box</th>
-                <th className="w-24 pb-2 pr-2 text-right">Qty</th>
-                <th className="w-20 pb-2 pr-2">Unit</th>
-                <th className="w-24 pb-2 pr-2 text-right">Rate</th>
-                <th className="w-20 pb-2 pr-2 text-right">Tax %</th>
-                <th className="w-28 pb-2 pr-2 text-right">Amount</th>
-                <th className="w-8 pb-2" />
-              </tr>
-            </thead>
-            <tbody>
-              {editing.items.map((it, i) => (
-                <tr key={i} className="border-b border-slate-100">
-                  <td className="py-2 pr-2">
-                    <SearchSelect
-                      className="w-full"
-                      placeholder="Type to search…"
-                      value={itemKey(it)}
-                      options={buyOptions}
-                      onChange={(v) => pickItem(i, v)}
-                    />
-                  </td>
-                  <td className="py-2 pr-2"><Input type="number" min={0} step="any" value={it.packs ?? ''} onChange={(e) => setItem(i, { packs: e.target.value === '' ? null : Number(e.target.value) })} /></td>
-                  <td className="py-2 pr-2"><Input type="number" min={0} step="any" value={it.pcs_per_pack ?? ''} onChange={(e) => setItem(i, { pcs_per_pack: e.target.value === '' ? null : Number(e.target.value) })} /></td>
-                  <td className="py-2 pr-2"><Input type="number" min={0} step="any" value={it.qty ?? ''} onChange={(e) => setItem(i, { qty: e.target.value === '' ? null : Number(e.target.value) })} /></td>
-                  <td className="py-2 pr-2"><Input value={it.unit} onChange={(e) => setItem(i, { unit: e.target.value })} /></td>
-                  <td className="py-2 pr-2"><Input type="number" min={0} step="any" value={it.rate || ''} onChange={(e) => setItem(i, { rate: Number(e.target.value) })} /></td>
-                  <td className="py-2 pr-2"><Input type="number" min={0} step="any" value={it.tax_pct ?? ''} onChange={(e) => setItem(i, { tax_pct: Number(e.target.value) })} /></td>
-                  <td className="py-2 pr-2 pt-4 text-right tabular-nums">{fmtMoney((it.qty ?? 0) * (it.rate || 0), editing.currency ?? 'INR')}</td>
-                  <td className="py-2 text-right">
-                    <button
-                      className="text-slate-300 hover:text-red-500"
-                      onClick={() => set({ items: editing.items.filter((_, idx) => idx !== i) })}
-                    >✕</button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          <div className="mt-2 flex items-center justify-between">
-            <Button variant="secondary" onClick={() => set({ items: [...editing.items, emptyItem()] })}>+ Add line</Button>
-            <span className="text-sm text-slate-600">
-              Subtotal <strong className="tabular-nums">{fmtMoney(preview, editing.currency ?? 'INR')}</strong>
-            </span>
-          </div>
-
-          <Field label="Notes" className="mt-3">
-            <Textarea rows={2} value={editing.notes ?? ''} onChange={(e) => set({ notes: e.target.value })} />
-          </Field>
-
-          <ErrorText error={save.error} />
-          <div className="mt-4 flex justify-end gap-2">
-            <Button variant="secondary" onClick={() => setEditing(null)}>Cancel</Button>
-            <Button onClick={() => save.mutate(editing)} disabled={save.isPending || !editing.supplier_id}>
-              {save.isPending ? 'Saving…' : 'Save'}
-            </Button>
-          </div>
-        </Modal>
-      )}
 
       {receiving && <ReceiveModal po={receiving} onClose={() => setReceiving(null)} onSaved={refresh} />}
       {fromShortfall && (

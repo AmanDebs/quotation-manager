@@ -35,6 +35,7 @@ import StockPage from './pages/Stock';
 import MaterialRequiredPage from './pages/MaterialRequired';
 import ReportsPage from './pages/Reports';
 import PurchaseOrdersPage from './pages/PurchaseOrders';
+import PurchaseOrderFormPage from './pages/PurchaseOrderForm';
 import MastersPage from './pages/Masters';
 import ApprovalsPage from './pages/Approvals';
 import ActivityPage from './pages/Activity';
@@ -224,6 +225,8 @@ export const routes: RouteObject[] = [
       { path: '/reports', element: <Needs fn="proforma"><ReportsPage /></Needs> },
       { path: '/finished-goods', element: <Needs fn="fg"><FinishedGoodsPage /></Needs> },
       { path: '/purchase-orders', element: <Needs fn="purchasing"><PurchaseOrdersPage /></Needs> },
+      { path: '/purchase-orders/new', element: <Needs fn="purchasing"><PurchaseOrderFormPage /></Needs> },
+      { path: '/purchase-orders/:id', element: <Needs fn="purchasing"><PurchaseOrderFormPage /></Needs> },
       { path: '/masters', element: <Needs fn="master"><MastersPage /></Needs> },
       { path: '/approvals', element: <Needs fn="approval"><ApprovalsPage /></Needs> },
       { path: '/activity', element: <Needs fn="audit"><ActivityPage /></Needs> },
