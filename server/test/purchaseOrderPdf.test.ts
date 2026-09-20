@@ -32,7 +32,7 @@ function textsOf(node: unknown, out: string[] = []): string[] {
 interface Line {
   description?: string; qty?: number | null; unit?: string; rate?: number;
   tax_pct?: number; amount?: number; packs?: number | null; pcs_per_pack?: number | null;
-  material_id?: number | null; product_id?: number | null;
+  material_id?: number | null; product_id?: number | null; total_pcs?: number | null;
 }
 
 let seq = 0;
@@ -52,12 +52,12 @@ function makePo(header: Record<string, unknown>, lines: Line[]): number {
   ).run(...cols.map((c) => values[c] as never));
   const id = Number(po.lastInsertRowid);
   const ins = db.prepare(
-    `INSERT INTO po_items (po_id, material_id, product_id, description, qty, unit, packs, pcs_per_pack, rate, tax_pct, amount, sort_order)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO po_items (po_id, material_id, product_id, description, qty, unit, packs, pcs_per_pack, total_pcs, rate, tax_pct, amount, sort_order)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   );
   lines.forEach((l, i) => ins.run(
     id, l.material_id ?? null, l.product_id ?? null, l.description ?? '', l.qty ?? null, l.unit ?? 'kg',
-    l.packs ?? null, l.pcs_per_pack ?? null, l.rate ?? 0, l.tax_pct ?? 0, l.amount ?? 0, i
+    l.packs ?? null, l.pcs_per_pack ?? null, l.total_pcs ?? null, l.rate ?? 0, l.tax_pct ?? 0, l.amount ?? 0, i
   ));
   return id;
 }
@@ -94,6 +94,29 @@ describe('what the purchase order states', () => {
     }
     // The banner the proforma draws over its packing columns, here over these.
     assert.ok(texts.includes('QUANTITY'), 'no QUANTITY group banner');
+  });
+
+  /**
+   * Quantity is pieces on a piece basis (2026-09-20, the client with 19 boxes
+   * of 5,000 on the line: "why quantity is showing 95, it should show
+   * 95000") — `95 per 1000` is how the line is priced, not how much is
+   * bought. A kilo line prints its kilos as before.
+   */
+  test('a per-1000 line prints its pieces, a kilo line its kilos', () => {
+    const pieces = textsOf(buildPurchaseOrderPdf(makePo({}, [
+      { description: '28mm Preform 12gm', qty: 95, unit: 'per 1000', packs: 19, pcs_per_pack: 5000, total_pcs: 95000, rate: 1400, tax_pct: 18, amount: 133000 },
+    ])));
+    assert.ok(pieces.includes('95,000 Pcs'), `expected the piece count, got ${pieces.filter((t) => /Pcs|per 1000/.test(t)).join(' | ')}`);
+    assert.ok(!pieces.some((t) => t.includes('95 per 1000')), 'the billing quantity must not print as the quantity');
+    // No packing typed: the pieces are still read off the billed figure.
+    const bare = textsOf(buildPurchaseOrderPdf(makePo({}, [
+      { description: '28mm Preform 12gm', qty: 137.5, unit: 'per 1000', rate: 1400, tax_pct: 18, amount: 192500 },
+    ])));
+    assert.ok(bare.includes('1,37,500 Pcs'));
+    const kilos = textsOf(buildPurchaseOrderPdf(makePo({}, [
+      { description: 'HDPE Resin', qty: 1000, unit: 'kg', rate: 85, tax_pct: 18, amount: 85000 },
+    ])));
+    assert.ok(kilos.includes('1,000 kg'));
   });
 
   /**

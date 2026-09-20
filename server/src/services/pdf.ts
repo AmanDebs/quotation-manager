@@ -2058,7 +2058,14 @@ export function buildPurchaseOrderPdf(id: number): TDocumentDefinitions {
     // on an order that states no packing at all.
     { key: 'packs', label: 'NO. OF CART./BAGS', width: 46, align: 'right', group: 'QUANTITY', value: (it) => fmtNum(it.packs, 0), sum: (rows) => fmtNum(rows.reduce((t, r) => t + (Number(r.packs) || 0), 0), 0) },
     { key: 'pcs_per_pack', label: 'PCS./KGS. IN CART.', width: 48, align: 'right', group: 'QUANTITY', value: (it) => fmtNum(it.pcs_per_pack, 0) },
-    { key: 'qty', label: 'TOTAL QUANTITY', width: 60, align: 'right', always: true, value: (it) => (it.qty != null ? `${fmtNum(it.qty)} ${it.unit ?? ''}`.trim() : '') },
+    // Pieces on a piece basis (2026-09-20, the client: "it should show
+    // 95000"), the invoice's `piecesOf` reading — `95 per 1000` is how the
+    // line is priced, not how much is bought. Kilos print as kilos.
+    { key: 'qty', label: 'TOTAL QUANTITY', width: 60, align: 'right', always: true, value: (it) => {
+      const pcs = piecesOf(it);
+      if (pcs != null) return `${fmtNum(pcs, 0)} Pcs`;
+      return it.qty != null ? `${fmtNum(it.qty)} ${it.unit ?? ''}`.trim() : '';
+    } },
     { key: 'rate', label: `UNIT PRICE (${cur})`, width: 56, align: 'right', always: true, value: (it) => fmtNum(it.rate, 3) },
     { key: 'tax', label: 'TAX %', width: 28, align: 'right', value: (it) => (showTax ? `${it.tax_pct ?? 0}%` : '') },
     { key: 'amount', label: `TOTAL (${cur})`, width: 64, align: 'right', always: true, value: (it) => fmtMoney(Number(it.amount), cur), sum: (rows) => fmtMoney(rows.reduce((t, r) => t + (Number(r.amount) || 0), 0), cur) },

@@ -10,7 +10,7 @@ import { DocNumber, PaymentTermsInput, PurchaseTermsInput } from '../components/
 import HistoryCard from '../components/HistoryCard';
 import { productTypeLabel } from './Products';
 import { fmtMoney, today } from '../lib/format';
-import { PIECES_PER_BILLING_UNIT } from '../lib/pieces';
+import { PIECES_PER_BILLING_UNIT, piecesOrdered } from '../lib/pieces';
 import { useUnsavedChanges } from '../lib/useUnsavedChanges';
 import { poStatusLabel, poStatusStyle } from './PurchaseOrders';
 
@@ -145,10 +145,40 @@ export default function PurchaseOrderFormPage() {
    */
   const setPacking = (i: number, patch: Partial<PoItem>) => {
     const it = { ...draft.items[i], ...patch };
+    const per = PIECES_PER_BILLING_UNIT[it.unit ?? ''];
     if (it.packs != null && it.pcs_per_pack != null) {
       it.total_pcs = it.packs * it.pcs_per_pack;
-      const per = PIECES_PER_BILLING_UNIT[it.unit ?? ''];
-      if (per) it.qty = it.total_pcs / per;
+    } else if (per && 'unit' in patch && it.total_pcs == null && it.qty != null) {
+      // Moved onto a piece basis with a bare quantity typed: that figure was
+      // typed as a count of something, and pieces is what the box now means.
+      it.total_pcs = it.qty;
+    }
+    if (per && it.total_pcs != null) it.qty = it.total_pcs / per;
+    setDraft((d) => ({ ...d, items: d.items.map((x, idx) => (idx === i ? it : x)) }));
+  };
+  /**
+   * The Qty box is pieces on a piece basis (2026-09-20, the client with 19
+   * boxes of 5,000 on the line: *"why quantity is showing 95, it should
+   * show 95000"*) — the invoice's and the packing list's own rule, `piecesOf`,
+   * where Quantity is what is bought and the `per 1000` beside the rate is
+   * how it is priced. The billing quantity is derived under it and never
+   * typed: `billedQty` on the server reads `total_pcs / per` ahead of a typed
+   * `qty` on such a line anyway, so a box holding 95 was a figure the save
+   * would have ignored. Typing pieces recomputes the boxes at the line's
+   * pcs-per-box, the dispatch form's rule that the last figure typed drives;
+   * on a weight basis the box is the kilos, as it always was.
+   */
+  const qtyShown = (it: PoItem): number | null =>
+    (PIECES_PER_BILLING_UNIT[it.unit ?? ''] ? piecesOrdered(it) : it.qty ?? null);
+  const setQty = (i: number, value: number | null) => {
+    const it = { ...draft.items[i] };
+    const per = PIECES_PER_BILLING_UNIT[it.unit ?? ''];
+    if (per) {
+      it.total_pcs = value;
+      it.qty = value == null ? null : value / per;
+      if (value != null && it.pcs_per_pack) it.packs = value / it.pcs_per_pack;
+    } else {
+      it.qty = value;
     }
     setDraft((d) => ({ ...d, items: d.items.map((x, idx) => (idx === i ? it : x)) }));
   };
@@ -423,7 +453,7 @@ export default function PurchaseOrderFormPage() {
                     </td>
                     <td className="py-2 pr-2"><Input type="number" min={0} step="any" className="w-full text-right tabular-nums" value={it.packs ?? ''} onChange={(e) => setPacking(i, { packs: e.target.value === '' ? null : Number(e.target.value) })} /></td>
                     <td className="py-2 pr-2"><Input type="number" min={0} step="any" className="w-full text-right tabular-nums" value={it.pcs_per_pack ?? ''} onChange={(e) => setPacking(i, { pcs_per_pack: e.target.value === '' ? null : Number(e.target.value) })} /></td>
-                    <td className="py-2 pr-2"><Input type="number" min={0} step="any" className="w-full text-right tabular-nums" value={it.qty ?? ''} onChange={(e) => setItem(i, { qty: e.target.value === '' ? null : Number(e.target.value) })} /></td>
+                    <td className="py-2 pr-2"><Input type="number" min={0} step="any" className="w-full text-right tabular-nums" value={qtyShown(it) ?? ''} onChange={(e) => setQty(i, e.target.value === '' ? null : Number(e.target.value))} /></td>
                     <td className="py-2 pr-2"><Input value={it.unit} onChange={(e) => setPacking(i, { unit: e.target.value })} /></td>
                     <td className="py-2 pr-2"><Input type="number" min={0} step="any" className="w-full text-right tabular-nums" value={it.rate || ''} onChange={(e) => setItem(i, { rate: Number(e.target.value) })} /></td>
                     <td className="py-2 pr-2"><Input type="number" min={0} step="any" className="w-full text-right tabular-nums" value={it.tax_pct ?? ''} onChange={(e) => setItem(i, { tax_pct: Number(e.target.value) })} /></td>
