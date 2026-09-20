@@ -294,20 +294,28 @@ export function DespatchFields({
             const ceiling = left === null ? undefined : Math.round(left * 1.1);
             const over = ceiling !== undefined && (r.qty ?? 0) > ceiling;
             /*
-             * The same three figures in boxes. Ordered is the line's own box
-             * count, else its pieces at the catalogue's pcs-per-box; sent is
-             * what the other trips recorded, box counts being typed off the
-             * lorry rather than derived; and **balance is the pieces left at
-             * pcs-per-box**, not ordered less sent — the first cut did the
-             * subtraction and the real book read *0 boxes* beside 30,00,000
-             * pieces, because a trip's typed box count is a count of what was
-             * loaded and says nothing about how the rest will be packed. The
-             * subtraction stands in only on a line stating a box count but no
-             * pcs-per-box. A line stating neither says nothing, not 0.
+             * The same three figures in boxes, and **all three are the pieces
+             * beside them at the line's pcs-per-box**. Two earlier cuts read
+             * the recorded box counts instead — sent as what the other trips
+             * typed, balance first as ordered less sent and then as pieces at
+             * pcs-per-box — and each left the row not adding up: on the real
+             * book a trip recorded at 1,000 boxes for 30,00,000 pieces read
+             * *1,000 sent · 500 balance* against 1,000 ordered (the client:
+             * *"The calculation of boxes is not correct"*). The pieces are
+             * the record and the ceiling is on them; boxes here are that
+             * record read in cartons, so one rule for the three columns is
+             * what makes ordered − sent = balance hold on every row. What a
+             * trip's own box count was is on the trip and its challan. On a
+             * line with no pcs-per-box the recorded counts stand in — the
+             * line's own, the trips' less this trip's, their difference — and
+             * a line stating neither says nothing, not 0.
              */
-            const orderedBoxes = line ? (line.packs || boxesFor(ordered, line.pcs_per_pack)) : null;
-            const sentBoxes = orderedBoxes != null ? Math.max(0, (line?.despatched?.packs ?? 0) - own.packs) : null;
-            const leftBoxes = left != null && line?.pcs_per_pack ? boxesFor(left, line.pcs_per_pack)
+            const per = line?.pcs_per_pack || 0;
+            const orderedBoxes = per ? boxesFor(ordered, per) : line?.packs || null;
+            const sentBoxes = ordered == null ? null
+              : per ? boxesFor(Math.max(0, sentElsewhere), per)
+              : orderedBoxes != null ? Math.max(0, (line?.despatched?.packs ?? 0) - own.packs) : null;
+            const leftBoxes = per ? boxesFor(left, per)
               : orderedBoxes != null && sentBoxes != null ? Math.max(0, Math.round((orderedBoxes - sentBoxes) * 100) / 100)
               : null;
             const num = (v: number | null, cls = 'text-slate-500') => (
