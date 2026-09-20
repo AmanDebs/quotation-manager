@@ -74,15 +74,17 @@ function saveItems(
  * no export.
  */
 /**
- * Statuses kept off the list unless somebody asks for them.
- *
- * `expired` is deliberately not one of them: a lapsed offer is revived by
- * extending its validity date, which is a job still to do, and
- * quotationExpiry.ts exists precisely to hand it back. There is no `lost`
- * status to hide either — the CHECK constraint has six values and rejected is
- * what "lost" means here.
+ * The statuses the list shows unless somebody asks for others: the live
+ * offers — draft, sent, negotiating (2026-09-20, the client with the picker
+ * open on exactly those three: *"These 3 status should be selected by
+ * default"*). It replaces a default that hid `rejected` alone and kept
+ * `expired` on the grounds that a lapsed offer is revived by extending its
+ * validity; the client's call is that the working list is what is still in
+ * play, and a lapsed or converted one is a click away under *All statuses*.
+ * Naming what is shown rather than what is hidden means a status added to
+ * the CHECK later does not silently land on the working list.
  */
-const HIDDEN_BY_DEFAULT = ['rejected'];
+export const SHOWN_BY_DEFAULT = ['draft', 'sent', 'negotiating'];
 
 function quotationListWhere(req: AuthedRequest): { where: string[]; params: unknown[] } {
   const status = String(req.query.status ?? '').trim();
@@ -111,8 +113,8 @@ function quotationListWhere(req: AuthedRequest): { where: string[]; params: unkn
       where.push(`q.status IN (${wanted.map(() => '?').join(', ')})`);
       params.push(...wanted);
     } else {
-      where.push(`q.status NOT IN (${HIDDEN_BY_DEFAULT.map(() => '?').join(', ')})`);
-      params.push(...HIDDEN_BY_DEFAULT);
+      where.push(`q.status IN (${SHOWN_BY_DEFAULT.map(() => '?').join(', ')})`);
+      params.push(...SHOWN_BY_DEFAULT);
     }
   }
   // Number or customer — the two things somebody has in hand when they come

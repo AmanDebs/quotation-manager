@@ -37,6 +37,8 @@ const approvalBadge: Record<string, { cls: string; label: string }> = {
  * is a row you cannot find.
  */
 export const STATUSES = ['draft', 'sent', 'negotiating', 'accepted', 'rejected', 'expired'];
+/** What the list shows with no status asked for — the server's `SHOWN_BY_DEFAULT`, ticked in the picker. */
+export const OPEN_STATUSES = ['draft', 'sent', 'negotiating'];
 
 /**
  * The statuses a person sets. The other three are **observations, not
@@ -161,10 +163,12 @@ export default function QuotationsPage() {
           options={STATUSES.map((s) => ({ key: s, label: quotationStatusLabel(s) }))}
           value={statusFilter}
           onChange={setStatusFilter}
-          // Names the default rather than sitting blank: the list drops
-          // rejected quotations unless asked, and a box saying "All statuses"
-          // over a list that is hiding some would be a small lie.
-          defaultLabel="Open (rejected hidden)"
+          // Names the default rather than sitting blank, and ticks the three
+          // it stands for (2026-09-20: "These 3 status should be selected by
+          // default"): a box saying "All statuses" over a list that is
+          // hiding some would be a small lie.
+          defaultLabel="Open offers"
+          defaultKeys={OPEN_STATUSES}
           allLabel="All statuses"
         />
         <Input
@@ -181,9 +185,9 @@ export default function QuotationsPage() {
             message={
               search || statusFilter || exportFilter || companyFilter
                 ? 'Nothing matches those filters.'
-                // Rejected rows are dropped even with no filter set, so an
-                // empty table here is not proof the book is empty.
-                : 'No open quotations. Rejected ones are hidden — pick “All statuses” to include them.'
+                // Only the live offers show with no filter set, so an empty
+                // table here is not proof the book is empty.
+                : 'No open quotations. Converted, rejected and expired ones are hidden — pick “All statuses” to include them.'
             }
           />
         ) : (

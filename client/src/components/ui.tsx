@@ -706,12 +706,19 @@ export function StatusBadge({ status }: { status: string }) {
  * **The outside-click listener is attached only while the panel is open**, so
  * it cannot intercept clicks the rest of the time — the same rule the mobile
  * drawer follows in Layout.tsx.
+ *
+ * **`defaultKeys` says which boxes the default ticks**, so the panel shows
+ * the list's default as ticks rather than as six empty boxes over a table
+ * that is plainly filtered (2026-09-20, the quotations list). Ticking back
+ * to exactly that set writes `''` again, so the URL stays clean and the box
+ * reads the default's name rather than "3 selected".
  */
 export function MultiSelectFilter({
   options,
   value,
   onChange,
   defaultLabel,
+  defaultKeys = [],
   allLabel = 'All',
   className = 'min-w-45',
 }: {
@@ -719,6 +726,7 @@ export function MultiSelectFilter({
   value: string;
   onChange: (v: string) => void;
   defaultLabel: string;
+  defaultKeys?: string[];
   allLabel?: string;
   className?: string;
 }) {
@@ -736,16 +744,18 @@ export function MultiSelectFilter({
 
   const selected = value === 'all'
     ? options.map((o) => o.key)
-    : value.split(',').map((s) => s.trim()).filter(Boolean);
+    : value === '' ? defaultKeys
+      : value.split(',').map((s) => s.trim()).filter(Boolean);
 
+  const sameSet = (a: string[], b: string[]) => a.length === b.length && a.every((k) => b.includes(k));
   const toggle = (key: string) => {
     const next = selected.includes(key) ? selected.filter((k) => k !== key) : [...selected, key];
-    onChange(next.length === options.length ? 'all' : next.join(','));
+    onChange(next.length === options.length ? 'all' : sameSet(next, defaultKeys) ? '' : next.join(','));
   };
 
   const summary =
     value === 'all' ? allLabel
-      : selected.length === 0 ? defaultLabel
+      : value === '' ? defaultLabel
         : selected.length === 1 ? (options.find((o) => o.key === selected[0])?.label ?? selected[0])
           : `${selected.length} selected`;
 
