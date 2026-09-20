@@ -226,24 +226,39 @@ function stateOf(ordered: number, made: number, sent: number, scheduledJobs: num
  * The filters as SQL, kept apart from the query so the paged list and its
  * count are built from one description of "which lines".
  */
-/** `status` as the routes take it: a comma list, `all` or blank meaning no filter. */
-export function statusList(status: string | undefined): string[] {
+/**
+ * The status clause every reader of the book shares (2026-09-20, the
+ * client with the picker open on Not scheduled, Scheduled and Partially
+ * dispatched: *"These 3 checkboxes should be clicked by default"*).
+ *
+ * A named status shows exactly what was named, as a comma list; `all`
+ * shows everything; and **blank shows the open book** — every order not
+ * completed or cancelled, which is what `?open=1` has always meant and is
+ * now what the page opens on. Written as what is *hidden* rather than the
+ * three the picker ticks, so an order still holding a retired status
+ * (`confirmed`, `in_production`, `ready` — offered no box, being words the
+ * client's list does not have) stays on the working list rather than
+ * vanishing from it.
+ */
+export function statusClause(status: string | undefined, col = 'o.status'): { sql: string; params: unknown[] } {
   const s = String(status ?? '').trim();
-  if (!s || s === 'all') return [];
-  return s.split(',').map((v) => v.trim()).filter(Boolean);
+  if (s === 'all') return { sql: '', params: [] };
+  if (!s) return { sql: `${col} NOT IN ('completed', 'cancelled')`, params: [] };
+  const list = s.split(',').map((v) => v.trim()).filter(Boolean);
+  if (!list.length) return { sql: '', params: [] };
+  return { sql: `${col} IN (${list.map(() => '?').join(', ')})`, params: list };
 }
 
 function lineWhere(f: Filters): { sql: string; params: unknown[] } {
   const where: string[] = [];
   const params: unknown[] = [];
   if (f.scopeSql) { where.push(`o.${f.scopeSql}`); params.push(...(f.scopeParams ?? [])); }
-  // A comma list, as the quotation and proforma lists take (2026-09-20):
-  // "scheduled or partly sent" is not a question one value can ask.
-  const statuses = statusList(f.status);
-  if (statuses.length) { where.push(`o.status IN (${statuses.map(() => '?').join(', ')})`); params.push(...statuses); }
+  const status = statusClause(f.status);
+  if (status.sql) { where.push(status.sql); params.push(...status.params); }
   if (f.isExport === 0 || f.isExport === 1) { where.push('o.is_export = ?'); params.push(f.isExport); }
   if (f.companyId) { where.push('o.company_id = ?'); params.push(f.companyId); }
-  if (f.openOnly) where.push("o.status NOT IN ('completed','cancelled')");
+  // `?open=1` — the dashboard's links — is the blank default said out loud.
+  if (f.openOnly && f.status) where.push("o.status NOT IN ('completed','cancelled')");
   const search = orderSearchClause(f.q, 'l');
   if (search.sql) { where.push(search.sql); params.push(...search.params); }
   // The base query already carries a WHERE (charge lines are excluded there).

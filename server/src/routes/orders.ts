@@ -8,7 +8,7 @@ import { despatchedByOrder } from './despatches.js';
 import { orderMaterialCost } from '../services/costing.js';
 import { orderAdvance, advanceForProforma } from '../services/receivables.js';
 import { withStock, orderLines, productDemand, countOrderLines, orderSearchClause,
-  type Filters, type OrderLine, type ProductDemand, statusList } from '../services/orderLines.js';
+  type Filters, type OrderLine, type ProductDemand, statusClause } from '../services/orderLines.js';
 import { buildXlsx, attachmentName, type Column } from '../services/xlsx.js';
 import { allows, type AuthedRequest } from '../middleware/auth.js';
 import { scopeClause, canAccessCustomer, linkError, customerChangeError } from '../middleware/scope.js';
@@ -260,13 +260,14 @@ function orderListWhere(req: AuthedRequest): { where: string[]; params: unknown[
   const params: unknown[] = [];
   const scope = scopeClause(req, 'o.customer_id');
   if (scope.sql) { where.push(scope.sql); params.push(...scope.params); }
-  const statuses = statusList(req.query.status ? String(req.query.status) : undefined);
-  if (statuses.length) { where.push(`o.status IN (${statuses.map(() => '?').join(', ')})`); params.push(...statuses); }
+  const status = statusClause(req.query.status ? String(req.query.status) : undefined);
+  if (status.sql) { where.push(status.sql); params.push(...status.params); }
   if (req.query.export === '1' || req.query.export === '0') { where.push('o.is_export = ?'); params.push(Number(req.query.export)); }
   // Narrow to one selling entity. Ignored when the group has just one.
   if (Number(req.query.company) > 0) { where.push('o.company_id = ?'); params.push(Number(req.query.company)); }
-  // ?open=1 → the order book: everything not yet completed or cancelled.
-  if (req.query.open === '1') where.push("o.status NOT IN ('completed','cancelled')");
+  // ?open=1 → the open book, which a blank `status` now means anyway; kept
+  // for the dashboard's links and for a caller naming statuses as well.
+  if (req.query.open === '1' && req.query.status) where.push("o.status NOT IN ('completed','cancelled')");
   // One box, one meaning across all three views — see `orderSearchClause`.
   // Without an item alias it asks whether *any* line on the order matches,
   // which is the same question put to a row that is one order rather than one

@@ -47,6 +47,13 @@ export const offeredStatuses = (current?: string): OrderStatus[] =>
  * it — but *All statuses*, the default, still shows every row on file.
  */
 const FILTER_STATUSES: OrderStatus[] = offeredStatuses();
+/**
+ * What the picker ticks with nothing asked for (the client: "These 3
+ * checkboxes should be clicked by default") — the open book. The server
+ * reads a blank as *not completed or cancelled*, so a row holding a retired
+ * status is on the list too, though it has no box to tick.
+ */
+const OPEN_STATUSES: OrderStatus[] = ['pending', 'scheduled', 'partially_dispatched'];
 
 /**
  * The order's vocabulary, where it differs from the value that is stored.
@@ -155,6 +162,8 @@ export default function OrdersPage() {
   // (`?status=`, `?open=1`) land on the filter they name and a filtered
   // book can be bookmarked. `open` reads `'1'` or nothing.
   const statusFilter = search.get('status') ?? '';
+  // `?open=1` is what the dashboard's links say; it is the blank default now
+  // (the open book), so the tick that used to set it is gone.
   const openOnly = search.get('open') === '1';
   const setParam = (key: string, value: string) => {
     const next = new URLSearchParams(search);
@@ -162,7 +171,6 @@ export default function OrdersPage() {
     setSearch(next, { replace: true });
   };
   const setStatusFilter = (v: string) => setParam('status', v);
-  const setOpenOnly = (on: boolean) => setParam('open', on ? '1' : '');
   const [exportFilter, setExportFilter] = useState('');
   const can = useCan();
   const canDispatch = can('dispatch', 'full');
@@ -235,13 +243,10 @@ export default function OrdersPage() {
           options={FILTER_STATUSES.map((s) => ({ key: s, label: orderStatusLabel(s) }))}
           value={statusFilter}
           onChange={setStatusFilter}
-          defaultLabel="All statuses"
+          defaultLabel="Open orders"
+          defaultKeys={OPEN_STATUSES}
           allLabel="All statuses"
         />
-        <label className="flex items-center gap-1.5 text-sm text-slate-600">
-          <input type="checkbox" checked={openOnly} onChange={(e) => setOpenOnly(e.target.checked)} />
-          Open sales orders only
-        </label>
         {/*
           * Shown on all three views. It used to be hidden on Orders, because
           * the per-order list could not answer it — which meant a term typed
@@ -274,7 +279,7 @@ export default function OrdersPage() {
           {orders.length === 0 ? (
             <EmptyState message={statusFilter || exportFilter || companyFilter || openOnly
               ? 'Nothing matches those filters.'
-              : 'No sales orders yet. Book one from an accepted quotation, or create it directly.'} />
+              : 'No open sales orders. Fully dispatched and cancelled ones are hidden — pick “All statuses” to include them.'} />
           ) : (
             <table className="w-full text-sm">
               <thead>
