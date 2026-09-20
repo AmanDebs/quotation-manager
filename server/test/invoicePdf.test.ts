@@ -132,45 +132,23 @@ describe('the packing list runs description, colour, HSN, boxes, quantity, thous
   });
 });
 
-describe('the packing list is container-wise', () => {
-  function twoContainers(): number {
+describe('the packing list states its container', () => {
+  function list(container: string): number {
     const invId = makeInvoice({ customerId: cust, currency: 'USD', total: 100 });
     db.prepare("UPDATE commercial_invoices SET is_export = 1 WHERE id = ?").run(invId);
     const pl = Number((db.prepare(
-      `INSERT INTO packing_lists (number, date, invoice_id, customer_id, company_id) VALUES (?, '2026-09-20', ?, ?, 1) RETURNING id`
-    ).get(`PL/26-27/9${invId}`, invId, cust) as { id: number }).id);
-    const ins = db.prepare(`INSERT INTO packing_list_items (packing_list_id, description, qty, unit, packages, net_weight, gross_weight, container_no, sort_order)
-                            VALUES (?, ?, ?, 'per 1000', ?, ?, ?, ?, ?)`);
-    ins.run(pl, 'Preform A', 100, '10 CTN', 100, 110, 'MSKU1111111', 0);
-    ins.run(pl, 'Cap B', 200, '20 CTN', 200, 220, 'MSKU2222222', 1);
-    ins.run(pl, 'Preform C', 300, '30 CTN', 300, 330, 'MSKU1111111', 2);
+      `INSERT INTO packing_lists (number, date, invoice_id, customer_id, company_id, container_no) VALUES (?, '2026-09-20', ?, ?, 1, ?) RETURNING id`
+    ).get(`PL/26-27/9${invId}`, invId, cust, container) as { id: number }).id);
+    db.prepare(`INSERT INTO packing_list_items (packing_list_id, description, qty, unit, packages, sort_order) VALUES (?, 'Preform A', 100, 'per 1000', '10 CTN', 0)`).run(pl);
     return pl;
   }
-  const text = (pl: number) => {
-    const content = buildPackingListPdf(pl).content as Node[];
-    const t = content.filter((n) => n && typeof n === 'object' && n.table)
-      .find((t) => t.table.body.some((row: any[]) => row.some((c) => /Description of Goods/.test(cellText(c)))));
-    return t.table.body.map((row: any[]) => row.map(cellText).filter(Boolean).join(' | '));
-  };
-  test('lines are grouped under their container in order of first appearance, each group with its subtotal', () => {
-    const rows = text(twoContainers());
-    assert.deepEqual(rows.slice(1), [
-      'CONTAINER NO. MSKU1111111',
-      '1 | Preform A | 10 CTN | 1,00,000 Pcs | 100 | 100 | 110',
-      '2 | Preform C | 30 CTN | 3,00,000 Pcs | 300 | 300 | 330',
-      'TOTAL — MSKU1111111 | 40 CTN | 4,00,000 | 400 | 400 | 440',
-      'CONTAINER NO. MSKU2222222',
-      '3 | Cap B | 20 CTN | 2,00,000 Pcs | 200 | 200 | 220',
-      'TOTAL — MSKU2222222 | 20 CTN | 2,00,000 | 200 | 200 | 220',
-      'TOTAL | 60 CTN | 6,00,000 | 600 | 600 | 660',
-    ]);
+  const flat = (pl: number) => JSON.stringify(buildPackingListPdf(pl).content);
+  test('in the reference block, beside the lot', () => {
+    assert.ok(/CONTAINER NO\./.test(flat(list('MSKU1111111'))));
+    assert.ok(flat(list('MSKU2222222')).includes('MSKU2222222'));
   });
-  test('a list naming no container prints no banner and no subtotal', () => {
-    const pl = twoContainers();
-    db.prepare("UPDATE packing_list_items SET container_no = '' WHERE packing_list_id = ?").run(pl);
-    const rows = text(pl);
-    assert.equal(rows.length, 1 + 3 + 1);
-    assert.ok(rows.every((r) => !/CONTAINER/.test(r)), rows.join(' / '));
+  test('and prints no such cell on a list stating none', () => {
+    assert.ok(!/Container No\./i.test(flat(list(''))));
   });
 });
 

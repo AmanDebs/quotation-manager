@@ -18,10 +18,11 @@ interface Draft {
   shipping_marks: string;
   lot_no: string;
   remarks: string;
+  container_no: string;
   items: PackingListItem[];
 }
 
-const emptyItem = (): PackingListItem => ({ description: '', hsn_code: '', qty: null, unit: 'unit', container_no: '', packages: '', dimensions: '', gross_weight: 0, net_weight: 0 });
+const emptyItem = (): PackingListItem => ({ description: '', hsn_code: '', qty: null, unit: 'unit', packages: '', dimensions: '', gross_weight: 0, net_weight: 0 });
 
 export default function PackingListFormPage() {
   const { id } = useParams();
@@ -38,7 +39,7 @@ export default function PackingListFormPage() {
     enabled: !isNew,
   });
 
-  const [draft, setDraft] = useState<Draft>({ customer_id: '', invoice_id: null, date: today(), shipping_marks: '', lot_no: '', remarks: '', items: [] });
+  const [draft, setDraft] = useState<Draft>({ customer_id: '', invoice_id: null, date: today(), shipping_marks: '', lot_no: '', remarks: '', container_no: '', items: [] });
   const [prefilled, setPrefilled] = useState(false);
 
   useEffect(() => {
@@ -51,6 +52,7 @@ export default function PackingListFormPage() {
         shipping_marks: existing.shipping_marks,
         lot_no: existing.lot_no ?? '',
         remarks: existing.remarks,
+        container_no: existing.container_no ?? '',
         items: existing.items ?? [],
       });
     }
@@ -148,6 +150,7 @@ export default function PackingListFormPage() {
             </Field>
             <Field label="Date"><Input type="date" value={draft.date} onChange={(e) => set({ date: e.target.value })} /></Field>
             <Field label="Lot No."><Input value={draft.lot_no} onChange={(e) => set({ lot_no: e.target.value })} placeholder="e.g. 90/2025" /></Field>
+            <Field label="Container No."><Input value={draft.container_no} onChange={(e) => set({ container_no: e.target.value })} placeholder="e.g. MSKU1234567" /></Field>
             <Field label="Shipping Marks" className="col-span-full">
               <Textarea rows={2} value={draft.shipping_marks} onChange={(e) => set({ shipping_marks: e.target.value })} placeholder="Marks and numbers printed on packages…" />
             </Field>
@@ -162,7 +165,6 @@ export default function PackingListFormPage() {
                 <th className="pb-1 pr-2 w-20">HSN</th>
                 <th className="pb-1 pr-2 w-20">Qty</th>
                 <th className="pb-1 pr-2 w-24">Unit</th>
-                <th className="pb-1 pr-2 w-32">Container No.</th>
                 <th className="pb-1 pr-2 w-28">Packages</th>
                 <th className="pb-1 pr-2 w-32">Dimensions</th>
                 <th className="pb-1 pr-2 w-24">Net Wt (kg)</th>
@@ -191,7 +193,6 @@ export default function PackingListFormPage() {
                       </Select>
                     </td>
                   </ReadOnlyFields>
-                  <td className="py-1.5 pr-2"><Input value={it.container_no ?? ''} onChange={(e) => setItem(i, { container_no: e.target.value })} placeholder="e.g. MSKU1234567" /></td>
                   <td className="py-1.5 pr-2"><Input value={it.packages} onChange={(e) => setItem(i, { packages: e.target.value })} placeholder="e.g. 10 cartons" /></td>
                   <td className="py-1.5 pr-2"><Input value={it.dimensions} onChange={(e) => setItem(i, { dimensions: e.target.value })} placeholder="60x40x40 cm" /></td>
                   <td className="py-1.5 pr-2"><Input type="number" min={0} step="any" value={it.net_weight || ''} onChange={(e) => setItem(i, { net_weight: Number(e.target.value) })} /></td>

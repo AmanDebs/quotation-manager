@@ -1152,14 +1152,14 @@ export interface CreditNote {
 export interface PackingListItem {
   id?: number; description: string; hsn_code?: string; qty: number | null; unit: string;
   packages: string; dimensions: string; gross_weight: number; net_weight: number;
-  /** Which container the line travelled in; mandatory per goods line on an export (2026-09-20). */
-  container_no: string;
   custom1?: string; custom2?: string; custom3?: string;
 }
 
 export interface PackingList {
   id: number; number: string; date: string; invoice_id: number | null; customer_id: number; company_id?: number;
   shipping_marks: string; lot_no: string; remarks: string;
+  /** The container the whole list travelled in; mandatory on an export (2026-09-20). */
+  container_no?: string;
   invoice?: Record<string, unknown>;
   customer_name?: string; invoice_number?: string;
   total_gross?: number; total_net?: number;

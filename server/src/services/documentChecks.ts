@@ -421,29 +421,24 @@ const RULES: Rule[] = [
   })),
   {
     /*
-     * Every goods line of an export invoice's packing list names the
-     * container it travelled in (2026-09-20, the client: *"Packing list
-     * should be container wise, container number is mandatory"*). The
-     * packing list is the invoice's other half and has no approval of its
-     * own, so the rule sits on the invoice: it gates the approval, the
-     * invoice's PDF and the combined file, and the packing list's own PDF
-     * asks the same question of its invoice. Read from the list the sync
-     * wrote rather than the body, like every rule here. An invoice with no
-     * list yet (nothing saved) is not blocked — there is nothing to fill in.
-     * Export only: a domestic lorry has no container. A charge line packs
-     * nothing and is not asked.
+     * An export invoice's packing list names the container it travelled in
+     * (2026-09-20, the client: *"Packing list should be container wise,
+     * container number is mandatory"* — then, with a box per line in front
+     * of them, *"container no for the whole packing list"*: one list, one
+     * container). The packing list is the invoice's other half and has no
+     * approval of its own, so the rule sits on the invoice: it gates the
+     * approval, the invoice's PDF and the combined file, and the packing
+     * list's own PDF asks the same question of its invoice. Read from the
+     * list the sync wrote rather than the body, like every rule here. An
+     * invoice with no list yet (nothing saved) is not blocked — there is
+     * nothing to fill in. Export only: a domestic lorry has no container.
      */
     key: 'pl_container', level: 'block', tables: ['commercial_invoices'], when: isExport,
     check: (d) => {
       const id = Number(d.row.id) || 0;
       if (!id) return null;
-      const rows = db.prepare(
-        `SELECT i.container_no, i.is_charge FROM packing_list_items i
-         JOIN packing_lists p ON p.id = i.packing_list_id
-         WHERE p.invoice_id = ? ORDER BY i.sort_order, i.id`
-      ).all(id) as { container_no: string; is_charge: number }[];
-      const bad = rows.map((r, i) => (r.is_charge || text(r.container_no) ? 0 : i + 1)).filter(Boolean);
-      return bad.length ? `Packing list line ${bad.join(', ')} has no container number.` : null;
+      const pl = db.prepare('SELECT container_no FROM packing_lists WHERE invoice_id = ?').get(id) as { container_no: string } | undefined;
+      return pl && !text(pl.container_no) ? 'The packing list has no container number.' : null;
     },
   },
   ...([

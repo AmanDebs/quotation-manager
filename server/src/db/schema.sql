@@ -567,6 +567,9 @@ CREATE TABLE IF NOT EXISTS packing_lists (
   -- The group entity issuing this document. Fixed at creation.
   company_id INTEGER NOT NULL DEFAULT 1 REFERENCES companies(id),
   shipping_marks TEXT NOT NULL DEFAULT '',
+  -- The container the whole list travelled in (2026-09-20): one list, one
+  -- container, and on an export it is mandatory.
+  container_no TEXT NOT NULL DEFAULT '',
   lot_no TEXT NOT NULL DEFAULT '',
   remarks TEXT NOT NULL DEFAULT '',
   created_by INTEGER REFERENCES users(id),
@@ -588,8 +591,9 @@ CREATE TABLE IF NOT EXISTS packing_list_items (
   -- Mirrors the invoice line. Nothing is packed against a freight charge, so
   -- the row is kept (the two lists match by index) but never printed.
   is_charge INTEGER NOT NULL DEFAULT 0,
-  -- Which container this line travelled in (2026-09-20): the packing list
-  -- prints container-wise, and on an export it is mandatory per goods line.
+  -- Kept but unwritten: a per-line container lasted one commit (2026-09-20)
+  -- before the client said the number is the whole list's — see
+  -- packing_lists.container_no. Dropping a column is not additive.
   container_no TEXT NOT NULL DEFAULT '',
   custom1 TEXT NOT NULL DEFAULT '',
   custom2 TEXT NOT NULL DEFAULT '',

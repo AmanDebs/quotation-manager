@@ -22,7 +22,6 @@ interface PlItemInput {
   hsn_code?: string;
   qty?: number | null;
   unit?: string;
-  container_no?: string;
   packages?: string;
   dimensions?: string;
   gross_weight?: number;
@@ -65,14 +64,14 @@ function saveItems(plId: number, items: PlItemInput[], invoiceId?: number | null
     ).all(invoiceId) as { description: string; hsn_code: string; qty: number | null; unit: string; is_charge: number }[];
     db.prepare('DELETE FROM packing_list_items WHERE packing_list_id = ?').run(plId);
     const insLinked = db.prepare(
-      `INSERT INTO packing_list_items (packing_list_id, description, hsn_code, qty, unit, packages, dimensions, gross_weight, net_weight, is_charge, container_no, custom1, custom2, custom3, sort_order)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO packing_list_items (packing_list_id, description, hsn_code, qty, unit, packages, dimensions, gross_weight, net_weight, is_charge, custom1, custom2, custom3, sort_order)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     );
     invItems.forEach((inv, i) => {
       const p = items[i] ?? {};
       insLinked.run(plId, inv.description, inv.hsn_code ?? '', inv.qty ?? null, inv.unit ?? 'unit',
         String(p.packages ?? ''), String(p.dimensions ?? ''), Number(p.gross_weight ?? 0), Number(p.net_weight ?? 0),
-        inv.is_charge ? 1 : 0, String(p.container_no ?? '').trim(),
+        inv.is_charge ? 1 : 0,
         String(p.custom1 ?? ''), String(p.custom2 ?? ''), String(p.custom3 ?? ''), i);
     });
     return;
@@ -83,12 +82,12 @@ function saveItems(plId: number, items: PlItemInput[], invoiceId?: number | null
 function saveStandaloneItems(plId: number, items: PlItemInput[]) {
   db.prepare('DELETE FROM packing_list_items WHERE packing_list_id = ?').run(plId);
   const ins = db.prepare(
-    `INSERT INTO packing_list_items (packing_list_id, description, hsn_code, qty, unit, packages, dimensions, gross_weight, net_weight, container_no, custom1, custom2, custom3, sort_order)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO packing_list_items (packing_list_id, description, hsn_code, qty, unit, packages, dimensions, gross_weight, net_weight, custom1, custom2, custom3, sort_order)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   );
   items.forEach((it, i) =>
     ins.run(plId, String(it.description ?? ''), String(it.hsn_code ?? ''), it.qty ?? null, String(it.unit ?? 'unit'), String(it.packages ?? ''),
-      String(it.dimensions ?? ''), Number(it.gross_weight ?? 0), Number(it.net_weight ?? 0), String(it.container_no ?? '').trim(),
+      String(it.dimensions ?? ''), Number(it.gross_weight ?? 0), Number(it.net_weight ?? 0),
       String(it.custom1 ?? ''), String(it.custom2 ?? ''), String(it.custom3 ?? ''), i)
   );
 }
@@ -129,8 +128,8 @@ packingListsRouter.post('/', (req: AuthedRequest, res) => {
   const id = transaction(() => {
     const number = nextNumber('packing_list', { companyId, date: String(body.date ?? '') });
     const info = db.prepare(
-      `INSERT INTO packing_lists (number, date, invoice_id, customer_id, company_id, shipping_marks, lot_no, remarks, created_by, column_config)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO packing_lists (number, date, invoice_id, customer_id, company_id, shipping_marks, lot_no, remarks, container_no, created_by, column_config)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       number,
       String(body.date ?? new Date().toISOString().slice(0, 10)),
@@ -140,6 +139,7 @@ packingListsRouter.post('/', (req: AuthedRequest, res) => {
       String(body.shipping_marks ?? ''),
       String(body.lot_no ?? ''),
       String(body.remarks ?? ''),
+      String(body.container_no ?? '').trim(),
       req.user!.id,
       JSON.stringify(body.column_config ?? {})
     );
@@ -156,7 +156,7 @@ packingListsRouter.put('/:id', (req: AuthedRequest, res) => {
   const existing = db.prepare('SELECT * FROM packing_lists WHERE id = ?').get(id) as Record<string, unknown> | undefined;
   if (!existing || !canAccessCustomer(req, Number(existing.customer_id))) return res.status(404).json({ error: 'Packing list not found' });
   transaction(() => {
-    db.prepare('UPDATE packing_lists SET number = ?, date = ?, invoice_id = ?, customer_id = ?, shipping_marks = ?, lot_no = ?, remarks = ?, column_config = ? WHERE id = ?').run(
+    db.prepare('UPDATE packing_lists SET number = ?, date = ?, invoice_id = ?, customer_id = ?, shipping_marks = ?, lot_no = ?, remarks = ?, container_no = ?, column_config = ? WHERE id = ?').run(
       String(body.number ?? existing.number),
       String(body.date ?? existing.date),
       body.invoice_id ? Number(body.invoice_id) : (existing.invoice_id as number | null),
@@ -164,6 +164,7 @@ packingListsRouter.put('/:id', (req: AuthedRequest, res) => {
       String(body.shipping_marks ?? existing.shipping_marks ?? ''),
       String(body.lot_no ?? existing.lot_no ?? ''),
       String(body.remarks ?? existing.remarks ?? ''),
+      String(body.container_no ?? existing.container_no ?? '').trim(),
       JSON.stringify(body.column_config ?? JSON.parse(String(existing.column_config || '{}'))),
       id
     );

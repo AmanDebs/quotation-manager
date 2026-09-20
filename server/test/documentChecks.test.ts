@@ -442,7 +442,7 @@ describe('the commercial invoice mandatory fields', () => {
   });
 });
 
-describe('every goods line of an export packing list names its container', () => {
+describe('an export packing list names its container', () => {
   function finishedExport(): number {
     const c = makeCustomer();
     const id = makeInvoice({ customerId: c, currency: 'USD', total: 500 });
@@ -450,34 +450,29 @@ describe('every goods line of an export packing list names its container', () =>
                   lot_no = '90/2025', prepared_by = 'R. Das', shipping_details = 'Maersk', bank_account = 'AXIS', country_of_origin = 'India',
                   port_of_loading = 'Nhava Sheva', port_of_discharge = 'Nacala', final_destination = 'Mozambique', arn_ref = 'AD1' WHERE id = ?`).run(id);
     db.prepare(`INSERT INTO invoice_items (invoice_id, description, color, hsn_code, qty, unit, unit_price, amount, sort_order)
-                VALUES (?, 'Preform', 'Natural', '3923', 10, 'per 1000', 50, 500, 0), (?, 'Freight', '', '', 1, 'unit', 0, 0, 1)`).run(id, id);
-    db.prepare(`UPDATE invoice_items SET is_charge = 1 WHERE invoice_id = ? AND description = 'Freight'`).run(id);
+                VALUES (?, 'Preform', 'Natural', '3923', 10, 'per 1000', 50, 500, 0)`).run(id);
     return id;
   }
-  const list = (invId: number, containers: string[]) => {
-    const pl = Number((db.prepare(`INSERT INTO packing_lists (number, date, invoice_id, customer_id, company_id) VALUES (?, '2026-09-20', ?, 1, 1) RETURNING id`)
-      .get(`PL-${invId}`, invId) as { id: number }).id);
-    containers.forEach((cn, i) => db.prepare(
-      `INSERT INTO packing_list_items (packing_list_id, description, qty, unit, is_charge, container_no, sort_order) VALUES (?, 'x', 1, 'unit', ?, ?, ?)`
-    ).run(pl, i === containers.length - 1 ? 1 : 0, cn, i));
-  };
+  const list = (invId: number, container: string) => db.prepare(
+    `INSERT INTO packing_lists (number, date, invoice_id, customer_id, company_id, container_no) VALUES (?, '2026-09-20', ?, 1, 1, ?)`
+  ).run(`PL-${invId}`, invId, container);
   test('an invoice with no list yet is not asked', () => {
     assert.equal(incompleteError('commercial_invoices', finishedExport()), null);
   });
-  test('a blank container on a goods line blocks, by line; a charge line is not asked', () => {
+  test('a list with no container blocks the invoice', () => {
     const id = finishedExport();
-    list(id, ['', '']);
-    assert.equal(incompleteError('commercial_invoices', id), 'This invoice is not finished: Packing list line 1 has no container number.');
+    list(id, '  ');
+    assert.equal(incompleteError('commercial_invoices', id), 'This invoice is not finished: The packing list has no container number.');
   });
-  test('a container on every goods line clears it', () => {
+  test('a container clears it', () => {
     const id = finishedExport();
-    list(id, ['MSKU1234567', '']);
+    list(id, 'MSKU1234567');
     assert.equal(incompleteError('commercial_invoices', id), null);
   });
   test('a domestic invoice is not asked', () => {
     const id = finishedExport();
     db.prepare("UPDATE commercial_invoices SET is_export = 0, tax_type = 'igst' WHERE id = ?").run(id);
-    list(id, ['', '']);
+    list(id, '');
     assert.ok(!(incompleteError('commercial_invoices', id) ?? '').includes('container'));
   });
 });

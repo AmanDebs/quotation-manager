@@ -1846,23 +1846,6 @@ export function buildPackingListPdf(id: number): TDocumentDefinitions {
   );
   const pi = inv?.pi_id ? (db.prepare('SELECT number, date FROM proforma_invoices WHERE id = ?').get(inv.pi_id) as Row | undefined) : undefined;
 
-  /*
-   * Container-wise (2026-09-20, the client: *"Packing list should be
-   * container wise"*): the lines are grouped under the container they
-   * travelled in, in order of first appearance, each group closing on its
-   * own subtotal, and the grand total closes the table as before. A list on
-   * which **no** line names a container prints exactly what it always did —
-   * no banner, no subtotal — which is every list raised before this; a line
-   * with none on a list where others have one is grouped last under *not
-   * stated*, so it is seen rather than lost.
-   */
-  const containerOf = (it: Row) => String(it.container_no || '').trim();
-  const containers = [...new Set(items.map(containerOf).filter(Boolean))];
-  const groups = containers.length
-    ? [...containers, ''].map((c) => ({ container: c, items: items.filter((it) => containerOf(it) === c) })).filter((g) => g.items.length)
-    : [{ container: '', items }];
-  const ordered = groups.flatMap((g) => g.items);
-
   const totalGross = round2(items.reduce((sum, it) => sum + (it.gross_weight || 0), 0));
   const totalNet = round2(items.reduce((sum, it) => sum + (it.net_weight || 0), 0));
   // Quantities here are in each line's own billing unit, so they are totalled
@@ -1876,7 +1859,9 @@ export function buildPackingListPdf(id: number): TDocumentDefinitions {
     lv('Invoice Reference', inv ? `${inv.number} DATED ${fmtDate(inv.date)}${pi ? `\nP.I. NO: ${pi.number} DATED ${fmtDate(pi.date)}` : ''}` : '—'),
     { text: ' ', fontSize: 3 },
     lv('Other Reference(s)', pl.lot_no ? `Lot No. ${pl.lot_no}` : '—'),
-    ...(containers.length ? [{ text: ' ', fontSize: 3 } as Cell, lv(containers.length > 1 ? 'Container Nos.' : 'Container No.', containers.join(', '))] : []),
+    // One list, one container (2026-09-20); a list raised before this, or a
+    // domestic one, states none and prints no cell for it.
+    ...(String(pl.container_no || '').trim() ? [{ text: ' ', fontSize: 3 } as Cell, lv('Container No.', String(pl.container_no))] : []),
   ];
 
   const grid = exportDocGrid(s, {
@@ -1922,10 +1907,9 @@ export function buildPackingListPdf(id: number): TDocumentDefinitions {
     { key: 'gross_weight', label: 'Gross Wt (kg)', width: 48, align: 'right', value: (it) => (it.gross_weight ? fmtNum(it.gross_weight) : '') },
   ];
 
-  const table = itemsTable(s, ordered, specs, cfg) as any;
+  const table = itemsTable(s, items, specs, cfg) as any;
   const headerCells = table.table.body[0] as Cell[];
-  // A totals row matching whichever columns survived — the grand total, and
-  // one per container where the list is container-wise.
+  // A totals row matching whichever columns survived.
   const totalsFor = (rows: Row[], title: string, fill: string) => headerCells.map((h: Cell) => {
     const label = String(h.text);
     const cell = (text: string, align: string = 'right') => ({ text, fontSize: 8, bold: true, alignment: align, fillColor: fill });
@@ -1941,26 +1925,6 @@ export function buildPackingListPdf(id: number): TDocumentDefinitions {
     if (label === 'Gross Wt (kg)') return cell(fmtNum(round2(rows.reduce((sum, it) => sum + (it.gross_weight || 0), 0))));
     return cell('');
   });
-  if (containers.length) {
-    // Splice a banner above each container's lines and a subtotal below
-    // them; the item rows sit directly after the header rows, in `ordered`
-    // order, and the packing list passes no money footer.
-    const body = table.table.body as Cell[][];
-    const headerRows = Number(table.table.headerRows) || 1;
-    const banner = (title: string): Cell[] => [
-      { text: title, colSpan: headerCells.length, fontSize: 8, bold: true, color: s.theme, fillColor: '#f7f5f4' },
-      ...Array.from({ length: headerCells.length - 1 }, () => ({} as Cell)),
-    ];
-    let at = headerRows;
-    for (const g of groups) {
-      body.splice(at, 0, banner(g.container ? `CONTAINER NO. ${g.container}` : 'CONTAINER NOT STATED'));
-      at += 1 + g.items.length;
-      if (groups.length > 1) {
-        body.splice(at, 0, totalsFor(g.items, `TOTAL — ${g.container || 'container not stated'}`, '#f7f5f4'));
-        at += 1;
-      }
-    }
-  }
   table.table.body.push(totalsFor(items, 'TOTAL', '#efe9e7'));
 
   const certFooter: Content = {

@@ -66,12 +66,14 @@ interface PackingDraft {
   date: string;
   shipping_marks: string;
   remarks: string;
+  /** The container the whole list travelled in; mandatory on an export. */
+  container_no: string;
   column_config: ColumnConfig;
   items: PackingListItem[];
 }
 
 const emptyPackingItem = (): PackingListItem => ({
-  description: '', qty: null, unit: 'unit', container_no: '', packages: '', dimensions: '', gross_weight: 0, net_weight: 0,
+  description: '', qty: null, unit: 'unit', packages: '', dimensions: '', gross_weight: 0, net_weight: 0,
 });
 
 const emptyDraft = (): Draft => ({
@@ -80,7 +82,7 @@ const emptyDraft = (): Draft => ({
   is_export: 0, country_of_origin: '', port_of_loading: '', port_of_discharge: '', final_destination: '',
   notify_party_2: '', method_of_despatch: '', lot_no: '', arn_ref: '', prepared_by: '',
   remarks: '', tax_type: 'igst', column_config: newColumnConfig(), items: [],
-  packing: { date: today(), shipping_marks: '', remarks: '', column_config: {}, items: [] },
+  packing: { date: today(), shipping_marks: '', remarks: '', container_no: '', column_config: {}, items: [] },
 });
 
 export default function InvoiceFormPage() {
@@ -119,7 +121,9 @@ export default function InvoiceFormPage() {
    * the same reason. Derived rows re-follow the line as its pieces or boxes
    * are edited.
    */
-  const [typedWeight, setTypedWeight] = useState<Record<number, { net?: boolean; gross?: boolean; packages?: boolean; container?: boolean }>>({});
+  const [typedWeight, setTypedWeight] = useState<Record<number, { net?: boolean; gross?: boolean; packages?: boolean }>>({});
+  /** The container box, like the marks: typed or saved, it is never overwritten. */
+  const [typedContainer, setTypedContainer] = useState(false);
   // And the shipping marks, the same rule for the one field over the rows.
   const [typedMarks, setTypedMarks] = useState(false);
   const companies = useCompanies();
@@ -129,7 +133,7 @@ export default function InvoiceFormPage() {
     if (typedMarks || !derivedMarks) return;
     setDraft((d) => (d.packing.shipping_marks === derivedMarks ? d : { ...d, packing: { ...d.packing, shipping_marks: derivedMarks } }));
   }, [derivedMarks, typedMarks]);
-  const markTyped = (i: number, key: 'net' | 'gross' | 'packages' | 'container') =>
+  const markTyped = (i: number, key: 'net' | 'gross' | 'packages') =>
     setTypedWeight((t) => ({ ...t, [i]: { ...t[i], [key]: true } }));
   const weightOf = (productId: number | null | undefined) =>
     productId ? products.find((p) => p.id === productId)?.weight_grams ?? null : null;
@@ -137,14 +141,18 @@ export default function InvoiceFormPage() {
   /*
    * The container the trips billed under this invoice name, when they all
    * name the one (2026-09-20). The dispatch register already records which
-   * box the goods went in, so a blank container on the packing row is
-   * filled from it — a default, not a rule: typed over, it stays, and a
-   * saved value is treated as typed. Two containers across the trips is a
-   * split shipment and nothing is guessed; the key is absent for a caller
-   * without `dispatch`, which is the same silence.
+   * box the goods went in, so a blank container on the packing list is
+   * filled from it — a default, not a rule, the marks' own: typed over, it
+   * stays, and a saved value is treated as typed. Two containers across the
+   * trips is a split shipment and nothing is guessed; the key is absent for
+   * a caller without `dispatch`, which is the same silence.
    */
   const tripContainers = [...new Set((existing?.despatches ?? []).map((d) => String(d.container_no || '').trim()).filter(Boolean))];
   const defaultContainer = tripContainers.length === 1 ? tripContainers[0] : '';
+  useEffect(() => {
+    if (typedContainer || !defaultContainer) return;
+    setDraft((d) => (d.packing.container_no === defaultContainer ? d : { ...d, packing: { ...d.packing, container_no: defaultContainer } }));
+  }, [defaultContainer, typedContainer]);
   useEffect(() => {
     setDraft((d) => {
       const items = [...d.packing.items];
@@ -153,7 +161,6 @@ export default function InvoiceFormPage() {
         const w = products.length ? packingWeights(line, weightOf(line.product_id)) : null;
         const row = items[i] ?? emptyPackingItem();
         const patch: Partial<PackingListItem> = {};
-        if (defaultContainer && !line.is_charge && !typedWeight[i]?.container && !(row.container_no ?? '').trim()) patch.container_no = defaultContainer;
         // The box count is the invoice line's own, in the words the PDF prints.
         const boxes = line.is_charge ? null : boxesOn(line);
         const packages = boxes == null ? '' : `${fmtQty(boxes)} CTN`;
@@ -170,7 +177,7 @@ export default function InvoiceFormPage() {
       });
       return changed ? { ...d, packing: { ...d.packing, items } } : d;
     });
-  }, [draft.items, products, typedWeight, defaultContainer]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [draft.items, products, typedWeight]); // eslint-disable-line react-hooks/exhaustive-deps
   /*
    * The due date on a saved invoice is held apart from the draft and saved
    * the moment it is picked, through `PATCH /due-date` (the tracker's route):
@@ -199,8 +206,9 @@ export default function InvoiceFormPage() {
         ...rest
       } = existing;
       // A saved weight is a figure somebody put there; keep it whatever the catalogue says.
-      setTypedWeight(Object.fromEntries((existing.packing?.items ?? []).map((p, i) => [i, { net: !!p.net_weight, gross: !!p.gross_weight, packages: !!p.packages.trim(), container: !!(p.container_no ?? '').trim() }])));
+      setTypedWeight(Object.fromEntries((existing.packing?.items ?? []).map((p, i) => [i, { net: !!p.net_weight, gross: !!p.gross_weight, packages: !!p.packages.trim() }])));
       setTypedMarks(!!(existing.packing?.shipping_marks ?? '').trim());
+      setTypedContainer(!!(existing.packing?.container_no ?? '').trim());
       setDraft({
         ...(rest as unknown as Draft),
         column_config: existing.column_config ?? {},
@@ -210,6 +218,7 @@ export default function InvoiceFormPage() {
           date: existing.packing?.date ?? existing.date,
           shipping_marks: existing.packing?.shipping_marks ?? '',
           remarks: existing.packing?.remarks ?? '',
+          container_no: existing.packing?.container_no ?? '',
           column_config: existing.packing?.column_config ?? {},
           items: existing.packing?.items ?? [],
         },
@@ -611,6 +620,11 @@ export default function InvoiceFormPage() {
             <Field label="Packing List Date">
               <Input type="date" value={draft.packing.date} onChange={(e) => setPacking({ date: e.target.value })} />
             </Field>
+            {/* One list, one container (2026-09-20); mandatory on an export,
+                and the invoice will not approve or print without it. */}
+            <Field label={draft.is_export ? 'Container No. *' : 'Container No.'}>
+              <Input value={draft.packing.container_no} onChange={(e) => { setTypedContainer(true); setPacking({ container_no: e.target.value }); }} placeholder="e.g. MSKU1234567" />
+            </Field>
             <Field label="Shipping Marks" className="sm:col-span-2">
               <Input value={draft.packing.shipping_marks} onChange={(e) => { setTypedMarks(true); setPacking({ shipping_marks: e.target.value }); }} placeholder="e.g. 1-590/AGLO POLY/NACALA" />
             </Field>
@@ -624,10 +638,6 @@ export default function InvoiceFormPage() {
                 <thead>
                   <tr className={TH_CLASS}>
                     <th className="pb-1 pr-2">Item (from invoice)</th>
-                    {/* Mandatory per goods line on an export; the PDF prints
-                        container-wise and the invoice will not approve or
-                        print without it (2026-09-20). */}
-                    <th className="pb-1 pr-2 w-36">Container No.{!!draft.is_export && <span className="ml-0.5 text-rose-500">*</span>}</th>
                     <th className="pb-1 pr-2 w-28">Packages</th>
                     <th className="pb-1 pr-2 w-32">Dimensions</th>
                     <th className="pb-1 pr-2 w-24">Net Wt (kg)</th>
@@ -644,14 +654,6 @@ export default function InvoiceFormPage() {
                           <div className="text-xs text-slate-400">
                             {it.qty != null ? `${fmtQty(it.qty)} ${it.unit}` : 'no qty'}{it.hsn_code ? ` · HSN ${it.hsn_code}` : ''}
                           </div>
-                        </td>
-                        <td className="py-1.5 pr-2">
-                          {/* The wrapper takes the same `data-missing` mark `Field`
-                              reads off a trailing asterisk, so the one CSS rule
-                              tints a blank box on an export goods line. */}
-                          <label className="block" data-missing={!!draft.is_export && !it.is_charge && !(p.container_no ?? '').trim() ? '' : undefined}>
-                            <Input value={p.container_no ?? ''} onChange={(e) => { markTyped(i, 'container'); setPackingItem(i, { container_no: e.target.value }); }} placeholder={it.is_charge ? '' : 'e.g. MSKU1234567'} disabled={!!it.is_charge} />
-                          </label>
                         </td>
                         <td className="py-1.5 pr-2">
                           <Input value={p.packages} onChange={(e) => { markTyped(i, 'packages'); setPackingItem(i, { packages: e.target.value }); }} placeholder="e.g. 130 CTN" />
