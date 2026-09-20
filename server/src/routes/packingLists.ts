@@ -22,6 +22,7 @@ interface PlItemInput {
   hsn_code?: string;
   qty?: number | null;
   unit?: string;
+  container_no?: string;
   packages?: string;
   dimensions?: string;
   gross_weight?: number;
@@ -64,14 +65,14 @@ function saveItems(plId: number, items: PlItemInput[], invoiceId?: number | null
     ).all(invoiceId) as { description: string; hsn_code: string; qty: number | null; unit: string; is_charge: number }[];
     db.prepare('DELETE FROM packing_list_items WHERE packing_list_id = ?').run(plId);
     const insLinked = db.prepare(
-      `INSERT INTO packing_list_items (packing_list_id, description, hsn_code, qty, unit, packages, dimensions, gross_weight, net_weight, is_charge, custom1, custom2, custom3, sort_order)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO packing_list_items (packing_list_id, description, hsn_code, qty, unit, packages, dimensions, gross_weight, net_weight, is_charge, container_no, custom1, custom2, custom3, sort_order)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     );
     invItems.forEach((inv, i) => {
       const p = items[i] ?? {};
       insLinked.run(plId, inv.description, inv.hsn_code ?? '', inv.qty ?? null, inv.unit ?? 'unit',
         String(p.packages ?? ''), String(p.dimensions ?? ''), Number(p.gross_weight ?? 0), Number(p.net_weight ?? 0),
-        inv.is_charge ? 1 : 0,
+        inv.is_charge ? 1 : 0, String(p.container_no ?? '').trim(),
         String(p.custom1 ?? ''), String(p.custom2 ?? ''), String(p.custom3 ?? ''), i);
     });
     return;
@@ -82,12 +83,12 @@ function saveItems(plId: number, items: PlItemInput[], invoiceId?: number | null
 function saveStandaloneItems(plId: number, items: PlItemInput[]) {
   db.prepare('DELETE FROM packing_list_items WHERE packing_list_id = ?').run(plId);
   const ins = db.prepare(
-    `INSERT INTO packing_list_items (packing_list_id, description, hsn_code, qty, unit, packages, dimensions, gross_weight, net_weight, custom1, custom2, custom3, sort_order)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO packing_list_items (packing_list_id, description, hsn_code, qty, unit, packages, dimensions, gross_weight, net_weight, container_no, custom1, custom2, custom3, sort_order)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   );
   items.forEach((it, i) =>
     ins.run(plId, String(it.description ?? ''), String(it.hsn_code ?? ''), it.qty ?? null, String(it.unit ?? 'unit'), String(it.packages ?? ''),
-      String(it.dimensions ?? ''), Number(it.gross_weight ?? 0), Number(it.net_weight ?? 0),
+      String(it.dimensions ?? ''), Number(it.gross_weight ?? 0), Number(it.net_weight ?? 0), String(it.container_no ?? '').trim(),
       String(it.custom1 ?? ''), String(it.custom2 ?? ''), String(it.custom3 ?? ''), i)
   );
 }

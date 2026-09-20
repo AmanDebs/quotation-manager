@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { incompleteError } from '../services/documentChecks.js';
+import { incompleteError, checkDocument } from '../services/documentChecks.js';
 import type { DocTable } from '../services/approval.js';
 import { db } from '../db/connection.js';
 import {
@@ -275,6 +275,20 @@ pdfRouter.get('/:type/:id/:name?', async (req: AuthedRequest, res) => {
   if (entry.table === 'orders') {
     const unfinished = incompleteError('orders', id);
     if (unfinished) return res.status(422).json({ error: unfinished });
+  }
+  // The packing list has no approval of its own; the container rule lives on
+  // its invoice (2026-09-20), and this is the one finding of the invoice's
+  // the list is held to — the rest are the invoice's own business, and the
+  // list has kept printing beside an unfinished invoice since 2026-09-16.
+  // An approved invoice's list always prints, the rule every reprint follows.
+  if (type === 'packing-list') {
+    const link = db.prepare(
+      'SELECT i.id, i.approval_status FROM packing_lists p JOIN commercial_invoices i ON i.id = p.invoice_id WHERE p.id = ?'
+    ).get(id) as { id: number; approval_status: string } | undefined;
+    if (link && link.approval_status !== 'approved') {
+      const missing = checkDocument('commercial_invoices', link.id).find((f) => f.key === 'pl_container');
+      if (missing) return res.status(422).json({ error: `This packing list is not finished: ${missing.message}` });
+    }
   }
   if (entry.approvable) {
     const appr = db.prepare(`SELECT approval_status FROM ${entry.table} WHERE id = ?`).get(id) as { approval_status: string };

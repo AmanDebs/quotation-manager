@@ -588,6 +588,9 @@ CREATE TABLE IF NOT EXISTS packing_list_items (
   -- Mirrors the invoice line. Nothing is packed against a freight charge, so
   -- the row is kept (the two lists match by index) but never printed.
   is_charge INTEGER NOT NULL DEFAULT 0,
+  -- Which container this line travelled in (2026-09-20): the packing list
+  -- prints container-wise, and on an export it is mandatory per goods line.
+  container_no TEXT NOT NULL DEFAULT '',
   custom1 TEXT NOT NULL DEFAULT '',
   custom2 TEXT NOT NULL DEFAULT '',
   custom3 TEXT NOT NULL DEFAULT '',

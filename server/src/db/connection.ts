@@ -197,6 +197,8 @@ addColumnIfMissing('work_orders', 'process_id', 'INTEGER');
 // every specification on file keeps meaning exactly what it meant.
 addColumnIfMissing('product_qc_params', 'customer_id', 'INTEGER');
 addColumnIfMissing('packing_list_items', 'hsn_code', "TEXT NOT NULL DEFAULT ''");
+// Container-wise packing list (2026-09-20).
+addColumnIfMissing('packing_list_items', 'container_no', "TEXT NOT NULL DEFAULT ''");
 addColumnIfMissing('quotations', 'freight', 'REAL NOT NULL DEFAULT 0');
 addColumnIfMissing('quotations', 'insurance', 'REAL NOT NULL DEFAULT 0');
 addColumnIfMissing('quotations', 'inco_terms', "TEXT NOT NULL DEFAULT ''");

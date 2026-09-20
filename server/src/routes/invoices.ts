@@ -204,6 +204,7 @@ interface PackingInput {
   column_config?: unknown;
   items?: {
     packages?: string; dimensions?: string; gross_weight?: number; net_weight?: number;
+    container_no?: string;
     custom1?: string; custom2?: string; custom3?: string;
   }[];
 }
@@ -264,14 +265,14 @@ function syncPackingList(invoiceId: number, userId: number, packing: PackingInpu
 
   db.prepare('DELETE FROM packing_list_items WHERE packing_list_id = ?').run(plId);
   const ins = db.prepare(
-    `INSERT INTO packing_list_items (packing_list_id, description, hsn_code, qty, unit, packages, dimensions, gross_weight, net_weight, is_charge, custom1, custom2, custom3, sort_order)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO packing_list_items (packing_list_id, description, hsn_code, qty, unit, packages, dimensions, gross_weight, net_weight, is_charge, container_no, custom1, custom2, custom3, sort_order)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   );
   invItems.forEach((it, i) => {
     const p = packing?.items?.[i] ?? {};
     ins.run(plId, it.description, it.hsn_code ?? '', it.qty ?? null, it.unit ?? 'unit',
       String(p.packages ?? ''), String(p.dimensions ?? ''), Number(p.gross_weight ?? 0), Number(p.net_weight ?? 0),
-      it.is_charge ? 1 : 0,
+      it.is_charge ? 1 : 0, String(p.container_no ?? '').trim(),
       String(p.custom1 ?? ''), String(p.custom2 ?? ''), String(p.custom3 ?? ''), i);
   });
 }

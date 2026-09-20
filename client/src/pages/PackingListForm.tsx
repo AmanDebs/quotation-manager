@@ -21,7 +21,7 @@ interface Draft {
   items: PackingListItem[];
 }
 
-const emptyItem = (): PackingListItem => ({ description: '', hsn_code: '', qty: null, unit: 'unit', packages: '', dimensions: '', gross_weight: 0, net_weight: 0 });
+const emptyItem = (): PackingListItem => ({ description: '', hsn_code: '', qty: null, unit: 'unit', container_no: '', packages: '', dimensions: '', gross_weight: 0, net_weight: 0 });
 
 export default function PackingListFormPage() {
   const { id } = useParams();
@@ -162,6 +162,7 @@ export default function PackingListFormPage() {
                 <th className="pb-1 pr-2 w-20">HSN</th>
                 <th className="pb-1 pr-2 w-20">Qty</th>
                 <th className="pb-1 pr-2 w-24">Unit</th>
+                <th className="pb-1 pr-2 w-32">Container No.</th>
                 <th className="pb-1 pr-2 w-28">Packages</th>
                 <th className="pb-1 pr-2 w-32">Dimensions</th>
                 <th className="pb-1 pr-2 w-24">Net Wt (kg)</th>
@@ -190,6 +191,7 @@ export default function PackingListFormPage() {
                       </Select>
                     </td>
                   </ReadOnlyFields>
+                  <td className="py-1.5 pr-2"><Input value={it.container_no ?? ''} onChange={(e) => setItem(i, { container_no: e.target.value })} placeholder="e.g. MSKU1234567" /></td>
                   <td className="py-1.5 pr-2"><Input value={it.packages} onChange={(e) => setItem(i, { packages: e.target.value })} placeholder="e.g. 10 cartons" /></td>
                   <td className="py-1.5 pr-2"><Input value={it.dimensions} onChange={(e) => setItem(i, { dimensions: e.target.value })} placeholder="60x40x40 cm" /></td>
                   <td className="py-1.5 pr-2"><Input type="number" min={0} step="any" value={it.net_weight || ''} onChange={(e) => setItem(i, { net_weight: Number(e.target.value) })} /></td>
