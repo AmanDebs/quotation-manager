@@ -380,17 +380,9 @@ export default function InvoiceFormPage() {
                   <Button variant="secondary">📄+🔬 Invoice &amp; QC</Button>
                 </PdfLink>
                 <FollowupButton docType="invoice" docId={Number(id)} customerId={existing!.customer_id} />
-                {/*
-                  * Goods came back, or a rate was settled down: raise the
-                  * credit against this invoice. Offered only to a team that
-                  * may write invoices — Logistics reads this page and would
-                  * only ever get a 403 from the button.
-                  */}
-                {can('invoice', 'full') && existing!.approval_status === 'approved' && (
-                  <Link to={`/credit-notes/new?from_invoice=${id}`}>
-                    <Button variant="secondary">↩ Credit Note</Button>
-                  </Link>
-                )}
+                {/* The ↩ Credit Note button went with the sidebar entry on
+                    2026-09-20 ("Remove credit note"); a note already on file
+                    is still listed below and opens from there. */}
               </>
             )}
           </div>

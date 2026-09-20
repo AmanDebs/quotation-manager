@@ -50,7 +50,9 @@ const NAV: { heading: string; items: NavItem[] }[] = [
       { to: '/invoices', label: 'Commercial Invoices', icon: 'invoice', needs: 'invoice' },
       // The invoice being partly taken back — a return, or a rate settled
       // down after the fact — so it sits with the invoice and on its function.
-      { to: '/credit-notes', label: 'Credit Notes', icon: 'invoice', needs: 'invoice' },
+      // Credit Notes left the sidebar on 2026-09-20 at the client's word
+      // ("Remove credit note"); the routes stay so a note on file still
+      // opens from the invoice it credits, the approvals queue and Activity.
       // Money in, beside the documents it is banked against. Sales and the
       // super admin hold `payment`; nobody on the floor does.
       { to: '/payments', label: 'Payments', icon: 'coins', needs: 'payment' },
