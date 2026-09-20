@@ -408,6 +408,9 @@ function roundOffOf(doc: Row): number {
   return round2(Number(doc.grand_total) - (Number(doc.subtotal) + Number(doc.freight || 0) + Number(doc.insurance || 0) + Number(doc.tax_total)));
 }
 
+/** The concessional rate a deemed export is bought at; the client's own figure. */
+const DEEMED_EXPORT_PCT = 0.1;
+
 function taxRows(doc: Row, currency: string): [string, string][] {
   const rows: [string, string][] = [];
   if (doc.tax_type === 'cgst_sgst' && doc.tax_total > 0) {
@@ -2071,8 +2074,17 @@ export function buildPurchaseOrderPdf(id: number): TDocumentDefinitions {
     Number(po.grand_total) - (Number(po.subtotal) + Number(po.tax_total) + tcs)
   );
 
+  /*
+   * A deemed export is bought at the concessional 0.1% (2026-09-20, the
+   * client: "In tax add Deemed Export (0.1%)"). It is not a fourth stored
+   * tax type — `purchase_orders.tax_type` carries a CHECK naming three, and
+   * SQLite cannot ALTER one — but IGST at 0.1% on every line, which the form
+   * sets and this reads back: the tax row says so, since "Add IGST" over a
+   * ₹140 figure on a ₹1,40,000 order reads as a mistake rather than a rate.
+   */
+  const deemed = po.tax_type === 'igst' && items.length > 0 && items.every((it) => Number(it.tax_pct) === DEEMED_EXPORT_PCT);
   const money: MoneyRow[] = [
-    ...taxRows(po, cur).map(([label, value]) => ({ label, value })),
+    ...taxRows(po, cur).map(([label, value]) => ({ label: deemed && label === 'Add IGST' ? `Add IGST @ ${DEEMED_EXPORT_PCT}% (Deemed Export)` : label, value })),
     ...(tcs ? [{ label: `TCS @ ${fmtNum(po.tcs_pct, 3)}%`, value: fmtMoney(tcs, cur) }] : []),
     ...(po.inco_terms ? [{ label: `Incoterms: ${String(po.inco_terms)}`, value: '' }] : []),
     ...(roundOff !== 0 ? [{ label: 'Round off', value: (roundOff > 0 ? '' : '(') + Math.abs(roundOff).toFixed(2) + (roundOff > 0 ? '' : ')') }] : []),

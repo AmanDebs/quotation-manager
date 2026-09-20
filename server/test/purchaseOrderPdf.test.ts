@@ -108,6 +108,15 @@ describe('how it adds up', () => {
     assert.ok(texts.some((t) => t.includes('165.20')), 'the TCS figure is not printed');
   });
 
+  test('IGST at 0.1% on every line is named as the deemed-export concession', () => {
+    const id = makePo({ subtotal: 140000, tax_total: 140, grand_total: 140140 }, [{ ...GOODS, tax_pct: 0.1 }]);
+    const texts = textsOf(buildPurchaseOrderPdf(id));
+    assert.ok(texts.some((t) => t === 'Add IGST @ 0.1% (Deemed Export)'), texts.filter((t) => t.startsWith('Add')).join(' | '));
+    // At any other rate the row keeps its plain name.
+    const plain = textsOf(buildPurchaseOrderPdf(makePo({ subtotal: 140000, tax_total: 25200, grand_total: 165200 }, [GOODS])));
+    assert.ok(plain.some((t) => t === 'Add IGST'));
+  });
+
   /**
    * The rounding line must not absorb TCS. `roundOffOf` knows about freight
    * and insurance and not about this, so the purchase order derives its own —

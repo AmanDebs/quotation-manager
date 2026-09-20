@@ -28,7 +28,22 @@ import { poStatusLabel, poStatusStyle } from './PurchaseOrders';
 
 export type PoDraft = Partial<PurchaseOrder> & { items: PoItem[] };
 
-export const emptyPoItem = (): PoItem => ({ material_id: null, product_id: null, description: '', qty: null, unit: 'kg', rate: 0, tax_pct: 18 });
+const DEFAULT_TAX_PCT = 18;
+/**
+ * The concessional rate a deemed export is bought at (2026-09-20, the client:
+ * *"In tax add Deemed Export (0.1%)"*). Not a fourth stored tax type —
+ * `purchase_orders.tax_type` carries a CHECK naming three and SQLite cannot
+ * ALTER one — but a preset in the Tax picker: IGST with every line at 0.1%.
+ * **Derived on the way back**: the picker reads *Deemed Export* whenever the
+ * stored type is IGST and every line is at that rate, so there is no flag
+ * that can come to disagree with the lines under it, and the PDF names the
+ * concession by the same reading. A line's rate stays editable — the preset
+ * writes the figure once and does not police it — and a new line added while
+ * the preset is in force starts at 0.1 rather than 18.
+ */
+export const DEEMED_EXPORT_PCT = 0.1;
+
+export const emptyPoItem = (taxPct = DEFAULT_TAX_PCT): PoItem => ({ material_id: null, product_id: null, description: '', qty: null, unit: 'kg', rate: 0, tax_pct: taxPct });
 
 /*
  * A line names a material or a product, so the picker's value has to say which
@@ -162,6 +177,17 @@ export default function PurchaseOrderFormPage() {
   // Preview only — the server recomputes on save, as it does for every document.
   const preview = draft.items.reduce((s, it) => s + (it.qty ?? 0) * (it.rate || 0), 0);
   const cur = draft.currency ?? 'INR';
+  const deemed = draft.tax_type === 'igst' && draft.items.length > 0 && draft.items.every((it) => Number(it.tax_pct) === DEEMED_EXPORT_PCT);
+  const taxChoice = deemed ? 'deemed_export' : (draft.tax_type ?? 'igst');
+  const pickTax = (choice: string) => {
+    if (choice === 'deemed_export') {
+      set({ tax_type: 'igst', items: draft.items.map((it) => ({ ...it, tax_pct: DEEMED_EXPORT_PCT })) });
+      return;
+    }
+    // Leaving the preset puts the lines it set back on the ordinary rate;
+    // a line somebody had typed another figure into is left alone.
+    set({ tax_type: choice as TaxType, items: deemed ? draft.items.map((it) => ({ ...it, tax_pct: DEFAULT_TAX_PCT })) : draft.items });
+  };
 
   return (
     <div>
@@ -239,9 +265,10 @@ export default function PurchaseOrderFormPage() {
               )}
             </Field>
             <Field label="Tax">
-              <Select value={draft.tax_type ?? 'igst'} onChange={(e) => set({ tax_type: e.target.value as TaxType })}>
+              <Select value={taxChoice} onChange={(e) => pickTax(e.target.value)}>
                 <option value="igst">IGST (supplier in another state)</option>
                 <option value="cgst_sgst">CGST + SGST (supplier in the same state)</option>
+                <option value="deemed_export">Deemed Export (IGST 0.1%)</option>
                 <option value="none">No tax</option>
               </Select>
             </Field>
@@ -325,7 +352,7 @@ export default function PurchaseOrderFormPage() {
             </table>
           </div>
           <div className="mt-2 flex items-center justify-between">
-            <Button variant="secondary" onClick={() => set({ items: [...draft.items, emptyPoItem()] })}>+ Add line</Button>
+            <Button variant="secondary" onClick={() => set({ items: [...draft.items, emptyPoItem(deemed ? DEEMED_EXPORT_PCT : DEFAULT_TAX_PCT)] })}>+ Add line</Button>
             <span className="text-sm text-slate-600">
               Lines <strong className="tabular-nums">{fmtMoney(preview, cur)}</strong>
               {!isNew && existing!.grand_total != null && (
