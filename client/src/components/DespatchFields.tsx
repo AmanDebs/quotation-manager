@@ -1,5 +1,5 @@
 import type { Order, Despatch, DespatchItem, Location, Transporter, OrderBatch } from '../types';
-import { Input, Textarea, Select, Field, Card, FIELD_GRID, TH_CLASS, CAPTION_CLASS } from './ui';
+import { Input, Textarea, Select, Field, Card, FIELD_GRID, CAPTION_CLASS } from './ui';
 import { fmtQty, today } from '../lib/format';
 import { piecesOrdered } from '../lib/pieces';
 
@@ -52,6 +52,13 @@ function piecesFor(boxes: number | null | undefined, pcsPerPack: number | null |
   if (!per || boxes == null || !Number.isFinite(Number(boxes))) return null;
   return Math.round(Number(boxes) * per);
 }
+
+/** The lines table's group band and the sub-heading under it. */
+// The tint is the caller's, not a default here: two background utilities of
+// equal specificity are settled by stylesheet order, not by which is written
+// last (the trap `setsWidth()` exists for).
+const GROUP = 'border-b border-white py-1.5 text-center';
+const SUB = 'pb-1.5 pr-2 pt-1 text-right';
 
 export function newTrip(order: Order, locations: Location[], transporters: Transporter[]): Partial<Despatch> {
 const items = order.items ?? [];
@@ -240,23 +247,27 @@ export function DespatchFields({
               quantity and boxes since 2026-09-20 ("make 4 columns Ordered >>
               Sent >> Balance >> Current Dispatch and two sub columns in each
               Quantity and boxes"), the lorry being loaded by the carton. */}
-          <tr className={TH_CLASS}>
-            <th rowSpan={2} className="pb-2 pr-2 align-bottom">Line</th>
-            <th colSpan={2} className="border-l border-slate-200 pb-1 pl-2 pr-2 text-center">Ordered</th>
-            <th colSpan={2} className="border-l border-slate-200 pb-1 pl-2 pr-2 text-center" title="Sent on other trips">Sent</th>
-            <th colSpan={2} className="border-l border-slate-200 pb-1 pl-2 pr-2 text-center">Balance</th>
-            <th colSpan={2} className="border-l border-slate-200 pb-1 pl-2 pr-2 text-center">Current dispatch</th>
-            <th rowSpan={2} className="border-l border-slate-200 pb-2 pl-2 pr-2 align-bottom">Note</th>
+          {/* Each group is a tinted band over its pair, the current dispatch —
+              the only pair typed into — in the brand tint so the editable
+              zone reads as one; the sub-row is lighter and carries no rules of
+              its own, the band above already saying where a group starts. */}
+          <tr className={CAPTION_CLASS}>
+            <th rowSpan={2} className="border-b border-slate-200 pb-2 pr-3 text-left align-bottom">Line</th>
+            <th colSpan={2} className={`${GROUP} bg-slate-50`}>Ordered</th>
+            <th colSpan={2} className={`${GROUP} bg-slate-50`} title="Sent on other trips">Sent</th>
+            <th colSpan={2} className={`${GROUP} bg-slate-50`}>Balance</th>
+            <th colSpan={2} className={`${GROUP} bg-brand-50 text-brand-700`}>Current dispatch</th>
+            <th rowSpan={2} className="w-56 border-b border-slate-200 pb-2 pl-3 text-left align-bottom">Note</th>
           </tr>
-          <tr className={`${TH_CLASS} text-slate-400`}>
-            <th className="w-24 border-l border-slate-200 pb-2 pl-2 pr-2 text-right font-normal">Quantity</th>
-            <th className="w-20 pb-2 pr-2 text-right font-normal">Boxes</th>
-            <th className="w-24 border-l border-slate-200 pb-2 pl-2 pr-2 text-right font-normal">Quantity</th>
-            <th className="w-20 pb-2 pr-2 text-right font-normal">Boxes</th>
-            <th className="w-24 border-l border-slate-200 pb-2 pl-2 pr-2 text-right font-normal">Quantity</th>
-            <th className="w-20 pb-2 pr-2 text-right font-normal">Boxes</th>
-            <th className="w-32 border-l border-slate-200 pb-2 pl-2 pr-2 text-right font-normal">Quantity</th>
-            <th className="w-24 pb-2 pr-2 text-right font-normal">Boxes</th>
+          <tr className="border-b border-slate-200 text-[10.5px] font-medium uppercase leading-4 tracking-wide text-slate-400">
+            <th className={`w-24 ${SUB} pl-3`}>Quantity</th>
+            <th className={`w-20 ${SUB}`}>Boxes</th>
+            <th className={`w-24 ${SUB} pl-3`}>Quantity</th>
+            <th className={`w-20 ${SUB}`}>Boxes</th>
+            <th className={`w-24 ${SUB} pl-3`}>Quantity</th>
+            <th className={`w-20 ${SUB}`}>Boxes</th>
+            <th className={`w-32 ${SUB} bg-brand-50/60 pl-3 text-brand-600`}>Quantity</th>
+            <th className={`w-24 ${SUB} bg-brand-50/60 text-brand-600`}>Boxes</th>
           </tr>
         </thead>
         <tbody>
@@ -286,21 +297,33 @@ export function DespatchFields({
              * The same three figures in boxes. Ordered is the line's own box
              * count, else its pieces at the catalogue's pcs-per-box; sent is
              * what the other trips recorded, box counts being typed off the
-             * lorry rather than derived; balance is their difference, so the
-             * column adds up on its own rather than re-deriving from pieces
-             * and disagreeing with the trips by a part box. A line stating
-             * neither boxes nor pcs-per-box says nothing, not 0.
+             * lorry rather than derived; and **balance is the pieces left at
+             * pcs-per-box**, not ordered less sent — the first cut did the
+             * subtraction and the real book read *0 boxes* beside 30,00,000
+             * pieces, because a trip's typed box count is a count of what was
+             * loaded and says nothing about how the rest will be packed. The
+             * subtraction stands in only on a line stating a box count but no
+             * pcs-per-box. A line stating neither says nothing, not 0.
              */
             const orderedBoxes = line ? (line.packs || boxesFor(ordered, line.pcs_per_pack)) : null;
             const sentBoxes = orderedBoxes != null ? Math.max(0, (line?.despatched?.packs ?? 0) - own.packs) : null;
-            const leftBoxes = orderedBoxes != null && sentBoxes != null ? Math.max(0, Math.round((orderedBoxes - sentBoxes) * 100) / 100) : null;
+            const leftBoxes = left != null && line?.pcs_per_pack ? boxesFor(left, line.pcs_per_pack)
+              : orderedBoxes != null && sentBoxes != null ? Math.max(0, Math.round((orderedBoxes - sentBoxes) * 100) / 100)
+              : null;
             const num = (v: number | null, cls = 'text-slate-500') => (
-              <td className={`py-2 pr-2 text-right tabular-nums ${cls}`}>{v != null ? fmtQty(v) : '—'}</td>
+              <td className={`py-2.5 pr-2 text-right tabular-nums ${cls}`}>{v != null ? fmtQty(v) : <span className="text-slate-300">—</span>}</td>
             );
             return (
             <tr key={i} className="border-b border-slate-100">
-              <td className="py-2 pr-2">
-                {line?.description || r.description || `Line ${r.order_line + 1}`}
+              <td className="py-2.5 pr-3">
+                <div className="font-medium text-slate-800">{line?.description || r.description || `Line ${r.order_line + 1}`}</div>
+                {/* The pcs-per-box sits under the line rather than under the
+                    boxes box: it is a fact about the line, every box figure on
+                    the row is read by it, and out of the cell the row stays
+                    one line tall. */}
+                {!!line?.pcs_per_pack && (
+                  <div className="text-xs text-slate-400">{fmtQty(line.pcs_per_pack)} pcs / box</div>
+                )}
                 {/* The order has been edited since this lorry left. The row is
                     kept rather than merged away — dropping it would delete the
                     record of goods that physically went — but it is said out
@@ -311,13 +334,13 @@ export function DespatchFields({
               </td>
               {/* A weight-billed line states no piece count, and says nothing
                   rather than 0 — the ceiling below follows the same rule. */}
-              {num(ordered || null, 'border-l border-slate-100 pl-2 text-slate-500')}
+              {num(ordered || null, 'pl-3 text-slate-500')}
               {num(orderedBoxes)}
-              {num(ordered ? Math.max(0, sentElsewhere) : null, 'border-l border-slate-100 pl-2 text-slate-500')}
+              {num(ordered ? Math.max(0, sentElsewhere) : null, 'pl-3 text-slate-500')}
               {num(sentBoxes)}
-              {num(left, `border-l border-slate-100 pl-2 font-medium ${left === 0 ? 'text-slate-400' : 'text-slate-900'}`)}
-              {num(leftBoxes, `font-medium ${leftBoxes === 0 ? 'text-slate-400' : 'text-slate-900'}`)}
-              <td className="border-l border-slate-100 py-2 pl-2 pr-2">
+              {num(left, `pl-3 font-semibold ${left === 0 ? 'text-slate-400' : 'text-slate-900'}`)}
+              {num(leftBoxes, `font-semibold ${leftBoxes === 0 ? 'text-slate-400' : 'text-slate-900'}`)}
+              <td className="bg-brand-50/40 py-2 pl-3 pr-2">
                 <Input
                   type="number" min={0} max={ceiling} step="any"
                   className={`w-full text-right tabular-nums ${over ? 'border-red-400 focus:border-red-500' : ''}`}
@@ -328,7 +351,7 @@ export function DespatchFields({
                   <div className="mt-0.5 text-xs text-red-600">at most {fmtQty(ceiling!)}</div>
                 )}
               </td>
-              <td className="py-2 pr-2">
+              <td className="bg-brand-50/40 py-2 pr-3">
                 <Input
                   type="number" min={0} step="any"
                   className="w-full text-right tabular-nums"
@@ -336,13 +359,8 @@ export function DespatchFields({
                   placeholder={line?.pcs_per_pack ? '' : '—'}
                   onChange={(e) => setBoxes(i, e.target.value === '' ? null : Number(e.target.value))}
                 />
-                {/* Always shown where the line states one: it is the figure the
-                    two boxes are read from each other by. */}
-                {!!line?.pcs_per_pack && (
-                  <div className="mt-0.5 text-xs text-slate-400">{fmtQty(line.pcs_per_pack)}/box</div>
-                )}
               </td>
-              <td className="border-l border-slate-100 py-2 pl-2 pr-2">
+              <td className="py-2 pl-3">
                 <Input value={r.notes ?? ''} onChange={(e) => setRow(i, { notes: e.target.value })} />
               </td>
             </tr>
