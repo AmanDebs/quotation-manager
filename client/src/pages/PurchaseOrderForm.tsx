@@ -277,13 +277,20 @@ export default function PurchaseOrderFormPage() {
                 {['INR', 'USD', 'EUR'].map((c) => <option key={c} value={c}>{c}</option>)}
               </Select>
             </Field>
-            <Field label="TCS %">
-              <Input
-                type="number" min={0} step="any" className="w-full text-right tabular-nums"
-                value={draft.tcs_pct || ''}
-                onChange={(e) => set({ tcs_pct: e.target.value === '' ? 0 : Number(e.target.value) })}
-              />
-            </Field>
+            {/* Transport, Ship via and TCS % left the form on 2026-09-20 at the
+                client's word. The columns stay and the draft round-trips them;
+                each box is shown only on an order already carrying a value, so
+                a figure entered before this can be seen and cleared rather than
+                becoming invisible — TCS especially, being money in the total. */}
+            {!!existing?.tcs_pct && (
+              <Field label="TCS %">
+                <Input
+                  type="number" min={0} step="any" className="w-full text-right tabular-nums"
+                  value={draft.tcs_pct || ''}
+                  onChange={(e) => set({ tcs_pct: e.target.value === '' ? 0 : Number(e.target.value) })}
+                />
+              </Field>
+            )}
             {/* The same list the domestic quotation offers (2026-09-20, the
                 client: "Add the same payment terms dropdown as domestic
                 quotation"); an import takes the export-side list, a
@@ -302,8 +309,8 @@ export default function PurchaseOrderFormPage() {
           <div className={FIELD_GRID}>
             <Field label="Kind Attn"><Input value={draft.attn ?? ''} onChange={(e) => set({ attn: e.target.value })} placeholder="Who at the supplier" /></Field>
             <Field label="Vendor ID"><Input value={draft.vendor_ref ?? ''} onChange={(e) => set({ vendor_ref: e.target.value })} placeholder="Their reference for us" /></Field>
-            <Field label="Transport"><Input value={draft.transport ?? ''} onChange={(e) => set({ transport: e.target.value })} /></Field>
-            <Field label="Ship via"><Input value={draft.ship_via ?? ''} onChange={(e) => set({ ship_via: e.target.value })} /></Field>
+            {!!existing?.transport && <Field label="Transport"><Input value={draft.transport ?? ''} onChange={(e) => set({ transport: e.target.value })} /></Field>}
+            {!!existing?.ship_via && <Field label="Ship via"><Input value={draft.ship_via ?? ''} onChange={(e) => set({ ship_via: e.target.value })} /></Field>}
             <Field label="Ship to" className="sm:col-span-2">
               <Textarea rows={2} value={draft.ship_to ?? ''} onChange={(e) => set({ ship_to: e.target.value })} placeholder="Leave blank to print the plant above" />
             </Field>
