@@ -772,6 +772,28 @@ function qtyTotal(rows: Row[]): string {
     .join('\n');
 }
 
+/**
+ * The packing list's Boxes column added up (2026-09-20, the client: "Also
+ * compute total boxes"). The cell is free text — *114 CTN*, *2 PALLETS*, the
+ * form's own prefill being *N CTN* — so each is read as a leading number and
+ * the word after it, and **totalled per word**, the rule `qtyTotal` follows
+ * about bases: 1,180 cartons and 2 pallets do not make 1,182 of anything, so
+ * a mixed list prints one line per word. A cell with no leading number is
+ * skipped rather than read as 0; nothing parsable prints nothing.
+ */
+function packagesTotal(cells: string[]): string {
+  const byWord = new Map<string, number>();
+  for (const cell of cells) {
+    const m = /^\s*([\d,]+(?:\.\d+)?)\s*(.*)$/.exec(cell);
+    if (!m) continue;
+    const n = Number(m[1].replace(/,/g, ''));
+    if (!Number.isFinite(n)) continue;
+    const word = m[2].trim().toUpperCase();
+    byWord.set(word, (byWord.get(word) ?? 0) + n);
+  }
+  return [...byWord].map(([word, n]) => `${fmtNum(n)}${word ? ` ${word}` : ''}`).join('\n');
+}
+
 /* ------------------------------------------------------------------ */
 /* QUOTATION — modeled on the Sanya Industries sample                  */
 /* ------------------------------------------------------------------ */
@@ -1868,6 +1890,7 @@ export function buildPackingListPdf(id: number): TDocumentDefinitions {
   // kilos and no thousands.
   const thousands = (it: Row) => { const p = piecesOf(it); return p != null ? p / 1000 : null; };
   const totalThousands = items.reduce((sum, it) => sum + (thousands(it) ?? 0), 0);
+  const totalBoxes = packagesTotal(items.map((it) => String(it.packages || '')));
 
   // The order is the client's (2026-09-20: "Desp >> color >> Hsn >> Boxes >>
   // quantity >> Quantity in Thousand pieces"), the weights closing the row.
@@ -1891,6 +1914,7 @@ export function buildPackingListPdf(id: number): TDocumentDefinitions {
     const cell = (text: string, align: string = 'right') => ({ text, fontSize: 8, bold: true, alignment: align, fillColor: '#efe9e7' });
     if (label === 'Description of Goods') return cell('TOTAL', 'left');
     if (label === 'Quantity') return cell(totalQty);
+    if (label === 'Boxes') return cell(totalBoxes, 'center');
     // Only the lines that actually show a thousand-pieces figure are in it.
     if (label === "Qty in Thousand Pcs") return cell(totalThousands ? fmtNum(totalThousands, 2) : '');
     if (label === 'Net Wt (kg)') return cell(fmtNum(totalNet));

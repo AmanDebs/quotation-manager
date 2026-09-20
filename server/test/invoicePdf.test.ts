@@ -124,6 +124,12 @@ describe('the packing list runs description, colour, HSN, boxes, quantity, thous
     assert.equal(total[5], '3,42,000');
     assert.equal(total[6], '342');
   });
+  test('the boxes add up per word, and a cell with no number is skipped', () => {
+    db.prepare(`INSERT INTO packing_list_items (packing_list_id, description, qty, unit, packages, sort_order)
+                VALUES (?, 'Caps', 100, 'per 1000', '63 ctn', 1), (?, 'Handles', 50, 'per 1000', '2 PALLETS', 2), (?, 'Loose', 1, 'per 1000', 'loose', 3)`).run(pl, pl, pl);
+    const total = rows(pl).at(-1)!;
+    assert.equal(total[4], '177 CTN\n2 PALLETS');
+  });
 });
 
 describe('the money sits in the items table', () => {
