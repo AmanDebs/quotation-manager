@@ -710,12 +710,14 @@ dashboardRouter.get('/', (req: AuthedRequest, res) => {
       currency: string; outstanding: number;
       overdue_amount: number; overdue_count: number; due_week_amount: number; due_week_count: number;
       advance_held: number; still_to_ship: number; open_orders: number;
+      /** Owing money with neither a due date nor a shipment ETA — never flagged by the sheet, so said here. */
+      undated_amount: number; undated_count: number;
     };
     const rows = new Map<string, MoneyRow>();
     const row = (currency: string): MoneyRow => {
       const r = rows.get(currency) ?? {
         currency, outstanding: 0, overdue_amount: 0, overdue_count: 0, due_week_amount: 0, due_week_count: 0,
-        advance_held: 0, still_to_ship: 0, open_orders: 0,
+        advance_held: 0, still_to_ship: 0, open_orders: 0, undated_amount: 0, undated_count: 0,
       };
       rows.set(currency, r);
       return r;
@@ -728,6 +730,9 @@ dashboardRouter.get('/', (req: AuthedRequest, res) => {
         if (i.colour === 'red') { r.overdue_amount += i.balance_due; r.overdue_count += 1; }
         else { r.due_week_amount += i.balance_due; r.due_week_count += 1; }
       }
+      const r = row(g.currency);
+      r.undated_amount += g.undated.due;
+      r.undated_count += g.undated.count;
     }
     // Held = banked against the proformas, less what the invoices absorbed.
     const applied = advanceAppliedByInvoice();
@@ -746,6 +751,7 @@ dashboardRouter.get('/', (req: AuthedRequest, res) => {
       .map((r) => ({
         ...r,
         outstanding: r2(r.outstanding), overdue_amount: r2(r.overdue_amount), due_week_amount: r2(r.due_week_amount),
+        undated_amount: r2(r.undated_amount),
         // Floored, as `customerSummary` floors it: an over-allocation is not a debt owed back.
         advance_held: r2(Math.max(0, r.advance_held)),
       }))

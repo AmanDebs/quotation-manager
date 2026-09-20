@@ -153,6 +153,8 @@ interface DashboardData {
     currency: string; outstanding: number;
     overdue_amount: number; overdue_count: number; due_week_amount: number; due_week_count: number;
     advance_held: number; still_to_ship: number; open_orders: number;
+    /** Owing money with no due date and no ETA — the sheet can never flag these, so the row says so. */
+    undated_amount?: number; undated_count?: number;
   }[];
   /** Open orders by the date that stands (revised, else promised), overdue first, a fortnight out. */
   deliveries?: {
@@ -351,6 +353,19 @@ function ListRow({ to, lead, leadCls = 'text-slate-500', number, who, right, rig
 function daysUntil(date: string): number {
   return Math.round((Date.parse(`${date}T00:00:00Z`) - Date.parse(`${today()}T00:00:00Z`)) / 86_400_000);
 }
+
+/**
+ * A grid cell, and the card inside it, may shrink below their content.
+ *
+ * A grid item defaults to `min-width: auto` — it will not go narrower than
+ * its content's min-content width — and the cell is itself a grid holding the
+ * card, so both had it. A morning list row is a flex row whose customer name
+ * is meant to truncate, but truncation only happens once the row is narrower
+ * than its text, and neither box would let it be: on the live book a
+ * *Petite Bottling Company* row ran 25px past its card and under the next
+ * one. The same trap `<main>` carries `min-w-0` for, two levels down.
+ */
+const CELL = 'grid min-w-0 [&>*]:min-w-0';
 
 /** Tailwind needs the whole class name in the source, so these are spelt out. */
 const SPAN_CLASS: Record<number, string> = {
@@ -830,7 +845,8 @@ export default function DashboardPage() {
                     return (
                       <tr key={m.currency} className="border-b border-slate-100 align-top last:border-0">
                         <td className="py-1.5 pr-3 font-medium">{m.currency}</td>
-                        {cell(m.outstanding, listUrl('/invoices'), 'text-slate-900')}
+                        {cell(m.outstanding, listUrl('/invoices'), 'text-slate-900',
+                          m.undated_count ? `${fmtMoney(m.undated_amount ?? 0, m.currency)} on ${m.undated_count} invoice${m.undated_count === 1 ? '' : 's'} with no due date` : undefined)}
                         {cell(m.overdue_amount, listUrl('/reports', { view: 'due' }), 'text-red-600', `${m.overdue_count} invoice${m.overdue_count === 1 ? '' : 's'}`)}
                         {cell(m.due_week_amount, listUrl('/reports', { view: 'due' }), 'text-amber-700', `${m.due_week_count} invoice${m.due_week_count === 1 ? '' : 's'}`)}
                         {cell(m.advance_held, listUrl('/payments', { against: 'proforma' }), 'text-green-700')}
@@ -1824,7 +1840,7 @@ export default function DashboardPage() {
               // cards: a grid container with one child stretches it in both axes,
               // so a short card fills its row instead of leaving a gap under it.
               // Measured before this: 450px of holes on an 1,859px page.
-              <div key={c.id} className={`grid ${SPAN_CLASS[c.span ?? 1]}`}>{c.body}</div>
+              <div key={c.id} className={`${CELL} ${SPAN_CLASS[c.span ?? 1]}`}>{c.body}</div>
             ))}
           </div>
           {review.length > 0 && (
@@ -1844,7 +1860,7 @@ export default function DashboardPage() {
               {reviewOpen && (
                 <div className="mt-2 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
                   {review.map((c) => (
-                    <div key={c.id} className={`grid ${SPAN_CLASS[c.span ?? 1]}`}>{c.body}</div>
+                    <div key={c.id} className={`${CELL} ${SPAN_CLASS[c.span ?? 1]}`}>{c.body}</div>
                   ))}
                 </div>
               )}
