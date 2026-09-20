@@ -32,7 +32,7 @@ function textsOf(node: unknown, out: string[] = []): string[] {
 interface Line {
   description?: string; qty?: number | null; unit?: string; rate?: number;
   tax_pct?: number; amount?: number; packs?: number | null; pcs_per_pack?: number | null;
-  material_id?: number | null; product_id?: number | null; total_pcs?: number | null; color?: string;
+  material_id?: number | null; product_id?: number | null; total_pcs?: number | null; color?: string; image?: string;
 }
 
 let seq = 0;
@@ -52,11 +52,11 @@ function makePo(header: Record<string, unknown>, lines: Line[]): number {
   ).run(...cols.map((c) => values[c] as never));
   const id = Number(po.lastInsertRowid);
   const ins = db.prepare(
-    `INSERT INTO po_items (po_id, material_id, product_id, description, color, qty, unit, packs, pcs_per_pack, total_pcs, rate, tax_pct, amount, sort_order)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO po_items (po_id, material_id, product_id, description, color, image, qty, unit, packs, pcs_per_pack, total_pcs, rate, tax_pct, amount, sort_order)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   );
   lines.forEach((l, i) => ins.run(
-    id, l.material_id ?? null, l.product_id ?? null, l.description ?? '', l.color ?? '', l.qty ?? null, l.unit ?? 'kg',
+    id, l.material_id ?? null, l.product_id ?? null, l.description ?? '', l.color ?? '', l.image ?? '', l.qty ?? null, l.unit ?? 'kg',
     l.packs ?? null, l.pcs_per_pack ?? null, l.total_pcs ?? null, l.rate ?? 0, l.tax_pct ?? 0, l.amount ?? 0, i
   ));
   return id;
@@ -117,6 +117,17 @@ describe('what the purchase order states', () => {
       { description: 'HDPE Resin', qty: 1000, unit: 'kg', rate: 85, tax_pct: 18, amount: 85000 },
     ])));
     assert.ok(kilos.includes('1,000 kg'));
+  });
+
+  test('a line photo prints as an image cell and the column is absent where none', () => {
+    // A 1x1 PNG, the smallest thing pdfmake will accept as an image.
+    const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
+    const doc = buildPurchaseOrderPdf(makePo({}, [{ ...GOODS, image: png }]));
+    const withImage = textsOf(doc);
+    assert.ok(withImage.includes('IMAGE'));
+    assert.ok(JSON.stringify(doc).includes(`"image":"${png}"`), 'the photo should be an image cell, not text');
+    const bare = textsOf(buildPurchaseOrderPdf(makePo({}, [GOODS])));
+    assert.ok(!bare.includes('IMAGE'), 'an order with no photo must not print an empty column');
   });
 
   test('the colour prints where stated and the column is absent where not', () => {

@@ -51,6 +51,7 @@ interface PoItemInput {
   product_id?: number | null;
   description?: string;
   color?: string;
+  image?: string;
   qty?: number | null;
   unit?: string;
   packs?: number | null;
@@ -128,15 +129,15 @@ function saveItems(
   );
   db.prepare('DELETE FROM po_items WHERE po_id = ?').run(poId);
   const ins = db.prepare(
-    `INSERT INTO po_items (po_id, material_id, product_id, description, color, qty, unit,
+    `INSERT INTO po_items (po_id, material_id, product_id, description, color, image, qty, unit,
                            packs, pcs_per_pack, total_pcs, rate, tax_pct, amount, sort_order)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   );
   // What was bought is read back out of the *original* row by index:
   // computeTotals is not given it and does not reorder, so the index holds.
   totals.items.forEach((it, i) =>
     ins.run(poId, numOrNull(items[i]?.material_id), numOrNull(items[i]?.product_id),
-      it.description, String(items[i]?.color ?? '').trim(), it.qty ?? null, it.unit ?? 'kg',
+      it.description, String(items[i]?.color ?? '').trim(), String(items[i]?.image ?? ''), it.qty ?? null, it.unit ?? 'kg',
       it.packs ?? null, it.pcs_per_pack ?? null, it.total_pcs ?? null,
       Number(items[i]?.rate) || 0, it.tax_pct ?? 0, it.amount, i));
   db.prepare('UPDATE purchase_orders SET subtotal = ?, tax_total = ?, tcs_amount = ?, grand_total = ? WHERE id = ?')

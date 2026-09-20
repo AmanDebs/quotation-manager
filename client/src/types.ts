@@ -585,6 +585,8 @@ export interface PoItem {
   description: string;
   /** The colour bought (2026-09-20); from the catalogue on a pick, typed over where the supplier's word differs. */
   color?: string;
+  /** A photo of the line, base64 and downscaled (2026-09-20); the catalogue's on a pick. */
+  image?: string;
   qty: number | null;
   unit: string;
   /** Packing as the supplier states it — cartons/bags, and what is in one. */

@@ -2054,6 +2054,13 @@ export function buildPurchaseOrderPdf(id: number): TDocumentDefinitions {
     { key: 'description', label: 'DESCRIPTION', width: '*', always: true, value: (it) => String(it.description || it.material_name || it.product_name || '') },
     // Auto-hides on an order stating none, which is every one raised before
     // the column existed (2026-09-20).
+    // The photo, drawn as the proforma draws its IMAGE cell; the column
+    // drops out entirely when no line carries one.
+    {
+      key: 'image', label: 'IMAGE', width: 46, align: 'center',
+      value: (it) => String(it.image || ''),
+      cell: (it) => (it.image ? { image: String(it.image), fit: [40, 40] as [number, number] } : { text: '' }),
+    },
     { key: 'color', label: 'COLOUR', width: 40, align: 'center', value: (it) => String(it.color || '') },
     { key: 'hsn', label: 'HSN', width: 44, align: 'center', value: hsnOf },
     // The reference order's QUANTITY banner sits over these two. The banner

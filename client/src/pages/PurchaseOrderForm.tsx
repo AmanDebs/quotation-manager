@@ -9,6 +9,7 @@ import CompanySelect, { useCompanies } from '../components/CompanySelect';
 import { DocNumber, PaymentTermsInput, PurchaseTermsInput } from '../components/DocFields';
 import HistoryCard from '../components/HistoryCard';
 import { productTypeLabel, unitOptions } from './Products';
+import { PhotoCell } from '../components/LineItemsEditor';
 import { fmtMoney, today } from '../lib/format';
 import { PIECES_PER_BILLING_UNIT, piecesOrdered } from '../lib/pieces';
 import { useUnsavedChanges } from '../lib/useUnsavedChanges';
@@ -44,7 +45,7 @@ const DEFAULT_TAX_PCT = 18;
  */
 export const DEEMED_EXPORT_PCT = 0.1;
 
-export const emptyPoItem = (taxPct = DEFAULT_TAX_PCT): PoItem => ({ material_id: null, product_id: null, description: '', color: '', qty: null, unit: 'kg', rate: 0, tax_pct: taxPct });
+export const emptyPoItem = (taxPct = DEFAULT_TAX_PCT): PoItem => ({ material_id: null, product_id: null, description: '', color: '', image: '', qty: null, unit: 'kg', rate: 0, tax_pct: taxPct });
 
 /*
  * A line names a material or a product, so the picker's value has to say which
@@ -214,11 +215,13 @@ export default function PurchaseOrderFormPage() {
     const mid = Number(rawId);
     if (kind === 'm') {
       const m = materials.find((x) => x.id === mid);
-      setItem(i, { material_id: mid, product_id: null, description: m?.name ?? '', color: '', unit: m?.unit || 'kg' });
+      setItem(i, { material_id: mid, product_id: null, description: m?.name ?? '', color: '', image: '', unit: m?.unit || 'kg' });
     } else {
       const p = products.find((x) => x.id === mid);
       setItem(i, {
         material_id: null, product_id: mid, description: p?.name ?? '', color: p?.color ?? '', unit: p?.unit || 'unit',
+        // The catalogue's photo unless one was already put on the line.
+        image: draft.items[i]?.image || p?.image || '',
         pcs_per_pack: p?.pcs_per_pack ?? null,
       });
     }
@@ -428,7 +431,11 @@ export default function PurchaseOrderFormPage() {
                       capped (2026-09-20, the client: "Decrease the width of
                       material") — the figures had been squeezed to 80px boxes
                       beside a picker most of the card wide. */}
-                  <th className="w-[30%] min-w-52 pb-2 pr-2">Material or product</th>
+                  <th className="w-[28%] min-w-48 pb-2 pr-2">Material or product</th>
+                  {/* A photo per line (2026-09-20, the client: "add a column
+                      to insert image") — the line editor's own cell, the
+                      catalogue's photo on a pick, replaced or cleared here. */}
+                  <th className="w-14 pb-2 pr-2">Photo</th>
                   {/* The colour bought (2026-09-20, the client: "Add Colour
                       column"): the catalogue's on a pick, typed over where
                       the supplier's word differs. */}
@@ -445,7 +452,7 @@ export default function PurchaseOrderFormPage() {
               </thead>
               <tbody>
                 {draft.items.map((it, i) => (
-                  <tr key={i} className="border-b border-slate-100">
+                  <tr key={i} className="group border-b border-slate-100">
                     <td className="py-2 pr-2">
                       <SearchSelect
                         className="w-full"
@@ -455,6 +462,7 @@ export default function PurchaseOrderFormPage() {
                         onChange={(v) => pickItem(i, v)}
                       />
                     </td>
+                    <td className="py-2 pr-2"><PhotoCell value={it.image ?? ''} onChange={(v) => setItem(i, { image: v })} /></td>
                     <td className="py-2 pr-2"><Input value={it.color ?? ''} onChange={(e) => setItem(i, { color: e.target.value })} placeholder="e.g. Natural" /></td>
                     <td className="py-2 pr-2"><Input type="number" min={0} step="any" className="w-full text-right tabular-nums" value={it.packs ?? ''} onChange={(e) => setPacking(i, { packs: e.target.value === '' ? null : Number(e.target.value) })} /></td>
                     <td className="py-2 pr-2"><Input type="number" min={0} step="any" className="w-full text-right tabular-nums" value={it.pcs_per_pack ?? ''} onChange={(e) => setPacking(i, { pcs_per_pack: e.target.value === '' ? null : Number(e.target.value) })} /></td>

@@ -1208,6 +1208,10 @@ CREATE TABLE IF NOT EXISTS po_items (
   -- from the catalogue when a product is picked and typed over where the
   -- supplier's word differs. Display only, as on every other item table.
   color TEXT NOT NULL DEFAULT '',
+  -- A photo of the line (2026-09-20, "add a column to insert image"), base64
+  -- and downscaled on the client like every other item table's; the
+  -- catalogue's when a product is picked. The audit trail never records it.
+  image TEXT NOT NULL DEFAULT '',
   qty REAL,
   unit TEXT NOT NULL DEFAULT 'kg',
   -- Packing, as the supplier states it: cartons/bags, and what is in one.

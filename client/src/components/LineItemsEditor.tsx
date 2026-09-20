@@ -12,7 +12,7 @@ import { PIECES_PER_BILLING_UNIT } from '../lib/pieces';
  * The photo for one line. Clicking the thumbnail replaces it, ✕ clears it.
  * Photos are downscaled before they are stored — see lib/image.ts for why.
  */
-function PhotoCell({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+export function PhotoCell({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   const input = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
 
