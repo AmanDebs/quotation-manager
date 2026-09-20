@@ -6,8 +6,10 @@ import type { Proforma, Customer } from '../types';
 import { Button, Select, Input, PageHeader, EmptyState, Card, ExportTabs, ErrorText, Pagination, DownloadButton, TH_CLASS, MultiSelectFilter } from '../components/ui';
 import { useCompanies } from '../components/CompanySelect';
 import NewDocumentDialog from '../components/NewDocumentDialog';
-import { fmtDate, fmtMoney } from '../lib/format';
+import { fmtDate, fmtMoney, today } from '../lib/format';
 import InternalNotes from '../components/InternalNotes';
+import { FollowupDialog } from '../components/FollowupButton';
+import { Icon } from '../components/icons';
 import { useUrlFilter } from '../lib/useUrlFilter';
 import { usePagedList, PAGE_SIZE } from '../lib/usePagedList';
 
@@ -91,6 +93,9 @@ export default function ProformasPage() {
   // Which rows have their note panel open. Keyed by proforma id rather than
   // index, so filtering the list cannot open the wrong one.
   const [openNotes, setOpenNotes] = useState<Set<number>>(new Set());
+  // The proforma a follow-up is being scheduled on from its row (2026-09-20,
+  // the client: "Add the follow up in proforma also").
+  const [chasing, setChasing] = useState<Proforma | null>(null);
 
   const toggleNote = (id: number) =>
     setOpenNotes((prev) => {
@@ -140,6 +145,13 @@ export default function ProformasPage() {
         }
       />
       {creating && <NewDocumentDialog basePath="/proformas" title="New Proforma Invoice" onClose={() => setCreating(false)} />}
+      {chasing && (
+        <FollowupDialog
+          docType="proforma" docId={chasing.id} customerId={chasing.customer_id}
+          onClose={() => setChasing(null)}
+          onCreated={() => queryClient.invalidateQueries({ queryKey: ['proformas'] })}
+        />
+      )}
       <div className="mb-3 flex flex-wrap items-center gap-3">
         <ExportTabs value={exportFilter} onChange={setExportFilter} />
         {showCompany && (
@@ -199,12 +211,14 @@ export default function ProformasPage() {
                 <th className="pb-2 pr-3">Issued By</th>
                 <th className="pb-2 pr-3">Sales Order</th>
                 <th className="pb-2 pr-3">Status</th>
-                <th className="w-8 pb-2" />
+                <th className="w-14 pb-2" />
               </tr>
             </thead>
             {proformas.map((p) => {
               const noteOpen = openNotes.has(p.id);
               const hasNote = !!p.internal_notes?.trim();
+              const chase = p.next_followup || '';
+              const chaseDue = !!chase && chase <= today();
               return (
               <tbody key={p.id} className="border-b border-slate-100 last:border-0">
                 <tr className="cursor-pointer hover:bg-slate-50" onClick={() => navigate(`/proformas/${p.id}`)}>
@@ -268,7 +282,17 @@ export default function ProformasPage() {
                     )}
                   </td>
                   {/* Opens the note in place — the click must not open the proforma. */}
-                  <td className="py-2 text-right" onClick={(e) => e.stopPropagation()}>
+                  <td className="py-2 text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                    {/* A chase on this proforma, the quotation list's own bell:
+                        tinted once scheduled, red once due, counted in the sidebar. */}
+                    <button
+                      onClick={() => setChasing(p)}
+                      className={`rounded px-1 focus:outline-none focus:ring-1 focus:ring-brand-600 ${
+                        chaseDue ? 'text-red-600' : chase ? 'text-brand-600' : 'text-slate-300 hover:text-slate-500'
+                      }`}
+                      title={chase ? `Follow-up ${chaseDue ? 'due' : 'scheduled for'} ${fmtDate(chase)} — schedule another` : 'Schedule a follow-up'}
+                      aria-label={`Schedule a follow-up on ${p.number}`}
+                    ><Icon name="bell" className="inline-block align-[-3px]" /></button>
                     <button
                       onClick={() => toggleNote(p.id)}
                       aria-expanded={noteOpen}

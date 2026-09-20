@@ -999,6 +999,8 @@ export interface Proforma {
   payments?: Payment[];
   amount_received?: number;
   /** Never printed — the team's own record. Quotations have had one all along. */
+  /** The soonest open follow-up on this proforma, or null — the list's bell reads it. */
+  next_followup?: string | null;
   internal_notes?: string;
   // Both come off the list query. Optional so a server that has not been
   // redeployed yet yields "—" rather than NaN, the way the dashboard's

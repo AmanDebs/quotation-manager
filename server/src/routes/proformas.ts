@@ -74,7 +74,10 @@ const listSql = `
          -- the one outcome worse than an awkward figure on screen.
          (SELECT COUNT(*) FROM payments pm
            WHERE pm.pi_id = p.id
-             AND pm.currency IS NOT NULL AND pm.currency <> '' AND pm.currency <> p.currency) AS currency_mismatch_count
+             AND pm.currency IS NOT NULL AND pm.currency <> '' AND pm.currency <> p.currency) AS currency_mismatch_count,
+         -- The soonest open follow-up on this proforma, for the list's bell
+         -- (2026-09-20, the quotation list's own).
+         (SELECT MIN(f.due_date) FROM followups f WHERE f.doc_type = 'proforma' AND f.doc_id = p.id AND f.done = 0) AS next_followup
   FROM proforma_invoices p
   JOIN customers c ON c.id = p.customer_id
   -- LEFT, not JOIN: a document must still list if its company row is gone.
