@@ -116,7 +116,7 @@ describe('the packing list runs description, colour, HSN, boxes, quantity, thous
   test('the header, in that order', () => {
     const [header] = rows(pl);
     assert.deepEqual(header.map((c) => c.replace(/\s+/g, ' ')),
-      ['SL', 'Description of Goods', 'Color', 'HSN Code', 'Boxes', 'Quantity', "Qty in '000 Pcs", 'Net Wt (kg)', 'Gross Wt (kg)']);
+      ['SL', 'Description of Goods', 'Color', 'HSN Code', 'Boxes', 'Quantity', "Qty in Thousand Pcs", 'Net Wt (kg)', 'Gross Wt (kg)']);
   });
   test('a per-1000 line states its pieces, its thousands and the invoice line’s colour', () => {
     const [, line, total] = rows(pl);

@@ -143,7 +143,7 @@ export const PACKING_COLUMNS: ToggleableColumn[] = [
   { key: 'color', label: 'Colour' },
   { key: 'hsn', label: 'HSN Code' },
   { key: 'packages', label: 'Boxes' },
-  { key: 'thousand_pcs', label: "Qty in '000 Pcs" },
+  { key: 'thousand_pcs', label: "Qty in Thousand Pcs" },
   { key: 'net_weight', label: 'Net Weight' },
   { key: 'gross_weight', label: 'Gross Weight' },
 ];

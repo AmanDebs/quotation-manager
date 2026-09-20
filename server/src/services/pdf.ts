@@ -1878,7 +1878,7 @@ export function buildPackingListPdf(id: number): TDocumentDefinitions {
     { key: 'hsn', label: 'HSN Code', width: 45, align: 'center', value: (it) => String(it.hsn_code || '') },
     { key: 'packages', label: 'Boxes', width: 50, align: 'center', value: (it) => String(it.packages || '') },
     { key: 'qty', label: 'Quantity', width: 58, align: 'right', always: true, value: (it) => (piecesOf(it) != null ? `${fmtNum(piecesOf(it), 0)} Pcs` : it.qty != null ? `${fmtNum(it.qty)} ${it.unit === 'unit' ? 'pcs' : it.unit}` : '—') },
-    { key: 'thousand_pcs', label: "Qty in '000 Pcs", width: 48, align: 'right', value: (it) => (thousands(it) != null ? fmtNum(thousands(it)!, 2) : '') },
+    { key: 'thousand_pcs', label: "Qty in Thousand Pcs", width: 56, align: 'right', value: (it) => (thousands(it) != null ? fmtNum(thousands(it)!, 2) : '') },
     { key: 'net_weight', label: 'Net Wt (kg)', width: 48, align: 'right', value: (it) => (it.net_weight ? fmtNum(it.net_weight) : '') },
     { key: 'gross_weight', label: 'Gross Wt (kg)', width: 48, align: 'right', value: (it) => (it.gross_weight ? fmtNum(it.gross_weight) : '') },
   ];
@@ -1892,7 +1892,7 @@ export function buildPackingListPdf(id: number): TDocumentDefinitions {
     if (label === 'Description of Goods') return cell('TOTAL', 'left');
     if (label === 'Quantity') return cell(totalQty);
     // Only the lines that actually show a thousand-pieces figure are in it.
-    if (label === "Qty in '000 Pcs") return cell(totalThousands ? fmtNum(totalThousands, 2) : '');
+    if (label === "Qty in Thousand Pcs") return cell(totalThousands ? fmtNum(totalThousands, 2) : '');
     if (label === 'Net Wt (kg)') return cell(fmtNum(totalNet));
     if (label === 'Gross Wt (kg)') return cell(fmtNum(totalGross));
     return cell('');
