@@ -1,5 +1,4 @@
 import { db } from '../db/connection.js';
-import { returnedQtyByLine } from './creditNotes.js';
 import { piecesOrdered } from './totals.js';
 import { productionByOrder } from './production.js';
 
@@ -85,13 +84,6 @@ export function impliedStatus(orderId: number): StatusFacts {
   const items = db.prepare('SELECT total_pcs, qty, unit, is_charge FROM order_items WHERE order_id = ? ORDER BY sort_order, id')
     .all(orderId) as { total_pcs: number | null; qty: number | null; unit: string; is_charge: number }[];
 
-  // Invoiced value first: it is the strongest claim, and the existing
-  // dispatchProgress walk already owns "how much has been billed".
-  const invoiced = db.prepare(
-    `SELECT COUNT(*) AS c FROM commercial_invoices
-     WHERE order_id = ? OR pi_id IN (SELECT id FROM proforma_invoices WHERE order_id = ?)`
-  ).get(orderId, orderId) as { c: number };
-
   const despatched = db.prepare('SELECT COUNT(*) AS c FROM despatches WHERE order_id = ?')
     .get(orderId) as { c: number };
 
@@ -155,27 +147,34 @@ export function impliedStatus(orderId: number): StatusFacts {
    * booked with nothing released.
    */
   void anyJob;
+  /*
+   * **The ladder is Not Scheduled → Scheduled → Partially dispatched → Fully
+   * Dispatched** (2026-09-20, the client with the pill row in front of them:
+   * *"Make this status as Not Scheduled >> Scheduled >> Partially dispatched
+   * >> Fully Dispatched"*) — the order line's own vocabulary, asked for the
+   * same day, read for the whole order. Two things follow from the words.
+   *
+   * `in_production` and `ready` are **retired, not removed**, `confirmed`'s
+   * own call: output booked and every line made both fold into *Scheduled*
+   * — this row is read for what is sold and what has gone, and how far the
+   * floor is with it is the Work Orders page's figure. Never set here, never
+   * handed out by the status route; a row already holding one keeps it.
+   *
+   * And **both dispatch rungs read the dispatch record and nothing else**.
+   * *Partially dispatched* used to fire on an invoice too, and *Completed*
+   * closed an export on the invoice walk — the money truth. Labelled *Fully
+   * Dispatched*, that would say goods had gone that the register shows still
+   * in the yard, which is the very lie the line state stopped telling on
+   * 2026-09-16 (*"the state becomes shipped even if I have not recorded the
+   * dispatch"*). So an invoice moves nothing here now, export or domestic;
+   * what has been billed is `dispatchProgress()`'s figure, shown beside what
+   * has been sent rather than folded into the status.
+   */
   let implied: OrderStatus = 'pending';
   let reason = '';
-  if (anyScheduled) { implied = 'scheduled'; reason = 'a work order has been released or dated'; }
-  if (anyProduction) { implied = 'in_production'; reason = 'production has been booked'; }
-  if (allMade) { implied = 'ready'; reason = 'every line has been made in full'; }
-  if (despatched.c > 0 || invoiced.c > 0) {
-    implied = 'partially_dispatched';
-    reason = despatched.c > 0 ? 'goods have been dispatched' : 'an invoice has been raised';
-  }
-  /*
-   * What closes an order depends on where it is billed (2026-09-16, the
-   * client: *"They use Tally for domestic commercial invoice"*). An export is
-   * invoiced here, so it closes on the invoice walk as it always has — the
-   * money truth, and the conservative direction. A domestic sale is invoiced
-   * in Tally and this app never sees the bill, so the only record it can
-   * close on is the lorry: every goods line dispatched in full.
-   */
-  if (order.is_export ? fullyBilled(orderId) : fullyDispatched(orderId)) {
-    implied = 'completed';
-    reason = order.is_export ? 'every line has been billed in full' : 'every line has been dispatched in full';
-  }
+  if (anyScheduled || anyProduction || allMade) { implied = 'scheduled'; reason = 'a work order has been released, dated or run'; }
+  if (despatched.c > 0) { implied = 'partially_dispatched'; reason = 'goods have been dispatched'; }
+  if (fullyDispatched(orderId)) { implied = 'completed'; reason = 'every line has been dispatched in full'; }
 
   return { implied, reason };
 }
@@ -183,11 +182,12 @@ export function impliedStatus(orderId: number): StatusFacts {
 /**
  * Has every goods line physically gone, by the dispatch record?
  *
- * The domestic order's closing rule: in pieces, by `piecesOrdered`'s one
- * rule, against `despatch_items` summed by position. A line stating no piece
- * count — weight-billed, or price-only — cannot be complete, the same
- * refusal `fullyBilled` makes about a line with no quantity. Charge lines are
- * excluded as everywhere else.
+ * The closing rule for every order since 2026-09-20 (the domestic order's
+ * since 2026-09-16): in pieces, by `piecesOrdered`'s one rule, against
+ * `despatch_items` summed by position. A line stating no piece count —
+ * weight-billed, or price-only — cannot be complete. Charge lines are
+ * excluded as everywhere else. A return credit note does not re-open it:
+ * the goods did go, and the note is the money record of what came back.
  */
 function fullyDispatched(orderId: number): boolean {
   const items = db.prepare(
@@ -204,53 +204,6 @@ function fullyDispatched(orderId: number): boolean {
     const target = piecesOrdered(it);
     return target > 0 && (sent.get(it.line) ?? 0) + 1e-9 >= target;
   });
-}
-
-/**
- * Has every goods line been billed in full?
- *
- * The invoice walk, not the despatch record: `dispatchProgress()` has always
- * been the money truth for an order, and the two are shown side by side rather
- * than reconciled precisely because a lorry can leave before the paperwork.
- * Closing on the paperwork is the conservative direction — an order stays open
- * until it has actually been billed.
- *
- * Reproduces that walk here rather than importing it, because `routes/orders.ts`
- * imports this file and the cycle would be worse than eight lines of SQL. The
- * check that keeps them honest is in the test: `fully_dispatched` from
- * `GET /orders/:id` agrees with this on every order.
- *
- * **Charge lines are excluded** (`is_charge`), as everywhere else — freight is
- * not a thing that ships, and an order whose only outstanding line is a freight
- * charge is finished. A line with no quantity cannot be complete either: a
- * price-only line has no target to reach.
- */
-function fullyBilled(orderId: number): boolean {
-  const items = db.prepare(
-    'SELECT qty, is_charge FROM order_items WHERE order_id = ? ORDER BY sort_order, id'
-  ).all(orderId) as { qty: number | null; is_charge: number }[];
-  const goods = items.map((it, i) => ({ ...it, line: i })).filter((it) => !it.is_charge);
-  if (!goods.length || goods.some((it) => !it.qty || it.qty <= 0)) return false;
-
-  const invoices = db.prepare(
-    `SELECT id FROM commercial_invoices
-     WHERE order_id = ? OR pi_id IN (SELECT id FROM proforma_invoices WHERE order_id = ?)`
-  ).all(orderId, orderId) as { id: number }[];
-  if (!invoices.length) return false;
-
-  const billed = items.map(() => 0);
-  for (const inv of invoices) {
-    const rows = db.prepare('SELECT qty FROM invoice_items WHERE invoice_id = ? ORDER BY sort_order, id')
-      .all(inv.id) as { qty: number | null }[];
-    // Matched by position, the same index rule syncPackingList() and
-    // dispatchProgress() use.
-    rows.forEach((r, i) => { if (i < billed.length && r.qty != null) billed[i] += r.qty; });
-    // Less what came back on an approved return credit note — the same
-    // subtraction `dispatchProgress()` makes, so a line returned in full
-    // re-opens the order here as it does on the page.
-    for (const [i, qty] of returnedQtyByLine(inv.id)) { if (i < billed.length) billed[i] -= qty; }
-  }
-  return goods.every((it) => billed[it.line] + 1e-9 >= (it.qty ?? 0));
 }
 
 /**

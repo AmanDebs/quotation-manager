@@ -69,9 +69,9 @@ function dispatchProgress(orderId: number, items: { qty: number | null; unit_pri
     /*
      * ...less anything that came back. A **return** credit note takes its
      * quantities off the line it credits, by the same position rule, so a line
-     * returned in full is open again and the order stops reading Completed
-     * over goods sitting in the yard. `fullyBilled()` reads this walk, so the
-     * status ladder follows without a second rule.
+     * returned in full reads as open again on the Billed figure. (Until
+     * 2026-09-20 the order's *Completed* read this walk too; it reads the
+     * dispatch record now, and a return does not re-open it.)
      *
      * An **adjustment** is excluded inside `returnedQtyByLine` rather than
      * here: it credits money against a line without anything moving, and
@@ -671,7 +671,13 @@ ordersRouter.post('/:id/status', (req: AuthedRequest, res) => {
    * keep it, stay labelled and filterable; it is simply no longer handed out.
    */
   if (status === 'confirmed') {
-    return res.status(409).json({ error: 'Work Order is no longer a status a sales order is set to: every order raises its jobs when it is booked. Use Pending or Scheduled.' });
+    return res.status(409).json({ error: 'Work Order is no longer a status a sales order is set to: every order raises its jobs when it is booked. Use Not Scheduled or Scheduled.' });
+  }
+  // In production and Ready folded into Scheduled on 2026-09-20 (the ladder
+  // is Not Scheduled → Scheduled → Partially dispatched → Fully Dispatched);
+  // retired the same way, rows holding them left alone.
+  if (status === 'in_production' || status === 'ready') {
+    return res.status(409).json({ error: 'In production and Ready are no longer statuses a sales order is set to: how far the floor is with it is the Work Orders page\'s figure. Use Scheduled.' });
   }
   if (!allowed.includes(status)) return res.status(400).json({ error: 'Invalid status' });
   const existing = db.prepare('SELECT customer_id FROM orders WHERE id = ?').get(id) as { customer_id: number } | undefined;

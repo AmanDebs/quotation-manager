@@ -13,14 +13,15 @@ import { useCan } from '../App';
  * A dispatch is recorded from the book (asked for 2026-09-14: "a button to
  * record Dispatch on right side of state on every sales order"). It opens
  * the record-a-dispatch page for that order, behind `dispatch: full`. A
- * cancelled order gets no button. A *completed* one keeps it (2026-09-16):
- * `completed` is measured on the invoice walk, and on this desk the invoice
- * regularly goes before the lorry, so a fully billed order is exactly the
- * one whose goods are about to leave. The lines view goes one better and
- * drops the button once every line has physically gone.
+ * cancelled order gets no button, and since 2026-09-20 neither does a
+ * *completed* one: `completed` reads **Fully dispatched** and is measured on
+ * the dispatch record, so there is nothing left to send. (It kept the button
+ * from 2026-09-16, when `completed` was measured on the invoice walk and a
+ * fully billed order was exactly the one about to leave.) The lines view
+ * also drops it once every line on the page has physically gone.
  */
 const recordDispatchUrl = (orderId: number) => `/despatches/new?order=${orderId}`;
-const CLOSED: ReadonlySet<string> = new Set(['cancelled']);
+const CLOSED: ReadonlySet<string> = new Set(['cancelled', 'completed']);
 
 export const ORDER_STATUSES: OrderStatus[] = [
   'pending', 'confirmed', 'scheduled', 'in_production', 'ready', 'partially_dispatched', 'completed', 'cancelled',
@@ -36,8 +37,9 @@ export const ORDER_STATUSES: OrderStatus[] = [
  * picker on such a row keeps it as an option so the control can show what is
  * there; nothing else is ever offered it.
  */
+const RETIRED: ReadonlySet<string> = new Set(['confirmed', 'in_production', 'ready']);
 export const offeredStatuses = (current?: string): OrderStatus[] =>
-  ORDER_STATUSES.filter((s) => s !== 'confirmed' || s === current);
+  ORDER_STATUSES.filter((s) => !RETIRED.has(s) || s === current);
 
 /**
  * The order's vocabulary, where it differs from the value that is stored.
@@ -61,8 +63,19 @@ export const offeredStatuses = (current?: string): OrderStatus[] =>
  * `in_production`, not "In production" — so it stays uniform rather than
  * gaining one prettified special case.
  */
+/*
+ * The row reads **Not Scheduled → Scheduled → Partially dispatched → Fully
+ * Dispatched** since 2026-09-20 (the client: *"Make this status as Not
+ * Scheduled >> Scheduled >> Partially dispatched >> Fully Dispatched"*) —
+ * the order line's own vocabulary, read for the whole order. `pending` and
+ * `completed` are relabelled; `in_production` and `ready` are retired
+ * alongside `confirmed` (folded into Scheduled by the ladder, offered only
+ * on a row still holding one) and keep their labels for those rows.
+ */
 const ORDER_STATUS_LABELS: Record<string, string> = {
+  pending: 'Not scheduled',
   confirmed: 'Work Order',
+  completed: 'Fully dispatched',
 };
 
 export const orderStatusLabel = (s: string) =>

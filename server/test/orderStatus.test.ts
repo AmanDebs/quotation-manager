@@ -20,10 +20,11 @@ import { makeCustomer, makeInvoice } from './helpers/factory.js';
 let seq = 0;
 
 /**
- * An **export** order by default: those are invoiced here and close on the
- * invoice walk, which is what the closing cases below exercise. A domestic
- * sale is invoiced in Tally and closes on the dispatch record instead — its
- * own cases pass `{ domestic: true }`.
+ * An **export** order by default. Since 2026-09-20 export and domestic close
+ * alike, on the dispatch record — the ladder is Not Scheduled → Scheduled →
+ * Partially dispatched → Fully Dispatched — so the flag decides nothing here
+ * any more; the domestic cases below keep passing `{ domestic: true }` to say
+ * so.
  */
 function order(status = 'pending', opts: { domestic?: boolean } = {}): number {
   const id = (db.prepare(
@@ -123,19 +124,36 @@ describe('raising a job and scheduling it are different steps', () => {
 });
 
 describe('the facts push the order up the ladder', () => {
-  test('a job, a shift and a lorry each move it on', () => {
+  test('a job and a lorry each move it on; a shift keeps it Scheduled', () => {
     const o = order();
     const j = job(o);
     syncOrderStatus(o);
     assert.equal(statusOf(o), 'scheduled', 'a released job should schedule the order');
 
+    // Output booked used to be *In production* and every line made *Ready*;
+    // both fold into Scheduled since 2026-09-20 — how far the floor is with
+    // it is the Work Orders page's figure, not this row's.
     shift(j);
     syncOrderStatus(o);
-    assert.equal(statusOf(o), 'in_production');
+    assert.equal(statusOf(o), 'scheduled');
+    shift(j, 100000);
+    syncOrderStatus(o);
+    assert.equal(statusOf(o), 'scheduled', 'every line made is still only Scheduled');
 
     despatch(o);
     syncOrderStatus(o);
     assert.equal(statusOf(o), 'partially_dispatched');
+  });
+
+  /** Output on a job nobody released or dated still counts as the floor at work. */
+  test('a shift on a bare job schedules the order by itself', () => {
+    const o = order();
+    const j = rawJob(o);
+    syncOrderStatus(o);
+    assert.equal(statusOf(o), 'pending');
+    shift(j);
+    syncOrderStatus(o);
+    assert.equal(statusOf(o), 'scheduled');
   });
 
   test('and syncing again changes nothing', () => {
@@ -185,15 +203,15 @@ describe('withdrawing the record takes the order back down', () => {
     assert.equal(statusOf(o), 'pending');
   });
 
-  test('deleting a mis-keyed shift falls back to the job that remains', () => {
+  test('deleting a mis-keyed shift on a bare job un-schedules it', () => {
     const o = order();
-    const j = job(o);
+    const j = rawJob(o);
     const s = shift(j);
     syncOrderStatus(o);
-    assert.equal(statusOf(o), 'in_production');
+    assert.equal(statusOf(o), 'scheduled');
     db.prepare('DELETE FROM production_entries WHERE id = ?').run(s);
     syncOrderStatus(o);
-    assert.equal(statusOf(o), 'scheduled', 'the job is still there, so it is still scheduled');
+    assert.equal(statusOf(o), 'pending', 'nothing released, dated or made — not scheduled');
   });
 });
 
@@ -226,7 +244,7 @@ describe('what a person chose is a floor', () => {
 });
 
 describe('closing an order', () => {
-  /** Every goods line billed in full — the invoice walk, not the despatch record. */
+  /** Every goods line billed in full — the invoice walk, which moves nothing here any more. */
   const billInFull = (orderId: number, customerId: number) => {
     const inv = makeInvoice({ customerId, currency: 'INR', total: 1000 });
     db.prepare('UPDATE commercial_invoices SET order_id = ? WHERE id = ?').run(orderId, inv);
@@ -238,96 +256,86 @@ describe('closing an order', () => {
   };
   const customerOf = (orderId: number) =>
     (db.prepare('SELECT customer_id FROM orders WHERE id = ?').get(orderId) as { customer_id: number }).customer_id;
+  const send = (orderId: number, qty: number) => {
+    const trip = despatch(orderId);
+    db.prepare('INSERT INTO despatch_items (despatch_id, order_line, qty) VALUES (?, 0, ?)').run(trip, qty);
+    return trip;
+  };
 
-  test('the invoices close it, and deleting one re-opens it', () => {
+  /**
+   * Since 2026-09-20 the two dispatch rungs read the dispatch record and
+   * nothing else, export or domestic: *Fully Dispatched* over goods the
+   * register shows in the yard is the lie the line state stopped telling on
+   * 2026-09-16. An invoice is `dispatchProgress()`'s figure, shown beside
+   * what has gone rather than folded into the status.
+   */
+  test('an invoice moves an export order nowhere', () => {
     const o = order();
-    const inv = billInFull(o, customerOf(o));
+    billInFull(o, customerOf(o));
+    syncOrderStatus(o);
+    assert.equal(statusOf(o), 'pending', 'an invoice alone was read as goods leaving');
+  });
+
+  test('the dispatch record closes it, and deleting a trip re-opens it', () => {
+    const o = order();
+    const first = send(o, 60000);
+    syncOrderStatus(o);
+    assert.equal(statusOf(o), 'partially_dispatched');
+
+    send(o, 40000);
     syncOrderStatus(o);
     assert.equal(statusOf(o), 'completed');
 
-    db.prepare('DELETE FROM invoice_items WHERE invoice_id = ?').run(inv);
-    db.prepare('DELETE FROM commercial_invoices WHERE id = ?').run(inv);
+    db.prepare('DELETE FROM despatch_items WHERE despatch_id = ?').run(first);
+    db.prepare('DELETE FROM despatches WHERE id = ?').run(first);
     syncOrderStatus(o);
-    assert.equal(statusOf(o), 'pending', 'a re-opened order stayed closed');
+    assert.equal(statusOf(o), 'partially_dispatched', 'a re-opened order stayed closed');
+  });
+
+  test('a domestic order closes exactly the same way', () => {
+    const o = order('pending', { domestic: true });
+    billInFull(o, customerOf(o));
+    syncOrderStatus(o);
+    assert.equal(statusOf(o), 'pending');
+    send(o, 100000);
+    syncOrderStatus(o);
+    assert.equal(statusOf(o), 'completed');
   });
 
   /**
-   * Goods that came back were not delivered. A **return** credit note takes
-   * its quantity off the billed figure by position, so a line returned in
-   * full re-opens the order; an **adjustment** credits money alone and must
-   * leave the order closed, nothing having moved.
+   * A return credit note no longer re-opens the order: the goods did go,
+   * which is what the status now states, and the note is the money record
+   * of what came back.
    */
-  test('a return re-opens it; an adjustment does not', () => {
+  test('a return credit note leaves a fully dispatched order closed', () => {
     const o = order();
     const inv = billInFull(o, customerOf(o));
+    send(o, 100000);
     syncOrderStatus(o);
     assert.equal(statusOf(o), 'completed');
-
-    const note = (kind: string, qty: number) => {
-      const id = (db.prepare(
-        `INSERT INTO credit_notes (number, date, invoice_id, customer_id, company_id, kind, currency, grand_total, approval_status)
-         VALUES (?, '2026-09-10', ?, ?, 1, ?, 'INR', 100, 'approved') RETURNING id`
-      ).get(`CN/OS-${++seq}`, inv, customerOf(o), kind) as { id: number }).id;
-      db.prepare("INSERT INTO credit_note_items (credit_note_id, description, qty, unit, sort_order) VALUES (?, '28mm Cap', ?, 'per 1000', 0)").run(id, qty);
-      return id;
-    };
-    note('adjustment', 100);
-    syncOrderStatus(o);
-    assert.equal(statusOf(o), 'completed', 'an adjustment re-opened the order for goods still with the buyer');
-
-    const back = note('return', 100);
-    syncOrderStatus(o);
-    // Not `pending`: the invoice still stands, and an order with an invoice
-    // on it is part-dispatched by the ladder's own rule. What matters is that
-    // it is no longer *Completed* over goods sitting in the yard.
-    assert.equal(statusOf(o), 'partially_dispatched', 'a full return left the order reading Completed');
-
-    // Un-approving the note (what an edit does) puts the credit — and the
-    // closing — back where they were.
-    db.prepare("UPDATE credit_notes SET approval_status = 'not_submitted' WHERE id = ?").run(back);
+    const id = (db.prepare(
+      `INSERT INTO credit_notes (number, date, invoice_id, customer_id, company_id, kind, currency, grand_total, approval_status)
+       VALUES (?, '2026-09-10', ?, ?, 1, 'return', 'INR', 100, 'approved') RETURNING id`
+    ).get(`CN/OS-${++seq}`, inv, customerOf(o)) as { id: number }).id;
+    db.prepare("INSERT INTO credit_note_items (credit_note_id, description, qty, unit, sort_order) VALUES (?, '28mm Cap', 100, 'per 1000', 0)").run(id);
     syncOrderStatus(o);
     assert.equal(statusOf(o), 'completed');
+  });
+
+  /** A price-only line states no quantity at all and can never be complete. */
+  test('a line with no quantity never closes', () => {
+    const o = order();
+    db.prepare('UPDATE order_items SET total_pcs = NULL, qty = NULL WHERE order_id = ?').run(o);
+    send(o, 100000);
+    syncOrderStatus(o);
+    assert.equal(statusOf(o), 'partially_dispatched');
   });
 
   /**
    * The commercial decision the original design was right to protect: closing
-   * is often taken when a short shipment is accepted, and the invoices will
-   * never add up. Setting the status by hand clears the memory, so nothing
-   * here can re-open it.
+   * is often taken when a short shipment is accepted. Setting the status by
+   * hand clears the memory, so nothing here can re-open it.
    */
-  /**
-   * A domestic sale is invoiced in Tally (2026-09-16), so this app never sees
-   * the bill and the lorry is the only record it can close on.
-   */
-  test('a domestic order closes on the dispatch record, not the invoice', () => {
-    const o = order('pending', { domestic: true });
-    billInFull(o, customerOf(o));
-    syncOrderStatus(o);
-    assert.equal(statusOf(o), 'partially_dispatched', 'an invoice closed a domestic order');
-
-    const trip = despatch(o);
-    db.prepare('INSERT INTO despatch_items (despatch_id, order_line, qty) VALUES (?, 0, 60000)').run(trip);
-    syncOrderStatus(o);
-    assert.equal(statusOf(o), 'partially_dispatched');
-
-    db.prepare('INSERT INTO despatch_items (despatch_id, order_line, qty) VALUES (?, 0, 40000)').run(trip);
-    syncOrderStatus(o);
-    assert.equal(statusOf(o), 'completed');
-
-    db.prepare('DELETE FROM despatch_items WHERE despatch_id = ?').run(trip);
-    db.prepare('DELETE FROM despatches WHERE id = ?').run(trip);
-    syncOrderStatus(o);
-    assert.equal(statusOf(o), 'partially_dispatched', 'the invoice still stands; the order is open again');
-  });
-
-  test('an export order fully dispatched but unbilled stays open', () => {
-    const o = order();
-    const trip = despatch(o);
-    db.prepare('INSERT INTO despatch_items (despatch_id, order_line, qty) VALUES (?, 0, 100000)').run(trip);
-    syncOrderStatus(o);
-    assert.equal(statusOf(o), 'partially_dispatched');
-  });
-
   test('but an order closed by hand stays closed', () => {
     const o = order();
     despatch(o);
