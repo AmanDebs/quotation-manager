@@ -76,6 +76,19 @@ function exportInvoice(): number {
   return id;
 }
 
+describe('the columns run description, colour, HSN, boxes, quantity, rate, amount', () => {
+  // The client's order (2026-09-20): what the goods are, then how they are
+  // packed, then what they cost.
+  test('on an export invoice carrying every one of them', () => {
+    const id = makeInvoice({ customerId: cust, currency: 'USD', total: 3000 });
+    db.prepare("UPDATE commercial_invoices SET is_export = 1 WHERE id = ?").run(id);
+    addItem(id, { description: 'Cap', hsn_code: '3923', qty: 300000, unit: 'per 1000', unit_price: 10, amount: 3000, packs: 300, total_pcs: 300000 });
+    db.prepare("UPDATE invoice_items SET color = 'Natural' WHERE invoice_id = ?").run(id);
+    const header = itemsTableRows(id)[0].map((c) => c.replace(/\s+/g, ' '));
+    assert.deepEqual(header, ['SL', 'Description of Goods', 'Color', 'HSN Code', 'Boxes', 'Quantity', 'USD/1000 Pcs', 'Amount USD']);
+  });
+});
+
 describe('the money sits in the items table', () => {
   test('every money line is a row of the table', () => {
     const id = exportInvoice();

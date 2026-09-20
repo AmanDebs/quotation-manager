@@ -1524,17 +1524,19 @@ export function buildInvoicePdf(id: number): TDocumentDefinitions {
   const specs: ColumnSpec[] = [
     { key: 'sl', label: 'SL', width: 16, align: 'center', always: true, value: (_it, i) => String(i + 1) },
     { key: 'description', label: 'Description of Goods', width: '*', always: true, value: (it) => String(it.description) },
-    // A charge line (freight, insurance) states its amount and nothing else —
-    // its billed quantity of 1 is arithmetic, not a count of anything shipped.
-    // Directly after the goods (2026-09-17, the client: "HSN should be after description").
+    // The order is the client's (2026-09-20: "Descp >> Color >> HSN >> Boxes
+    // >> Quantity >> Rate >> Amount"): what the goods are, then how they are
+    // packed, then what they cost. A charge line (freight, insurance) states
+    // its amount and nothing else — its billed quantity of 1 is arithmetic,
+    // not a count of anything shipped.
+    { key: 'color', label: 'Color', width: 46, align: 'center', value: (it) => String(it.color || '') },
     { key: 'hsn', label: 'HSN Code', width: 45, align: 'center', value: (it) => String(it.hsn_code || '') },
+    { key: 'packs', label: 'Boxes', width: 40, align: 'right', value: (it) => (it.packs != null ? fmtNum(it.packs, 0) : '') },
     // Pieces on a piece basis, in the proforma's words, and the proforma's own
     // per-1000 rate beside them (2026-09-17): the two documents describe one
     // shipment. A weight-billed line still states its kilos and its own price.
     { key: 'qty', label: 'Quantity', width: 58, align: 'right', always: true, value: (it) => (it.is_charge ? '' : piecesOf(it) != null ? `${fmtNum(piecesOf(it), 0)} Pcs` : it.qty != null ? `${fmtNum(it.qty)} ${it.unit}` : '—') },
     { key: 'unit_price', label: rateLabelFor(items, cur), width: 55, align: 'right', always: true, value: per1000Rate },
-    { key: 'color', label: 'Color', width: 46, align: 'center', value: (it) => String(it.color || '') },
-    { key: 'packs', label: 'Boxes', width: 40, align: 'right', value: (it) => (it.packs != null ? fmtNum(it.packs, 0) : '') },
     ...(showTax ? [{ key: 'tax', label: 'Tax %', width: 28, align: 'right' as const, value: (it: Row) => `${it.tax_pct ?? 0}%` }] : []),
     { key: 'amount', label: `Amount ${cur}${inv.inco_terms ? ` (${String(inv.inco_terms).split(' ')[0]})` : ''}`, width: 62, align: 'right', always: true, value: (it) => fmtMoney(it.amount, cur) },
   ];
