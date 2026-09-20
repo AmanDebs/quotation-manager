@@ -177,6 +177,16 @@ function headerValues(body: Record<string, unknown>, existing?: Record<string, u
 }
 
 /** The list's filters, built once so the list and its export cannot drift. */
+/**
+ * The statuses the list shows unless somebody asks for others — the offers
+ * still in play: draft, sent, order confirmed, advance received (2026-09-20,
+ * the client: *"by default draft, sent, order confirmed, advance received
+ * should be selected"*). A booked, cancelled or lapsed proforma is a click
+ * away under *All statuses*. Applied only when nothing was asked for, as on
+ * the quotations list: a named status shows exactly that, `all` everything.
+ */
+export const SHOWN_BY_DEFAULT = ['draft', 'sent', 'order_confirmed', 'advance_received'];
+
 function proformaListWhere(req: AuthedRequest): { where: string[]; params: unknown[] } {
   // Not named `q`: the alias below is a table, and on invoices `i` is too.
   const search = String(req.query.q ?? '').trim();
@@ -191,10 +201,11 @@ function proformaListWhere(req: AuthedRequest): { where: string[]; params: unkno
   // The same expression the SELECT uses, not `p.status`: an alias cannot be
   // referenced in WHERE, and filtering on the stored value would make Expired
   // a status the list shows and cannot find.
-  if (req.query.status) {
+  const status = String(req.query.status ?? '').trim();
+  if (status !== 'all') {
     // A comma list, as the quotations list takes — the Reports page links in
     // with "confirmed or advance received or booked" as one filter.
-    const statuses = String(req.query.status).split(',').map((v) => v.trim()).filter(Boolean);
+    const statuses = status ? status.split(',').map((v) => v.trim()).filter(Boolean) : SHOWN_BY_DEFAULT;
     if (statuses.length) { where.push(`${STATUS_SQL} IN (${statuses.map(() => '?').join(',')})`); params.push(...statuses); }
   }
   // One customer's proformas, for the Reports page's links and the customer

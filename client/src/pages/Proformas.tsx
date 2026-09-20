@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Proforma, Customer } from '../types';
-import { Button, Select, Input, PageHeader, EmptyState, Card, ExportTabs, ErrorText, Pagination, DownloadButton, TH_CLASS } from '../components/ui';
+import { Button, Select, Input, PageHeader, EmptyState, Card, ExportTabs, ErrorText, Pagination, DownloadButton, TH_CLASS, MultiSelectFilter } from '../components/ui';
 import { useCompanies } from '../components/CompanySelect';
 import NewDocumentDialog from '../components/NewDocumentDialog';
 import { fmtDate, fmtMoney } from '../lib/format';
@@ -27,6 +27,8 @@ import { usePagedList, PAGE_SIZE } from '../lib/usePagedList';
  * at all without a migration.
  */
 export const STATUSES = ['draft', 'sent', 'order_confirmed', 'advance_received', 'in_production', 'cancelled', 'expired'];
+/** What the list shows with no status asked for — the server's `SHOWN_BY_DEFAULT`, ticked in the picker. */
+export const OPEN_STATUSES = ['draft', 'sent', 'order_confirmed', 'advance_received'];
 
 /**
  * The five a person records. The other two are observations:
@@ -148,17 +150,18 @@ export default function ProformasPage() {
             ))}
           </Select>
         )}
-        <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="max-w-52">
-          <option value="">All statuses</option>
-          {STATUSES.map((s) => (
-            <option key={s} value={s}>{label(s)}</option>
-          ))}
-          {/* A linked-in comma list of statuses is offered as it stands, so the
-              box names what the table is showing rather than going blank. */}
-          {statusFilter.includes(',') && (
-            <option value={statusFilter}>{statusFilter.split(',').map(label).join(' / ')}</option>
-          )}
-        </Select>
+        {/* Tick boxes, as the quotations list has (2026-09-20: "add check
+            boxes in proforma status"), opening with the four offers still in
+            play ticked; a linked-in comma list from the Reports page reads
+            as its ticks. */}
+        <MultiSelectFilter
+          options={STATUSES.map((s) => ({ key: s, label: label(s) }))}
+          value={statusFilter}
+          onChange={setStatusFilter}
+          defaultLabel="Open offers"
+          defaultKeys={OPEN_STATUSES}
+          allLabel="All statuses"
+        />
         <Select value={customerFilter} onChange={(e) => setCustomerFilter(e.target.value)} className="max-w-56">
           <option value="">All customers</option>
           {customers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
@@ -177,7 +180,9 @@ export default function ProformasPage() {
             message={
               search || statusFilter || exportFilter || companyFilter || customerFilter
                 ? 'Nothing matches those filters.'
-                : 'No proforma invoices yet. Convert an accepted quotation, or create one directly.'
+                // Only the open offers show with no filter set, so an empty
+                // table is not proof the book is empty.
+                : 'No open proforma invoices. Booked, cancelled and expired ones are hidden — pick “All statuses” to include them.'
             }
           />
         ) : (
