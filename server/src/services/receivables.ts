@@ -246,6 +246,21 @@ export function invoiceReceivable(invoiceId: number): InvoiceReceivable {
  * allocation rule, but without re-querying per invoice.
  */
 export function receivedByInvoice(): Map<number, number> {
+  return allocateAllInvoices().received;
+}
+
+/**
+ * The advance each invoice absorbed from its proforma's pool, by the same
+ * allocation — the other half of *advance held* (`customerSummary`'s rule:
+ * what the proformas hold, less what the invoices raised from them have
+ * already been credited with). One walk for both figures, so the dashboard's
+ * *received* and its *held* cannot come from two allocations.
+ */
+export function advanceAppliedByInvoice(): Map<number, number> {
+  return allocateAllInvoices().applied;
+}
+
+function allocateAllInvoices(): { received: Map<number, number>; applied: Map<number, number> } {
   const invoices = db.prepare(
     `SELECT id, pi_id, currency, grand_total, ${CREDITED_SQL('commercial_invoices.id')} AS credited
        FROM commercial_invoices ORDER BY date, id`
@@ -272,6 +287,7 @@ export function receivedByInvoice(): Map<number, number> {
   }
 
   const received = new Map<number, number>();
+  const appliedBy = new Map<number, number>();
   for (const inv of invoices) {
     const direct = directTotal.get(inv.id) ?? 0;
     // The same capacity rule as `allocateAdvances`, or the dashboard and the
@@ -288,8 +304,9 @@ export function receivedByInvoice(): Map<number, number> {
       applied = round2(applied + take);
     }
     received.set(inv.id, round2(direct + applied));
+    appliedBy.set(inv.id, applied);
   }
-  return received;
+  return { received, applied: appliedBy };
 }
 
 /** What an order's proforma has actually taken in. */

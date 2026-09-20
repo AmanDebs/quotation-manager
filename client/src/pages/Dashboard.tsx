@@ -147,6 +147,35 @@ interface DashboardData {
     user_id: number; name: string;
     followups: number; quotations: number; orders: number; customers: number;
   }[];
+  /* ---- The morning cards (2026-09-20). Each absent for a caller without its function. ---- */
+  /** Money per currency: owed, past due, due this week, advance held, still to ship. */
+  money?: {
+    currency: string; outstanding: number;
+    overdue_amount: number; overdue_count: number; due_week_amount: number; due_week_count: number;
+    advance_held: number; still_to_ship: number; open_orders: number;
+  }[];
+  /** Open orders by the date that stands (revised, else promised), overdue first, a fortnight out. */
+  deliveries?: {
+    rows: {
+      id: number; number: string; customer_name: string; currency: string; grand_total: number; status: string;
+      due: string; revised: number; pieces_ordered: number; pieces_sent: number;
+    }[];
+    /** Open orders carrying no date at all — counted, since silence is not a date. */
+    undated: number;
+  };
+  /** Sea-leg trips with an ETA inside a fortnight either way, soonest first. */
+  shipments?: {
+    id: number; challan_no: string; cn_no: string; bl_no: string; container_no: string; etd: string; eta: string;
+    docs_status: string; invoice_id: number | null; destination: string; order_id: number; order_number: string; customer_name: string;
+  }[];
+  /** What is stalled: each list absent for a caller without that document's function. */
+  pipeline?: {
+    proformasAwaitingReply?: { id: number; number: string; customer_name: string; date: string; currency: string; grand_total: number }[];
+    proformasNotBooked?: { id: number; number: string; customer_name: string; date: string; currency: string; grand_total: number; status: string }[];
+    quotationsUnchased?: { id: number; number: string; revision: number; customer_name: string; date: string; currency: string; grand_total: number }[];
+  };
+  /** Jobs nobody has planned on orders due within a fortnight. */
+  unplannedDue?: { id: number; number: string; order_id: number; order_number: string; customer_name: string; due: string; qty_planned: number }[];
   // Optional for the same reason: an older server simply has no factory card.
   production?: {
     workOrdersByStatus: { status: string; count: number }[];
@@ -221,6 +250,21 @@ const RANGES: Range[] = [
 const DEFAULT_HIDDEN = ['trend', 'pipeline', 'quotation-status', 'money-detail', 'followups', 'split'];
 
 /**
+ * Where a card sits (2026-09-20). The **morning** cards answer what wants
+ * doing today — money owed, deliveries due, what is on the water, what has
+ * stalled, what blocks the floor — as short lists with a date and a link. The
+ * **review** cards are the month-end reading: the funnel, the trend, the
+ * rankings, the period figures. Review opens folded, since a page read every
+ * morning should open on the morning's questions; the fold is remembered on
+ * this machine, being a preference about a screen rather than about a book.
+ */
+type Section = 'morning' | 'review';
+const REVIEW_KEY = 'qm.dash.review';
+function readReviewOpen(): boolean {
+  try { return localStorage.getItem(REVIEW_KEY) === '1'; } catch { return false; }
+}
+
+/**
  * The order a first look opens in — and it is about packing, not preference.
  *
  * A `span: 2` card cannot sit in the one column left after two singles, so it
@@ -231,8 +275,10 @@ const DEFAULT_HIDDEN = ['trend', 'pipeline', 'quotation-status', 'money-detail',
  */
 const DEFAULT_ORDER = [
   'attention', 'money',
-  'expiring', 'funnel',
-  'activity', 'factory', 'top-customers', 'top-products',
+  'deliveries', 'shipments', 'expiring',
+  'commercial', 'factory',
+  'funnel', 'period',
+  'top-customers', 'top-products', 'activity',
 ];
 
 /**
@@ -255,7 +301,48 @@ function applyOrder<T extends { id: string }>(cards: T[], order: string[]): T[] 
  * what made the page two screens tall — a table with one data row was being
  * given 669px and filling 133px of it.
  */
-interface CardDef { id: string; title: string; span?: 1 | 2 | 3; body: ReactNode }
+interface CardDef { id: string; title: string; span?: 1 | 2 | 3; section?: Section; body: ReactNode }
+
+/** *3 days late* · *today* · *tomorrow* · *in 5 days*, with the tone the distance earns. */
+function dueWord(date: string): { text: string; cls: string } {
+  const d = daysUntil(date);
+  if (d < 0) return { text: `${-d} day${d === -1 ? '' : 's'} late`, cls: 'text-red-600' };
+  if (d === 0) return { text: 'today', cls: 'text-red-600' };
+  if (d === 1) return { text: 'tomorrow', cls: 'text-amber-600' };
+  return { text: `in ${d} days`, cls: d <= 7 ? 'text-amber-600' : 'text-slate-500' };
+}
+/** *today* · *3 days ago* · *2 weeks ago* — how long something has been waiting. */
+function agoWord(date: string): string {
+  const d = -daysUntil(date);
+  if (d <= 0) return 'today';
+  if (d === 1) return 'yesterday';
+  if (d < 14) return `${d} days ago`;
+  return `${Math.floor(d / 7)} weeks ago`;
+}
+
+/** A caption over a short list inside a card, with its count. */
+function ListCaption({ label, count }: { label: string; count?: number }) {
+  return (
+    <div className={`${CAPTION} mb-1 flex items-baseline gap-1.5`}>
+      <span>{label}</span>
+      {!!count && <span className="rounded-full bg-slate-100 px-1.5 text-[10px] font-bold text-slate-600">{count}</span>}
+    </div>
+  );
+}
+
+/** One row of a morning list: a lead word, a document number, who, and a figure on the right. */
+function ListRow({ to, lead, leadCls = 'text-slate-500', number, who, right, rightCls = 'text-slate-500' }: {
+  to: string; lead: string; leadCls?: string; number: string; who: string; right?: string; rightCls?: string;
+}) {
+  return (
+    <Link to={to} className="flex items-center gap-2 rounded-md px-1 py-0.5 text-sm hover:bg-slate-50">
+      <span className={`w-24 shrink-0 text-xs font-semibold ${leadCls}`}>{lead}</span>
+      <span className="shrink-0 whitespace-nowrap font-medium text-brand-700">{number}</span>
+      <span className="min-w-0 truncate text-slate-600" title={who}>{who}</span>
+      {right !== undefined && <span className={`ml-auto shrink-0 whitespace-nowrap text-xs tabular-nums ${rightCls}`}>{right}</span>}
+    </Link>
+  );
+}
 
 /**
  * Whole days from today to a `YYYY-MM-DD`, both read as UTC midnights so no
@@ -433,6 +520,11 @@ export default function DashboardPage() {
     return { hidden: [...DEFAULT_HIDDEN], order: [] };
   });
   const [customising, setCustomising] = useState(false);
+  const [reviewOpen, setReviewOpen] = useState<boolean>(readReviewOpen);
+  const toggleReview = () => setReviewOpen((v) => {
+    try { localStorage.setItem(REVIEW_KEY, v ? '0' : '1'); } catch { /* not worth failing over */ }
+    return !v;
+  });
   const patchUser = usePatchUser();
   const saveLayout = useMutation({
     mutationFn: (next: DashboardLayout) => api.put<DashboardLayout>('/api/auth/dashboard-layout', next),
@@ -573,9 +665,16 @@ export default function DashboardPage() {
   const topCustomerRows = (customerBasis === 'invoiced'
     ? data.topCustomersInvoiced.map((c) => ({ ...c, n: c.invoices }))
     : data.topCustomers.map((c) => ({ ...c, n: c.quotes })));
-  // Bars are proportional to the leader, not to a total: this is a ranking,
-  // and "how does this compare with the best" is the question being asked.
-  const topCustomerMax = Math.max(0, ...topCustomerRows.map((c) => c.total));
+  /*
+   * One ranking per currency (2026-09-20): the server sends the top five in
+   * each, and a dollar figure is never ranked against a rupee one. Bars are
+   * proportional to that currency's leader, not to a total — this is a
+   * ranking, and "how does this compare with the best" is the question.
+   */
+  const topCustomerGroups = [...new Set(topCustomerRows.map((c) => c.currency))].map((currency) => {
+    const rows = topCustomerRows.filter((c) => c.currency === currency);
+    return { currency, rows, max: Math.max(0, ...rows.map((c) => c.total)) };
+  });
   const topProductMax = Math.max(0, ...data.topProducts.map((prod) => prod.times_quoted));
   const activity = data.activity ?? [];
   const pipelineMax = Math.max(1, ...pipeline.map((s) => s.count));
@@ -603,10 +702,8 @@ export default function DashboardPage() {
     + a.invoicesOverdue + a.invoicesDueThisWeek
     + (isManager ? a.pendingApprovals : 0);
 
-  // Headline money, all in the selected currency.
+  // The review charts read one currency at a time; the morning cards read them all.
   const cur = activeCurrency;
-  const book = data.orderBook.find((r) => r.currency === cur);
-  const recv = data.receivables.find((r) => r.currency === cur);
   // A tile states one currency's money, so it must count in that currency
   // too. Pairing an INR figure with a count of every document in the book
   // made a true zero read as a fault.
@@ -691,27 +788,215 @@ export default function DashboardPage() {
         </Card>
       ),
     },
-    {
+    /*
+     * Money, per currency and all of them at once (2026-09-20). Four tiles
+     * in one selected currency used to sit here, and on a two-book business
+     * — exports in dollars, domestic in rupees — the page read "₹0.00 · 0
+     * open orders" beside a strip saying two were late. Both true. One row
+     * per currency now, nothing summed or converted, every cell a link to
+     * the list it was counted from. Absent for a caller without `invoice`.
+     */
+    ...(data.money ? [{
       id: 'money',
-      title: 'Money headlines',
-      span: 3,
+      title: 'Money',
+      span: 3 as const,
       body: (
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-          <MoneyTile
-            to={listUrl('/orders', { open: '1' })}
-            label="Still to ship"
-            value={book?.pending_value ?? 0}
-            currency={cur}
-            note={`${book?.count ?? 0} open order${book?.count === 1 ? '' : 's'} in the book`}
-          />
-          <MoneyTile
-            to={listUrl('/invoices')}
-            label="Outstanding"
-            value={recv?.outstanding ?? 0}
-            currency={cur}
-            tone={(recv?.outstanding ?? 0) > 0 ? 'warn' : 'good'}
-            note={(recv?.overdue ?? 0) ? `${recv!.overdue} invoice${recv!.overdue === 1 ? '' : 's'} over 60 days old` : 'nothing older than 60 days'}
-          />
+        <Card title="Money" actions={<Link to={listUrl('/reports', { view: 'due' })} className="text-xs text-brand-600 hover:underline">Due sheet</Link>}>
+          {data.money.length === 0 ? (
+            <p className={EMPTY}>No invoices or open orders yet.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className={TH}>
+                    <th className="pb-1 pr-3">Currency</th>
+                    <th className="pb-1 pr-3 text-right">Outstanding</th>
+                    <th className="pb-1 pr-3 text-right">Past due date</th>
+                    <th className="pb-1 pr-3 text-right">Due this week</th>
+                    <th className="pb-1 pr-3 text-right">Advances held</th>
+                    <th className="pb-1 text-right">Still to ship</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.money.map((m) => {
+                    const cell = (v: number, to: string, cls: string, sub?: string) => (
+                      <td className="py-1.5 pr-3 text-right tabular-nums">
+                        {v > 0 ? (
+                          <Link to={to} className={`font-semibold hover:underline ${cls}`}>{fmtMoney(v, m.currency)}</Link>
+                        ) : <span className="text-slate-300">—</span>}
+                        {v > 0 && sub && <div className="text-xs font-normal text-slate-400">{sub}</div>}
+                      </td>
+                    );
+                    return (
+                      <tr key={m.currency} className="border-b border-slate-100 align-top last:border-0">
+                        <td className="py-1.5 pr-3 font-medium">{m.currency}</td>
+                        {cell(m.outstanding, listUrl('/invoices'), 'text-slate-900')}
+                        {cell(m.overdue_amount, listUrl('/reports', { view: 'due' }), 'text-red-600', `${m.overdue_count} invoice${m.overdue_count === 1 ? '' : 's'}`)}
+                        {cell(m.due_week_amount, listUrl('/reports', { view: 'due' }), 'text-amber-700', `${m.due_week_count} invoice${m.due_week_count === 1 ? '' : 's'}`)}
+                        {cell(m.advance_held, listUrl('/payments', { against: 'proforma' }), 'text-green-700')}
+                        {cell(m.still_to_ship, listUrl('/orders'), 'text-slate-900', `${m.open_orders} open order${m.open_orders === 1 ? '' : 's'}`)}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              <p className="mt-1 text-xs text-slate-400">
+                Past due and due this week follow the Due sheet — the invoice's due date, or the shipment's ETA where none is typed.
+                Advances held is money banked against proformas that no invoice has absorbed yet.
+              </p>
+            </div>
+          )}
+        </Card>
+      ),
+    }] : []),
+    /*
+     * Deliveries due: what we promised and when, by the date that stands
+     * (revised, else promised — the order book's rule), overdue first, a
+     * fortnight out, with the pieces the dispatch record says are still to
+     * send. The chip counts the late ones; this names them.
+     */
+    ...(data.deliveries ? [{
+      id: 'deliveries',
+      title: 'Deliveries due',
+      body: (
+        <Card
+          title={`Deliveries due${data.deliveries.rows.length ? ` (${data.deliveries.rows.length})` : ''}`}
+          actions={<Link to={listUrl('/orders')} className="text-xs text-brand-600 hover:underline">Order book</Link>}
+        >
+          {data.deliveries.rows.length === 0 ? (
+            <p className={EMPTY}>Nothing due in the next 14 days.</p>
+          ) : (
+            <div className="space-y-1">
+              {data.deliveries.rows.map((o) => {
+                const w = dueWord(o.due);
+                const left = Math.max(0, o.pieces_ordered - o.pieces_sent);
+                return (
+                  <ListRow
+                    key={o.id} to={`/orders/${o.id}`}
+                    lead={w.text} leadCls={w.cls}
+                    number={o.number} who={o.customer_name}
+                    right={o.pieces_ordered > 0 ? `${fmtQty(left)} pcs to send` : fmtMoney(o.grand_total, o.currency)}
+                    rightCls={left > 0 ? 'text-slate-600' : 'text-green-700'}
+                  />
+                );
+              })}
+            </div>
+          )}
+          {data.deliveries.undated > 0 && (
+            <p className="mt-2 text-xs text-slate-400">
+              <Link to={listUrl('/orders')} className="text-brand-600 hover:underline">
+                {data.deliveries.undated} open order{data.deliveries.undated === 1 ? '' : 's'}
+              </Link>{' '}
+              {data.deliveries.undated === 1 ? 'carries' : 'carry'} no promised or revised date, so {data.deliveries.undated === 1 ? 'it is' : 'they are'} not counted here.
+            </p>
+          )}
+        </Card>
+      ),
+    }] : []),
+    /*
+     * On the water: the sea-leg trips landing inside a fortnight either way,
+     * with the documents' state — the buyer cannot clear the goods without
+     * them — and whether the trip is billed. A lorry carries none of this
+     * and is not listed.
+     */
+    ...(data.shipments ? [{
+      id: 'shipments',
+      title: 'On the water',
+      body: (
+        <Card
+          title={`On the water${data.shipments.length ? ` (${data.shipments.length})` : ''}`}
+          actions={<Link to={listUrl('/despatches')} className="text-xs text-brand-600 hover:underline">Dispatches</Link>}
+        >
+          {data.shipments.length === 0 ? (
+            <p className={EMPTY}>No shipment lands inside a fortnight.</p>
+          ) : (
+            <div className="space-y-1">
+              {data.shipments.map((d) => {
+                const w = dueWord(d.eta);
+                const ref = d.container_no || d.bl_no || d.challan_no || d.cn_no || `#${d.id}`;
+                const docs = d.docs_status === 'received' ? 'docs received' : d.docs_status === 'sent' ? 'docs sent' : 'docs not sent';
+                const docsCls = d.docs_status === 'received' ? 'text-green-700' : d.docs_status === 'sent' ? 'text-amber-700' : 'text-red-600';
+                const late = daysUntil(d.eta) < 0;
+                return (
+                  <ListRow
+                    key={d.id} to={listUrl('/despatches', { q: ref })}
+                    lead={late ? `landed ${w.text.replace(' late', ' ago')}` : `ETA ${w.text}`}
+                    leadCls={late ? 'text-slate-500' : w.cls}
+                    number={ref} who={`${d.customer_name}${d.destination ? ` · ${d.destination}` : ''}`}
+                    right={`${docs}${d.invoice_id ? '' : ' · unbilled'}`} rightCls={docsCls}
+                  />
+                );
+              })}
+            </div>
+          )}
+        </Card>
+      ),
+    }] : []),
+    /*
+     * The commercial pipeline: what has stalled, in three short lists —
+     * each a thing to ring somebody about. The Expiring Quotations card
+     * beside it is the fourth, kept on its own at the client's word.
+     */
+    ...(data.pipeline ? [{
+      id: 'commercial',
+      title: 'Commercial pipeline',
+      body: (() => {
+        const pl = data.pipeline;
+        const reply = pl.proformasAwaitingReply ?? [];
+        const book = pl.proformasNotBooked ?? [];
+        const chase = pl.quotationsUnchased ?? [];
+        const nothing = reply.length + book.length + chase.length === 0;
+        return (
+          <Card title="Commercial pipeline" actions={<Link to={listUrl('/proformas')} className="text-xs text-brand-600 hover:underline">Proformas</Link>}>
+            {nothing ? (
+              <p className={EMPTY}>Nothing stalled: every proforma is answered or booked, and every live offer has a follow-up.</p>
+            ) : (
+              <div className="space-y-3">
+                {book.length > 0 && (
+                  <div>
+                    <ListCaption label="Confirmed, order not booked" count={book.length} />
+                    {book.map((r) => (
+                      <ListRow key={r.id} to={`/proformas/${r.id}`} lead={agoWord(r.date)} number={r.number} who={r.customer_name}
+                        right={fmtMoney(r.grand_total, r.currency)} />
+                    ))}
+                  </div>
+                )}
+                {reply.length > 0 && (
+                  <div>
+                    <ListCaption label="Proforma sent, no reply in a week" count={reply.length} />
+                    {reply.map((r) => (
+                      <ListRow key={r.id} to={`/proformas/${r.id}`} lead={agoWord(r.date)} leadCls="text-amber-600" number={r.number} who={r.customer_name}
+                        right={fmtMoney(r.grand_total, r.currency)} />
+                    ))}
+                  </div>
+                )}
+                {chase.length > 0 && (
+                  <div>
+                    <ListCaption label="Live offers with no follow-up scheduled" count={chase.length} />
+                    {chase.map((r) => (
+                      <ListRow key={r.id} to={`/quotations/${r.id}`} lead={agoWord(r.date)} number={`${r.number}${r.revision ? ` R${r.revision}` : ''}`} who={r.customer_name}
+                        right={fmtMoney(r.grand_total, r.currency)} />
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </Card>
+        );
+      })(),
+    }] : []),
+    /*
+     * This period's headline figures — invoiced and quoted, with how each
+     * moved against the window before — in the currency the selector names.
+     * Review material, so it sits in that section; the two tiles it keeps
+     * are the ones that carried a direction.
+     */
+    {
+      id: 'period',
+      title: 'This period',
+      section: 'review',
+      body: (
+        <div className="grid grid-cols-2 gap-3">
           <MoneyTile
             to={listUrl('/invoices')}
             label={`Invoiced · ${range.label.toLowerCase()}`}
@@ -806,6 +1091,7 @@ export default function DashboardPage() {
     {
       id: 'pipeline',
       title: 'Production Pipeline',
+      section: 'review',
       body: (
         <Card
           title="Production Pipeline"
@@ -845,6 +1131,7 @@ export default function DashboardPage() {
       id: 'trend',
       title: 'Quoted · Invoiced · Collected',
       span: 2,
+      section: 'review',
       body: (
         <Card title={`Quoted · Invoiced · Collected (${cur})`}>
           {monthlyRows.length === 0 ? (
@@ -889,6 +1176,7 @@ export default function DashboardPage() {
       id: 'money-detail',
       title: 'Order book & receivables',
       span: 2,
+      section: 'review',
       body: (
         <Card
           title="Sales order book & receivables"
@@ -1033,6 +1321,37 @@ export default function DashboardPage() {
                 {openJobs === 0 && <span className="text-sm text-slate-400">No jobs open.</span>}
               </div>
 
+              {/* Jobs nobody has planned on orders due inside a fortnight —
+                  the queue read against the delivery date, which is what
+                  makes a not-planned job a blocker rather than a backlog. */}
+              {!!data.unplannedDue?.length && (
+                <div className="border-t border-slate-100 pt-3">
+                  <ListCaption label="Not planned, order due within 14 days" count={data.unplannedDue.length} />
+                  <div className="space-y-1">
+                    {data.unplannedDue.map((j) => {
+                      const w = dueWord(j.due);
+                      return (
+                        <ListRow key={j.id} to={`/work-orders/${j.id}`} lead={w.text} leadCls={w.cls}
+                          number={j.number} who={`${j.order_number} · ${j.customer_name}`}
+                          right={`${fmtQty(j.qty_planned)} pcs`} />
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Nothing logged is not zero made: the floor may simply not be
+                  booking its shifts yet, and *Made 0* beside 66 lakh pieces
+                  dispatched reads as a fault rather than as an absence. */}
+              {floor.piecesMade + floor.piecesRejected === 0 ? (
+                <div className="border-t border-slate-100 pt-3 text-sm">
+                  <span className="text-slate-400">No production logged {range.label.toLowerCase() === 'all time' ? 'yet' : `for ${range.label.toLowerCase()}`}.</span>
+                  <span className="ml-2 text-slate-500">
+                    Dispatched <span className="font-semibold tabular-nums">{fmtQty(floor.piecesDespatched)}</span>
+                    <span className="ml-1 text-xs text-slate-400">{floor.despatches} trip{floor.despatches === 1 ? '' : 's'}</span>
+                  </span>
+                </div>
+              ) : (
               <div className="grid grid-cols-3 gap-2 border-t border-slate-100 pt-3 text-sm">
                 <div>
                   <div className={CAPTION}>Made · {range.label.toLowerCase()}</div>
@@ -1059,6 +1378,7 @@ export default function DashboardPage() {
                   </div>
                 </div>
               </div>
+              )}
 
               {floor.shortMaterials.length > 0 && (
                 <div className="border-t border-slate-100 pt-3">
@@ -1093,6 +1413,7 @@ export default function DashboardPage() {
     {
       id: 'split',
       title: 'Export vs Domestic',
+      section: 'review',
       body: (
         <Card title={`Export vs Domestic — invoiced (${cur})`}>
           {splitRows.length === 0 ? (
@@ -1145,6 +1466,7 @@ export default function DashboardPage() {
        */
       id: 'funnel',
       title: 'Conversion Funnel',
+      section: 'review',
       /*
        * Two columns, not three. Full width was tried and the user called it
        * straight away: four numbers do not need 1,202px, and stretched that
@@ -1232,6 +1554,7 @@ export default function DashboardPage() {
     {
       id: 'quotation-status',
       title: 'Quotations by Status',
+      section: 'review',
       body: (
         <Card title="Quotations by Status">
           <ResponsiveContainer width="100%" height={220}>
@@ -1269,6 +1592,7 @@ export default function DashboardPage() {
        */
       id: 'activity',
       title: 'Sales Activity',
+      section: 'review',
       body: (
         <Card
           title="Sales Activity"
@@ -1335,6 +1659,7 @@ export default function DashboardPage() {
     {
       id: 'top-customers',
       title: 'Top Customers',
+      section: 'review',
       body: (
         <Card
           title="Top Customers"
@@ -1350,17 +1675,24 @@ export default function DashboardPage() {
               {customerBasis === 'invoiced' ? 'No invoices in this period.' : 'No quotations in this period.'}
             </p>
           ) : (
-            <div className="space-y-1">
-              {topCustomerRows.map((c, i) => (
-                <RankedBar
-                  key={`${c.name}-${i}`}
-                  rank={i + 1}
-                  label={c.name}
-                  value={fmtMoney(c.total, c.currency)}
-                  sub={`${c.n} ${customerBasis === 'invoiced' ? 'inv' : 'qts'}`}
-                  pct={topCustomerMax ? (c.total / topCustomerMax) * 100 : 0}
-                  to={`/customers?q=${encodeURIComponent(c.name)}`}
-                />
+            <div className="space-y-3">
+              {topCustomerGroups.map((g) => (
+                <div key={g.currency}>
+                  {topCustomerGroups.length > 1 && <div className={`${CAPTION} mb-1`}>{g.currency}</div>}
+                  <div className="space-y-1">
+                    {g.rows.map((c, i) => (
+                      <RankedBar
+                        key={`${c.name}-${i}`}
+                        rank={i + 1}
+                        label={c.name}
+                        value={fmtMoney(c.total, c.currency)}
+                        sub={`${c.n} ${customerBasis === 'invoiced' ? 'inv' : 'qts'}`}
+                        pct={g.max ? (c.total / g.max) * 100 : 0}
+                        to={`/customers?q=${encodeURIComponent(c.name)}`}
+                      />
+                    ))}
+                  </div>
+                </div>
               ))}
             </div>
           )}
@@ -1370,6 +1702,7 @@ export default function DashboardPage() {
     {
       id: 'top-products',
       title: 'Most Quoted Products',
+      section: 'review',
       body: (
         <Card
           title="Most Quoted Products"
@@ -1401,6 +1734,8 @@ export default function DashboardPage() {
   const hidden = new Set(layout.hidden);
   const ordered = applyOrder(cards, layout.order.length ? layout.order : DEFAULT_ORDER);
   const visible = ordered.filter((c) => !hidden.has(c.id));
+  const morning = visible.filter((c) => c.section !== 'review');
+  const review = visible.filter((c) => c.section === 'review');
 
   const move = (id: string, delta: number) => {
     const ids = ordered.map((c) => c.id);
@@ -1453,7 +1788,7 @@ export default function DashboardPage() {
                 value={activeCurrency}
                 onChange={(e) => setCurrency(e.target.value)}
                 className="w-24 shrink-0"
-                title="Currency for all money figures"
+                title="Currency for the review charts — the Money card shows every currency"
               >
                 {currencies.map((c) => <option key={c} value={c}>{c}</option>)}
               </Select>
@@ -1482,15 +1817,40 @@ export default function DashboardPage() {
           Every card is hidden. Use <b>Customise</b> to bring some back.
         </p>
       ) : (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {visible.map((c) => (
-            // `grid` on the wrapper rather than a class on each of the fourteen
-            // cards: a grid container with one child stretches it in both axes,
-            // so a short card fills its row instead of leaving a gap under it.
-            // Measured before this: 450px of holes on an 1,859px page.
-            <div key={c.id} className={`grid ${SPAN_CLASS[c.span ?? 1]}`}>{c.body}</div>
-          ))}
-        </div>
+        <>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {morning.map((c) => (
+              // `grid` on the wrapper rather than a class on each of the fourteen
+              // cards: a grid container with one child stretches it in both axes,
+              // so a short card fills its row instead of leaving a gap under it.
+              // Measured before this: 450px of holes on an 1,859px page.
+              <div key={c.id} className={`grid ${SPAN_CLASS[c.span ?? 1]}`}>{c.body}</div>
+            ))}
+          </div>
+          {review.length > 0 && (
+            <div className="mt-6">
+              <button
+                type="button"
+                onClick={toggleReview}
+                aria-expanded={reviewOpen}
+                className="flex w-full items-center gap-2 rounded-lg px-1 py-1 text-left text-sm font-semibold text-slate-600 hover:text-slate-900"
+              >
+                <Icon name={reviewOpen ? 'chevron-down' : 'chevron-right'} />
+                <span>Review</span>
+                <span className="text-xs font-normal text-slate-400">
+                  {review.length} card{review.length === 1 ? '' : 's'} · the funnel, the trend and the rankings for {range.label.toLowerCase()}
+                </span>
+              </button>
+              {reviewOpen && (
+                <div className="mt-2 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+                  {review.map((c) => (
+                    <div key={c.id} className={`grid ${SPAN_CLASS[c.span ?? 1]}`}>{c.body}</div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </>
       )}
 
       {customising && (

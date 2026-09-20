@@ -2,7 +2,9 @@ import { Router } from 'express';
 import { db } from '../db/connection.js';
 import { allows, type AuthedRequest } from '../middleware/auth.js';
 import { scopeClause } from '../middleware/scope.js';
-import { receivedByInvoice } from '../services/receivables.js';
+import { receivedByInvoice, advanceAppliedByInvoice, sameCurrency } from '../services/receivables.js';
+import { PIECES_ORDERED_SQL } from '../services/totals.js';
+import { STATUS_SQL as PI_STATUS_SQL } from '../services/proformaStatus.js';
 import { creditedByInvoice } from '../services/creditNotes.js';
 import { defaultCompanyId } from '../services/companies.js';
 import { shortfall, onHandAll } from '../services/stock.js';
@@ -273,21 +275,34 @@ dashboardRouter.get('/', (req: AuthedRequest, res) => {
   const dq = docFilter('q');
   const di = docFilter('i');
 
+  /*
+   * One ranking **per currency**, never one across them (2026-09-20). It was
+   * `ORDER BY total DESC LIMIT 8` over rows carrying a currency each, which
+   * ranked $83,367 above ₹17,700 — the one comparison this app refuses
+   * everywhere else. The top five in each currency, currencies ordered by
+   * their leader so the bigger book reads first.
+   */
   const topCustomers = q(
-    `SELECT c.name, q.currency, SUM(q.grand_total) AS total, COUNT(*) AS quotes
-     FROM quotations q JOIN customers c ON c.id = q.customer_id
-     WHERE q.superseded_by IS NULL AND q.date BETWEEN ? AND ?${dq.sql}
-     GROUP BY c.id, q.currency ORDER BY total DESC LIMIT 8`,
+    `SELECT name, currency, total, quotes FROM (
+       SELECT c.name, q.currency, SUM(q.grand_total) AS total, COUNT(*) AS quotes,
+              ROW_NUMBER() OVER (PARTITION BY q.currency ORDER BY SUM(q.grand_total) DESC, c.name) AS rn
+       FROM quotations q JOIN customers c ON c.id = q.customer_id
+       WHERE q.superseded_by IS NULL AND q.date BETWEEN ? AND ?${dq.sql}
+       GROUP BY c.id, q.currency)
+     WHERE rn <= 5 ORDER BY currency, rn`,
     from, to, ...dq.params
   );
 
   // Quoted value flatters whoever quotes the most; invoiced value is the real
   // business. Both are offered so the two can be compared.
   const topCustomersInvoiced = q(
-    `SELECT c.name, i.currency, SUM(i.grand_total) AS total, COUNT(*) AS invoices
-     FROM commercial_invoices i JOIN customers c ON c.id = i.customer_id
-     WHERE i.date BETWEEN ? AND ?${di.sql}
-     GROUP BY c.id, i.currency ORDER BY total DESC LIMIT 8`,
+    `SELECT name, currency, total, invoices FROM (
+       SELECT c.name, i.currency, SUM(i.grand_total) AS total, COUNT(*) AS invoices,
+              ROW_NUMBER() OVER (PARTITION BY i.currency ORDER BY SUM(i.grand_total) DESC, c.name) AS rn
+       FROM commercial_invoices i JOIN customers c ON c.id = i.customer_id
+       WHERE i.date BETWEEN ? AND ?${di.sql}
+       GROUP BY c.id, i.currency)
+     WHERE rn <= 5 ORDER BY currency, rn`,
     from, to, ...di.params
   );
 
@@ -668,6 +683,191 @@ dashboardRouter.get('/', (req: AuthedRequest, res) => {
     )
     : undefined;
 
+  /* ---------------------------------------------------------------- *
+   * The morning cards (2026-09-20, after the client asked what the page
+   * should show). Each answers one of the questions this desk asks before
+   * lunch, each is a short list with a date and a link rather than a total,
+   * and each is **absent, not empty, for a caller without the function**
+   * (`despatchAttention`'s rule): the client draws a card only when its key
+   * arrived, so the access table is decided here and nowhere else.
+   * ---------------------------------------------------------------- */
+
+  /**
+   * Money, per currency and never a selector's worth. This is a two-book
+   * business — exports in USD/EUR, domestic in INR — and a tile showing one
+   * currency read *"₹0.00 · 0 open orders"* beside a strip saying two were
+   * late (both true: the open orders were in dollars). One row per currency:
+   * what is owed, what is past its due date and what falls due this week
+   * (the Due sheet's own rule, `dueReport` at seven days, so the row and the
+   * sheet cannot disagree), the advance banked against proformas no invoice
+   * has absorbed yet (`customerSummary`'s derivation, group-wide), and the
+   * open order value still to ship. Gated on `invoice`: every figure but the
+   * last is a receivable.
+   */
+  const money = (() => {
+    if (!allows(req, 'invoice')) return undefined;
+    type MoneyRow = {
+      currency: string; outstanding: number;
+      overdue_amount: number; overdue_count: number; due_week_amount: number; due_week_count: number;
+      advance_held: number; still_to_ship: number; open_orders: number;
+    };
+    const rows = new Map<string, MoneyRow>();
+    const row = (currency: string): MoneyRow => {
+      const r = rows.get(currency) ?? {
+        currency, outstanding: 0, overdue_amount: 0, overdue_count: 0, due_week_amount: 0, due_week_count: 0,
+        advance_held: 0, still_to_ship: 0, open_orders: 0,
+      };
+      rows.set(currency, r);
+      return r;
+    };
+    for (const r of receivables) row(r.currency).outstanding = r.outstanding;
+    const due = dueReport({ scope, companyId }, today, 7);
+    for (const g of due.groups) {
+      for (const i of g.invoices) {
+        const r = row(g.currency);
+        if (i.colour === 'red') { r.overdue_amount += i.balance_due; r.overdue_count += 1; }
+        else { r.due_week_amount += i.balance_due; r.due_week_count += 1; }
+      }
+    }
+    // Held = banked against the proformas, less what the invoices absorbed.
+    const applied = advanceAppliedByInvoice();
+    for (const inv of invoicesAll) row(inv.currency).advance_held -= applied.get(inv.id) ?? 0;
+    for (const pay of q<{ amount: number; currency: string; pi_currency: string }>(
+      `SELECT pay.amount, pay.currency, pi.currency AS pi_currency
+       FROM payments pay JOIN proforma_invoices pi ON pi.id = pay.pi_id
+       WHERE 1 = 1${docFilter('pi').sql}`,
+      ...docFilter('pi').params
+    )) {
+      if (sameCurrency(pay.currency, pay.pi_currency)) row(pay.pi_currency).advance_held += pay.amount;
+    }
+    for (const b of orderBook) { const r = row(b.currency); r.still_to_ship = b.pending_value; r.open_orders = b.count; }
+    const r2 = (n: number) => Math.round(n * 100) / 100;
+    return [...rows.values()]
+      .map((r) => ({
+        ...r,
+        outstanding: r2(r.outstanding), overdue_amount: r2(r.overdue_amount), due_week_amount: r2(r.due_week_amount),
+        // Floored, as `customerSummary` floors it: an over-allocation is not a debt owed back.
+        advance_held: r2(Math.max(0, r.advance_held)),
+      }))
+      .sort((a, b) => (a.currency === 'INR' ? -1 : b.currency === 'INR' ? 1 : a.currency.localeCompare(b.currency)));
+  })();
+
+  /**
+   * Deliveries due: open orders by the date that stands — the revised
+   * production date where set, else the promised one, the order book's own
+   * rule — overdue first, then the next fortnight, with the pieces still to
+   * send by the dispatch record. An open order with **no date at all** is
+   * counted rather than listed: silence is not a date, and a plan nobody
+   * has dated is worth a line saying so. Gated on `order`.
+   */
+  const deliveries = allows(req, 'order')
+    ? (() => {
+      const dueExpr = "COALESCE(NULLIF(o.revised_date, ''), NULLIF(o.promised_date, ''))";
+      const rows = q<{
+        id: number; number: string; customer_name: string; currency: string; grand_total: number; status: string;
+        due: string; revised: number; pieces_ordered: number; pieces_sent: number;
+      }>(
+        `SELECT o.id, o.number, COALESCE(c.name, '') AS customer_name, o.currency, o.grand_total, o.status,
+                ${dueExpr} AS due, CASE WHEN o.revised_date <> '' THEN 1 ELSE 0 END AS revised,
+                (SELECT COALESCE(SUM(${PIECES_ORDERED_SQL('oi')}), 0) FROM order_items oi
+                  WHERE oi.order_id = o.id AND oi.is_charge = 0) AS pieces_ordered,
+                (SELECT COALESCE(SUM(di.qty), 0) FROM despatch_items di
+                  JOIN despatches d ON d.id = di.despatch_id WHERE d.order_id = o.id) AS pieces_sent
+         FROM orders o LEFT JOIN customers c ON c.id = o.customer_id
+         WHERE o.status NOT IN ('completed', 'cancelled') AND ${dueExpr} IS NOT NULL
+           AND ${dueExpr} <= date(?, '+14 days')${docFilter('o').sql}
+         ORDER BY due, o.id LIMIT 12`,
+        today, ...docFilter('o').params
+      );
+      const undated = one(
+        `SELECT COUNT(*) AS c FROM orders o
+         WHERE o.status NOT IN ('completed', 'cancelled') AND ${dueExpr} IS NULL${docFilter('o').sql}`,
+        ...docFilter('o').params
+      );
+      return { rows, undated };
+    })()
+    : undefined;
+
+  /**
+   * On the water: shipments — the sea-leg trips, `SEA_LEG_D`'s rule — with
+   * an ETA from a fortnight back to a fortnight ahead, soonest first, with
+   * the documents' state and whether the trip is billed. A fortnight back
+   * because nothing records an actual arrival: a container that should have
+   * landed last week is still worth a line, one from March is not. The
+   * chips beside keep counting papers outstanding however old. Gated on
+   * `dispatch`, scoped through the order.
+   */
+  const shipments = allows(req, 'dispatch')
+    ? q<{
+      id: number; challan_no: string; cn_no: string; bl_no: string; container_no: string; etd: string; eta: string;
+      docs_status: string; invoice_id: number | null; destination: string; order_id: number; order_number: string; customer_name: string;
+    }>(
+      `SELECT d.id, d.challan_no, d.cn_no, d.bl_no, d.container_no, d.etd, d.eta, d.docs_status, d.invoice_id, d.destination,
+              o.id AS order_id, o.number AS order_number, COALESCE(c.name, '') AS customer_name
+       FROM despatches d JOIN orders o ON o.id = d.order_id LEFT JOIN customers c ON c.id = o.customer_id
+       WHERE ${SEA_LEG_D} AND d.eta <> '' AND d.eta BETWEEN date(?, '-14 days') AND date(?, '+14 days')
+         ${scope.sql ? ` AND o.${scope.sql}` : ''}${companyId ? ' AND o.company_id = ?' : ''}
+       ORDER BY d.eta, d.id LIMIT 12`,
+      today, today, ...scope.params, ...(companyId ? [companyId] : [])
+    )
+    : undefined;
+
+  /**
+   * The commercial pipeline: what is in play and stalled. Three short lists,
+   * each a thing somebody should ring about — a proforma sent a week ago
+   * with no reply, a proforma the buyer confirmed (or paid against) that
+   * nobody has booked an order from, and a live offer with no follow-up
+   * scheduled against it. Each gated on its own document's function.
+   */
+  const pipeline = (() => {
+    const out: Record<string, unknown> = {};
+    if (allows(req, 'proforma')) {
+      out.proformasAwaitingReply = q(
+        `SELECT p.id, p.number, COALESCE(c.name, '') AS customer_name, p.date, p.currency, p.grand_total
+         FROM proforma_invoices p LEFT JOIN customers c ON c.id = p.customer_id
+         WHERE ${PI_STATUS_SQL} = 'sent' AND p.date <= date(?, '-7 days')${docFilter('p').sql}
+         ORDER BY p.date, p.id LIMIT 6`,
+        today, ...docFilter('p').params
+      );
+      out.proformasNotBooked = q(
+        `SELECT p.id, p.number, COALESCE(c.name, '') AS customer_name, p.date, p.currency, p.grand_total, p.status
+         FROM proforma_invoices p LEFT JOIN customers c ON c.id = p.customer_id
+         WHERE p.status IN ('order_confirmed', 'advance_received') AND p.order_id IS NULL${docFilter('p').sql}
+         ORDER BY p.date, p.id LIMIT 6`,
+        ...docFilter('p').params
+      );
+    }
+    if (allows(req, 'quotation')) {
+      out.quotationsUnchased = q(
+        `SELECT qt.id, qt.number, qt.revision, COALESCE(c.name, '') AS customer_name, qt.date, qt.currency, qt.grand_total
+         FROM quotations qt LEFT JOIN customers c ON c.id = qt.customer_id
+         WHERE qt.superseded_by IS NULL AND qt.status IN ('sent', 'negotiating')
+           AND NOT EXISTS (SELECT 1 FROM followups f WHERE f.doc_type = 'quotation' AND f.doc_id = qt.id AND f.done = 0)
+           ${docFilter('qt').sql}
+         ORDER BY qt.date, qt.id LIMIT 6`,
+        ...docFilter('qt').params
+      );
+    }
+    return Object.keys(out).length ? out : undefined;
+  })();
+
+  /**
+   * Jobs nobody has planned on orders due within a fortnight — the floor's
+   * own blocker, read against the delivery date rather than the whole not-
+   * planned queue the Work Orders page counts. Gated on `work_order`.
+   */
+  const unplannedDue = allows(req, 'work_order')
+    ? q<{ id: number; number: string; order_id: number; order_number: string; customer_name: string; due: string; qty_planned: number }>(
+      `SELECT w.id, w.number, o.id AS order_id, o.number AS order_number, COALESCE(c.name, '') AS customer_name,
+              COALESCE(NULLIF(o.revised_date, ''), NULLIF(o.promised_date, '')) AS due, w.qty_planned
+       FROM work_orders w JOIN orders o ON o.id = w.order_id LEFT JOIN customers c ON c.id = o.customer_id
+       WHERE w.status = 'planned' AND w.planned_start = '' AND o.status NOT IN ('completed', 'cancelled')
+         AND COALESCE(NULLIF(o.revised_date, ''), NULLIF(o.promised_date, '')) <= date(?, '+14 days')${floorFilter}
+       ORDER BY due, w.id LIMIT 8`,
+      today, ...floorParams
+    )
+    : undefined;
+
   res.json({
     counts, countsByCurrency, quotationsByStatus, ordersByStatus, businessSplit, quotedByMonth, invoicedByMonth,
     receivedByMonth,
@@ -675,5 +875,10 @@ dashboardRouter.get('/', (req: AuthedRequest, res) => {
     receivables, receivablesAgeing, orderBook, overdueOrders, attention, production,
     previous, activity: activityRows,
     ...(expiring ? { expiring } : {}),
+    ...(money ? { money } : {}),
+    ...(deliveries ? { deliveries } : {}),
+    ...(shipments ? { shipments } : {}),
+    ...(pipeline ? { pipeline } : {}),
+    ...(unplannedDue ? { unplannedDue } : {}),
   });
 });

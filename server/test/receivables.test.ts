@@ -1,7 +1,7 @@
 import './helpers/scratch.js';
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { invoiceReceivable, receivedByInvoice } from '../src/services/receivables.js';
+import { invoiceReceivable, receivedByInvoice, advanceAppliedByInvoice } from '../src/services/receivables.js';
 import { makeCustomer, makeProforma, makeInvoice, makePayment } from './helpers/factory.js';
 
 /**
@@ -128,4 +128,29 @@ test('the bulk figures match the single ones, invoice for invoice', () => {
     assert.equal(bulk.get(id) ?? 0, invoiceReceivable(id).amount_received,
       `invoice ${id}: the dashboard and the invoice page must agree`);
   }
+});
+
+/**
+ * The dashboard's *advances held* is what the proformas took in less what the
+ * invoices absorbed, and the absorbed half comes from the same allocation as
+ * `receivedByInvoice` — one walk, two figures. So the bulk applied figure must
+ * match the single one invoice for invoice, and what is left over is what the
+ * pool still holds.
+ */
+test('the bulk advance-applied figures match the single ones, and the remainder is what is held', () => {
+  const c = makeCustomer();
+  const pi = makeProforma({ customerId: c, currency: 'INR', total: 20000 });
+  makePayment({ customerId: c, piId: pi, amount: 7500, currency: 'INR' });
+  const ids = [
+    makeInvoice({ customerId: c, currency: 'INR', total: 5000, piId: pi, date: '2026-08-03' }),
+    makeInvoice({ customerId: c, currency: 'INR', total: 1000, piId: pi, date: '2026-08-04' }),
+  ];
+  const applied = advanceAppliedByInvoice();
+  let absorbed = 0;
+  for (const id of ids) {
+    assert.equal(applied.get(id) ?? 0, invoiceReceivable(id).advance_applied);
+    absorbed += applied.get(id) ?? 0;
+  }
+  assert.equal(absorbed, 6000);
+  assert.equal(7500 - absorbed, 1500, 'the pool still holds what no invoice has absorbed');
 });
