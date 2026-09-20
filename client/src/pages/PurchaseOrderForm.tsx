@@ -394,14 +394,18 @@ export default function PurchaseOrderFormPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className={TH_CLASS}>
-                  <th className="pb-2 pr-2">Material or product</th>
-                  <th className="w-20 pb-2 pr-2 text-right">Boxes</th>
-                  <th className="w-20 pb-2 pr-2 text-right">Pcs/Box</th>
-                  <th className="w-24 pb-2 pr-2 text-right">Qty</th>
-                  <th className="w-20 pb-2 pr-2">Unit</th>
-                  <th className="w-24 pb-2 pr-2 text-right">Rate</th>
+                  {/* The product column takes what is left after the figures,
+                      capped (2026-09-20, the client: "Decrease the width of
+                      material") — the figures had been squeezed to 80px boxes
+                      beside a picker most of the card wide. */}
+                  <th className="w-[34%] min-w-56 pb-2 pr-2">Material or product</th>
+                  <th className="w-24 pb-2 pr-2 text-right">Boxes</th>
+                  <th className="w-24 pb-2 pr-2 text-right">Pcs/Box</th>
+                  <th className="w-32 pb-2 pr-2 text-right">Qty</th>
+                  <th className="w-28 pb-2 pr-2">Unit</th>
+                  <th className="w-28 pb-2 pr-2 text-right">Rate</th>
                   <th className="w-20 pb-2 pr-2 text-right">Tax %</th>
-                  <th className="w-28 pb-2 pr-2 text-right">Amount</th>
+                  <th className="w-32 pb-2 pr-2 text-right">Amount</th>
                   <th className="w-8 pb-2" />
                 </tr>
               </thead>
