@@ -138,10 +138,12 @@ export function proformaOmit(isExport: boolean): string[] {
 }
 
 
+// In the PDF's order (2026-09-20): colour, HSN, boxes, quantity, thousands.
 export const PACKING_COLUMNS: ToggleableColumn[] = [
+  { key: 'color', label: 'Colour' },
   { key: 'hsn', label: 'HSN Code' },
-  { key: 'packages', label: 'Qty in Boxes' },
-  { key: 'thousand_pcs', label: 'Thousand Pcs' },
+  { key: 'packages', label: 'Boxes' },
+  { key: 'thousand_pcs', label: "Qty in '000 Pcs" },
   { key: 'net_weight', label: 'Net Weight' },
   { key: 'gross_weight', label: 'Gross Weight' },
 ];

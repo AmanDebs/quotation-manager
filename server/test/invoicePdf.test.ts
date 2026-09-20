@@ -1,7 +1,7 @@
 import './helpers/scratch.js';
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildInvoicePdf, buildProformaPdf } from '../src/services/pdf.js';
+import { buildPackingListPdf, buildInvoicePdf, buildProformaPdf } from '../src/services/pdf.js';
 import { db } from '../src/db/connection.js';
 import { makeCustomer, makeInvoice, makePayment, makeProforma } from './helpers/factory.js';
 
@@ -86,6 +86,43 @@ describe('the columns run description, colour, HSN, boxes, quantity, rate, amoun
     db.prepare("UPDATE invoice_items SET color = 'Natural' WHERE invoice_id = ?").run(id);
     const header = itemsTableRows(id)[0].map((c) => c.replace(/\s+/g, ' '));
     assert.deepEqual(header, ['SL', 'Description of Goods', 'Color', 'HSN Code', 'Boxes', 'Quantity', 'USD/1000 Pcs', 'Amount USD']);
+  });
+});
+
+describe('the packing list runs description, colour, HSN, boxes, quantity, thousands, then the weights', () => {
+  // The client's order (2026-09-20). Colour and the piece count are the
+  // invoice line's, read by index; a `342 per 1000` line is 3,42,000 pieces
+  // and 342 thousand, where it used to print "342 per 1000" and no thousands.
+  function packingList(): number {
+    const invId = makeInvoice({ customerId: cust, currency: 'USD', total: 7069 });
+    db.prepare("UPDATE commercial_invoices SET is_export = 1 WHERE id = ?").run(invId);
+    addItem(invId, { description: '29/21 CTC Preforms - 10 gms', hsn_code: '3923', qty: 342, unit: 'per 1000', unit_price: 20.67, amount: 7069.14, packs: 114, total_pcs: null });
+    db.prepare("UPDATE invoice_items SET color = 'Natural' WHERE invoice_id = ?").run(invId);
+    const pl = Number((db.prepare(
+      `INSERT INTO packing_lists (number, date, invoice_id, customer_id, company_id) VALUES ('PL/26-27/003', '2026-09-17', ?, ?, 1) RETURNING id`
+    ).get(invId, cust) as { id: number }).id);
+    db.prepare(`INSERT INTO packing_list_items (packing_list_id, description, hsn_code, qty, unit, packages, net_weight, gross_weight, sort_order)
+                VALUES (?, '29/21 CTC Preforms - 10 gms', '3923', 342, 'per 1000', '114 CTN', 3420, 3648, 0)`).run(pl);
+    return pl;
+  }
+  function rows(pl: number): string[][] {
+    const content = buildPackingListPdf(pl).content as Node[];
+    const t = content.filter((n) => n && typeof n === 'object' && n.table)
+      .find((t) => t.table.body.some((row: any[]) => row.some((c) => /Description of Goods/.test(cellText(c)))));
+    assert.ok(t, 'no items table');
+    return t.table.body.map((row: any[]) => row.map(cellText));
+  }
+  const pl = packingList();
+  test('the header, in that order', () => {
+    const [header] = rows(pl);
+    assert.deepEqual(header.map((c) => c.replace(/\s+/g, ' ')),
+      ['SL', 'Description of Goods', 'Color', 'HSN Code', 'Boxes', 'Quantity', "Qty in '000 Pcs", 'Net Wt (kg)', 'Gross Wt (kg)']);
+  });
+  test('a per-1000 line states its pieces, its thousands and the invoice line’s colour', () => {
+    const [, line, total] = rows(pl);
+    assert.deepEqual(line.slice(2, 7), ['Natural', '3923', '114 CTN', '3,42,000 Pcs', '342']);
+    assert.equal(total[5], '3,42,000');
+    assert.equal(total[6], '342');
   });
 });
 

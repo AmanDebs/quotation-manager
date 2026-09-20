@@ -1805,14 +1805,23 @@ export function buildPackingListPdf(id: number): TDocumentDefinitions {
   if (!pl) throw new Error('Packing list not found');
   const s = companyProfile(pl.company_id);
   const c = db.prepare('SELECT * FROM customers WHERE id = ?').get(pl.customer_id) as Row;
-  // Charge lines are stored so the list keeps its index alignment with the
-  // invoice, but nothing is packed against freight — they are not printed.
-  const items = goodsOnly(
-    db.prepare('SELECT * FROM packing_list_items WHERE packing_list_id = ? ORDER BY sort_order, id').all(id) as Row[]
-  );
   const inv = pl.invoice_id
     ? (db.prepare('SELECT * FROM commercial_invoices WHERE id = ?').get(pl.invoice_id) as Row | undefined)
     : undefined;
+  // The colour and the piece count are the invoice line's, read **by index**
+  // at render time — the chain's own rule, and how `syncPackingList` keeps
+  // the descriptions in step — rather than copied onto the packing row: a
+  // copy is a second colour that can disagree with the one on the invoice
+  // it travels with. A standalone list, linked to no invoice, has neither.
+  const invItems = inv
+    ? (db.prepare('SELECT color, total_pcs FROM invoice_items WHERE invoice_id = ? ORDER BY sort_order, id').all(inv.id) as Row[])
+    : [];
+  // Charge lines are stored so the list keeps its index alignment with the
+  // invoice, but nothing is packed against freight — they are not printed.
+  const items = goodsOnly(
+    (db.prepare('SELECT * FROM packing_list_items WHERE packing_list_id = ? ORDER BY sort_order, id').all(id) as Row[])
+      .map((it, i) => ({ ...it, color: invItems[i]?.color ?? '', total_pcs: invItems[i]?.total_pcs ?? null }))
+  );
   const pi = inv?.pi_id ? (db.prepare('SELECT number, date FROM proforma_invoices WHERE id = ?').get(inv.pi_id) as Row | undefined) : undefined;
 
   const totalGross = round2(items.reduce((sum, it) => sum + (it.gross_weight || 0), 0));
@@ -1851,16 +1860,25 @@ export function buildPackingListPdf(id: number): TDocumentDefinitions {
   });
 
   const cfg: ColumnConfig = JSON.parse(String(pl.column_config || '{}'));
-  const inPieces = (it: Row) => it.qty != null && ['unit', 'pcs'].includes(String(it.unit || '').toLowerCase());
-  const totalThousands = items.reduce((sum, it) => sum + (inPieces(it) ? it.qty / 1000 : 0), 0);
+  // Pieces by the one rule (`piecesOf`, the invoice's own): a line entered as
+  // `342 per 1000` is 3,42,000 pieces, and 342 thousand — it used to print
+  // *342 per 1000* under Quantity and count thousands only off a line whose
+  // unit was literally pieces, so the thousands column was blank on every
+  // per-1000 line this book is entered in. A weight-billed line states its
+  // kilos and no thousands.
+  const thousands = (it: Row) => { const p = piecesOf(it); return p != null ? p / 1000 : null; };
+  const totalThousands = items.reduce((sum, it) => sum + (thousands(it) ?? 0), 0);
 
+  // The order is the client's (2026-09-20: "Desp >> color >> Hsn >> Boxes >>
+  // quantity >> Quantity in Thousand pieces"), the weights closing the row.
   const specs: ColumnSpec[] = [
     { key: 'sl', label: 'SL', width: 16, align: 'center', always: true, value: (_it, i) => String(i + 1) },
     { key: 'description', label: 'Description of Goods', width: '*', always: true, value: (it) => it.description + (it.dimensions ? `\nDim: ${it.dimensions}` : '') },
-    { key: 'packages', label: 'Qty in Boxes', width: 55, align: 'center', value: (it) => String(it.packages || '') },
+    { key: 'color', label: 'Color', width: 44, align: 'center', value: (it) => String(it.color || '') },
     { key: 'hsn', label: 'HSN Code', width: 45, align: 'center', value: (it) => String(it.hsn_code || '') },
-    { key: 'qty', label: 'Quantity', width: 55, align: 'right', always: true, value: (it) => (it.qty != null ? `${fmtNum(it.qty, 0)} ${it.unit === 'unit' ? 'pcs' : it.unit}` : '—') },
-    { key: 'thousand_pcs', label: 'Thousand Pcs', width: 48, align: 'right', value: (it) => (inPieces(it) ? fmtNum(it.qty / 1000, 2) : '') },
+    { key: 'packages', label: 'Boxes', width: 50, align: 'center', value: (it) => String(it.packages || '') },
+    { key: 'qty', label: 'Quantity', width: 58, align: 'right', always: true, value: (it) => (piecesOf(it) != null ? `${fmtNum(piecesOf(it), 0)} Pcs` : it.qty != null ? `${fmtNum(it.qty)} ${it.unit === 'unit' ? 'pcs' : it.unit}` : '—') },
+    { key: 'thousand_pcs', label: "Qty in '000 Pcs", width: 48, align: 'right', value: (it) => (thousands(it) != null ? fmtNum(thousands(it)!, 2) : '') },
     { key: 'net_weight', label: 'Net Wt (kg)', width: 48, align: 'right', value: (it) => (it.net_weight ? fmtNum(it.net_weight) : '') },
     { key: 'gross_weight', label: 'Gross Wt (kg)', width: 48, align: 'right', value: (it) => (it.gross_weight ? fmtNum(it.gross_weight) : '') },
   ];
@@ -1874,7 +1892,7 @@ export function buildPackingListPdf(id: number): TDocumentDefinitions {
     if (label === 'Description of Goods') return cell('TOTAL', 'left');
     if (label === 'Quantity') return cell(totalQty);
     // Only the lines that actually show a thousand-pieces figure are in it.
-    if (label === 'Thousand Pcs') return cell(totalThousands ? fmtNum(totalThousands, 2) : '');
+    if (label === "Qty in '000 Pcs") return cell(totalThousands ? fmtNum(totalThousands, 2) : '');
     if (label === 'Net Wt (kg)') return cell(fmtNum(totalNet));
     if (label === 'Gross Wt (kg)') return cell(fmtNum(totalGross));
     return cell('');
