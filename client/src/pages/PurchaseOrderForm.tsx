@@ -119,7 +119,12 @@ export default function PurchaseOrderFormPage() {
       const block = [co.company_name, co.address, [co.city, co.state, co.pincode].filter(Boolean).join(', ')].filter(Boolean).join('\n');
       if (!(d.bill_to ?? '').trim() && block) patch.bill_to = block;
       if (!(d.bill_to_gstin ?? '').trim() && co.gstin) patch.bill_to_gstin = co.gstin;
-      if (!(d.ship_to ?? '').trim() && plant) patch.ship_to = [co.company_name, plant.name, plant.address].filter(Boolean).join('\n');
+      // A plant named after the company (the ordinary single-plant setup)
+      // is not written twice.
+      if (!(d.ship_to ?? '').trim() && plant) {
+        const plantName = plant.name.trim().toLowerCase() === String(co.company_name).trim().toLowerCase() ? '' : plant.name;
+        patch.ship_to = [co.company_name, plantName, plant.address].filter(Boolean).join('\n');
+      }
       if (!(d.ship_to_gstin ?? '').trim() && co.gstin) patch.ship_to_gstin = co.gstin;
       return Object.keys(patch).length ? { ...d, ...patch } : d;
     });
@@ -334,35 +339,33 @@ export default function PurchaseOrderFormPage() {
         </Card>
 
         <Card title="Supplier & Shipment">
+          {/* Vendor ID, Transport and Ship via left the form on 2026-09-20 at
+              the client's word — outright, an order carrying one included
+              (the first cut showed them where a value stood, and the client
+              asked again with such an order in front of them). The columns
+              stay, the draft round-trips them, and the PDF prints what is
+              there. TCS % alone is shown where a value stands, being money
+              in the total that could otherwise be neither seen nor cleared. */}
           <div className={FIELD_GRID}>
             <Field label="Kind Attn"><Input value={draft.attn ?? ''} onChange={(e) => set({ attn: e.target.value })} placeholder="Who at the supplier" /></Field>
-            {/* Vendor ID, Transport and Ship via left the form on 2026-09-20 at
-                the client's word — outright, an order carrying one included
-                (the first cut showed them where a value stood, and the client
-                asked again with such an order in front of them). The columns
-                stay, the draft round-trips them, and the PDF prints what is
-                there. TCS % alone is shown where a value stands, being money
-                in the total that could otherwise be neither seen nor cleared. */}
+            <Field label="Packing" className="sm:col-span-2 xl:col-span-3">
+              <Input value={draft.packing ?? ''} onChange={(e) => set({ packing: e.target.value })} placeholder="e.g. plain boxes, export standard" />
+            </Field>
             {/* Bill-to and ship-to with their registrations (2026-09-20, the
                 client: "Ship to with GST no and Bill To with GST No is
-                required"). Blank prints the issuing company's own address
-                and GSTIN, and the plant for ship-to; typed where they differ. */}
-            <Field label="Bill to *" className="sm:col-span-2">
-              <Textarea rows={2} value={draft.bill_to ?? ''} onChange={(e) => set({ bill_to: e.target.value })} placeholder="The party invoiced" />
+                required"), each a three-line address beside its GSTIN, the
+                pair filling a row so neither party wraps under the other. */}
+            <Field label="Bill to *" className="sm:col-span-2 xl:col-span-3">
+              <Textarea rows={3} value={draft.bill_to ?? ''} onChange={(e) => set({ bill_to: e.target.value })} placeholder="The party invoiced" />
             </Field>
             <Field label="Bill to GSTIN *">
               <Input value={draft.bill_to_gstin ?? ''} onChange={(e) => set({ bill_to_gstin: e.target.value })} />
             </Field>
-            <div className="hidden xl:block" />
-            <Field label="Ship to *" className="sm:col-span-2">
-              <Textarea rows={2} value={draft.ship_to ?? ''} onChange={(e) => set({ ship_to: e.target.value })} placeholder="Where the goods are delivered" />
+            <Field label="Ship to *" className="sm:col-span-2 xl:col-span-3">
+              <Textarea rows={3} value={draft.ship_to ?? ''} onChange={(e) => set({ ship_to: e.target.value })} placeholder="Where the goods are delivered" />
             </Field>
             <Field label="Ship to GSTIN *">
               <Input value={draft.ship_to_gstin ?? ''} onChange={(e) => set({ ship_to_gstin: e.target.value })} />
-            </Field>
-            <div className="hidden xl:block" />
-            <Field label="Packing" className="sm:col-span-2">
-              <Input value={draft.packing ?? ''} onChange={(e) => set({ packing: e.target.value })} placeholder="e.g. plain boxes, export standard" />
             </Field>
           </div>
         </Card>
