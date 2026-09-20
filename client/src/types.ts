@@ -583,6 +583,8 @@ export interface PoItem {
   material_id: number | null;
   product_id?: number | null;
   description: string;
+  /** The colour bought (2026-09-20); from the catalogue on a pick, typed over where the supplier's word differs. */
+  color?: string;
   qty: number | null;
   unit: string;
   /** Packing as the supplier states it — cartons/bags, and what is in one. */

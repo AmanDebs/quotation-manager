@@ -1204,6 +1204,10 @@ CREATE TABLE IF NOT EXISTS po_items (
   material_id INTEGER REFERENCES materials(id),
   product_id INTEGER REFERENCES products(id),
   description TEXT NOT NULL DEFAULT '',
+  -- The colour bought (2026-09-20, the client: "Add Colour column"), filled
+  -- from the catalogue when a product is picked and typed over where the
+  -- supplier's word differs. Display only, as on every other item table.
+  color TEXT NOT NULL DEFAULT '',
   qty REAL,
   unit TEXT NOT NULL DEFAULT 'kg',
   -- Packing, as the supplier states it: cartons/bags, and what is in one.

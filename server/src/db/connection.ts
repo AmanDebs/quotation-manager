@@ -193,6 +193,7 @@ addColumnIfMissing('po_items', 'product_id', 'INTEGER');
 addColumnIfMissing('po_items', 'packs', 'REAL');
 addColumnIfMissing('po_items', 'pcs_per_pack', 'REAL');
 addColumnIfMissing('po_items', 'total_pcs', 'REAL');
+addColumnIfMissing('po_items', 'color', "TEXT NOT NULL DEFAULT ''");
 // What was done to make it (2026-09), a fourth master on the job beside the
 // location, the machine and the mould.
 addColumnIfMissing('work_orders', 'process_id', 'INTEGER');

@@ -2052,6 +2052,9 @@ export function buildPurchaseOrderPdf(id: number): TDocumentDefinitions {
   const specs: ColumnSpec[] = [
     { key: 'sl', label: 'SL', width: 18, align: 'center', always: true, value: (_it, i) => String(i + 1) },
     { key: 'description', label: 'DESCRIPTION', width: '*', always: true, value: (it) => String(it.description || it.material_name || it.product_name || '') },
+    // Auto-hides on an order stating none, which is every one raised before
+    // the column existed (2026-09-20).
+    { key: 'color', label: 'COLOUR', width: 40, align: 'center', value: (it) => String(it.color || '') },
     { key: 'hsn', label: 'HSN', width: 44, align: 'center', value: hsnOf },
     // The reference order's QUANTITY banner sits over these two. The banner
     // shrinks with its run if either auto-hides, which is what makes it safe

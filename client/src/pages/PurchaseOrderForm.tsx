@@ -44,7 +44,7 @@ const DEFAULT_TAX_PCT = 18;
  */
 export const DEEMED_EXPORT_PCT = 0.1;
 
-export const emptyPoItem = (taxPct = DEFAULT_TAX_PCT): PoItem => ({ material_id: null, product_id: null, description: '', qty: null, unit: 'kg', rate: 0, tax_pct: taxPct });
+export const emptyPoItem = (taxPct = DEFAULT_TAX_PCT): PoItem => ({ material_id: null, product_id: null, description: '', color: '', qty: null, unit: 'kg', rate: 0, tax_pct: taxPct });
 
 /*
  * A line names a material or a product, so the picker's value has to say which
@@ -214,11 +214,11 @@ export default function PurchaseOrderFormPage() {
     const mid = Number(rawId);
     if (kind === 'm') {
       const m = materials.find((x) => x.id === mid);
-      setItem(i, { material_id: mid, product_id: null, description: m?.name ?? '', unit: m?.unit || 'kg' });
+      setItem(i, { material_id: mid, product_id: null, description: m?.name ?? '', color: '', unit: m?.unit || 'kg' });
     } else {
       const p = products.find((x) => x.id === mid);
       setItem(i, {
-        material_id: null, product_id: mid, description: p?.name ?? '', unit: p?.unit || 'unit',
+        material_id: null, product_id: mid, description: p?.name ?? '', color: p?.color ?? '', unit: p?.unit || 'unit',
         pcs_per_pack: p?.pcs_per_pack ?? null,
       });
     }
@@ -428,7 +428,11 @@ export default function PurchaseOrderFormPage() {
                       capped (2026-09-20, the client: "Decrease the width of
                       material") — the figures had been squeezed to 80px boxes
                       beside a picker most of the card wide. */}
-                  <th className="w-[34%] min-w-56 pb-2 pr-2">Material or product</th>
+                  <th className="w-[30%] min-w-52 pb-2 pr-2">Material or product</th>
+                  {/* The colour bought (2026-09-20, the client: "Add Colour
+                      column"): the catalogue's on a pick, typed over where
+                      the supplier's word differs. */}
+                  <th className="w-28 pb-2 pr-2">Colour</th>
                   <th className="w-24 pb-2 pr-2 text-right">Boxes</th>
                   <th className="w-24 pb-2 pr-2 text-right">Pcs/Box</th>
                   <th className="w-32 pb-2 pr-2 text-right">Qty</th>
@@ -451,6 +455,7 @@ export default function PurchaseOrderFormPage() {
                         onChange={(v) => pickItem(i, v)}
                       />
                     </td>
+                    <td className="py-2 pr-2"><Input value={it.color ?? ''} onChange={(e) => setItem(i, { color: e.target.value })} placeholder="e.g. Natural" /></td>
                     <td className="py-2 pr-2"><Input type="number" min={0} step="any" className="w-full text-right tabular-nums" value={it.packs ?? ''} onChange={(e) => setPacking(i, { packs: e.target.value === '' ? null : Number(e.target.value) })} /></td>
                     <td className="py-2 pr-2"><Input type="number" min={0} step="any" className="w-full text-right tabular-nums" value={it.pcs_per_pack ?? ''} onChange={(e) => setPacking(i, { pcs_per_pack: e.target.value === '' ? null : Number(e.target.value) })} /></td>
                     <td className="py-2 pr-2"><Input type="number" min={0} step="any" className="w-full text-right tabular-nums" value={qtyShown(it) ?? ''} onChange={(e) => setQty(i, e.target.value === '' ? null : Number(e.target.value))} /></td>
