@@ -10,6 +10,7 @@ import { DocNumber, PaymentTermsInput, PurchaseTermsInput } from '../components/
 import HistoryCard from '../components/HistoryCard';
 import { productTypeLabel } from './Products';
 import { fmtMoney, today } from '../lib/format';
+import { PIECES_PER_BILLING_UNIT } from '../lib/pieces';
 import { useUnsavedChanges } from '../lib/useUnsavedChanges';
 import { poStatusLabel, poStatusStyle } from './PurchaseOrders';
 
@@ -133,6 +134,24 @@ export default function PurchaseOrderFormPage() {
   const set = (patch: Partial<PoDraft>) => setDraft((d) => ({ ...d, ...patch }));
   const setItem = (i: number, patch: Partial<PoItem>) =>
     setDraft((d) => ({ ...d, items: d.items.map((it, idx) => (idx === i ? { ...it, ...patch } : it)) }));
+  /**
+   * Boxes × pcs/box fills the piece count and, on a piece basis, the billing
+   * quantity with it (2026-09-20, the client with two lines typed and Qty
+   * blank on both: *"Quantity should be filled automatically"*) — 1,000
+   * boxes of 5,000 at `per 1000` is 5,000. The last figure typed drives, the
+   * dispatch form's rule: retyping a box count recomputes the quantity, and
+   * a quantity typed afterwards stands until the packing is touched again.
+   * A weight basis derives nothing — kilos are not a count of boxes.
+   */
+  const setPacking = (i: number, patch: Partial<PoItem>) => {
+    const it = { ...draft.items[i], ...patch };
+    if (it.packs != null && it.pcs_per_pack != null) {
+      it.total_pcs = it.packs * it.pcs_per_pack;
+      const per = PIECES_PER_BILLING_UNIT[it.unit ?? ''];
+      if (per) it.qty = it.total_pcs / per;
+    }
+    setDraft((d) => ({ ...d, items: d.items.map((x, idx) => (idx === i ? it : x)) }));
+  };
 
   /**
    * One picker over both masters.
@@ -398,10 +417,10 @@ export default function PurchaseOrderFormPage() {
                         onChange={(v) => pickItem(i, v)}
                       />
                     </td>
-                    <td className="py-2 pr-2"><Input type="number" min={0} step="any" className="w-full text-right tabular-nums" value={it.packs ?? ''} onChange={(e) => setItem(i, { packs: e.target.value === '' ? null : Number(e.target.value) })} /></td>
-                    <td className="py-2 pr-2"><Input type="number" min={0} step="any" className="w-full text-right tabular-nums" value={it.pcs_per_pack ?? ''} onChange={(e) => setItem(i, { pcs_per_pack: e.target.value === '' ? null : Number(e.target.value) })} /></td>
+                    <td className="py-2 pr-2"><Input type="number" min={0} step="any" className="w-full text-right tabular-nums" value={it.packs ?? ''} onChange={(e) => setPacking(i, { packs: e.target.value === '' ? null : Number(e.target.value) })} /></td>
+                    <td className="py-2 pr-2"><Input type="number" min={0} step="any" className="w-full text-right tabular-nums" value={it.pcs_per_pack ?? ''} onChange={(e) => setPacking(i, { pcs_per_pack: e.target.value === '' ? null : Number(e.target.value) })} /></td>
                     <td className="py-2 pr-2"><Input type="number" min={0} step="any" className="w-full text-right tabular-nums" value={it.qty ?? ''} onChange={(e) => setItem(i, { qty: e.target.value === '' ? null : Number(e.target.value) })} /></td>
-                    <td className="py-2 pr-2"><Input value={it.unit} onChange={(e) => setItem(i, { unit: e.target.value })} /></td>
+                    <td className="py-2 pr-2"><Input value={it.unit} onChange={(e) => setPacking(i, { unit: e.target.value })} /></td>
                     <td className="py-2 pr-2"><Input type="number" min={0} step="any" className="w-full text-right tabular-nums" value={it.rate || ''} onChange={(e) => setItem(i, { rate: Number(e.target.value) })} /></td>
                     <td className="py-2 pr-2"><Input type="number" min={0} step="any" className="w-full text-right tabular-nums" value={it.tax_pct ?? ''} onChange={(e) => setItem(i, { tax_pct: Number(e.target.value) })} /></td>
                     <td className="py-2 pr-2 text-right tabular-nums">{fmtMoney((it.qty ?? 0) * (it.rate || 0), cur)}</td>
