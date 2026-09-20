@@ -46,14 +46,27 @@ describe('billed on an order line is in pieces', () => {
     assert.equal(lines[1].billed, 40000);
   });
   test('an invoice alone does not make a line shipped; the dispatch record does', () => {
-    assert.equal(lines[0].state, 'not_started');
-    assert.equal(lines[1].state, 'not_started');
+    assert.equal(lines[0].state, 'not_scheduled');
+    assert.equal(lines[1].state, 'not_scheduled');
     const loc = Number((db.prepare("INSERT INTO locations (name) VALUES ('Plant') RETURNING id").get() as { id: number }).id);
     const trip = Number((db.prepare("INSERT INTO despatches (order_id, location_id, date) VALUES (?, ?, '2026-09-10') RETURNING id").get(orderId, loc) as { id: number }).id);
     db.prepare('INSERT INTO despatch_items (despatch_id, order_line, qty) VALUES (?, 0, 3245000), (?, 1, 40000)').run(trip, trip);
     const after = orderLines({}).filter((l) => l.order_id === orderId).sort((a, b) => a.order_line - b.order_line);
-    assert.equal(after[0].state, 'shipped');
-    assert.equal(after[1].state, 'part_shipped');
+    assert.equal(after[0].state, 'fully_dispatched');
+    assert.equal(after[1].state, 'partially_dispatched');
+  });
+  test('a released or dated job makes a line scheduled; a job merely raised does not', () => {
+    const wo = (line: number, status: string, start: string) => Number((db.prepare(
+      `INSERT INTO work_orders (order_id, order_line, number, status, planned_start, qty_planned) VALUES (?, ?, ?, ?, ?, 1) RETURNING id`
+    ).get(orderId, line, `WO-${line}-${status}-${start}`, status, start) as { id: number }).id);
+    const state = (line: number) => orderLines({}).filter((l) => l.order_id === orderId).find((l) => l.order_line === line)!.state;
+    const cancelled = wo(2, 'released', '');
+    db.prepare("UPDATE work_orders SET status = 'cancelled' WHERE id = ?").run(cancelled);
+    assert.equal(state(2), 'not_scheduled');
+    wo(2, 'planned', '');
+    assert.equal(state(2), 'not_scheduled');
+    wo(2, 'planned', '2026-09-22');
+    assert.equal(state(2), 'scheduled');
   });
   test('a weight-billed line stays in its own unit', () => {
     assert.equal(lines[2].ordered, 500);

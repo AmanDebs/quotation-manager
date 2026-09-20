@@ -28,7 +28,7 @@ import { LIVE_OK } from './production.js';
  * makes in `services/pdf.ts`.
  */
 
-export type LineState = 'not_started' | 'in_production' | 'made' | 'part_shipped' | 'shipped';
+export type LineState = 'not_scheduled' | 'scheduled' | 'partially_dispatched' | 'fully_dispatched';
 
 export interface OrderLine {
   order_id: number;
@@ -120,6 +120,14 @@ const SQL = `
       JOIN despatches d ON d.id = di.despatch_id
       WHERE d.order_id = o.id AND di.order_line = l.pos
     ), 0) AS sent,
+    -- A job on this line committed to a slot: released, or given a start
+    -- date — the order ladder's own rule for its Scheduled rung, restated
+    -- per line (a job merely raised is neither).
+    (
+      SELECT COUNT(*) FROM work_orders w
+      WHERE w.order_id = o.id AND w.order_line = l.pos AND w.status <> 'cancelled'
+        AND (w.status <> 'planned' OR w.planned_start <> '')
+    ) AS scheduled_jobs,
     -- In pieces, like ordered and sent beside it: an invoice line is billed
     -- in its own basis (3,245 per 1000), and summing that against a piece
     -- count read a fully billed line as 0.1% shipped (2026-09-16).
@@ -185,7 +193,19 @@ export function orderSearchClause(q: string | undefined, itemAlias?: string): { 
 }
 
 /**
- * Shipped means the dispatch record says so, and nothing else (2026-09-16,
+ * Four states, in the client's own words (2026-09-20: *"change the state to
+ * Not Scheduled >> Scheduled >> Partially dispatched >> Fully Dispatched"*),
+ * replacing the five of *not started → in production → made → part shipped
+ * → shipped*. The two production rungs folded into one: this view is read
+ * for what is sold and what has gone, and how far the floor is with it is
+ * the Work Orders page's figure.
+ *
+ * **Scheduled** is the order ladder's own rule read per line: a live job on
+ * the line released or given a start date. Output booked counts too — a
+ * job that has run was scheduled, whatever its status field says — so a
+ * line never reads *Not scheduled* over pieces already made.
+ *
+ * Dispatched means the dispatch record says so, and nothing else (2026-09-16,
  * the client having raised an invoice and watched an unsent line read
  * *Shipped*). Until the dispatch register existed the invoice walk was the
  * only record of goods leaving, so a billed line counted as sent; on this
@@ -194,13 +214,12 @@ export function orderSearchClause(q: string | undefined, itemAlias?: string): { 
  * book's Billed column and the ladder's *Completed* read it — but it no
  * longer stands in for the lorry.
  */
-function stateOf(ordered: number, made: number, sent: number): LineState {
+function stateOf(ordered: number, made: number, sent: number, scheduledJobs: number): LineState {
   const out = sent;
-  if (ordered > 0 && out >= ordered) return 'shipped';
-  if (out > 0) return 'part_shipped';
-  if (ordered > 0 && made >= ordered) return 'made';
-  if (made > 0) return 'in_production';
-  return 'not_started';
+  if (ordered > 0 && out >= ordered) return 'fully_dispatched';
+  if (out > 0) return 'partially_dispatched';
+  if (scheduledJobs > 0 || made > 0) return 'scheduled';
+  return 'not_scheduled';
 }
 
 /**
@@ -235,15 +254,15 @@ export function orderLines(f: Filters = {}, page?: { limit: number; offset: numb
   const args = page ? [...params, page.limit, page.offset] : params;
   const rows = db.prepare(
     `${sql} ${LINE_ORDER}${page ? ' LIMIT ? OFFSET ?' : ''}`
-  ).all(...(args as never[])) as unknown as (OrderLine & { billing_qty: number | null })[];
+  ).all(...(args as never[])) as unknown as (OrderLine & { billing_qty: number | null; scheduled_jobs: number })[];
 
-  return rows.map((r) => ({
+  return rows.map(({ scheduled_jobs, ...r }) => ({
     ...r,
     ordered: round2(r.ordered),
     made: round2(r.made),
     sent: round2(r.sent),
     billed: round2(r.billed),
-    state: stateOf(r.ordered, r.made, Number(r.sent)),
+    state: stateOf(r.ordered, r.made, Number(r.sent), Number(scheduled_jobs)),
   }));
 }
 
@@ -323,7 +342,7 @@ export function productDemand(f: Filters = {}): ProductDemand[] {
     g.orderIds.add(line.order_id);
 
     // Only unshipped lines can still be due; an empty date never wins.
-    if (line.state !== 'shipped' && line.promised_date) {
+    if (line.state !== 'fully_dispatched' && line.promised_date) {
       if (!g.next_due || line.promised_date < g.next_due) g.next_due = line.promised_date;
     }
   }

@@ -353,8 +353,8 @@ ordersRouter.get('/by-product', (req: AuthedRequest, res) => {
  * `scopeClause`, so an employee's export contains their customers and no more.
  */
 const STATE_LABEL: Record<string, string> = {
-  not_started: 'Not started', in_production: 'In production', made: 'Made',
-  part_shipped: 'Part shipped', shipped: 'Shipped',
+  not_scheduled: 'Not scheduled', scheduled: 'Scheduled',
+  partially_dispatched: 'Partially dispatched', fully_dispatched: 'Fully dispatched',
 };
 
 const lineColumns: Column<OrderLine>[] = [

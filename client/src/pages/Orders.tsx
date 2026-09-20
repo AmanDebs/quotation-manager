@@ -81,11 +81,10 @@ const statusTint: Record<string, string> = {
 
 /** Line state is derived, so it is shown as a label rather than a control. */
 const LINE_STATE: Record<LineState, { label: string; className: string }> = {
-  not_started: { label: 'Not started', className: 'bg-slate-50 text-slate-600 ring-slate-200' },
-  in_production: { label: 'In production', className: 'bg-purple-50 text-purple-700 ring-purple-200' },
-  made: { label: 'Made', className: 'bg-teal-50 text-teal-700 ring-teal-200' },
-  part_shipped: { label: 'Part shipped', className: 'bg-amber-50 text-amber-800 ring-amber-200' },
-  shipped: { label: 'Shipped', className: 'bg-green-50 text-green-700 ring-green-200' },
+  not_scheduled: { label: 'Not scheduled', className: 'bg-slate-50 text-slate-600 ring-slate-200' },
+  scheduled: { label: 'Scheduled', className: 'bg-blue-50 text-blue-700 ring-blue-200' },
+  partially_dispatched: { label: 'Partially dispatched', className: 'bg-amber-50 text-amber-800 ring-amber-200' },
+  fully_dispatched: { label: 'Fully dispatched', className: 'bg-green-50 text-green-700 ring-green-200' },
 };
 
 type View = 'lines' | 'products' | 'orders';
@@ -394,7 +393,7 @@ function LinesTable({ lines, pager }: {
                 // Overdue is judged against the date that stands — the revised
                 // one where set, else the original — and marked on that column.
                 const due = l.revised_date || l.promised_date;
-                const overdue = !!due && due < t && l.state !== 'shipped';
+                const overdue = !!due && due < t && l.state !== 'fully_dispatched';
                 // The dispatch record alone — an invoice is not a lorry (2026-09-16).
                 const sent = l.sent;
                 const balance = l.ordered ? Math.max(0, l.ordered - sent) : null;

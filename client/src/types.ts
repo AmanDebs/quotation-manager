@@ -695,7 +695,7 @@ export interface Despatch {
 /* ---------------- The order book, per line ---------------- */
 
 /** All derived from what has been made, sent and billed — never typed. */
-export type LineState = 'not_started' | 'in_production' | 'made' | 'part_shipped' | 'shipped';
+export type LineState = 'not_scheduled' | 'scheduled' | 'partially_dispatched' | 'fully_dispatched';
 
 export interface OrderLine {
   order_id: number; order_number: string; date: string; promised_date: string; revised_date: string;
