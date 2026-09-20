@@ -277,8 +277,8 @@ function readReviewOpen(): boolean {
  */
 const DEFAULT_ORDER = [
   'attention', 'money',
-  'deliveries', 'shipments', 'expiring',
-  'commercial', 'factory',
+  'deliveries', 'shipments',
+  'factory', 'commercial', 'expiring',
   'funnel', 'period',
   'top-customers', 'top-products', 'activity',
 ];
@@ -303,7 +303,14 @@ function applyOrder<T extends { id: string }>(cards: T[], order: string[]): T[] 
  * what made the page two screens tall — a table with one data row was being
  * given 669px and filling 133px of it.
  */
-interface CardDef { id: string; title: string; span?: 1 | 2 | 3; section?: Section; body: ReactNode }
+/**
+ * `allClear` is set by a morning list with nothing in it. Two of the six
+ * morning cards were full-height boxes saying *nothing here* (the client's
+ * screenshot, 2026-09-20), so an empty list now leaves the grid and states its
+ * absence in one *All clear* line under it — the page shows a list only where
+ * there is something to do, and still says what it checked.
+ */
+interface CardDef { id: string; title: string; span?: 1 | 2 | 3; section?: Section; allClear?: string; body: ReactNode }
 
 /** *3 days late* · *today* · *tomorrow* · *in 5 days*, with the tone the distance earns. */
 function dueWord(date: string): { text: string; cls: string } {
@@ -775,28 +782,26 @@ export default function DashboardPage() {
             <p className="text-sm text-slate-400">Nothing overdue. Follow-ups, orders and approvals are all up to date.</p>
           ) : (
             <div className="flex flex-wrap gap-2">
-              <AttentionChip to="/followups" count={a.overdueFollowups} label="follow-ups overdue" tone="red" />
-              <AttentionChip to={listUrl('/orders', { open: '1' })} count={a.overdueOrders} label="sales orders past promised date" tone="red" />
-              <AttentionChip to={listUrl('/invoices')} count={a.overdueInvoices} label="invoices unpaid over 60 days" tone="red" />
-              {/* The Due sheet's own two figures, by the due date the invoice
-                  carries rather than its age; both open that sheet. */}
+              {/* Reds first — what is already wrong — then the ambers, what is
+                  about to be. Within each: money, orders, offers, the floor,
+                  the sea leg. Short material is red because it stops
+                  production; a reorder level is a warning. Papers outstanding
+                  is red because the buyer cannot clear the goods without them;
+                  an arrival is not a fault. The Due sheet's two figures count
+                  by the due date the invoice carries rather than its age. */}
               <AttentionChip to={listUrl('/reports', { view: 'due' })} count={a.invoicesOverdue} label="invoices past due date" tone="red" />
+              <AttentionChip to={listUrl('/invoices')} count={a.overdueInvoices} label="invoices unpaid over 60 days" tone="red" />
+              <AttentionChip to={listUrl('/orders', { open: '1' })} count={a.overdueOrders} label="sales orders past promised date" tone="red" />
+              <AttentionChip to="/followups" count={a.overdueFollowups} label="follow-ups overdue" tone="red" />
+              <AttentionChip to="/work-orders" count={a.overdueWorkOrders} label="jobs past planned finish" tone="red" />
+              <AttentionChip to="/stock" count={a.materialShort} label="materials short for open jobs" tone="red" />
+              <AttentionChip to={listUrl('/despatches', { docs: 'pending' })} count={a.documentsOutstanding} label="shipments awaiting documents" tone="red" />
               <AttentionChip to={listUrl('/reports', { view: 'due' })} count={a.invoicesDueThisWeek} label="invoices due this week" tone="amber" />
               <AttentionChip to="/followups" count={a.followupsToday} label="follow-ups due today" tone="amber" />
               <AttentionChip to={listUrl('/quotations', { status: 'sent' })} count={a.expiringQuotations} label="quotations expiring this week" tone="amber" />
               {isManager && <AttentionChip to="/approvals" count={a.pendingApprovals} label="awaiting your approval" tone="amber" />}
-              {/* The floor. Short material is red because it stops production;
-                  a reorder level is a warning, not a stoppage. */}
-              <AttentionChip to="/work-orders" count={a.overdueWorkOrders} label="jobs past planned finish" tone="red" />
-              <AttentionChip to="/stock" count={a.materialShort} label="materials short for open jobs" tone="red" />
               <AttentionChip to="/stock" count={a.materialBelowReorder} label="materials below reorder level" tone="amber" />
               <AttentionChip to="/despatches" count={a.unbilledDespatches} label="dispatches not yet billed" tone="amber" />
-              {/* The sea leg. Papers outstanding is red because the buyer
-                  cannot clear the goods without them — a container sitting at
-                  the port is the most expensive row in the book. An arrival is
-                  not a fault, so it is amber, and both go straight to the
-                  register filtered the way the chip counted. */}
-              <AttentionChip to={listUrl('/despatches', { docs: 'pending' })} count={a.documentsOutstanding} label="shipments awaiting documents" tone="red" />
               <AttentionChip to={listUrl('/despatches', { eta_to: addDays(today(), 7) })} count={a.arrivingSoon} label="shipments arriving this week" tone="amber" />
             </div>
           )}
@@ -874,6 +879,10 @@ export default function DashboardPage() {
     ...(data.deliveries ? [{
       id: 'deliveries',
       title: 'Deliveries due',
+      // Two columns: this is the list the day is run from, and at one it
+      // clipped the customer and had no room for the order's state.
+      span: 2 as const,
+      allClear: data.deliveries.rows.length === 0 && data.deliveries.undated === 0 ? 'No delivery falls due in the next 14 days' : undefined,
       body: (
         <Card
           title={`Deliveries due${data.deliveries.rows.length ? ` (${data.deliveries.rows.length})` : ''}`}
@@ -882,20 +891,40 @@ export default function DashboardPage() {
           {data.deliveries.rows.length === 0 ? (
             <p className={EMPTY}>Nothing due in the next 14 days.</p>
           ) : (
-            <div className="space-y-1">
-              {data.deliveries.rows.map((o) => {
-                const w = dueWord(o.due);
-                const left = Math.max(0, o.pieces_ordered - o.pieces_sent);
-                return (
-                  <ListRow
-                    key={o.id} to={`/orders/${o.id}`}
-                    lead={w.text} leadCls={w.cls}
-                    number={o.number} who={o.customer_name}
-                    right={o.pieces_ordered > 0 ? `${fmtQty(left)} pcs to send` : fmtMoney(o.grand_total, o.currency)}
-                    rightCls={left > 0 ? 'text-slate-600' : 'text-green-700'}
-                  />
-                );
-              })}
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className={TH}>
+                    <th className="pb-1 pr-3">Due</th>
+                    <th className="pb-1 pr-3">Sales Order</th>
+                    <th className="pb-1 pr-3">Customer</th>
+                    <th className="pb-1 pr-3">State</th>
+                    <th className="pb-1 pr-3 text-right">To send</th>
+                    <th className="pb-1 text-right">Value</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.deliveries.rows.map((o) => {
+                    const w = dueWord(o.due);
+                    const left = Math.max(0, o.pieces_ordered - o.pieces_sent);
+                    return (
+                      <DrillRow key={o.id} to={`/orders/${o.id}`}>
+                        <td className={`py-1.5 pr-3 whitespace-nowrap text-xs font-semibold ${w.cls}`} title={`${fmtDate(o.due)}${o.revised ? ' (revised)' : ''}`}>
+                          {w.text}{o.revised ? <span className="ml-1 font-normal text-slate-400">rev.</span> : null}
+                        </td>
+                        <td className="py-1.5 pr-3 whitespace-nowrap font-medium text-brand-700">{o.number}</td>
+                        <td className="max-w-[16rem] truncate py-1.5 pr-3 text-slate-700" title={o.customer_name}>{o.customer_name}</td>
+                        <td className="py-1.5 pr-3 whitespace-nowrap text-xs text-slate-500">{orderStatusLabel(o.status)}</td>
+                        <td className={`py-1.5 pr-3 text-right tabular-nums ${left > 0 ? 'font-semibold text-slate-900' : 'text-green-700'}`}>
+                          {o.pieces_ordered > 0 ? `${fmtQty(left)} pcs` : <span className="text-slate-300">—</span>}
+                          {o.pieces_sent > 0 && left > 0 && <div className="text-xs font-normal text-slate-400">{fmtQty(o.pieces_sent)} sent</div>}
+                        </td>
+                        <td className="py-1.5 text-right tabular-nums text-slate-500">{fmtMoney(o.grand_total, o.currency)}</td>
+                      </DrillRow>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
           )}
           {data.deliveries.undated > 0 && (
@@ -918,6 +947,7 @@ export default function DashboardPage() {
     ...(data.shipments ? [{
       id: 'shipments',
       title: 'On the water',
+      allClear: data.shipments.length === 0 ? 'No shipment lands inside a fortnight' : undefined,
       body: (
         <Card
           title={`On the water${data.shipments.length ? ` (${data.shipments.length})` : ''}`}
@@ -956,6 +986,9 @@ export default function DashboardPage() {
     ...(data.pipeline ? [{
       id: 'commercial',
       title: 'Commercial pipeline',
+      allClear: ((data.pipeline.proformasAwaitingReply?.length ?? 0) + (data.pipeline.proformasNotBooked?.length ?? 0) + (data.pipeline.quotationsUnchased?.length ?? 0)) === 0
+        ? 'Nothing stalled — every proforma is answered or booked, every live offer has a follow-up'
+        : undefined,
       body: (() => {
         const pl = data.pipeline;
         const reply = pl.proformasAwaitingReply ?? [];
@@ -1047,6 +1080,7 @@ export default function DashboardPage() {
     ...(data.expiring ? [{
       id: 'expiring',
       title: 'Expiring Quotations',
+      allClear: data.expiring.length === 0 ? 'No live quotation lapses in the next 14 days' : undefined,
       body: (
         <Card
           title={`Expiring Quotations${data.expiring.length ? ` (${data.expiring.length})` : ''}`}
@@ -1312,6 +1346,11 @@ export default function DashboardPage() {
     {
       id: 'factory',
       title: 'On the Floor',
+      // Two columns, like the deliveries above it: the jobs list under it
+      // names a job, its order and its customer, and a lone single-column
+      // card on a row of its own left two-thirds of the row empty once the
+      // all-clear line had taken the empty lists out of the grid.
+      span: 2,
       body: (
         <Card
           title="On the Floor"
@@ -1750,7 +1789,8 @@ export default function DashboardPage() {
   const hidden = new Set(layout.hidden);
   const ordered = applyOrder(cards, layout.order.length ? layout.order : DEFAULT_ORDER);
   const visible = ordered.filter((c) => !hidden.has(c.id));
-  const morning = visible.filter((c) => c.section !== 'review');
+  const morning = visible.filter((c) => c.section !== 'review' && !c.allClear);
+  const allClear = visible.filter((c) => c.section !== 'review' && c.allClear);
   const review = visible.filter((c) => c.section === 'review');
 
   const move = (id: string, delta: number) => {
@@ -1799,16 +1839,6 @@ export default function DashboardPage() {
                 ))}
               </Select>
             )}
-            {currencies.length > 1 && (
-              <Select
-                value={activeCurrency}
-                onChange={(e) => setCurrency(e.target.value)}
-                className="w-24 shrink-0"
-                title="Currency for the review charts — the Money card shows every currency"
-              >
-                {currencies.map((c) => <option key={c} value={c}>{c}</option>)}
-              </Select>
-            )}
             <Select
               value={rangeKey}
               onChange={(e) => setRangeKey(e.target.value)}
@@ -1843,20 +1873,43 @@ export default function DashboardPage() {
               <div key={c.id} className={`${CELL} ${SPAN_CLASS[c.span ?? 1]}`}>{c.body}</div>
             ))}
           </div>
+          {allClear.length > 0 && (
+            // The lists with nothing in them, in one line: what was checked
+            // and found clear, without a card each to say so.
+            <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-xl border border-green-200 bg-green-50/60 px-4 py-2 text-xs text-green-800">
+              <span className="font-semibold">All clear</span>
+              {allClear.map((c) => <span key={c.id}>✓ {c.allClear}</span>)}
+            </div>
+          )}
           {review.length > 0 && (
             <div className="mt-6">
-              <button
-                type="button"
-                onClick={toggleReview}
-                aria-expanded={reviewOpen}
-                className="flex w-full items-center gap-2 rounded-lg px-1 py-1 text-left text-sm font-semibold text-slate-600 hover:text-slate-900"
-              >
-                <Icon name={reviewOpen ? 'chevron-down' : 'chevron-right'} />
-                <span>Review</span>
-                <span className="text-xs font-normal text-slate-400">
-                  {review.length} card{review.length === 1 ? '' : 's'} · the funnel, the trend and the rankings for {range.label.toLowerCase()}
-                </span>
-              </button>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={toggleReview}
+                  aria-expanded={reviewOpen}
+                  className="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-1 py-1 text-left text-sm font-semibold text-slate-600 hover:text-slate-900"
+                >
+                  <Icon name={reviewOpen ? 'chevron-down' : 'chevron-right'} />
+                  <span>Review</span>
+                  <span className="text-xs font-normal text-slate-400">
+                    {review.length} card{review.length === 1 ? '' : 's'} · the funnel, the trend and the rankings for {range.label.toLowerCase()}
+                  </span>
+                </button>
+                {/* The one currency the charts read, offered where the charts
+                    are rather than in the page header, where it looked like
+                    it governed the Money card above — which shows them all. */}
+                {reviewOpen && currencies.length > 1 && (
+                  <Select
+                    value={activeCurrency}
+                    onChange={(e) => setCurrency(e.target.value)}
+                    className="w-24 shrink-0"
+                    title="Currency for the review charts"
+                  >
+                    {currencies.map((c) => <option key={c} value={c}>{c}</option>)}
+                  </Select>
+                )}
+              </div>
               {reviewOpen && (
                 <div className="mt-2 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
                   {review.map((c) => (
