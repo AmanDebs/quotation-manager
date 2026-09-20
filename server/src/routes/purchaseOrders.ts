@@ -68,6 +68,24 @@ interface PoItemInput {
  * it pick one arbitrarily. Checked here rather than left to a constraint,
  * because an error the user can act on must not arrive as a 500.
  */
+/**
+ * Bill-to and ship-to, each with its GSTIN, are mandatory (2026-09-20, the
+ * client: *"Make Bill To and Ship To mandatory"*). Checked on the save rather
+ * than on a findings table — a purchase order has no approval to gate and no
+ * `documentChecks` row, and the form prefills all four from the issuing
+ * company and the plant, so the ordinary order meets it without typing. An
+ * order raised before the fields existed is not re-judged on a reprint: its
+ * PDF still stands the company in, which is the right data, and it is only
+ * held to this the next time it is saved.
+ */
+function partyError(v: (f: string) => unknown): string | null {
+  const blank = ([
+    ['bill_to', 'Bill to'], ['bill_to_gstin', 'Bill to GSTIN'],
+    ['ship_to', 'Ship to'], ['ship_to_gstin', 'Ship to GSTIN'],
+  ] as const).filter(([f]) => !String(v(f) ?? '').trim()).map(([, label]) => label);
+  return blank.length ? `${blank.join(', ')} ${blank.length > 1 ? 'are' : 'is'} blank.` : null;
+}
+
 function lineError(items: PoItemInput[]): string | null {
   for (const [i, it] of items.entries()) {
     const material = numOrNull(it.material_id);
@@ -206,6 +224,8 @@ purchaseOrdersRouter.post('/', (req: AuthedRequest, res) => {
   }
   const badLine = lineError(Array.isArray(body.items) ? body.items : []);
   if (badLine) return res.status(400).json({ error: badLine });
+  const badParty = partyError((f) => body[f]);
+  if (badParty) return res.status(400).json({ error: badParty });
   const isImport = Number(body.is_import) ? 1 : 0;
   const id = transaction(() => {
     const companyId = resolveCompanyId(body.company_id);
@@ -261,6 +281,8 @@ purchaseOrdersRouter.put('/:id', (req, res) => {
   const badLine = lineError(Array.isArray(body.items) ? body.items : []);
   if (badLine) return res.status(400).json({ error: badLine });
   const v = (f: string, def: unknown = '') => body[f] ?? existing[f] ?? def;
+  const badParty = partyError((f) => v(f));
+  if (badParty) return res.status(400).json({ error: badParty });
   const tcsPct = Number(v('tcs_pct', 0)) || 0;
   transaction(() => {
     db.prepare(

@@ -5,7 +5,7 @@ import { api } from '../api/client';
 import type { PurchaseOrder, PoItem, Supplier, Material, Location, TaxType, Product } from '../types';
 import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, SettledDocumentType, SearchSelect, FIELD_GRID, TH_CLASS, type SearchOption } from '../components/ui';
 import { PdfLink } from '../components/PdfLink';
-import CompanySelect from '../components/CompanySelect';
+import CompanySelect, { useCompanies } from '../components/CompanySelect';
 import { DocNumber, PaymentTermsInput, PurchaseTermsInput } from '../components/DocFields';
 import HistoryCard from '../components/HistoryCard';
 import { productTypeLabel } from './Products';
@@ -78,6 +78,7 @@ export default function PurchaseOrderFormPage() {
   // Aglo buys finished and semi-finished goods in as well as resin, so the
   // catalogue is on the picker beside the materials.
   const { data: products = [] } = useQuery({ queryKey: ['products', ''], queryFn: () => api.get<Product[]>('/api/products') });
+  const companies = useCompanies();
 
   // A draft handed over by the shortfall picker arrives in the router state
   // rather than a query param: it is a computed document, not an id.
@@ -95,6 +96,32 @@ export default function PurchaseOrderFormPage() {
     setDraft((d) => ({ ...emptyDraft(suppliers, locations), ...d, supplier_id: d.supplier_id ?? suppliers[0]?.id, location_id: d.location_id ?? locations[0]?.id ?? null }));
     setDefaulted(true);
   }, [isNew, defaulted, suppliers, locations]);
+
+  /*
+   * Bill-to and ship-to, each with its GSTIN, are mandatory (2026-09-20:
+   * *"Make Bill To and Ship To mandatory"*) — and on a new order they are
+   * written in from the issuing company and the plant, once both are known,
+   * so the ordinary order meets the rule without typing: the company's own
+   * address and GSTIN bill, the plant receives under the same registration.
+   * A default, not a rule — only a blank box is filled, and only once per
+   * box, so a box cleared on purpose stays cleared and a typed one is never
+   * overwritten. A saved order is left exactly as it was saved.
+   */
+  useEffect(() => {
+    if (!isNew) return;
+    const co = companies.find((c) => c.id === (draft.company_id ?? companies.find((x) => x.is_default)?.id)) ?? companies.find((c) => c.is_default) ?? companies[0];
+    const plant = locations.find((l) => l.id === draft.location_id);
+    if (!co) return;
+    setDraft((d) => {
+      const patch: Partial<PoDraft> = {};
+      const block = [co.company_name, co.address, [co.city, co.state, co.pincode].filter(Boolean).join(', ')].filter(Boolean).join('\n');
+      if (!(d.bill_to ?? '').trim() && block) patch.bill_to = block;
+      if (!(d.bill_to_gstin ?? '').trim() && co.gstin) patch.bill_to_gstin = co.gstin;
+      if (!(d.ship_to ?? '').trim() && plant) patch.ship_to = [co.company_name, plant.name, plant.address].filter(Boolean).join('\n');
+      if (!(d.ship_to_gstin ?? '').trim() && co.gstin) patch.ship_to_gstin = co.gstin;
+      return Object.keys(patch).length ? { ...d, ...patch } : d;
+    });
+  }, [isNew, companies, locations, draft.company_id, draft.location_id]);
 
   const set = (patch: Partial<PoDraft>) => setDraft((d) => ({ ...d, ...patch }));
   const setItem = (i: number, patch: Partial<PoItem>) =>
@@ -147,7 +174,8 @@ export default function PurchaseOrderFormPage() {
     queryClient.invalidateQueries({ queryKey: ['stock-shortfall'] });
   };
 
-  const canSave = !!draft.supplier_id && draft.items.length > 0;
+  const partiesStated = ['bill_to', 'bill_to_gstin', 'ship_to', 'ship_to_gstin'].every((f) => String((draft as Record<string, unknown>)[f] ?? '').trim());
+  const canSave = !!draft.supplier_id && draft.items.length > 0 && partiesStated;
   const { markSaved, pdf, prompt } = useUnsavedChanges(draft, {
     run: () => save.mutateAsync(draft),
     can: canSave,
@@ -315,18 +343,18 @@ export default function PurchaseOrderFormPage() {
                 client: "Ship to with GST no and Bill To with GST No is
                 required"). Blank prints the issuing company's own address
                 and GSTIN, and the plant for ship-to; typed where they differ. */}
-            <Field label="Bill to" className="sm:col-span-2">
-              <Textarea rows={2} value={draft.bill_to ?? ''} onChange={(e) => set({ bill_to: e.target.value })} placeholder="Leave blank to print the issuing company's address" />
+            <Field label="Bill to *" className="sm:col-span-2">
+              <Textarea rows={2} value={draft.bill_to ?? ''} onChange={(e) => set({ bill_to: e.target.value })} placeholder="The party invoiced" />
             </Field>
-            <Field label="Bill to GSTIN">
-              <Input value={draft.bill_to_gstin ?? ''} onChange={(e) => set({ bill_to_gstin: e.target.value })} placeholder="Blank = the company's own" />
+            <Field label="Bill to GSTIN *">
+              <Input value={draft.bill_to_gstin ?? ''} onChange={(e) => set({ bill_to_gstin: e.target.value })} />
             </Field>
             <div className="hidden xl:block" />
-            <Field label="Ship to" className="sm:col-span-2">
-              <Textarea rows={2} value={draft.ship_to ?? ''} onChange={(e) => set({ ship_to: e.target.value })} placeholder="Leave blank to print the plant above" />
+            <Field label="Ship to *" className="sm:col-span-2">
+              <Textarea rows={2} value={draft.ship_to ?? ''} onChange={(e) => set({ ship_to: e.target.value })} placeholder="Where the goods are delivered" />
             </Field>
-            <Field label="Ship to GSTIN">
-              <Input value={draft.ship_to_gstin ?? ''} onChange={(e) => set({ ship_to_gstin: e.target.value })} placeholder="Blank = the company's own" />
+            <Field label="Ship to GSTIN *">
+              <Input value={draft.ship_to_gstin ?? ''} onChange={(e) => set({ ship_to_gstin: e.target.value })} />
             </Field>
             <div className="hidden xl:block" />
             <Field label="Packing" className="sm:col-span-2">
