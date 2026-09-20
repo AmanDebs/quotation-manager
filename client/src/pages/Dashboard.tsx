@@ -111,6 +111,8 @@ interface DashboardData {
   topProducts: { name: string; times_quoted: number }[];
   currencyTotals: { currency: string; accepted_value: number; quoted_value: number }[];
   followups: { overdue: Followup[]; today: Followup[]; upcoming: Followup[] };
+  /** Live offers lapsing within a fortnight, soonest first; absent for a caller without `quotation`. */
+  expiring?: { id: number; number: string; revision: number; customer_name: string; validity_date: string; status: string; currency: string; grand_total: number }[];
   funnel: { quoted: number; accepted: number; orders: number; invoiced: number };
   receivables: { currency: string; invoiced: number; received: number; outstanding: number; overdue?: number }[];
   receivablesAgeing: { currency: string; bucket: string; outstanding: number; count: number }[];
@@ -229,8 +231,8 @@ const DEFAULT_HIDDEN = ['trend', 'pipeline', 'quotation-status', 'money-detail',
  */
 const DEFAULT_ORDER = [
   'attention', 'money',
-  'funnel', 'activity',
-  'factory', 'top-customers', 'top-products',
+  'expiring', 'funnel',
+  'activity', 'factory', 'top-customers', 'top-products',
 ];
 
 /**
@@ -254,6 +256,14 @@ function applyOrder<T extends { id: string }>(cards: T[], order: string[]): T[] 
  * given 669px and filling 133px of it.
  */
 interface CardDef { id: string; title: string; span?: 1 | 2 | 3; body: ReactNode }
+
+/**
+ * Whole days from today to a `YYYY-MM-DD`, both read as UTC midnights so no
+ * local timezone touches the arithmetic — the trap the date presets record.
+ */
+function daysUntil(date: string): number {
+  return Math.round((Date.parse(`${date}T00:00:00Z`) - Date.parse(`${today()}T00:00:00Z`)) / 86_400_000);
+}
 
 /** Tailwind needs the whole class name in the source, so these are spelt out. */
 const SPAN_CLASS: Record<number, string> = {
@@ -724,6 +734,45 @@ export default function DashboardPage() {
         </div>
       ),
     },
+    /*
+     * Which offers are about to lapse (2026-09-20, the client: "I want a card
+     * which tells me a quotation is about to expire"). The chip in the strip
+     * counts the week; this names them, a fortnight out, soonest first, with
+     * the days left — red on the last day or the day before, amber inside
+     * the week the chip counts, plain beyond it. Each row opens the
+     * quotation, where extending Valid Until is what revives it. Absent for
+     * a caller the server did not hand the rows to.
+     */
+    ...(data.expiring ? [{
+      id: 'expiring',
+      title: 'Expiring Quotations',
+      body: (
+        <Card
+          title={`Expiring Quotations${data.expiring.length ? ` (${data.expiring.length})` : ''}`}
+          actions={<Link to="/quotations" className="text-xs text-brand-600 hover:underline">View all</Link>}
+        >
+          {data.expiring.length === 0 ? (
+            <p className={EMPTY}>No live quotation lapses in the next 14 days.</p>
+          ) : (
+            <div className="space-y-1 text-sm">
+              {data.expiring.map((qt) => {
+                const left = daysUntil(qt.validity_date);
+                const tone = left <= 1 ? 'text-red-600' : left <= 7 ? 'text-amber-600' : 'text-slate-500';
+                const when = left === 0 ? 'today' : left === 1 ? 'tomorrow' : `in ${left} days`;
+                return (
+                  <Link key={qt.id} to={`/quotations/${qt.id}`} className="flex items-center gap-2 rounded-md px-1 py-0.5 hover:bg-slate-50">
+                    <span className={`w-20 shrink-0 text-xs font-semibold ${tone}`}>{when}</span>
+                    <span className="shrink-0 whitespace-nowrap font-medium text-brand-700">{qt.number}{qt.revision ? ` R${qt.revision}` : ''}</span>
+                    <span className="min-w-0 truncate text-slate-600" title={qt.customer_name}>{qt.customer_name}</span>
+                    <span className="ml-auto shrink-0 tabular-nums text-slate-500">{fmtMoney(qt.grand_total, qt.currency)}</span>
+                  </Link>
+                );
+              })}
+            </div>
+          )}
+        </Card>
+      ),
+    }] : []),
     {
       id: 'followups',
       title: 'Pending Follow-ups',

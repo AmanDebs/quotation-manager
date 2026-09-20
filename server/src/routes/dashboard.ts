@@ -643,11 +643,37 @@ dashboardRouter.get('/', (req: AuthedRequest, res) => {
       })),
   };
 
+  /**
+   * The quotations about to lapse, for the card the client asked for
+   * (2026-09-20: *"I want a card which tells me a quotation is about to
+   * expire"*). The attention chip counts the week; this lists a fortnight,
+   * soonest first, so the row that lapses tomorrow sits at the top and the
+   * one with ten days left is visible before it is urgent. Only a live offer
+   * can lapse — `sent` or `negotiating`, `quotationExpiry.ts`'s own rule — and
+   * the last day of validity is a day of validity, so `>= today`. Capped at
+   * eight: a card is a warning, and the list behind it is the Quotations
+   * page. **Absent, not empty, for a caller without `quotation`**: the rows
+   * carry numbers and totals, and the floor holds `quotation: none`
+   * (`despatchAttention`'s rule; the chip's bare count stays for everyone).
+   */
+  const expiring = allows(req, 'quotation')
+    ? q<{ id: number; number: string; revision: number; customer_name: string; validity_date: string; status: string; currency: string; grand_total: number }>(
+      `SELECT qt.id, qt.number, qt.revision, c.name AS customer_name, qt.validity_date, qt.status, qt.currency, qt.grand_total
+       FROM quotations qt LEFT JOIN customers c ON c.id = qt.customer_id
+       WHERE qt.superseded_by IS NULL AND qt.status IN ('sent','negotiating')
+         AND qt.validity_date <> '' AND qt.validity_date >= ? AND qt.validity_date <= date(?, '+14 days')
+         ${docFilter('qt').sql}
+       ORDER BY qt.validity_date, qt.id LIMIT 8`,
+      today, today, ...docFilter('qt').params
+    )
+    : undefined;
+
   res.json({
     counts, countsByCurrency, quotationsByStatus, ordersByStatus, businessSplit, quotedByMonth, invoicedByMonth,
     receivedByMonth,
     topCustomers, topCustomersInvoiced, topProducts, currencyTotals, followups, funnel,
     receivables, receivablesAgeing, orderBook, overdueOrders, attention, production,
     previous, activity: activityRows,
+    ...(expiring ? { expiring } : {}),
   });
 });
