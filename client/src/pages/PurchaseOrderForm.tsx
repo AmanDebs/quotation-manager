@@ -103,12 +103,14 @@ export default function PurchaseOrderFormPage() {
    * written in from the issuing company and the plant, once both are known,
    * so the ordinary order meets the rule without typing: the company's own
    * address and GSTIN bill, the plant receives under the same registration.
-   * A default, not a rule — only a blank box is filled, and only once per
-   * box, so a box cleared on purpose stays cleared and a typed one is never
-   * overwritten. A saved order is left exactly as it was saved.
+   * A default, not a rule — only a blank box is filled, so a typed one is
+   * never overwritten. It runs on a saved order too: one raised before the
+   * fields existed opened with four blank mandatory boxes and a Save button
+   * that would not enable until all were typed (the client's screenshot,
+   * 2026-09-20), and the company's own details are what its PDF was already
+   * printing in their place.
    */
   useEffect(() => {
-    if (!isNew) return;
     const co = companies.find((c) => c.id === (draft.company_id ?? companies.find((x) => x.is_default)?.id)) ?? companies.find((c) => c.is_default) ?? companies[0];
     const plant = locations.find((l) => l.id === draft.location_id);
     if (!co) return;
@@ -121,7 +123,7 @@ export default function PurchaseOrderFormPage() {
       if (!(d.ship_to_gstin ?? '').trim() && co.gstin) patch.ship_to_gstin = co.gstin;
       return Object.keys(patch).length ? { ...d, ...patch } : d;
     });
-  }, [isNew, companies, locations, draft.company_id, draft.location_id]);
+  }, [companies, locations, draft.company_id, draft.location_id]);
 
   const set = (patch: Partial<PoDraft>) => setDraft((d) => ({ ...d, ...patch }));
   const setItem = (i: number, patch: Partial<PoItem>) =>
@@ -305,11 +307,9 @@ export default function PurchaseOrderFormPage() {
                 {['INR', 'USD', 'EUR'].map((c) => <option key={c} value={c}>{c}</option>)}
               </Select>
             </Field>
-            {/* Transport, Ship via and TCS % left the form on 2026-09-20 at the
-                client's word. The columns stay and the draft round-trips them;
-                each box is shown only on an order already carrying a value, so
-                a figure entered before this can be seen and cleared rather than
-                becoming invisible — TCS especially, being money in the total. */}
+            {/* TCS % left the form on 2026-09-20 with Transport and Ship via;
+                it alone is shown where a value stands, being money in the
+                total that could otherwise be neither seen nor cleared. */}
             {!!existing?.tcs_pct && (
               <Field label="TCS %">
                 <Input
@@ -336,10 +336,13 @@ export default function PurchaseOrderFormPage() {
         <Card title="Supplier & Shipment">
           <div className={FIELD_GRID}>
             <Field label="Kind Attn"><Input value={draft.attn ?? ''} onChange={(e) => set({ attn: e.target.value })} placeholder="Who at the supplier" /></Field>
-            {/* Vendor ID left the form with Transport (2026-09-20); shown only on an order already carrying one. */}
-            {!!existing?.vendor_ref && <Field label="Vendor ID"><Input value={draft.vendor_ref ?? ''} onChange={(e) => set({ vendor_ref: e.target.value })} /></Field>}
-            {!!existing?.transport && <Field label="Transport"><Input value={draft.transport ?? ''} onChange={(e) => set({ transport: e.target.value })} /></Field>}
-            {!!existing?.ship_via && <Field label="Ship via"><Input value={draft.ship_via ?? ''} onChange={(e) => set({ ship_via: e.target.value })} /></Field>}
+            {/* Vendor ID, Transport and Ship via left the form on 2026-09-20 at
+                the client's word — outright, an order carrying one included
+                (the first cut showed them where a value stood, and the client
+                asked again with such an order in front of them). The columns
+                stay, the draft round-trips them, and the PDF prints what is
+                there. TCS % alone is shown where a value stands, being money
+                in the total that could otherwise be neither seen nor cleared. */}
             {/* Bill-to and ship-to with their registrations (2026-09-20, the
                 client: "Ship to with GST no and Bill To with GST No is
                 required"). Blank prints the issuing company's own address
