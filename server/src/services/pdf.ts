@@ -2146,54 +2146,75 @@ export function buildPurchaseOrderPdf(id: number): TDocumentDefinitions {
     gstinLine(po.ship_to_gstin),
   ].filter(Boolean);
 
+  /*
+   * The header is three rows over four equal columns (2026-09-21, the client
+   * with the page in front of them: "can we spread out the text, its too
+   * cluttered, maybe vendor and PO no in one row and Bill to and Ship to in
+   * another"). Vendor, bill-to and ship-to had sat side by side in a quarter
+   * of the page each, every address wrapping onto four lines beside a
+   * reference cell holding two facts. Now the vendor takes half the row
+   * beside the four reference facts — number, date, expected, currency — the
+   * two addresses share the second row at half the page each, and the terms
+   * close the grid. A little more air in each cell too: the boxed padding is
+   * the invoice's, which packs a customs grid, and this document has the
+   * room.
+   */
   const stack = (title: string, lines: string[]): Cell => ({
     stack: [
       { text: title, fontSize: 6.5, bold: true, color: '#333333' },
-      ...lines.filter(Boolean).map((t) => ({ text: t, fontSize: 8, margin: [0, 1, 0, 0] as [number, number, number, number] })),
+      ...lines.filter(Boolean).map((t, i) => ({ text: t, fontSize: 8, margin: [0, i === 0 ? 2 : 1, 0, 0] as [number, number, number, number] })),
     ],
   });
+  const facts = (...pairs: [string, string][]): Cell => ({
+    stack: pairs.flatMap(([label, value], i) => [
+      ...(i ? [{ text: ' ', fontSize: 3 }] : []),
+      ...(lv(label, value).stack as Content[]),
+    ]),
+  });
+  const hasVendorRef = !!String(po.vendor_ref || '').trim();
+  const hasTransport = !!(String(po.transport || '').trim() || String(po.ship_via || '').trim());
 
   const header: Content = {
     table: {
-      widths: ['*', '*', '*', 84],
+      widths: ['*', '*', '*', '*'],
       body: [
         [
-          stack('VENDOR', vendorLines.length ? vendorLines : ['—']),
-          stack('BILL TO', billLines.length ? billLines : ['—']),
-          stack('SHIP TO', shipLines.length ? shipLines : ['—']),
-          { stack: [...(lv('PO No.', String(po.number)).stack as Content[]), { text: ' ', fontSize: 3 }, ...(lv('Date', fmtDate(String(po.date))).stack as Content[])] },
+          { ...stack('VENDOR', vendorLines.length ? vendorLines : ['—']), colSpan: 2 }, {},
+          facts(['PO No.', String(po.number)], ['Date', fmtDate(String(po.date))]),
+          facts(['Expected', po.expected_date ? fmtDate(String(po.expected_date)) : ''], ['Currency', cur]),
         ],
-        // Vendor ID left the form on 2026-09-20 with Transport; an order still
-        // carrying one prints it, otherwise Kind Attn takes its room.
-        String(po.vendor_ref || '').trim()
+        [
+          { ...stack('BILL TO', billLines.length ? billLines : ['—']), colSpan: 2 }, {},
+          { ...stack('SHIP TO', shipLines.length ? shipLines : ['—']), colSpan: 2 }, {},
+        ],
+        // Vendor ID left the form on 2026-09-20; an order still carrying one
+        // prints it, otherwise the payment terms take its room.
+        hasVendorRef
           ? [
               lv('Kind Attn', attn),
               lv('Vendor ID', String(po.vendor_ref || '')),
-              lv('Expected', po.expected_date ? fmtDate(String(po.expected_date)) : ''),
-              lv('Currency', cur),
-            ]
-          : [
-              { ...lv('Kind Attn', attn), colSpan: 2 }, {},
-              lv('Expected', po.expected_date ? fmtDate(String(po.expected_date)) : ''),
-              lv('Currency', cur),
-            ],
-        // Transport and Ship Via left the form on 2026-09-20; an order still
-        // carrying either prints it, and one carrying neither gives the room
-        // to the payment terms rather than printing two dead cells.
-        String(po.transport || '').trim() || String(po.ship_via || '').trim()
-          ? [
               lv('Terms', String(po.inco_terms || '')),
               lv('Payment Terms', String(po.payment_terms || '')),
-              lv('Transport', String(po.transport || '')),
-              lv('Ship Via', String(po.ship_via || '')),
             ]
           : [
+              lv('Kind Attn', attn),
               lv('Terms', String(po.inco_terms || '')),
-              { ...lv('Payment Terms', String(po.payment_terms || '')), colSpan: 3 }, {}, {},
+              { ...lv('Payment Terms', String(po.payment_terms || '')), colSpan: 2 }, {},
             ],
+        // Transport and Ship Via left the form the same day; an order still
+        // carrying either gets a row for them, one carrying neither none.
+        ...(hasTransport
+          ? [[
+              { ...lv('Transport', String(po.transport || '')), colSpan: 2 }, {},
+              { ...lv('Ship Via', String(po.ship_via || '')), colSpan: 2 }, {},
+            ]]
+          : []),
       ],
     },
-    layout: boxedLayout,
+    layout: {
+      ...boxedLayout,
+      paddingTop: () => 4, paddingBottom: () => 4, paddingLeft: () => 6, paddingRight: () => 6,
+    },
     margin: [0, 6, 0, 0] as [number, number, number, number],
   };
 
