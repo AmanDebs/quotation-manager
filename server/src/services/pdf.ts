@@ -2201,12 +2201,10 @@ export function buildPurchaseOrderPdf(id: number): TDocumentDefinitions {
     ...companyHeader(s, {}),
     docTitle(s, 'PURCHASE ORDER'),
     header,
-    {
-      text: 'Dear Sir, as per your offer we are pleased to place the order for the following:',
-      fontSize: 8.5,
-      margin: [0, 8, 0, 4] as [number, number, number, number],
-    },
-    itemsTable(s, items, specs, {}, money),
+    // No salutation line between the header and the goods (2026-09-21, the
+    // client: "Remove the line dear sir, as per your offer..."); the table
+    // carries the gap the sentence used to.
+    { stack: [itemsTable(s, items, specs, {}, money)], margin: [0, 8, 0, 0] as [number, number, number, number] },
     amountWords(po, cur),
     ...(po.packing
       ? [{ text: `Packing: ${String(po.packing)}`, fontSize: 8, margin: [0, 6, 0, 0] as [number, number, number, number] }]
