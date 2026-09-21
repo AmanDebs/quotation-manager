@@ -168,7 +168,9 @@ const boxedLayout = {
   paddingTop: () => 2, paddingBottom: () => 2, paddingLeft: () => 5, paddingRight: () => 5,
 };
 
-const gridLayout = {
+type TableLayout = Record<string, unknown>;
+
+const gridLayout: TableLayout = {
   hLineColor: '#bbbbbb', vLineColor: '#bbbbbb',
   hLineWidth: () => 0.5, vLineWidth: () => 0.5,
   paddingTop: () => 3, paddingBottom: () => 3,
@@ -598,7 +600,7 @@ const ORDER_FORCED = ['amount', 'color'];
  * explicitly hidden columns are dropped, columns with no data anywhere are
  * dropped automatically, and up to three named custom columns are appended.
  */
-function itemsTable(s: Row, items: Row[], specs: ColumnSpec[], cfg: ColumnConfig, footer: MoneyRow[] = []) {
+function itemsTable(s: Row, items: Row[], specs: ColumnSpec[], cfg: ColumnConfig, footer: MoneyRow[] = [], layout: TableLayout = gridLayout) {
   const hidden = new Set(cfg.hidden ?? []);
   const customNames = (cfg.custom ?? []).slice(0, 3);
 
@@ -731,7 +733,7 @@ function itemsTable(s: Row, items: Row[], specs: ColumnSpec[], cfg: ColumnConfig
 
   return {
     table: { headerRows: headers.length, widths: columns.map((c) => c.width), body },
-    layout: gridLayout,
+    layout,
   } as Content;
 }
 
@@ -2050,7 +2052,17 @@ export function buildPurchaseOrderPdf(id: number): TDocumentDefinitions {
   const hsnOf = (it: Row) => String(it.material_hsn || it.product_hsn || '');
 
   const specs: ColumnSpec[] = [
-    { key: 'sl', label: 'SL', width: 18, align: 'center', always: true, value: (_it, i) => String(i + 1) },
+    /*
+     * The fixed columns are sized so the description keeps real room on an
+     * A4 page (2026-09-21, the client: "The table is going out of the
+     * frame"). Nine fixed widths plus ten cells' padding used to leave the
+     * star column less than its narrowest word, and pdfmake then widens the
+     * table past the margin rather than breaking a word — the goods ran off
+     * the right edge while the header grid above stopped at it. The page
+     * has 515pt inside the margins: these total 372 with 60 of padding at
+     * the tighter layout below, which leaves the description about 80pt.
+     */
+    { key: 'sl', label: 'SL', width: 16, align: 'center', always: true, value: (_it, i) => String(i + 1) },
     { key: 'description', label: 'DESCRIPTION', width: '*', always: true, value: (it) => String(it.description || it.material_name || it.product_name || '') },
     // Auto-hides on an order stating none, which is every one raised before
     // the column existed (2026-09-20).
@@ -2061,13 +2073,13 @@ export function buildPurchaseOrderPdf(id: number): TDocumentDefinitions {
       value: (it) => String(it.image || ''),
       cell: (it) => (it.image ? { image: String(it.image), fit: [40, 40] as [number, number] } : { text: '' }),
     },
-    { key: 'color', label: 'COLOUR', width: 40, align: 'center', value: (it) => String(it.color || '') },
-    { key: 'hsn', label: 'HSN', width: 44, align: 'center', value: hsnOf },
+    { key: 'color', label: 'COLOUR', width: 38, align: 'center', value: (it) => String(it.color || '') },
+    { key: 'hsn', label: 'HSN', width: 36, align: 'center', value: hsnOf },
     // The reference order's QUANTITY banner sits over these two. The banner
     // shrinks with its run if either auto-hides, which is what makes it safe
     // on an order that states no packing at all.
-    { key: 'packs', label: 'NO. OF CART./BAGS', width: 46, align: 'right', group: 'QUANTITY', value: (it) => fmtNum(it.packs, 0), sum: (rows) => fmtNum(rows.reduce((t, r) => t + (Number(r.packs) || 0), 0), 0) },
-    { key: 'pcs_per_pack', label: 'PCS./KGS. IN CART.', width: 48, align: 'right', group: 'QUANTITY', value: (it) => fmtNum(it.pcs_per_pack, 0) },
+    { key: 'packs', label: 'NO. OF CART./BAGS', width: 40, align: 'right', group: 'QUANTITY', value: (it) => fmtNum(it.packs, 0), sum: (rows) => fmtNum(rows.reduce((t, r) => t + (Number(r.packs) || 0), 0), 0) },
+    { key: 'pcs_per_pack', label: 'PCS./KGS. IN CART.', width: 44, align: 'right', group: 'QUANTITY', value: (it) => fmtNum(it.pcs_per_pack, 0) },
     // Pieces on a piece basis (2026-09-20, the client: "it should show
     // 95000"), the invoice's `piecesOf` reading — `95 per 1000` is how the
     // line is priced, not how much is bought. Kilos print as kilos.
@@ -2076,9 +2088,9 @@ export function buildPurchaseOrderPdf(id: number): TDocumentDefinitions {
       if (pcs != null) return `${fmtNum(pcs, 0)} Pcs`;
       return it.qty != null ? `${fmtNum(it.qty)} ${it.unit ?? ''}`.trim() : '';
     } },
-    { key: 'rate', label: `UNIT PRICE (${cur})`, width: 56, align: 'right', always: true, value: (it) => fmtNum(it.rate, 3) },
+    { key: 'rate', label: `UNIT PRICE (${cur})`, width: 48, align: 'right', always: true, value: (it) => fmtNum(it.rate, 3) },
     { key: 'tax', label: 'TAX %', width: 28, align: 'right', value: (it) => (showTax ? `${it.tax_pct ?? 0}%` : '') },
-    { key: 'amount', label: `TOTAL (${cur})`, width: 64, align: 'right', always: true, value: (it) => fmtMoney(Number(it.amount), cur), sum: (rows) => fmtMoney(rows.reduce((t, r) => t + (Number(r.amount) || 0), 0), cur) },
+    { key: 'amount', label: `TOTAL (${cur})`, width: 62, align: 'right', always: true, value: (it) => fmtMoney(Number(it.amount), cur), sum: (rows) => fmtMoney(rows.reduce((t, r) => t + (Number(r.amount) || 0), 0), cur) },
   ];
 
   /*
@@ -2225,7 +2237,9 @@ export function buildPurchaseOrderPdf(id: number): TDocumentDefinitions {
     // No salutation line between the header and the goods (2026-09-21, the
     // client: "Remove the line dear sir, as per your offer..."); the table
     // carries the gap the sentence used to.
-    { stack: [itemsTable(s, items, specs, {}, money)], margin: [0, 8, 0, 0] as [number, number, number, number] },
+    // Tighter cell padding than the grid's default 4: ten columns at 4 a side
+    // is 80pt of the page's 515, and the description was paying for it.
+    { stack: [itemsTable(s, items, specs, {}, money, { ...gridLayout, paddingLeft: () => 3, paddingRight: () => 3 })], margin: [0, 8, 0, 0] as [number, number, number, number] },
     amountWords(po, cur),
     ...(po.packing
       ? [{ text: `Packing: ${String(po.packing)}`, fontSize: 8, margin: [0, 6, 0, 0] as [number, number, number, number] }]
