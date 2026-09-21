@@ -2183,10 +2183,6 @@ export function buildPurchaseOrderPdf(id: number): TDocumentDefinitions {
           facts(['PO No.', String(po.number)], ['Date', fmtDate(String(po.date))]),
           facts(['Expected', po.expected_date ? fmtDate(String(po.expected_date)) : ''], ['Currency', cur]),
         ],
-        [
-          { ...stack('BILL TO', billLines.length ? billLines : ['—']), colSpan: 2 }, {},
-          { ...stack('SHIP TO', shipLines.length ? shipLines : ['—']), colSpan: 2 }, {},
-        ],
         // Vendor ID left the form on 2026-09-20; an order still carrying one
         // prints it, otherwise the payment terms take its room.
         hasVendorRef
@@ -2201,6 +2197,10 @@ export function buildPurchaseOrderPdf(id: number): TDocumentDefinitions {
               lv('Terms', String(po.inco_terms || '')),
               { ...lv('Payment Terms', String(po.payment_terms || '')), colSpan: 2 }, {},
             ],
+        [
+          { ...stack('BILL TO', billLines.length ? billLines : ['—']), colSpan: 2 }, {},
+          { ...stack('SHIP TO', shipLines.length ? shipLines : ['—']), colSpan: 2 }, {},
+        ],
         // Transport and Ship Via left the form the same day; an order still
         // carrying either gets a row for them, one carrying neither none.
         ...(hasTransport
