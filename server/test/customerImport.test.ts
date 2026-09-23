@@ -150,6 +150,36 @@ describe('a name that nearly matches one on file', () => {
   });
 });
 
+describe('a sheet that holds its own near-duplicates', () => {
+  // The client's own 698-row list holds two: *Davat Beverages Private Limited*
+  // beside *Davat Beverages Limited*. Matched against the book alone both
+  // would be created, with nothing on screen to say they are one buyer.
+  const sheet = [
+    'Customer,GSTIN',
+    'Davat Beverages Private Limited,19AAACD1111A1Z1',
+    'Davat Beverages Limited,19AAACD1111A1Z1',
+  ].join('\n');
+
+  test('the second spelling is left out, naming the row the first is on', () => {
+    const r = build(sheet, { customers: [] });
+    assert.deepEqual(r.rows.map((x) => x.action), ['create', 'skip']);
+    assert.match(String(r.rows[1].note), /Reads like .Davat Beverages Private Limited. on row 2 of this sheet/);
+    assert.equal(r.rows[1].nearName, 'Davat Beverages Private Limited');
+    assert.equal(r.summary.near, 1);
+  });
+
+  test('both are created when the sheet is said to hold two customers', () => {
+    const r = build(sheet, { customers: [] }, { nearMatch: 'new' });
+    assert.deepEqual(r.rows.map((x) => x.action), ['create', 'create']);
+    assert.match(String(r.rows[1].note), /added anyway/);
+  });
+
+  test('an exact repeat is still reported as the repeat it is', () => {
+    const r = build(['Customer', 'Davat Beverages Ltd', 'davat  beverages ltd'].join('\n'), { customers: [] });
+    assert.match(String(r.rows[1].note), /Already named on row 2/);
+  });
+});
+
 describe('what an update may write', () => {
   test('only the columns the sheet carries, so a name list cannot blank an address', () => {
     const r = build(['Customer Name,City', 'Bharat Engineering Works,Pune'].join('\n'), {}, { onDuplicate: 'update' });

@@ -1,5 +1,5 @@
 import { parseWorkbook, splitHeader, splitAt, type Sheet } from './spreadsheet.js';
-import { autoMapFields, matchByName, norm, type SynonymField } from './importMapping.js';
+import { autoMapFields, loose, matchByName, norm, type SynonymField } from './importMapping.js';
 
 /**
  * Turning a list of names into customers.
@@ -24,9 +24,11 @@ import { autoMapFields, matchByName, norm, type SynonymField } from './importMap
  * - **A near-match is not a new customer.** Two spellings of one buyer is the
  *   whole risk of importing names in bulk, and nothing downstream can tell
  *   them apart afterwards — every document, payment and order hangs off one
- *   `customer_id`. *Northern Traders Pvt. Ltd.* against *Northern Traders Pvt
- *   Ltd* is therefore left alone by default and reported, and adding it anyway
- *   is a choice on the dialog rather than the default.
+ *   `customer_id`. So a name that reads like a record already on file is left
+ *   alone by default and reported, and adding it anyway is a choice on the
+ *   dialog rather than the default. **The sheet is checked against itself the
+ *   same way**, which the book cannot do for it: a customer list holds its own
+ *   near-duplicates, and the client's own 698-row one holds two.
  * - **A near-match is never *updated* either**, which would rename a record
  *   the whole book points at to whatever the sheet happens to spell. Only an
  *   exact name is updated, and then only in the columns the sheet actually
@@ -189,6 +191,7 @@ export function buildCustomerImport(
   };
 
   const seen = new Map<string, number>();
+  const seenLoose = new Map<string, { row: number; name: string }>();
   const rows: CustomerRow[] = body.map((r, i) => {
     const rowNo = headerRow + 2 + i;
     const name = cell(r, 'name');
@@ -216,13 +219,34 @@ export function buildCustomerImport(
     if (!name) return { row: rowNo, customer, action: 'skip', note: 'No customer name in this row' };
 
     // The order sheet names each buyer once per line they ever ordered, so
-    // this is the rule that turns 804 rows into 210 customers.
+    // this is the rule that turns 804 rows into 198 customers.
     const key = norm(name);
     const first = seen.get(key);
     if (first !== undefined) {
       return { row: rowNo, customer, action: 'skip', note: `Already named on row ${first} of this sheet` };
     }
     seen.set(key, rowNo);
+
+    /*
+     * And the same question asked **within the sheet**, which the book on file
+     * cannot answer: a customer list can hold two spellings of one buyer
+     * itself, and on the client's own 698-row list two do — *Davat Beverages
+     * Private Limited* beside *Davat Beverages Limited*, and two spellings of
+     * one Bisleri branch. Matched against the book alone, both of each pair
+     * would have been created with nothing on screen to say so, which is the
+     * exact outcome the near-match rule exists to prevent. The first spelling
+     * in the sheet is the one that stands; `new` creates them both, as it does
+     * against the book.
+     */
+    const looseKey = loose(name);
+    const earlier = looseKey ? seenLoose.get(looseKey) : undefined;
+    if (earlier) {
+      const note = `Reads like “${earlier.name}” on row ${earlier.row} of this sheet`;
+      return nearMatch === 'new'
+        ? { row: rowNo, customer, action: 'create', note: `${note} — added anyway`, nearName: earlier.name }
+        : { row: rowNo, customer, action: 'skip', note: `${note} — left out`, nearName: earlier.name };
+    }
+    if (looseKey) seenLoose.set(looseKey, { row: rowNo, name });
 
     const match = matchByName(name, lookups.customers);
     if (match.exact && match.hit) {
