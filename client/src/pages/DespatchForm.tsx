@@ -104,10 +104,28 @@ export default function DespatchFormPage() {
     ownSent.set(it.order_line, { qty: prev.qty + (it.qty ?? 0), packs: prev.packs + (it.packs ?? 0) });
   }
 
+  /*
+   * The advance gate, stated before the press rather than sprung on it — the
+   * rule `despatchLimitError` follows about its own ceiling, and the reason
+   * the document forms carry `checks`.
+   *
+   * It binds on a **new** trip only, exactly as the server guards the POST and
+   * not the PUT: editing a trip changes nothing about whether the advance
+   * arrived, and holding a saved one would make every trip already on file
+   * uneditable.
+   */
+  const adv = order.advance_expected;
+  const heldForAdvance = !despatch && !!adv && adv.due > 0 && adv.outstanding > 0.005;
+  const money = (n: number) => `${adv?.currency ?? ''} ${new Intl.NumberFormat('en-IN').format(n)}`;
+
   const buttons = (
     <>
       <Button variant="secondary" onClick={() => navigate(-1)}>Cancel</Button>
-      <Button onClick={() => save.mutate(draft)} disabled={save.isPending || !canSave}>
+      <Button
+        onClick={() => save.mutate(draft)}
+        disabled={save.isPending || !canSave || heldForAdvance}
+        title={heldForAdvance ? 'The advance on this sales order has not been received' : undefined}
+      >
         {save.isPending ? 'Saving…' : 'Save dispatch'}
       </Button>
     </>
@@ -123,6 +141,20 @@ export default function DespatchFormPage() {
         </>}
         actions={buttons}
       />
+      {heldForAdvance && adv && (
+        <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+          <div className="font-semibold">The advance has not been received</div>
+          <p className="mt-0.5 text-amber-800">
+            This order&rsquo;s payment terms ({adv.terms}) ask for {money(adv.due)} up front
+            {adv.received > 0
+              ? <> and {money(adv.received)} has been recorded, so {money(adv.outstanding)} is still outstanding</>
+              : <>, and nothing has been recorded against it</>}.
+            Record it on{' '}
+            <Link to={`/orders/${order.id}`} className="font-medium text-amber-900 underline">{order.number}</Link>
+            {' '}— or correct the terms there — before the goods leave.
+          </p>
+        </div>
+      )}
       <DespatchFields
         draft={draft}
         items={order.items ?? []}

@@ -1,5 +1,6 @@
 import { db } from '../db/connection.js';
 import { round2, piecesOrdered, isPieceBasis } from './totals.js';
+import { advanceDue } from './receivables.js';
 
 /**
  * What a despatch line may say went out.
@@ -175,4 +176,59 @@ export function despatchDateError(
   if (eta && etd && eta < etd) return `ETA ${eta} is before ETD ${etd}: a vessel cannot arrive before it sails.`;
   if (eta && !etd && eta < d) return `ETA ${eta} is before the dispatch date ${d}.`;
   return null;
+}
+
+/**
+ * Nothing leaves until the advance the order asks for has arrived (2026-09-23,
+ * the client: *"dispatch should be recorded only when advance decided is
+ * received"*).
+ *
+ * The fourth guard of this shape on the despatch — after the QC gate, the
+ * quantity ceiling and the date — and the first about money. It exists because
+ * the terms on almost every order here say *30% Advance and Balance before
+ * Dispatch*, and until now nothing in the app read that sentence: a lorry could
+ * leave against an order nobody had banked a rupee on, and the only record that
+ * anything was owed was the wording on the document itself.
+ *
+ * **The commitment is the order's own terms, never a guess.** `advanceDue`
+ * reads the percentage out of the sentence the client writes, or the stored
+ * `advance_due` where an older order carries one. Terms that name no
+ * percentage — a credit term, `100% CAD`, the export book's bare `30-70` —
+ * ask for **nothing up front**, and this refuses nothing, which is the whole
+ * of what keeps it from stopping shipments it was never meant to stop. A
+ * blocking rule that fires wrongly stops a lorry, so everything ambiguous
+ * falls to "no advance decided".
+ *
+ * **Received is what the record says, not what the money did.** An order whose
+ * advance really was paid but never entered is refused, and correctly: the
+ * escape is to record it, which is one dialog on the order page and the reason
+ * that card was built. This is a real consequence for the imported backlog,
+ * where hundreds of orders carry advance terms and no payment rows, and it is
+ * the intended behaviour rather than an oversight — the alternative is a gate
+ * that passes whenever the record is silent, which is no gate at all.
+ *
+ * **POST only**, unlike `qcBlockError` beside it, and the difference is worth
+ * keeping: that one guards the PUT because a trip created with one innocuous
+ * line and then edited would walk a POST-only gate, whereas nothing about
+ * editing a trip changes whether the advance arrived, and `order_id` is not
+ * editable so a saved trip cannot be moved onto another order. Guarding the
+ * PUT would instead make every trip already on file uneditable until somebody
+ * back-filled a payment for it, which is the trap this codebase has built once
+ * already.
+ *
+ * 409, like the QC gate: the record does not support the claim, where
+ * `despatchLimitError` answers 400 for a figure that is simply wrong.
+ */
+export function advanceBlockError(orderId: number): string | null {
+  const a = advanceDue(orderId);
+  // Nothing was decided, so there is nothing to wait for.
+  if (a.due <= 0) return null;
+  // A paise of rounding is not an unpaid advance.
+  if (a.outstanding <= 0.005) return null;
+
+  const money = (n: number) => `${a.currency} ${fmt(n)}`;
+  return `The advance on this sales order has not been received. `
+    + `Its payment terms (${a.terms}) ask for ${money(a.due)} up front`
+    + (a.received > 0 ? ` and ${money(a.received)} has been recorded, so ${money(a.outstanding)} is still outstanding` : ', and nothing has been recorded against it')
+    + `. Record the advance on the sales order, or correct its payment terms, before the goods leave.`;
 }

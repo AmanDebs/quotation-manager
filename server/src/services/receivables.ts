@@ -462,6 +462,78 @@ const NO_ADVANCE: OrderAdvance = {
   payments: [], currency: '',
 };
 
+/** What an order asks for up front, and what has actually arrived against it. */
+export interface AdvanceDue {
+  /** The money the order's terms ask for before dispatch; 0 when they ask for none. */
+  due: number;
+  /** What has been banked — both pools, plus the legacy typed figure. */
+  received: number;
+  /** `due - received`, floored at zero. */
+  outstanding: number;
+  currency: string;
+  /** The terms the figure was read out of, for the sentence that refuses. */
+  terms: string;
+}
+
+/**
+ * The advance a set of payment terms asks for, in money, or 0 when it asks for
+ * none. Reads the leading percentage of a term like "40% Advance and Balance
+ * against shipping documents"; a credit term, a `100% CAD` or a bare `30-70`
+ * names no percentage and gives **0**, which is the conservative direction —
+ * this figure gates a lorry, and guessing one where the terms state none would
+ * hold a real shipment over a sentence nobody wrote as a commitment.
+ *
+ * It was written for the order form's Advance Due box, unused from 2026-09-17
+ * when that box was removed (*"the terms already say what is due up front, and
+ * a second figure typed there is one that can disagree"*), and kept "for the
+ * day the figure is wanted somewhere else". This is that day: deriving it from
+ * the terms rather than reinstating the box is what honours both instructions
+ * at once — one statement of what is due, in the client's own words, and a
+ * gate that reads it.
+ */
+export function advanceDueFrom(terms: string, total: number): number {
+  const m = String(terms ?? '').match(/(\d+(?:\.\d+)?)\s*%\s*advance/i);
+  if (!m || !total) return 0;
+  return round2((Number(m[1]) / 100) * total);
+}
+
+/**
+ * What one order asks for up front against what it has taken in.
+ *
+ * **The commitment is the terms, with the stored column as the more specific
+ * answer**: `orders.advance_due` is written only where somebody typed it — and
+ * since the box went, that is only orders raised before 2026-09-17 — so a
+ * figure explicitly agreed wins over one read out of a sentence.
+ *
+ * **Received counts the typed column too**, with `orderAdvance`'s recorded
+ * figure first, exactly as the order PDF's own *Advance Received* line reads:
+ * a legacy order carries its advance in that column and nowhere else, and
+ * refusing to see it would hold a lorry for money the record says arrived. It
+ * cannot be used to walk the gate — the box is offered only on an order that
+ * already carries a figure in it, never on a new one.
+ */
+export function advanceDue(orderId: number): AdvanceDue {
+  const o = db.prepare(
+    'SELECT currency, payment_terms, grand_total, advance_due, advance_amount FROM orders WHERE id = ?'
+  ).get(orderId) as
+    | { currency: string; payment_terms: string; grand_total: number; advance_due: number; advance_amount: number }
+    | undefined;
+  if (!o) return { due: 0, received: 0, outstanding: 0, currency: '', terms: '' };
+
+  const terms = String(o.payment_terms ?? '');
+  const due = Number(o.advance_due) > 0
+    ? round2(Number(o.advance_due))
+    : advanceDueFrom(terms, Number(o.grand_total) || 0);
+  const received = orderAdvance(orderId).amount_received || round2(Number(o.advance_amount) || 0);
+  return {
+    due,
+    received,
+    outstanding: Math.max(0, round2(due - received)),
+    currency: String(o.currency ?? ''),
+    terms,
+  };
+}
+
 /**
  * The same block, asked of a proforma directly.
  *

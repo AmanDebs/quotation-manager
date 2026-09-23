@@ -6,7 +6,7 @@ import { computeTotals, round2, type LineItemInput } from '../services/totals.js
 import { productionByOrder } from '../services/production.js';
 import { despatchedByOrder } from './despatches.js';
 import { orderMaterialCost } from '../services/costing.js';
-import { orderAdvance, advanceForProforma } from '../services/receivables.js';
+import { orderAdvance, advanceForProforma, advanceDue } from '../services/receivables.js';
 import { withStock, orderLines, productDemand, countOrderLines, orderSearchClause,
   type Filters, type OrderLine, type ProductDemand, statusClause } from '../services/orderLines.js';
 import { buildXlsx, attachmentName, type Column } from '../services/xlsx.js';
@@ -165,6 +165,19 @@ function getFull(id: number, req?: AuthedRequest) {
   // Optional `req` omits the rows rather than leaking them, the safe direction
   // the `despatches` key below takes for the same reason.
   if (!req || !allows(req, 'payment')) delete (order.advance as { payments?: unknown }).payments;
+  /*
+   * What the terms ask for up front and what has arrived, so the dispatch form
+   * can say why the lorry is held before somebody presses Save — the rule
+   * `despatchLimitError` follows about its own ceiling, and the reason the
+   * document forms carry `checks`.
+   *
+   * **Not gated on `payment`**, deliberately: the person recording the trip is
+   * Logistics, which holds `payment: none`, and `advanceBlockError` refuses
+   * their POST with this same sentence whatever the screen showed — so
+   * withholding it would hide the reason and not the fact. It names a
+   * percentage of a total this page already prints.
+   */
+  order.advance_expected = advanceDue(id);
   // What is still blank, in the words the PDF refuses with — listed on the
   // form above a quiet button rather than sprung on a click.
   order.checks = checkDocument('orders', id);
@@ -656,20 +669,6 @@ ordersRouter.get('/prefill/from-quotation/:quotationId', (req: AuthedRequest, re
  * invoices raised from that proforma, and copying the figure onto the order as
  * well would show the same money twice on the dashboard.
  */
-/**
- * The advance a set of payment terms asks for, in money, or 0 when it asks for
- * none. Reads the leading percentage of a term like "40% Advance and Balance
- * against shipping documents"; a credit term names no percentage and gives 0.
- * Unused since 2026-09-17, when Advance Due left the order form — kept, with
- * its regex, for the day the figure is wanted somewhere else.
- */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-function advanceDueFrom(terms: string, total: number): number {
-  const m = terms.match(/(\d+(?:\.\d+)?)\s*%\s*advance/i);
-  if (!m || !total) return 0;
-  return round2((Number(m[1]) / 100) * total);
-}
-
 ordersRouter.get('/prefill/from-proforma/:piId', (req: AuthedRequest, res) => {
   const piId = Number(req.params.piId);
   const pi = db.prepare('SELECT * FROM proforma_invoices WHERE id = ?').get(piId) as Record<string, unknown> | undefined;

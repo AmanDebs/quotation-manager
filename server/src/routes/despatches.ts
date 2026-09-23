@@ -4,7 +4,7 @@ import { round2 } from '../services/totals.js';
 import type { AuthedRequest } from '../middleware/auth.js';
 import { scopeClause, canAccessCustomer } from '../middleware/scope.js';
 import { qcBlockError } from '../services/qc.js';
-import { despatchLimitError, despatchDateError } from '../services/despatchLimits.js';
+import { despatchLimitError, despatchDateError, advanceBlockError } from '../services/despatchLimits.js';
 import { syncOrderStatus } from '../services/orderStatus.js';
 import { listBody } from '../services/pagination.js';
 import { searchClause } from '../services/search.js';
@@ -330,6 +330,11 @@ despatchesRouter.post('/', (req: AuthedRequest, res) => {
   // means and for the two things it deliberately does not block.
   const blocked = qcBlockError(order.id, items);
   if (blocked) return res.status(409).json({ error: blocked });
+  // And nothing leaves until the advance the order's own terms ask for has
+  // arrived. POST only — see `advanceBlockError` for why the PUT is not
+  // guarded and for what it deliberately never blocks.
+  const unpaid = advanceBlockError(order.id);
+  if (unpaid) return res.status(409).json({ error: unpaid });
   // A figure below zero, or far past what the line has left to ship. 400 and
   // not 409: nothing conflicts, the number itself is wrong.
   const outOfRange = despatchLimitError(order.id, items);

@@ -953,6 +953,12 @@ export interface Order {
      */
     payments?: Payment[];
   };
+  /**
+   * What the order's terms ask for up front against what has arrived. `due` is
+   * 0 when the terms name no advance, which is what the dispatch gate reads as
+   * "nothing to wait for".
+   */
+  advance_expected?: { due: number; received: number; outstanding: number; currency: string; terms: string };
   destination: string; transport: string; freight_terms: string;
   /** Export only: where the goods discharge. Named as on the proforma. */
   port_of_discharge: string;
