@@ -1,5 +1,6 @@
 import { parseWorkbook, splitHeader, splitAt, type Sheet } from './spreadsheet.js';
 import { piecesPerBillingUnit } from './totals.js';
+import { autoMapFields, loose, matchByName, norm } from './importMapping.js';
 
 /**
  * Turning a desk's own order sheet into sales orders.
@@ -108,33 +109,9 @@ export const ORDER_IMPORT_FIELDS: OrderFieldSpec[] = [
 
 export type OrderMapping = Partial<Record<OrderFieldKey, number>>;
 
-const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
-
-/** Best-guess column for each field: an exact heading beats a partial one. */
+/** Best-guess column for each field; the declaration order above decides ties. */
 export function autoMapOrders(headers: string[]): OrderMapping {
-  const normalised = headers.map(norm);
-  const taken = new Set<number>();
-  const mapping: OrderMapping = {};
-
-  for (const field of ORDER_IMPORT_FIELDS) {
-    let bestIdx = -1;
-    let bestScore = 0;
-    normalised.forEach((h, i) => {
-      if (!h || taken.has(i)) return;
-      for (const syn of field.synonyms) {
-        // A partial match is on **whole words**, not any substring. Measured
-        // against the live book: `po` matched *Transport* — "trans·po·rt" —
-        // so the customer's PO number was read out of a column holding freight
-        // notes. Padding both sides is the cheapest word boundary there is.
-        const score = h === syn ? 100 - field.synonyms.indexOf(syn)
-          : ` ${h} `.includes(` ${syn} `) ? 50 - field.synonyms.indexOf(syn)
-          : 0;
-        if (score > bestScore) { bestScore = score; bestIdx = i; }
-      }
-    });
-    if (bestIdx >= 0) { mapping[field.key] = bestIdx; taken.add(bestIdx); }
-  }
-  return mapping;
+  return autoMapFields(headers, ORDER_IMPORT_FIELDS);
 }
 
 /**
@@ -366,32 +343,6 @@ export interface OrderBuildOptions {
   rateBasis?: RateBasis;
   /** What to do with each status word, keyed by the word as the sheet spells it. */
   statusActions?: Record<string, StatusAction>;
-}
-
-/** Loose enough to survive "Pvt. Ltd." against "Pvt Ltd", and no looser. */
-const NOISE = /\b(pvt|private|ltd|limited|llp|inc|co|company|corporation|and)\b/g;
-const loose = (s: string) => norm(s).replace(NOISE, ' ').replace(/[^a-z0-9]/g, '');
-
-/**
- * Match a name against a book of them: the exact spelling first, then a loose
- * one — and a loose match that hits **more than one** record is refused rather
- * than guessed, because attaching an order to the wrong buyer is not a thing
- * anybody would notice afterwards.
- */
-function matchByName<T extends { id: number; name: string }>(
-  text: string, rows: T[]
-): { hit?: T; ambiguous?: boolean } {
-  const want = norm(text);
-  if (!want) return {};
-  const exact = rows.filter((r) => norm(r.name) === want);
-  if (exact.length === 1) return { hit: exact[0] };
-  if (exact.length > 1) return { hit: exact[0] };  // same spelling twice: either will do
-  const key = loose(text);
-  if (!key) return {};
-  const near = rows.filter((r) => loose(r.name) === key);
-  if (near.length === 1) return { hit: near[0] };
-  if (near.length > 1) return { ambiguous: true };
-  return {};
 }
 
 /** Name + colour + pcs per box, the catalogue's own identity for a product. */

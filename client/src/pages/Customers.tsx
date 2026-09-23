@@ -6,6 +6,8 @@ import type { Customer } from '../types';
 import { useCan } from '../App';
 import { Button, Input, PageHeader, EmptyState, ErrorText, Card, ExportTabs, Pagination, TH_CLASS } from '../components/ui';
 import CustomerDialog, { emptyCustomer } from '../components/CustomerDialog';
+import CustomerImportModal from '../components/CustomerImportModal';
+import { Icon } from '../components/icons';
 import { useUrlFilter } from '../lib/useUrlFilter';
 import { usePagedList, PAGE_SIZE } from '../lib/usePagedList';
 
@@ -18,6 +20,7 @@ export default function CustomersPage() {
   const [q, setQ] = useUrlFilter('q');
   const [exportFilter, setExportFilter] = useUrlFilter('export');
   const [editing, setEditing] = useState<Customer | Omit<Customer, 'id'> | null>(null);
+  const [importing, setImporting] = useState(false);
   const list = usePagedList<Customer>(
     ['customers', q, exportFilter],
     `/api/customers?q=${encodeURIComponent(q)}${exportFilter ? `&export=${exportFilter}` : ''}`,
@@ -34,7 +37,18 @@ export default function CustomersPage() {
       <PageHeader
         title="Customers"
         subtitle={`${list.total} customer${list.total === 1 ? '' : 's'}`}
-        actions={<Button onClick={() => setEditing({ ...emptyCustomer })}>+ New Customer</Button>}
+        actions={
+          <>
+            {/* Adding customers in bulk is adding customers: the same cell the
+                button beside it needs. */}
+            {can('customer', 'full') && (
+              <Button variant="secondary" onClick={() => setImporting(true)} className="inline-flex items-center gap-1.5">
+                <Icon name="upload" /> Import from Excel
+              </Button>
+            )}
+            <Button onClick={() => setEditing({ ...emptyCustomer })}>+ New Customer</Button>
+          </>
+        }
       />
       <div className="mb-3 flex flex-wrap items-center gap-3">
         <ExportTabs value={exportFilter} onChange={setExportFilter} />
@@ -103,6 +117,8 @@ export default function CustomersPage() {
           onSaved={(saved) => { if (!('id' in editing)) navigate(`/customers/${saved.id}`); }}
         />
       )}
+
+      {importing && <CustomerImportModal onClose={() => setImporting(false)} />}
     </div>
   );
 }

@@ -1,10 +1,13 @@
 import { Router } from 'express';
-import { db } from '../db/connection.js';
+import { db, transaction } from '../db/connection.js';
 import type { AuthedRequest } from '../middleware/auth.js';
 import { scopeClause, canAccessCustomer } from '../middleware/scope.js';
 import { listBody } from '../services/pagination.js';
 import { customerSummary } from '../services/customerSummary.js';
 import { searchClause } from '../services/search.js';
+import { CUSTOMER_IMPORT_FIELDS, buildCustomerImport, mappedColumns,
+  type CustomerBuildOptions, type CustomerLookups } from '../services/customerImport.js';
+import { decodeUpload } from '../services/productImport.js';
 
 export const customersRouter = Router();
 
@@ -38,6 +41,109 @@ customersRouter.get('/', (req: AuthedRequest, res) => {
     order: 'ORDER BY c.name, c.id',
     params,
   }));
+});
+
+/* ---------------------------------------------------------------- *
+ * Importing the customer book from a spreadsheet.
+ *
+ * Declared **above `/:id`**, or Express reads "import" as a customer id.
+ * `services/customerImport.ts` states what this refuses to do; the one rule
+ * that lives here is that a row is written exactly the way `POST /` writes
+ * one, including who owns it.
+ * ---------------------------------------------------------------- */
+
+customersRouter.get('/import/fields', (_req, res) => {
+  res.json(CUSTOMER_IMPORT_FIELDS.map(({ key, label, required }) => ({ key, label, required: !!required })));
+});
+
+function importLookups(req: AuthedRequest): CustomerLookups {
+  const scope = scopeClause(req, 'id');
+  return {
+    // Scoped like every other read: a Sales login matches against its own
+    // book, which is also the only book it could have created a duplicate in.
+    customers: db.prepare(
+      `SELECT id, name FROM customers${scope.sql ? ` WHERE ${scope.sql}` : ''}`
+    ).all(...(scope.params as never[])) as unknown as CustomerLookups['customers'],
+  };
+}
+
+function readImport(req: AuthedRequest) {
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  if (!body.file) throw new Error('No file was uploaded');
+  const buf = decodeUpload(String(body.file));
+  if (!buf.length) throw new Error('That file appears to be empty');
+  return buildCustomerImport(buf, String(body.filename ?? ''), importLookups(req), {
+    sheet: body.sheet ? String(body.sheet) : undefined,
+    headerRow: body.header_row !== undefined && body.header_row !== null ? Number(body.header_row) : undefined,
+    mapping: (body.mapping ?? undefined) as CustomerBuildOptions['mapping'],
+    onDuplicate: body.on_duplicate === 'update' ? 'update' : 'skip',
+    nearMatch: body.near_match === 'new' ? 'new' : 'same',
+  });
+}
+
+/** Dry run: every row, what it would do, and why a skipped one is skipped. */
+customersRouter.post('/import/preview', (req: AuthedRequest, res) => {
+  try {
+    res.json(readImport(req));
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : 'Could not read that file' });
+  }
+});
+
+/** Apply it. The file is re-parsed, so the result is the preview, not a copy. */
+customersRouter.post('/import', (req: AuthedRequest, res) => {
+  let result;
+  try {
+    result = readImport(req);
+  } catch (err) {
+    return res.status(400).json({ error: err instanceof Error ? err.message : 'Could not read that file' });
+  }
+  if (result.mapping.name === undefined || result.mapping.name < 0) {
+    return res.status(400).json({ error: 'Choose which column holds the customer name before importing' });
+  }
+  if (result.summary.create + result.summary.update === 0) {
+    return res.status(400).json({ error: 'Nothing to import — every row was skipped' });
+  }
+
+  /*
+   * An update writes **only the columns the sheet carries**. A list of names
+   * with nothing else on it must not blank the addresses, registrations and
+   * bank details already on file — the rule `productImport` learned about the
+   * photo, applied to every column rather than two, because a customer sheet
+   * is partial far more often than a price list is.
+   */
+  const cols = mappedColumns(result.mapping);
+  const insertCols = [...fields, 'is_export'] as const;
+  const insert = db.prepare(
+    `INSERT INTO customers (${insertCols.join(', ')}, owner_id) VALUES (${insertCols.map(() => '?').join(', ')}, ?)`
+  );
+  // `is_export` follows the country, so it is rewritten only where the sheet
+  // states one; otherwise a name list would make every export buyer domestic.
+  const updateCols = [...cols, ...(cols.includes('country') ? ['is_export' as const] : [])];
+  const update = updateCols.length
+    ? db.prepare(`UPDATE customers SET ${updateCols.map((c) => `${c} = ?`).join(', ')} WHERE id = ?`)
+    : null;
+
+  const counts = transaction(() => {
+    let created = 0;
+    let updated = 0;
+    for (const row of result.rows) {
+      const c = row.customer as unknown as Record<string, unknown>;
+      if (row.action === 'create') {
+        // Owned by whoever imported it, exactly as `POST /` hands a customer
+        // to whoever created it — without which a Sales login would import a
+        // book it cannot then see.
+        insert.run(...(insertCols.map((f) => c[f] ?? '') as never[]), req.user!.id);
+        created++;
+      } else if (row.action === 'update' && row.existingId !== undefined && update) {
+        update.run(...(updateCols.map((f) => c[f] ?? '') as never[]), row.existingId);
+        updated++;
+      }
+    }
+    return { created, updated };
+  });
+
+  res.json({ ...counts, skipped: result.summary.skip, sheet: result.sheet });
 });
 
 customersRouter.get('/:id', (req: AuthedRequest, res) => {

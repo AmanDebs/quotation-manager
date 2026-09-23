@@ -817,6 +817,31 @@ export interface OrderImportOrder {
   total: number;
 }
 
+/** One customer as the importer would add it, before anything is written. */
+export interface CustomerImportRow {
+  row: number;
+  customer: {
+    name: string; contact_person: string; email: string; phone: string;
+    address: string; city: string; country: string; gstin: string; currency: string;
+    consignee: string; notify_party: string; notify_party_2: string; notes: string;
+    is_export: number;
+  };
+  action: 'create' | 'update' | 'skip';
+  note?: string;
+  existingId?: number;
+  nearName?: string;
+}
+
+export interface CustomerImportPreview {
+  sheetNames: string[];
+  sheet: string;
+  headerRow: number;
+  headers: string[];
+  mapping: Record<string, number>;
+  rows: CustomerImportRow[];
+  summary: { create: number; update: number; skip: number; near: number; total: number };
+}
+
 export type OrderImportStatusAction = 'open' | 'completed' | 'cancelled' | 'skip';
 
 export interface OrderImportPreview {
