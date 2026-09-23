@@ -613,11 +613,22 @@ function itemsTable(s: Row, items: Row[], specs: ColumnSpec[], cfg: ColumnConfig
     });
   });
 
+  /*
+   * A custom column goes **before Amount, never after it** (2026-09-23, the
+   * client with a proforma carrying one: *"The amount column should be the
+   * last column even if I add a custom column"*). Appended, it took the last
+   * slot — and the money rows put their figure in the *last* column, so the
+   * grand total printed under the custom heading while Amount showed the sum
+   * of the lines above it: two figures, neither where it belongs. Money
+   * closes the table on every document here, so Amount is the column the
+   * closing row has to land in.
+   */
+  const extras: ColumnSpec[] = [];
   customNames.forEach((name, i) => {
     if (!name) return;
     const key = `custom${i + 1}`;
     if (hidden.has(key)) return;
-    columns.push({
+    extras.push({
       key,
       label: name,
       width: 55,
@@ -626,6 +637,10 @@ function itemsTable(s: Row, items: Row[], specs: ColumnSpec[], cfg: ColumnConfig
       always: true,
     });
   });
+  if (extras.length) {
+    const at = columns.findIndex((c) => c.key === 'amount');
+    columns.splice(at >= 0 ? at : columns.length, 0, ...extras);
+  }
 
   const head = (c: ColumnSpec): Cell => ({ ...th(s, c.label), alignment: c.key === 'description' ? 'left' : 'center' });
 

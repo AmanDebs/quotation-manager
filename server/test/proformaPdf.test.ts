@@ -117,4 +117,31 @@ describe('the advance on a proforma', () => {
     assert.deepEqual(middle(grand), ['20', '20,000'], 'the grand total lost the column totals');
     assert.deepEqual(middle(balance), [], 'the balance row carried the column totals');
   });
+
+  /**
+   * A custom column sits before Amount (2026-09-23, the client: *"The amount
+   * column should be the last column even if I add a custom column"*).
+   * Appended, it took the last slot — and a money row puts its figure in the
+   * last column, so the grand total printed under the custom heading while
+   * Amount carried the sum of the lines above it.
+   */
+  test('a custom column goes before Amount, which stays last', () => {
+    const pi = proformaWith(91420, 0);
+    db.prepare("UPDATE proforma_invoices SET column_config = ? WHERE id = ?")
+      .run(JSON.stringify({ hidden: [], custom: ['Custom'] }), pi);
+    const body = itemsBody(buildProformaPdf(pi));
+    const cellText = (c: any): string => (typeof c === 'string' ? c : String(c?.text ?? ''));
+    // The header row that carries the labels: an ungrouped column spans both
+    // rows and states its own there, so this is the one the order reads from.
+    const heads = (body.find((r) => r.some((c) => cellText(c) === 'Custom')) ?? body[0]).map(cellText);
+    const last = heads[heads.length - 1];
+    assert.ok(/AMOUNT/i.test(last), `Amount should close the table, got ${last}`);
+    assert.ok(heads.some((h) => h === 'Custom'), `the custom column is missing: ${heads.join(' | ')}`);
+    assert.ok(heads.indexOf('Custom') < heads.length - 1, 'the custom column took the last slot');
+
+    // And the grand total lands in Amount rather than in the custom column.
+    const grand = body[body.length - 1];
+    assert.ok(cellText(grand[0]).includes('TOTAL'), `expected the total to close the table, got ${cellText(grand[0])}`);
+    assert.ok(cellText(grand[grand.length - 1]).includes('91,420'), 'the grand total is not in the last column');
+  });
 });
