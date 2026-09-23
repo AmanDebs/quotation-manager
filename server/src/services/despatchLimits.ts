@@ -1,6 +1,6 @@
 import { db } from '../db/connection.js';
 import { round2, piecesOrdered, isPieceBasis } from './totals.js';
-import { advanceDue } from './receivables.js';
+import { preDispatchDue } from './receivables.js';
 
 /**
  * What a despatch line may say went out.
@@ -190,7 +190,7 @@ export function despatchDateError(
  * leave against an order nobody had banked a rupee on, and the only record that
  * anything was owed was the wording on the document itself.
  *
- * **The commitment is the order's own terms, never a guess.** `advanceDue`
+ * **The commitment is the order's own terms, never a guess.** `preDispatchDue`
  * reads the percentage out of the sentence the client writes, or the stored
  * `advance_due` where an older order carries one. Terms that name no
  * percentage — a credit term, `100% CAD`, the export book's bare `30-70` —
@@ -198,6 +198,19 @@ export function despatchDateError(
  * of what keeps it from stopping shipments it was never meant to stop. A
  * blocking rule that fires wrongly stops a lorry, so everything ambiguous
  * falls to "no advance decided".
+ *
+ * **And the balance where the terms settle it before dispatch** (2026-09-23,
+ * the client, asked the same hour as the advance half: *"Yes, hold the balance
+ * before dispatch too"*). The distinction is theirs and is already written
+ * into their own two term lists: a domestic sale reads *Balance **before
+ * Dispatch*** and an export one *Balance **against shipping documents***,
+ * which is settled against a bill of lading that exists only once the
+ * container has gone. So the first holds the **whole order value** and the
+ * second holds the advance alone — see `balanceBeforeDispatch`. The figure is
+ * deliberately **not pro-rated across a part shipment**: nobody wrote a
+ * pro-rata rule, and inventing one would release a lorry against money the
+ * terms say is due. On an order genuinely shipped in parts under such terms,
+ * the honest answer is to correct the terms to what was really agreed.
  *
  * **Received is what the record says, not what the money did.** An order whose
  * advance really was paid but never entered is refused, and correctly: the
@@ -220,15 +233,22 @@ export function despatchDateError(
  * `despatchLimitError` answers 400 for a figure that is simply wrong.
  */
 export function advanceBlockError(orderId: number): string | null {
-  const a = advanceDue(orderId);
+  const a = preDispatchDue(orderId);
   // Nothing was decided, so there is nothing to wait for.
-  if (a.due <= 0) return null;
+  if (a.basis === 'none') return null;
   // A paise of rounding is not an unpaid advance.
   if (a.outstanding <= 0.005) return null;
 
   const money = (n: number) => `${a.currency} ${fmt(n)}`;
-  return `The advance on this sales order has not been received. `
-    + `Its payment terms (${a.terms}) ask for ${money(a.due)} up front`
-    + (a.received > 0 ? ` and ${money(a.received)} has been recorded, so ${money(a.outstanding)} is still outstanding` : ', and nothing has been recorded against it')
-    + `. Record the advance on the sales order, or correct its payment terms, before the goods leave.`;
+  const headline = a.basis === 'full'
+    ? 'This sales order has not been paid for.'
+    : 'The advance on this sales order has not been received.';
+  const asks = a.basis === 'full'
+    ? `Its payment terms (${a.terms}) settle the balance before dispatch, so the whole ${money(a.due)} is due before the goods leave`
+    : `Its payment terms (${a.terms}) ask for ${money(a.due)} up front`;
+  return `${headline} ${asks}`
+    + (a.received > 0
+      ? ` and ${money(a.received)} has been recorded, so ${money(a.outstanding)} is still outstanding`
+      : ', and nothing has been recorded against it')
+    + '. Record the payment on the sales order, or correct its payment terms, before the goods leave.';
 }

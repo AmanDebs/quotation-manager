@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { db } from '../src/db/connection.js';
 import { despatchLimitError, despatchDateError, todayInKolkata,
   advanceBlockError } from '../src/services/despatchLimits.js';
+import { preDispatchDue } from '../src/services/receivables.js';
 import { makeCustomer } from './helpers/factory.js';
 
 /**
@@ -195,6 +196,11 @@ describe('when a despatch may say it left', () => {
  * than no rule at all. Everything ambiguous has to fall to "no advance decided".
  */
 describe('the advance gate on a dispatch', () => {
+  // The fixtures here use the **export** phrasing — *Balance against shipping
+  // documents* — because this group is about the advance on its own. The
+  // domestic *Balance before Dispatch* raises the figure to the whole order
+  // value, which is the group below.
+
   const orderWith = (terms: string, total: number, over: Record<string, unknown> = {}) => {
     const c = makeCustomer();
     const cols = ['number', 'date', 'customer_id', 'currency', 'tax_type', 'status', 'payment_terms', 'grand_total'];
@@ -212,7 +218,7 @@ describe('the advance gate on a dispatch', () => {
     ).run(o.customer_id, o.id, amount, currency);
 
   test('terms asking for an advance nobody has banked refuse the trip', () => {
-    const o = orderWith('30% Advance and Balance before Dispatch', 59000);
+    const o = orderWith('30% Advance and Balance against shipping documents', 59000);
     const err = advanceBlockError(o.id);
     assert.ok(err, 'a trip must be refused');
     assert.match(String(err), /has not been received/);
@@ -221,13 +227,13 @@ describe('the advance gate on a dispatch', () => {
   });
 
   test('the advance recorded in full opens it', () => {
-    const o = orderWith('30% Advance and Balance before Dispatch', 59000);
+    const o = orderWith('30% Advance and Balance against shipping documents', 59000);
     bank(o, 17700);
     assert.equal(advanceBlockError(o.id), null);
   });
 
   test('a part advance is still an advance not received, and the sentence says what is short', () => {
-    const o = orderWith('30% Advance and Balance before Dispatch', 59000);
+    const o = orderWith('30% Advance and Balance against shipping documents', 59000);
     bank(o, 10000);
     const err = String(advanceBlockError(o.id));
     assert.match(err, /10,000 has been recorded/);
@@ -245,12 +251,12 @@ describe('the advance gate on a dispatch', () => {
   });
 
   test('an order with no total decides nothing either', () => {
-    const o = orderWith('30% Advance and Balance before Dispatch', 0);
+    const o = orderWith('30% Advance and Balance against shipping documents', 0);
     assert.equal(advanceBlockError(o.id), null);
   });
 
   test('a stored advance_due is the more specific answer and overrides the terms', () => {
-    const o = orderWith('30% Advance and Balance before Dispatch', 59000, { advance_due: 5000 });
+    const o = orderWith('30% Advance and Balance against shipping documents', 59000, { advance_due: 5000 });
     bank(o, 5000);
     assert.equal(advanceBlockError(o.id), null, 'the figure somebody agreed, not 30% of the total');
   });
@@ -259,18 +265,18 @@ describe('the advance gate on a dispatch', () => {
     // An order raised before payments could be recorded against one carries its
     // advance in that column and nowhere else; refusing it would hold a lorry
     // for money the record says arrived.
-    const o = orderWith('30% Advance and Balance before Dispatch', 59000, { advance_amount: 17700 });
+    const o = orderWith('30% Advance and Balance against shipping documents', 59000, { advance_amount: 17700 });
     assert.equal(advanceBlockError(o.id), null);
   });
 
   test('an advance in another currency is credited to nothing, so it does not open the gate', () => {
-    const o = orderWith('30% Advance and Balance before Dispatch', 59000);
+    const o = orderWith('30% Advance and Balance against shipping documents', 59000);
     bank(o, 17700, 'EUR');
     assert.ok(advanceBlockError(o.id), 'money the ledger cannot count cannot release a lorry');
   });
 
   test('a paise of rounding is not an unpaid advance', () => {
-    const o = orderWith('33.33% Advance and Balance before Dispatch', 100);
+    const o = orderWith('33.33% Advance and Balance against shipping documents', 100);
     bank(o, 33.33);
     assert.equal(advanceBlockError(o.id), null);
   });
@@ -280,5 +286,82 @@ describe('the advance gate on a dispatch', () => {
     assert.ok(advanceBlockError(o.id));
     bank(o, 59000);
     assert.equal(advanceBlockError(o.id), null);
+  });
+});
+
+/**
+ * And the balance, where the terms settle it before the goods leave
+ * (2026-09-23: *"Yes, hold the balance before dispatch too"*).
+ *
+ * The distinction is the client's own, written into their two term lists: a
+ * domestic sale settles the balance **before Dispatch** and an export one
+ * **against shipping documents**, which cannot be presented until the
+ * container has gone. So one holds the whole order value and the other holds
+ * the advance alone, and the tests that matter most are the ones asserting the
+ * export side is *not* held.
+ */
+describe('the balance where the terms settle it before dispatch', () => {
+  const orderWith = (terms: string, total: number, over: Record<string, unknown> = {}) => {
+    const c = makeCustomer();
+    const cols = ['number', 'date', 'customer_id', 'currency', 'tax_type', 'status', 'payment_terms', 'grand_total'];
+    const vals: unknown[] = [`SO/${Math.random().toString(36).slice(2, 8)}`, '2026-09-01', c, 'INR', 'igst', 'confirmed', terms, total];
+    for (const [k, v] of Object.entries(over)) { cols.push(k); vals.push(v); }
+    const r = db.prepare(
+      `INSERT INTO orders (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')}) RETURNING id, customer_id`
+    ).get(...(vals as never[])) as { id: number; customer_id: number };
+    return r;
+  };
+  const bank = (o: { id: number; customer_id: number }, amount: number) =>
+    db.prepare(
+      `INSERT INTO payments (customer_id, order_id, amount, currency, date, method)
+       VALUES (?, ?, ?, 'INR', '2026-09-02', 'bank')`
+    ).run(o.customer_id, o.id, amount);
+
+  test('the advance alone no longer opens the gate', () => {
+    const o = orderWith('30% Advance and Balance before Dispatch', 59000);
+    bank(o, 17700);
+    const err = String(advanceBlockError(o.id));
+    assert.match(err, /has not been paid for/);
+    assert.match(err, /whole INR 59,000 is due/);
+    assert.match(err, /41,300 is still outstanding/);
+  });
+
+  test('and the whole value does', () => {
+    const o = orderWith('30% Advance and Balance before Dispatch', 59000);
+    bank(o, 59000);
+    assert.equal(advanceBlockError(o.id), null);
+  });
+
+  test('an export term settled against shipping documents holds the advance only', () => {
+    // The bill of lading exists only once the container has gone, so holding
+    // the balance for it would hold every export shipment for ever.
+    const o = orderWith('30% Advance and Balance against shipping documents', 59000);
+    bank(o, 17700);
+    assert.equal(advanceBlockError(o.id), null);
+  });
+
+  test('the basis says which figure it is', () => {
+    assert.equal(preDispatchDue(orderWith('30% Advance and Balance before Dispatch', 59000).id).basis, 'full');
+    assert.equal(preDispatchDue(orderWith('30% Advance and Balance against shipping documents', 59000).id).basis, 'advance');
+    assert.equal(preDispatchDue(orderWith('30 Days Credit', 59000).id).basis, 'none');
+  });
+
+  test('“before dispatch” in terms that name no money still asks for nothing', () => {
+    // A sentence this cannot price is not a commitment it may hold a lorry on.
+    const o = orderWith('Payment before dispatch', 59000);
+    assert.equal(advanceBlockError(o.id), null);
+  });
+
+  test('both spellings are read, this app having one on screen and the other in the schema', () => {
+    for (const terms of ['30% Advance and Balance before Dispatch', '30% Advance and balance before despatch']) {
+      assert.equal(preDispatchDue(orderWith(terms, 59000).id).due, 59000, terms);
+    }
+  });
+
+  test('a stored advance_due still wins, and the balance still follows it', () => {
+    const o = orderWith('30% Advance and Balance before Dispatch', 59000, { advance_due: 5000 });
+    const d = preDispatchDue(o.id);
+    assert.equal(d.basis, 'full');
+    assert.equal(d.due, 59000, 'the balance is the rest of the order whatever the advance was agreed at');
   });
 });

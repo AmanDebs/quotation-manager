@@ -6,7 +6,7 @@ import { computeTotals, round2, type LineItemInput } from '../services/totals.js
 import { productionByOrder } from '../services/production.js';
 import { despatchedByOrder } from './despatches.js';
 import { orderMaterialCost } from '../services/costing.js';
-import { orderAdvance, advanceForProforma, advanceDue } from '../services/receivables.js';
+import { orderAdvance, advanceForProforma, preDispatchDue } from '../services/receivables.js';
 import { withStock, orderLines, productDemand, countOrderLines, orderSearchClause,
   type Filters, type OrderLine, type ProductDemand, statusClause } from '../services/orderLines.js';
 import { buildXlsx, attachmentName, type Column } from '../services/xlsx.js';
@@ -166,10 +166,11 @@ function getFull(id: number, req?: AuthedRequest) {
   // the `despatches` key below takes for the same reason.
   if (!req || !allows(req, 'payment')) delete (order.advance as { payments?: unknown }).payments;
   /*
-   * What the terms ask for up front and what has arrived, so the dispatch form
-   * can say why the lorry is held before somebody presses Save — the rule
-   * `despatchLimitError` follows about its own ceiling, and the reason the
-   * document forms carry `checks`.
+   * What the terms require before the goods may leave — the advance, or the
+   * whole value where they settle the balance before dispatch — against what
+   * has arrived. It rides here so the dispatch form can say why the lorry is
+   * held before somebody presses Save, the rule `despatchLimitError` follows
+   * about its own ceiling and the reason the document forms carry `checks`.
    *
    * **Not gated on `payment`**, deliberately: the person recording the trip is
    * Logistics, which holds `payment: none`, and `advanceBlockError` refuses
@@ -177,7 +178,7 @@ function getFull(id: number, req?: AuthedRequest) {
    * withholding it would hide the reason and not the fact. It names a
    * percentage of a total this page already prints.
    */
-  order.advance_expected = advanceDue(id);
+  order.pre_dispatch_due = preDispatchDue(id);
   // What is still blank, in the words the PDF refuses with — listed on the
   // form above a quiet button rather than sprung on a click.
   order.checks = checkDocument('orders', id);

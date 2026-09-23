@@ -462,17 +462,23 @@ const NO_ADVANCE: OrderAdvance = {
   payments: [], currency: '',
 };
 
-/** What an order asks for up front, and what has actually arrived against it. */
-export interface AdvanceDue {
-  /** The money the order's terms ask for before dispatch; 0 when they ask for none. */
+/** What an order must have taken in before its goods may leave. */
+export interface PreDispatchDue {
+  /** The money that must be in before a trip is recorded; 0 when the terms ask for none. */
   due: number;
-  /** What has been banked — both pools, plus the legacy typed figure. */
+  /** What has been banked — both advance pools, plus the legacy typed figure. */
   received: number;
   /** `due - received`, floored at zero. */
   outstanding: number;
   currency: string;
   /** The terms the figure was read out of, for the sentence that refuses. */
   terms: string;
+  /**
+   * Why `due` is what it is. `advance` — the percentage the terms ask for up
+   * front. `full` — the whole order value, because the terms also settle the
+   * **balance before dispatch**. `none` — the terms name no figure at all.
+   */
+  basis: 'none' | 'advance' | 'full';
 }
 
 /**
@@ -498,12 +504,31 @@ export function advanceDueFrom(terms: string, total: number): number {
 }
 
 /**
- * What one order asks for up front against what it has taken in.
+ * Do these terms settle the **balance before the goods leave**?
+ *
+ * The client's own two lists are what make this answerable rather than a
+ * guess, and the distinction is theirs: a domestic sale reads *"N% Advance and
+ * Balance **before Dispatch**"* and an export one *"N% Advance and Balance
+ * **against shipping documents**"* — the second is settled against the bill of
+ * lading, which by definition exists only after the container has gone. So the
+ * phrase decides it, and a term that does not carry it holds nothing beyond
+ * its advance. Both spellings, this app having one on screen and the other in
+ * the schema.
+ */
+export const balanceBeforeDispatch = (terms: string) =>
+  /before\s+(dis|des)patch/i.test(String(terms ?? ''));
+
+/**
+ * What one order must have taken in before a trip may be recorded against it.
  *
  * **The commitment is the terms, with the stored column as the more specific
  * answer**: `orders.advance_due` is written only where somebody typed it — and
  * since the box went, that is only orders raised before 2026-09-17 — so a
- * figure explicitly agreed wins over one read out of a sentence.
+ * figure explicitly agreed wins over one read out of a sentence. Terms that
+ * also settle the balance before dispatch raise the figure to the **whole
+ * order value**, which is what that sentence says and is deliberately not
+ * pro-rated across a part shipment: nobody wrote a pro-rata rule, and
+ * inventing one would let a lorry go against money the terms say is due.
  *
  * **Received counts the typed column too**, with `orderAdvance`'s recorded
  * figure first, exactly as the order PDF's own *Advance Received* line reads:
@@ -512,18 +537,22 @@ export function advanceDueFrom(terms: string, total: number): number {
  * cannot be used to walk the gate — the box is offered only on an order that
  * already carries a figure in it, never on a new one.
  */
-export function advanceDue(orderId: number): AdvanceDue {
+export function preDispatchDue(orderId: number): PreDispatchDue {
   const o = db.prepare(
     'SELECT currency, payment_terms, grand_total, advance_due, advance_amount FROM orders WHERE id = ?'
   ).get(orderId) as
     | { currency: string; payment_terms: string; grand_total: number; advance_due: number; advance_amount: number }
     | undefined;
-  if (!o) return { due: 0, received: 0, outstanding: 0, currency: '', terms: '' };
+  if (!o) return { due: 0, received: 0, outstanding: 0, currency: '', terms: '', basis: 'none' };
 
   const terms = String(o.payment_terms ?? '');
-  const due = Number(o.advance_due) > 0
-    ? round2(Number(o.advance_due))
-    : advanceDueFrom(terms, Number(o.grand_total) || 0);
+  const total = round2(Number(o.grand_total) || 0);
+  const advance = Number(o.advance_due) > 0 ? round2(Number(o.advance_due)) : advanceDueFrom(terms, total);
+  // The balance falls due too, so the figure is everything — but only where
+  // the terms themselves already ask for something, since "before dispatch"
+  // in a sentence naming no money is not a commitment this can price.
+  const full = advance > 0 && balanceBeforeDispatch(terms);
+  const due = full ? total : advance;
   const received = orderAdvance(orderId).amount_received || round2(Number(o.advance_amount) || 0);
   return {
     due,
@@ -531,6 +560,7 @@ export function advanceDue(orderId: number): AdvanceDue {
     outstanding: Math.max(0, round2(due - received)),
     currency: String(o.currency ?? ''),
     terms,
+    basis: due <= 0 ? 'none' : full ? 'full' : 'advance',
   };
 }
 

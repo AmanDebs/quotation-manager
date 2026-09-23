@@ -114,8 +114,8 @@ export default function DespatchFormPage() {
    * arrived, and holding a saved one would make every trip already on file
    * uneditable.
    */
-  const adv = order.advance_expected;
-  const heldForAdvance = !despatch && !!adv && adv.due > 0 && adv.outstanding > 0.005;
+  const adv = order.pre_dispatch_due;
+  const heldForAdvance = !despatch && !!adv && adv.basis !== 'none' && adv.outstanding > 0.005;
   const money = (n: number) => `${adv?.currency ?? ''} ${new Intl.NumberFormat('en-IN').format(n)}`;
 
   const buttons = (
@@ -124,7 +124,7 @@ export default function DespatchFormPage() {
       <Button
         onClick={() => save.mutate(draft)}
         disabled={save.isPending || !canSave || heldForAdvance}
-        title={heldForAdvance ? 'The advance on this sales order has not been received' : undefined}
+        title={heldForAdvance ? 'This sales order has not been paid for — see the note above' : undefined}
       >
         {save.isPending ? 'Saving…' : 'Save dispatch'}
       </Button>
@@ -143,9 +143,14 @@ export default function DespatchFormPage() {
       />
       {heldForAdvance && adv && (
         <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-          <div className="font-semibold">The advance has not been received</div>
+          <div className="font-semibold">
+            {adv.basis === 'full' ? 'This order has not been paid for' : 'The advance has not been received'}
+          </div>
           <p className="mt-0.5 text-amber-800">
-            This order&rsquo;s payment terms ({adv.terms}) ask for {money(adv.due)} up front
+            This order&rsquo;s payment terms ({adv.terms}){' '}
+            {adv.basis === 'full'
+              ? <>settle the balance before dispatch, so the whole {money(adv.due)} is due before the goods leave</>
+              : <>ask for {money(adv.due)} up front</>}
             {adv.received > 0
               ? <> and {money(adv.received)} has been recorded, so {money(adv.outstanding)} is still outstanding</>
               : <>, and nothing has been recorded against it</>}.
