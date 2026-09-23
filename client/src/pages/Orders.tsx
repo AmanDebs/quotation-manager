@@ -8,6 +8,8 @@ import { useCompanies } from '../components/CompanySelect';
 import { fmtDate, fmtMoney, fmtQty, today } from '../lib/format';
 import { usePagedList, PAGE_SIZE, type PagedList } from '../lib/usePagedList';
 import { useCan } from '../App';
+import { Icon } from '../components/icons';
+import OrderImportModal from '../components/OrderImportModal';
 
 /**
  * A dispatch is recorded from the book (asked for 2026-09-14: "a button to
@@ -172,6 +174,7 @@ export default function OrdersPage() {
   };
   const setStatusFilter = (v: string) => setParam('status', v);
   const [exportFilter, setExportFilter] = useState('');
+  const [importing, setImporting] = useState(false);
   const can = useCan();
   const canDispatch = can('dispatch', 'full');
 
@@ -223,6 +226,13 @@ export default function OrdersPage() {
         actions={
           <div className="flex items-center gap-2">
             <DownloadButton href={`/api/orders/export?view=${view}${query ? `&${query}` : ''}`} />
+            {/* Booking a backlog is booking orders, so it sits behind the same
+                cell as the button beside it. */}
+            {can('order', 'full') && (
+              <Button variant="secondary" onClick={() => setImporting(true)} className="inline-flex items-center gap-1.5">
+                <Icon name="upload" /> Import Orders
+              </Button>
+            )}
             <Button onClick={() => navigate('/orders/new')}>+ New Sales Order</Button>
           </div>
         }
@@ -352,6 +362,8 @@ export default function OrdersPage() {
           />
         </Card>
       )}
+
+      {importing && <OrderImportModal onClose={() => setImporting(false)} />}
     </div>
   );
 }

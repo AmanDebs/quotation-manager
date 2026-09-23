@@ -746,7 +746,7 @@ export interface LineDespatch {
   trips: number;
 }
 
-export interface ImportField { key: string; label: string; required: boolean }
+export interface ImportField { key: string; label: string; required: boolean; scope?: 'order' | 'line' }
 
 export interface ImportPreviewRow {
   row: number;
@@ -764,6 +764,64 @@ export interface ImportPreview {
   mapping: Record<string, number>;
   rows: ImportPreviewRow[];
   summary: { create: number; update: number; skip: number; total: number };
+}
+
+/** One order line as the importer would book it, before anything is written. */
+export interface OrderImportLine {
+  row: number;
+  product_id: number | null;
+  description: string;
+  code: string;
+  color: string;
+  hsn_code: string;
+  unit: string;
+  qty: number | null;
+  unit_price: number;
+  tax_pct: number;
+  packs: number | null;
+  pcs_per_pack: number | null;
+  total_pcs: number | null;
+  supplier: string;
+  scheduled_date: string;
+  note?: string;
+}
+
+export interface OrderImportOrder {
+  number: string;
+  rows: number[];
+  customer_text: string;
+  customer_id: number | null;
+  customer_name: string;
+  date: string;
+  po_number: string;
+  po_date: string;
+  promised_date: string;
+  revised_date: string;
+  payment_terms: string;
+  inco_terms: string;
+  destination: string;
+  spoc: string;
+  order_through: string;
+  remarks: string;
+  currency: string;
+  is_export: number;
+  tax_type: 'none' | 'igst';
+  lines: OrderImportLine[];
+  dropped: { row: number; note: string }[];
+  action: 'create' | 'skip';
+  note?: string;
+  existingId?: number;
+  total: number;
+}
+
+export interface OrderImportPreview {
+  sheetNames: string[];
+  sheet: string;
+  headerRow: number;
+  headers: string[];
+  mapping: Record<string, number>;
+  orders: OrderImportOrder[];
+  summary: { create: number; skip: number; lines: number; rows: number };
 }
 
 export interface LineItem {

@@ -20,6 +20,8 @@ import { listBody, pageRequest } from '../services/pagination.js';
 import { syncProformaOrdered, syncProformaUnordered, alreadyOrderedError } from '../services/documentChain.js';
 import { blockUnapprovedConversion } from '../services/approval.js';
 import { batchesForOrder } from '../services/batch.js';
+import { ORDER_IMPORT_FIELDS, buildOrderImport, type Lookups, type OrderBuildOptions } from '../services/orderImport.js';
+import { decodeUpload } from '../services/productImport.js';
 
 
 export const ordersRouter = Router();
@@ -452,6 +454,144 @@ ordersRouter.get('/export', (req: AuthedRequest, res) => {
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.setHeader('Content-Disposition', `attachment; filename="${attachmentName(sheet)}"`);
   res.send(book);
+});
+
+/* ---------------------------------------------------------------- *
+ * Loading a backlog from a spreadsheet.
+ *
+ * Declared **above `/:id`**, or Express reads "import" as an order id — the
+ * rule `/export` already follows one block up.
+ *
+ * All three are POSTs but for `fields`, so the mount's `requireFunction`
+ * settles the guard at `order: full`: the preview writes nothing, but it
+ * reads the customer book and the catalogue and is part of an act that does.
+ * `services/orderImport.ts` states what this deliberately does not do.
+ * ---------------------------------------------------------------- */
+
+/** The columns an import can fill, so the client can draw the mapping UI. */
+ordersRouter.get('/import/fields', (_req, res) => {
+  res.json(ORDER_IMPORT_FIELDS.map(({ key, label, scope, required }) => ({ key, label, scope, required: !!required })));
+});
+
+/**
+ * What this caller may attach an order to. Scoped like every other read, so a
+ * Sales login cannot book a backlog onto somebody else's customer by typing
+ * their name into a sheet — the name simply will not match.
+ */
+function importLookups(req: AuthedRequest): Lookups {
+  const scope = scopeClause(req, 'id');
+  return {
+    customers: db.prepare(
+      `SELECT id, name, currency, country, is_export FROM customers${scope.sql ? ` WHERE ${scope.sql}` : ''}`
+    ).all(...(scope.params as never[])) as unknown as Lookups['customers'],
+    products: db.prepare(
+      'SELECT id, name, color, pcs_per_pack, hsn_code, unit, unit_price FROM products'
+    ).all() as unknown as Lookups['products'],
+    orderNumbers: new Map(
+      (db.prepare('SELECT id, number FROM orders').all() as { id: number; number: string }[])
+        .map((o) => [String(o.number).trim().toLowerCase(), o.id])
+    ),
+  };
+}
+
+function importOptions(body: Record<string, unknown>): OrderBuildOptions {
+  return {
+    sheet: body.sheet ? String(body.sheet) : undefined,
+    headerRow: body.header_row !== undefined && body.header_row !== null ? Number(body.header_row) : undefined,
+    mapping: (body.mapping ?? undefined) as OrderBuildOptions['mapping'],
+    quantityBasis: body.quantity_basis === 'billing' ? 'billing' : 'pieces',
+  };
+}
+
+function readImport(req: AuthedRequest) {
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  if (!body.file) throw new Error('No file was uploaded');
+  const buf = decodeUpload(String(body.file));
+  if (!buf.length) throw new Error('That file appears to be empty');
+  return buildOrderImport(buf, String(body.filename ?? ''), importLookups(req), importOptions(body));
+}
+
+/** Dry run: exactly what would be booked, and why each skipped order is skipped. */
+ordersRouter.post('/import/preview', (req: AuthedRequest, res) => {
+  try {
+    res.json(readImport(req));
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : 'Could not read that file' });
+  }
+});
+
+/** Apply it. The file is re-parsed, so the result is the preview, not a copy of it. */
+ordersRouter.post('/import', (req: AuthedRequest, res) => {
+  let result;
+  try {
+    result = readImport(req);
+  } catch (err) {
+    return res.status(400).json({ error: err instanceof Error ? err.message : 'Could not read that file' });
+  }
+  if (result.mapping.number === undefined || result.mapping.number < 0) {
+    return res.status(400).json({ error: 'Choose which column holds the order number before importing' });
+  }
+  if (result.summary.create === 0) {
+    return res.status(400).json({ error: 'Nothing to import — every order was skipped' });
+  }
+
+  /*
+   * One transaction for the whole load. A backlog is one act: half of it
+   * written, with nothing to say which half, is worse than none of it — and
+   * re-running the import is then safe, since every number now on file is
+   * skipped by name.
+   */
+  const numbers = transaction(() => {
+    const written: string[] = [];
+    for (const o of result.orders) {
+      if (o.action !== 'create' || !o.customer_id) continue;
+      const companyId = resolveCompanyId(null, o.customer_id);
+      const h = headerValues({
+        date: o.date || new Date().toISOString().slice(0, 10),
+        customer_id: o.customer_id,
+        is_export: o.is_export,
+        currency: o.currency,
+        tax_type: o.tax_type,
+        po_number: o.po_number,
+        po_date: o.po_date,
+        promised_date: o.promised_date,
+        revised_date: o.revised_date,
+        payment_terms: o.payment_terms,
+        inco_terms: o.inco_terms,
+        // One column on the sheet, and which of ours it means depends on where
+        // the goods are going: a port on an export, a delivery town at home.
+        [o.is_export ? 'port_of_discharge' : 'destination']: o.destination,
+        spoc: o.spoc,
+        order_through: o.order_through,
+        remarks: o.remarks,
+      });
+      const info = db.prepare(
+        `INSERT INTO orders (number, company_id, ${headerFields.join(', ')}, created_by, column_config, status)
+         VALUES (?, ?, ${headerFields.map(() => '?').join(', ')}, ?, ?, ?)`
+      ).run(
+        o.number, companyId,
+        ...(headerFields.map((f) => (h as Record<string, unknown>)[f]) as never[]),
+        req.user!.id, JSON.stringify({}), 'pending'
+      );
+      const id = Number(info.lastInsertRowid);
+      saveItems(id, o.lines as OrderItemInput[], h.tax_type, 0, 0, h.currency);
+      // An imported order is a booked order: it raises its jobs like any
+      // other, and not raising them would only last until the next restart,
+      // when `raiseJobsForOpenOrders()` would raise them anyway.
+      syncOrderJobs(id, req.user!.id);
+      syncOrderStatus(id);
+      written.push(o.number);
+    }
+    return written;
+  });
+
+  res.json({
+    created: numbers.length,
+    lines: result.summary.lines,
+    skipped: result.summary.skip,
+    numbers: numbers.slice(0, 50),
+    sheet: result.sheet,
+  });
 });
 
 ordersRouter.get('/:id', (req: AuthedRequest, res) => {
