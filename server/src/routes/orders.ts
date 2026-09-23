@@ -155,6 +155,16 @@ function getFull(id: number, req?: AuthedRequest) {
    * figure instead of three.
    */
   order.advance = orderAdvance(id);
+  /*
+   * The figure is the order's own business and stays; the **rows behind it**
+   * are the payment record, and Logistics and Production read this page while
+   * holding `payment: none`. Absent, not empty — decided here rather than by
+   * `useCan()` on the client, since a copy of the access table there is a
+   * second policy and it drifts. The card is drawn only when the key arrived.
+   */
+  // Optional `req` omits the rows rather than leaking them, the safe direction
+  // the `despatches` key below takes for the same reason.
+  if (!req || !allows(req, 'payment')) delete (order.advance as { payments?: unknown }).payments;
   // What is still blank, in the words the PDF refuses with — listed on the
   // form above a quiet button rather than sprung on a click.
   order.checks = checkDocument('orders', id);
@@ -881,6 +891,13 @@ ordersRouter.delete('/:id', (req: AuthedRequest, res) => {
   const trips = db.prepare('SELECT COUNT(*) AS c FROM despatches WHERE order_id = ?').get(id) as { c: number };
   if (trips.c > 0) {
     return res.status(409).json({ error: `This order has ${trips.c} dispatch${trips.c === 1 ? '' : 'es'} recorded against it and cannot be deleted` });
+  }
+  // An advance banked against the order itself. `payments.order_id` is a
+  // foreign key like the rest, and a missed one reaches the user as "Internal
+  // server error" — the rule every delete guard here follows.
+  const banked = db.prepare('SELECT COUNT(*) AS c FROM payments WHERE order_id = ?').get(id) as { c: number };
+  if (banked.c > 0) {
+    return res.status(409).json({ error: `This order has ${banked.c} advance payment${banked.c === 1 ? '' : 's'} recorded against it and cannot be deleted` });
   }
   transaction(() => {
     // Release the proforma that pointed at this order, the way deleting a

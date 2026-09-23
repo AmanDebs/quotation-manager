@@ -15,6 +15,7 @@ import { offeredStatuses, orderStatusLabel } from './Orders';
 import { today, fmtMoney, fmtDate } from '../lib/format';
 import { useUnsavedChanges } from '../lib/useUnsavedChanges';
 import HistoryCard from '../components/HistoryCard';
+import PaymentsCard from '../components/PaymentsCard';
 
 interface Draft {
   number?: string;
@@ -141,6 +142,13 @@ export default function OrderFormPage() {
    * would otherwise read as zero on the very screen where it is created.
    */
   const banked = existing?.advance ?? prefillAdvance;
+  /*
+   * The typed boxes survive only on an order that already carries a figure in
+   * them and has nothing recorded — the rule the quotation's Containers field
+   * follows, so a number nobody can see cannot go on sitting in the total.
+   * Every other order gets the derived figure and the card below.
+   */
+  const typedAdvance = !(banked?.amount_received ?? 0) && Number(draft.advance_amount) > 0;
 
   const { markSaved, pdf, prompt } = useUnsavedChanges(draft, {
     // Deferred, so the mutation declared just below is initialised by the
@@ -428,18 +436,7 @@ export default function OrderFormPage() {
               despatch register. An order booked without a proforma keeps the
               boxes, having nothing else to go on.
             */}
-            {banked?.pi_id ? (
-              <>
-                <Field label={`Advance Received (${draft.currency})`}>
-                  <div className="px-0.5 py-1.5 text-sm text-slate-900 tabular-nums">
-                    {fmtMoney(banked.amount_received, draft.currency)}
-                  </div>
-                </Field>
-                <Field label="Date of Credit">
-                  <div className="px-0.5 py-1.5 text-sm text-slate-900">{fmtDate(banked.last_date) || '—'}</div>
-                </Field>
-              </>
-            ) : (
+            {typedAdvance ? (
               <>
                 <Field label={`Advance Received (${draft.currency})`}>
                   <Input type="number" min={0} step="any" value={draft.advance_amount || ''} onChange={(e) => set({ advance_amount: Number(e.target.value) })} />
@@ -448,14 +445,39 @@ export default function OrderFormPage() {
                   <Input type="date" value={draft.advance_received_date} onChange={(e) => set({ advance_received_date: e.target.value })} />
                 </Field>
               </>
+            ) : (
+              <>
+                <Field label={`Advance Received (${draft.currency})`}>
+                  <div className="px-0.5 py-1.5 text-sm text-slate-900 tabular-nums">
+                    {fmtMoney(banked?.amount_received ?? 0, draft.currency)}
+                  </div>
+                </Field>
+                <Field label="Date of Credit">
+                  <div className="px-0.5 py-1.5 text-sm text-slate-900">{fmtDate(banked?.last_date ?? '') || '—'}</div>
+                </Field>
+              </>
             )}
           </div>
-          {banked?.pi_id && (
+          {typedAdvance ? (
+            <p className="mt-1.5 text-xs text-amber-700">
+              This figure was typed on the order rather than recorded as a payment, so nothing else in the app
+              counts it: it is in no register, and no invoice raised from this order is credited with it. Record
+              it under Advance Received below and clear the box.
+            </p>
+          ) : (
             <p className="mt-1.5 text-xs text-slate-500">
-              Advance received is what has been banked against{' '}
-              <Link to={`/proformas/${banked.pi_id}`} className="text-brand-600 hover:underline">{banked.pi_number}</Link>
-              , so it keeps up as payments are recorded there.
-              {banked.currency_mismatch.length > 0 && (
+              {/* "below" only where the card is actually drawn — a caller
+                  without `payment` was sent no rows and has nothing there. */}
+              {banked?.pi_id ? (
+                <>
+                  Advance received is what has been banked against{' '}
+                  <Link to={`/proformas/${banked.pi_id}`} className="text-brand-600 hover:underline">{banked.pi_number}</Link>
+                  , so it keeps up as payments are recorded there{banked.payments ? ' or below' : ''}.
+                </>
+              ) : (
+                <>Advance received is what has been recorded against this order{banked?.payments ? ', below' : ''}.</>
+              )}
+              {!!banked?.currency_mismatch.length && (
                 <> Not counted: {banked.currency_mismatch.map((m) => `${m.amount} ${m.currency}`).join(', ')} —
                   paid in another currency, so it is credited to nothing.</>
               )}
@@ -510,6 +532,33 @@ export default function OrderFormPage() {
         {/* The old Dispatch Progress card lived here. It has moved to the
             Dispatch tab, which says the same thing and more — sent as well as
             billed — and keeping a second copy invited the two to disagree. */}
+
+        {/*
+          The advance, recorded here rather than only quoted.
+          Absent — not empty — for a caller the server withheld the rows from:
+          Logistics and Production read this page holding `payment: none`.
+
+          It banks against the **proforma** wherever the order has one, so that
+          document goes on stating the advance it took in and the existing
+          allocation to the invoices raised from it is untouched. An order with
+          no proforma — the whole imported backlog — banks against itself, and
+          `receivables.ts` credits that pool to the invoices raised from the
+          order by the same rule.
+        */}
+        {!isNew && banked?.payments && (
+          <PaymentsCard
+            docType={banked.pi_id ? 'proforma' : 'order'}
+            docId={banked.pi_id ?? Number(id)}
+            currency={banked.currency || draft.currency}
+            payments={banked.payments}
+            received={banked.amount_received}
+            total={existing!.grand_total}
+            currencyMismatch={banked.currency_mismatch}
+            title="Advance Received"
+            emptyHint={banked.pi_id ? `It is banked against ${banked.pi_number}.` : undefined}
+            alsoInvalidate={[['order', String(id)]]}
+          />
+        )}
 
         <Card title="Remarks">
           {/*

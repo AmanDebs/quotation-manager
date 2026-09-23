@@ -89,17 +89,36 @@ export function syncInvoiceStatus(invoiceId: number): string | null {
  * that proforma — so adding or deleting one can change the balance of several
  * at once, including ones the payment never named.
  */
-export function syncInvoicesForPayment(payment: { invoice_id?: number | null; pi_id?: number | null }): void {
+export function syncInvoicesForPayment(
+  payment: { invoice_id?: number | null; pi_id?: number | null; order_id?: number | null }
+): void {
   if (payment.invoice_id) {
     syncInvoiceStatus(Number(payment.invoice_id));
     return;
   }
-  if (!payment.pi_id) return;
-  syncInvoicesForProforma(Number(payment.pi_id));
+  if (payment.pi_id) {
+    syncInvoicesForProforma(Number(payment.pi_id));
+    return;
+  }
+  if (payment.order_id) syncInvoicesForOrder(Number(payment.order_id));
 }
 
 /** Every invoice raised from one proforma — they share its advance pool. */
 export function syncInvoicesForProforma(piId: number): void {
   const rows = db.prepare('SELECT id FROM commercial_invoices WHERE pi_id = ?').all(piId) as { id: number }[];
+  for (const r of rows) syncInvoiceStatus(r.id);
+}
+
+/**
+ * Every invoice billing one order — they share the advance banked against it.
+ *
+ * Reached the way `dispatchProgress()` reaches the order: the invoice's own
+ * link, or backwards through the proforma that carries it.
+ */
+export function syncInvoicesForOrder(orderId: number): void {
+  const rows = db.prepare(
+    `SELECT id FROM commercial_invoices
+      WHERE order_id = ? OR pi_id IN (SELECT id FROM proforma_invoices WHERE order_id = ?)`
+  ).all(orderId, orderId) as { id: number }[];
   for (const r of rows) syncInvoiceStatus(r.id);
 }

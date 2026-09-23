@@ -945,6 +945,13 @@ export interface Order {
     amount_received: number;
     last_date: string;
     currency_mismatch: { currency: string; amount: number }[];
+    /** The currency the figure is counted in: the proforma's, else the order's. */
+    currency?: string;
+    /**
+     * The rows behind the figure — **absent, not empty**, for a caller without
+     * `payment`, so the card is drawn only when the server sent them.
+     */
+    payments?: Payment[];
   };
   destination: string; transport: string; freight_terms: string;
   /** Export only: where the goods discharge. Named as on the proforma. */
@@ -973,6 +980,8 @@ export interface Order {
 
 export interface Payment {
   id: number; pi_id: number | null; invoice_id: number | null; customer_id: number | null;
+  /** An advance banked against the sales order, where there is no proforma. */
+  order_id?: number | null;
   date: string; amount: number; currency: string; method: string; reference: string; notes: string;
   /** On an invoice, the slice of this payment credited here — a PI advance is shared across shipments. */
   applied_amount?: number;
@@ -985,7 +994,7 @@ export interface Payment {
 export interface PaymentRow extends Payment {
   customer_name: string | null;
   against_number: string | null;
-  against_type: 'invoice' | 'proforma' | '';
+  against_type: 'invoice' | 'proforma' | 'order' | '';
   doc_currency: string | null;
   /** 1 when the money is credited to nothing — see `receivables.ts`. */
   mismatched: number;

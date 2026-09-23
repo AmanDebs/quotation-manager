@@ -1,8 +1,9 @@
 import './helpers/scratch.js';
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { invoiceReceivable, receivedByInvoice, advanceAppliedByInvoice } from '../src/services/receivables.js';
-import { makeCustomer, makeProforma, makeInvoice, makePayment } from './helpers/factory.js';
+import { invoiceReceivable, receivedByInvoice, advanceAppliedByInvoice,
+  orderAdvance } from '../src/services/receivables.js';
+import { makeCustomer, makeProforma, makeInvoice, makePayment, makeOrder } from './helpers/factory.js';
 
 /**
  * `receivables.ts` is the only place allowed to answer "how much has this
@@ -153,4 +154,155 @@ test('the bulk advance-applied figures match the single ones, and the remainder 
   }
   assert.equal(absorbed, 6000);
   assert.equal(7500 - absorbed, 1500, 'the pool still holds what no invoice has absorbed');
+});
+
+/**
+ * An advance banked against the **sales order** (2026-09-23).
+ *
+ * The chain banks an advance against the proforma, and that is still where it
+ * goes wherever there is one. An order with no proforma — every order loaded
+ * from the backlog spreadsheet — had nowhere but a typed figure on its own
+ * row, which credits no invoice, so the invoice raised later asked the
+ * customer for money already sent. These are the same pool rules read against
+ * the other document, which is why they are asserted the same way.
+ */
+describe('an advance on the sales order', () => {
+  test('credits the invoice raised from that order', () => {
+    const c = makeCustomer();
+    const so = makeOrder({ customerId: c, currency: 'INR' });
+    makePayment({ customerId: c, orderId: so, amount: 4000, currency: 'INR' });
+    const inv = makeInvoice({ customerId: c, currency: 'INR', total: 10000, orderId: so });
+
+    const r = invoiceReceivable(inv);
+    assert.equal(r.advance_applied, 4000);
+    assert.equal(r.amount_received, 4000);
+    assert.equal(r.balance_due, 6000);
+  });
+
+  test('reaches an invoice that names only the proforma, through its back-pointer', () => {
+    // `dispatchProgress()`'s walk: the invoice's own link, else its proforma's.
+    const c = makeCustomer();
+    const so = makeOrder({ customerId: c, currency: 'INR' });
+    const pi = makeProforma({ customerId: c, currency: 'INR', total: 10000, orderId: so });
+    makePayment({ customerId: c, orderId: so, amount: 2500, currency: 'INR' });
+    const inv = makeInvoice({ customerId: c, currency: 'INR', total: 10000, piId: pi });
+
+    assert.equal(invoiceReceivable(inv).advance_applied, 2500);
+  });
+
+  test('is a pool like the proforma’s own — split earliest first, never counted twice', () => {
+    const c = makeCustomer();
+    const so = makeOrder({ customerId: c, currency: 'INR' });
+    makePayment({ customerId: c, orderId: so, amount: 12000, currency: 'INR' });
+    const first = makeInvoice({ customerId: c, currency: 'INR', total: 10000, orderId: so, date: '2026-08-05' });
+    const second = makeInvoice({ customerId: c, currency: 'INR', total: 10000, orderId: so, date: '2026-08-09' });
+
+    assert.equal(invoiceReceivable(first).amount_received, 10000);
+    assert.equal(invoiceReceivable(second).amount_received, 2000);
+    assert.equal(
+      invoiceReceivable(first).amount_received + invoiceReceivable(second).amount_received, 12000,
+      'the advance credited in total must equal the advance taken',
+    );
+  });
+
+  test('in another currency is credited to nothing, and reported instead', () => {
+    const c = makeCustomer();
+    const so = makeOrder({ customerId: c, currency: 'INR' });
+    makePayment({ customerId: c, orderId: so, amount: 500, currency: 'EUR' });
+    const inv = makeInvoice({ customerId: c, currency: 'INR', total: 10000, orderId: so });
+
+    const r = invoiceReceivable(inv);
+    assert.equal(r.amount_received, 0);
+    assert.deepEqual(r.currency_mismatch, [{ currency: 'EUR', amount: 500 }]);
+  });
+
+  test('the bulk allocation agrees with the single one, as it must for the dashboard', () => {
+    const c = makeCustomer();
+    const so = makeOrder({ customerId: c, currency: 'INR' });
+    makePayment({ customerId: c, orderId: so, amount: 7000, currency: 'INR' });
+    const a = makeInvoice({ customerId: c, currency: 'INR', total: 5000, orderId: so, date: '2026-08-03' });
+    const b = makeInvoice({ customerId: c, currency: 'INR', total: 5000, orderId: so, date: '2026-08-04' });
+
+    const received = receivedByInvoice();
+    const applied = advanceAppliedByInvoice();
+    for (const id of [a, b]) {
+      assert.equal(received.get(id) ?? 0, invoiceReceivable(id).amount_received);
+      assert.equal(applied.get(id) ?? 0, invoiceReceivable(id).advance_applied);
+    }
+  });
+
+  test('a payment row sits in one pool, so two documents cannot both spend it', () => {
+    // The proforma's advance and the order's are separate rows by construction
+    // — `POST /payments` writes exactly one link — and the invoice draws on
+    // both without either being double counted.
+    const c = makeCustomer();
+    const so = makeOrder({ customerId: c, currency: 'INR' });
+    const pi = makeProforma({ customerId: c, currency: 'INR', total: 10000, orderId: so });
+    makePayment({ customerId: c, piId: pi, amount: 3000, currency: 'INR', date: '2026-08-02' });
+    makePayment({ customerId: c, orderId: so, amount: 2000, currency: 'INR', date: '2026-08-03' });
+    const inv = makeInvoice({ customerId: c, currency: 'INR', total: 10000, piId: pi, orderId: so });
+
+    assert.equal(invoiceReceivable(inv).advance_applied, 5000);
+    assert.equal(invoiceReceivable(inv).balance_due, 5000);
+  });
+});
+
+describe('what the order page reads', () => {
+  test('an order with no proforma reads its own advance, in its own currency', () => {
+    const c = makeCustomer();
+    const so = makeOrder({ customerId: c, currency: 'INR' });
+    makePayment({ customerId: c, orderId: so, amount: 1500, currency: 'INR', date: '2026-08-04' });
+    makePayment({ customerId: c, orderId: so, amount: 500, currency: 'INR', date: '2026-08-07' });
+
+    const a = orderAdvance(so);
+    assert.equal(a.pi_id, null);
+    assert.equal(a.amount_received, 2000);
+    assert.equal(a.currency, 'INR');
+    assert.equal(a.last_date, '2026-08-07', 'the date of credit is the most recent that counted');
+    assert.equal(a.payments.length, 2);
+  });
+
+  test('an order booked from a proforma still reads that proforma’s advance', () => {
+    const c = makeCustomer();
+    const so = makeOrder({ customerId: c, currency: 'EUR' });
+    const pi = makeProforma({ customerId: c, currency: 'EUR', total: 20000, orderId: so });
+    makePayment({ customerId: c, piId: pi, amount: 6000, currency: 'EUR', date: '2026-08-05' });
+
+    const a = orderAdvance(so);
+    assert.equal(a.pi_id, pi);
+    assert.equal(a.amount_received, 6000);
+    assert.equal(a.last_date, '2026-08-05');
+  });
+
+  test('and both pools read as one figure where an order somehow holds both', () => {
+    const c = makeCustomer();
+    const so = makeOrder({ customerId: c, currency: 'INR' });
+    const pi = makeProforma({ customerId: c, currency: 'INR', total: 20000, orderId: so });
+    makePayment({ customerId: c, piId: pi, amount: 6000, currency: 'INR', date: '2026-08-05' });
+    makePayment({ customerId: c, orderId: so, amount: 1000, currency: 'INR', date: '2026-08-08' });
+
+    const a = orderAdvance(so);
+    assert.equal(a.amount_received, 7000);
+    assert.equal(a.last_date, '2026-08-08');
+  });
+
+  test('a date drawn from a payment in another currency would name money nothing counted', () => {
+    const c = makeCustomer();
+    const so = makeOrder({ customerId: c, currency: 'INR' });
+    makePayment({ customerId: c, orderId: so, amount: 1000, currency: 'INR', date: '2026-08-04' });
+    makePayment({ customerId: c, orderId: so, amount: 900, currency: 'EUR', date: '2026-08-09' });
+
+    const a = orderAdvance(so);
+    assert.equal(a.amount_received, 1000);
+    assert.equal(a.last_date, '2026-08-04');
+    assert.deepEqual(a.currency_mismatch, [{ currency: 'EUR', amount: 900 }]);
+  });
+
+  test('an order with nothing banked reads zero rather than nothing at all', () => {
+    const c = makeCustomer();
+    const a = orderAdvance(makeOrder({ customerId: c, currency: 'USD' }));
+    assert.equal(a.amount_received, 0);
+    assert.equal(a.currency, 'USD');
+    assert.deepEqual(a.payments, []);
+  });
 });

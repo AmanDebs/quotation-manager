@@ -168,6 +168,20 @@ export function customerSummary(req: AuthedRequest, customerId: number): Custome
       const adv = proformaAdvance(pi.id);
       if (adv.amount_received > 0) row(pi.currency).advance_held += adv.amount_received;
     }
+    /*
+     * And the advances banked against a **sales order** rather than a proforma
+     * — the order with no proforma behind it, which is every backlog order.
+     * Counted in SQL rather than through `orderAdvance` per order, since that
+     * reads the proforma's pool as well and would state the same money twice;
+     * the currency rule is `sameCurrency` restated, as the register's is.
+     */
+    for (const pay of db.prepare(
+      `SELECT pay.amount, pay.currency, o.currency AS order_currency
+         FROM payments pay JOIN orders o ON o.id = pay.order_id
+        WHERE pay.customer_id = ? AND pay.invoice_id IS NULL AND pay.pi_id IS NULL`
+    ).all(customerId) as { amount: number; currency: string; order_currency: string }[]) {
+      if (sameCurrency(pay.currency, pay.order_currency)) row(pay.order_currency).advance_held += pay.amount;
+    }
     for (const r of rows.values()) {
       r.advance_held = Math.max(0, round2(r.advance_held - (advanceApplied.get(r.currency) ?? 0)));
       r.invoiced = round2(r.invoiced);
@@ -186,10 +200,11 @@ export function customerSummary(req: AuthedRequest, customerId: number): Custome
     const mismatch = new Map<string, number>();
     const paid = db.prepare(
       `SELECT p.amount, p.currency AS pay_currency,
-              COALESCE(i.currency, pi.currency) AS doc_currency
+              COALESCE(i.currency, pi.currency, o.currency) AS doc_currency
        FROM payments p
        LEFT JOIN commercial_invoices i ON i.id = p.invoice_id
        LEFT JOIN proforma_invoices pi ON pi.id = p.pi_id
+       LEFT JOIN orders o ON o.id = p.order_id
        WHERE p.customer_id = ?`
     ).all(customerId) as { amount: number; pay_currency: string; doc_currency: string | null }[];
     for (const p of paid) {

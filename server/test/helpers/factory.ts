@@ -49,26 +49,35 @@ export function makeProforma(o: {
 }
 
 export function makeInvoice(o: {
-  customerId: number; currency: string; total: number; piId?: number | null;
+  customerId: number; currency: string; total: number; piId?: number | null; orderId?: number | null;
   date?: string; status?: string; approval?: string;
 }): number {
   const info = db.prepare(
-    `INSERT INTO commercial_invoices (number, date, customer_id, company_id, currency, pi_id,
+    `INSERT INTO commercial_invoices (number, date, customer_id, company_id, currency, pi_id, order_id,
                                       grand_total, status, approval_status)
-     VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?)`
-  ).run(`INV/${next()}`, o.date ?? '2026-08-01', o.customerId, o.currency, o.piId ?? null,
+     VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?)`
+  ).run(`INV/${next()}`, o.date ?? '2026-08-01', o.customerId, o.currency, o.piId ?? null, o.orderId ?? null,
     o.total, o.status ?? 'final', o.approval ?? 'approved');
+  return Number(info.lastInsertRowid);
+}
+
+export function makeOrder(o: { customerId: number; currency: string; total?: number; date?: string }): number {
+  const info = db.prepare(
+    `INSERT INTO orders (number, date, customer_id, company_id, currency, grand_total)
+     VALUES (?, ?, ?, 1, ?, ?)`
+  ).run(`SO/${next()}`, o.date ?? '2026-08-01', o.customerId, o.currency, o.total ?? 0);
   return Number(info.lastInsertRowid);
 }
 
 export function makePayment(o: {
   customerId: number; amount: number; currency: string;
-  piId?: number | null; invoiceId?: number | null; date?: string;
+  piId?: number | null; invoiceId?: number | null; orderId?: number | null; date?: string;
 }): number {
   const info = db.prepare(
-    `INSERT INTO payments (customer_id, pi_id, invoice_id, amount, currency, date, method)
-     VALUES (?, ?, ?, ?, ?, ?, 'bank')`
-  ).run(o.customerId, o.piId ?? null, o.invoiceId ?? null, o.amount, o.currency, o.date ?? '2026-08-02');
+    `INSERT INTO payments (customer_id, pi_id, invoice_id, order_id, amount, currency, date, method)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'bank')`
+  ).run(o.customerId, o.piId ?? null, o.invoiceId ?? null, o.orderId ?? null, o.amount, o.currency,
+    o.date ?? '2026-08-02');
   return Number(info.lastInsertRowid);
 }
 

@@ -159,6 +159,21 @@ for (const t of ['settings', 'companies']) {
 addColumnIfMissing('credit_notes', 'location_id', 'INTEGER REFERENCES locations(id)');
 
 /*
+ * An advance banked against the sales order itself (2026-09-23).
+ *
+ * The chain's advance is banked against the proforma, and that is still where
+ * it goes wherever there is one. An order with **no** proforma — every order
+ * loaded from the backlog spreadsheet, and any booked straight from a purchase
+ * order — had nowhere to record one but a typed figure on the order row, which
+ * credits no invoice and so leaves the customer billed for money already sent.
+ *
+ * Nullable with no default, which is what lets ALTER TABLE carry the foreign
+ * key: SQLite refuses an added column with a REFERENCES clause unless its
+ * default is NULL, the rule `company_id` below had to work around.
+ */
+addColumnIfMissing('payments', 'order_id', 'INTEGER REFERENCES orders(id)');
+
+/*
  * The purchase order, brought up to the shape of the documents around it
  * (2026-09), against Aglo's own reference PO.
  *

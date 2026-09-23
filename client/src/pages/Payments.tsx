@@ -119,12 +119,15 @@ function PaymentRegister() {
           <option value="">All customers</option>
           {customers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
         </Select>
-        {/* An advance is banked against a proforma and a settlement against an
+        {/* An advance is banked against a proforma — or against the sales
+            order, where the order has no proforma — and a settlement against an
             invoice: different things to look at, so they can be asked for
-            separately. */}
+            separately, and `advance` is the two halves read together. */}
         <Select className="w-44" value={against} onChange={(e) => setAgainst(e.target.value)}>
           <option value="">Advances and settlements</option>
-          <option value="proforma">Advances only</option>
+          <option value="advance">Advances only</option>
+          <option value="proforma">…against a proforma</option>
+          <option value="order">…against a sales order</option>
           <option value="invoice">Against invoices</option>
         </Select>
         {methods.length > 0 && (
@@ -181,14 +184,16 @@ function PaymentRegister() {
                   <td className="py-2 pr-3">
                     {p.against_number ? (
                       <Link
-                        to={p.against_type === 'invoice' ? `/invoices/${p.invoice_id}` : `/proformas/${p.pi_id}`}
+                        to={p.against_type === 'invoice' ? `/invoices/${p.invoice_id}`
+                          : p.against_type === 'order' ? `/orders/${p.order_id}`
+                          : `/proformas/${p.pi_id}`}
                         className="text-brand-600 hover:underline"
                       >
                         {p.against_number}
                       </Link>
                     ) : <span className="text-slate-400">—</span>}
                     <span className={`ml-1 ${CAPTION_CLASS} text-slate-400`}>
-                      {p.against_type === 'proforma' ? 'advance' : ''}
+                      {p.against_type === 'proforma' ? 'advance' : p.against_type === 'order' ? 'advance' : ''}
                     </span>
                   </td>
                   <td className="py-2 pr-3 text-slate-500">

@@ -8,13 +8,21 @@ import { fmtDate, fmtMoney, today } from '../lib/format';
 const METHODS = ['Bank Transfer', 'Letter of Credit', 'Cheque', 'Cash', 'Other'];
 
 /**
- * Record payments against a proforma (advance) or a commercial invoice (balance).
- * The linked document's detail query is invalidated so received/balance figures refresh.
+ * Record payments against a proforma (advance), a sales order (an advance where
+ * there is no proforma) or a commercial invoice (balance). The linked
+ * document's detail query is invalidated so received/balance figures refresh.
+ *
+ * The sales order is the third caller rather than a second card, because two
+ * copies of a money form is how the two come to ask different things. It banks
+ * against the **proforma** wherever the order has one — the order page passes
+ * `docType="proforma"` with that id and names itself in `alsoInvalidate` — so
+ * the proforma's own document goes on stating the advance it took in.
  */
 export default function PaymentsCard({
   docType, docId, currency, payments, received, total, balanceDue, advanceApplied, credited, currencyMismatch,
+  title, emptyHint, alsoInvalidate,
 }: {
-  docType: 'proforma' | 'invoice';
+  docType: 'proforma' | 'invoice' | 'order';
   docId: number;
   currency: string;
   payments: Payment[];
@@ -34,6 +42,15 @@ export default function PaymentsCard({
   credited?: number;
   /** Money against this document in another currency, credited to nothing. */
   currencyMismatch?: { currency: string; amount: number }[];
+  /** Overrides the card's heading, where the caller's own word for it is better. */
+  title?: string;
+  /** A sentence under the empty state, for a card whose money goes elsewhere. */
+  emptyHint?: string;
+  /**
+   * Further query keys to refresh. The order page records into its proforma's
+   * pool, so the page holding the figure is not the document being posted to.
+   */
+  alsoInvalidate?: readonly (readonly unknown[])[];
 }) {
   const queryClient = useQueryClient();
   const [adding, setAdding] = useState(false);
@@ -45,12 +62,16 @@ export default function PaymentsCard({
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: [docType, String(docId)] });
     queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+    queryClient.invalidateQueries({ queryKey: ['payments'] });
+    for (const key of alsoInvalidate ?? []) queryClient.invalidateQueries({ queryKey: key as unknown[] });
   };
+
+  const LINK = { proforma: 'pi_id', invoice: 'invoice_id', order: 'order_id' } as const;
 
   const create = useMutation({
     mutationFn: () =>
       api.post('/api/payments', {
-        [docType === 'proforma' ? 'pi_id' : 'invoice_id']: docId,
+        [LINK[docType]]: docId,
         date, amount: Number(amount), method, reference,
       }),
     onSuccess: () => {
@@ -75,13 +96,18 @@ export default function PaymentsCard({
     // alone, so its fields stay fields.
     <ReadOnlyFields on={false}>
     <Card
-      title={docType === 'proforma' ? 'Payments Received (advance)' : 'Payments Received'}
-      actions={!adding && <Button variant="secondary" onClick={() => setAdding(true)}>+ Record Payment</Button>}
+      title={title ?? (docType === 'invoice' ? 'Payments Received' : 'Payments Received (advance)')}
+      actions={!adding && (
+        <Button variant="secondary" onClick={() => setAdding(true)}>
+          {docType === 'invoice' ? '+ Record Payment' : '+ Record Advance'}
+        </Button>
+      )}
     >
       {payments.length === 0 && !adding && (
         <p className="text-sm text-slate-400">
           No payments recorded yet.
-          {docType === 'proforma' ? ' Record the advance here when it arrives.' : ''}
+          {docType !== 'invoice' ? ' Record the advance here when it arrives.' : ''}
+          {emptyHint ? ` ${emptyHint}` : ''}
         </p>
       )}
 
@@ -110,7 +136,9 @@ export default function PaymentsCard({
                   <td className="py-1.5 pr-3 whitespace-nowrap">{fmtDate(p.date)}</td>
                   <td className="py-1.5 pr-3">{p.method || '—'}</td>
                   <td className="py-1.5 pr-3">{p.reference || '—'}</td>
-                  <td className="py-1.5 pr-3 text-xs text-slate-500">{p.pi_id ? 'Advance (PI)' : 'Invoice'}</td>
+                  <td className="py-1.5 pr-3 text-xs text-slate-500">
+                    {p.pi_id ? 'Advance (PI)' : p.order_id ? 'Advance (SO)' : 'Invoice'}
+                  </td>
                   <td className="py-1.5 pr-3 text-right tabular-nums">
                     {fmtMoney(applied, p.currency)}
                     {partly && (

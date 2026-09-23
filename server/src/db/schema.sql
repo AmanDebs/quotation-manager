@@ -781,6 +781,12 @@ CREATE TABLE IF NOT EXISTS payments (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   pi_id INTEGER REFERENCES proforma_invoices(id),
   invoice_id INTEGER REFERENCES commercial_invoices(id),
+  -- An advance banked against the sales order itself, for the order that has
+  -- no proforma behind it: a backlog loaded from a spreadsheet has none, and
+  -- money taken up front against such an order has to be credited somewhere
+  -- or the invoice raised later asks the customer for it a second time.
+  -- Exactly one of the three links is set; see `services/receivables.ts`.
+  order_id INTEGER REFERENCES orders(id),
   customer_id INTEGER REFERENCES customers(id),
   date TEXT NOT NULL,
   amount REAL NOT NULL,

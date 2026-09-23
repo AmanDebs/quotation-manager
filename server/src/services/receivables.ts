@@ -21,6 +21,8 @@ export interface PaymentRow {
   id: number;
   pi_id: number | null;
   invoice_id: number | null;
+  /** An advance banked against the sales order, where there is no proforma. */
+  order_id: number | null;
   customer_id: number | null;
   date: string;
   amount: number;
@@ -77,21 +79,56 @@ export const currencyMismatchSql = (payment: string, document: string) =>
   `(${document} IS NOT NULL AND TRIM(COALESCE(${payment}, '')) <> ''`
   + ` AND TRIM(${payment}) <> TRIM(${document}))`;
 
-/** Advances on a proforma, split across the invoices raised from it (earliest first). */
-function allocateAdvances(piId: number): Map<number, AppliedPayment[]> {
-  const pool = db.prepare(
-    'SELECT * FROM payments WHERE pi_id = ? AND invoice_id IS NULL ORDER BY date, id'
-  ).all(piId) as unknown as PaymentRow[];
+/**
+ * The sales order an invoice bills — its own link, or its proforma's
+ * back-pointer, which is `dispatchProgress()`'s walk restated in SQL.
+ *
+ * It is what lets an advance banked against an **order** reach the invoices
+ * raised from it, the way one banked against a proforma reaches the invoices
+ * raised from that.
+ */
+const ORDER_BEHIND_INVOICE = (alias: string) =>
+  `COALESCE(${alias}.order_id, (SELECT p2.order_id FROM proforma_invoices p2 WHERE p2.id = ${alias}.pi_id))`;
+
+/**
+ * The advance rows an invoice may draw on: those banked against its proforma,
+ * and those banked against the order behind it.
+ *
+ * **A payment row carries exactly one link**, so the two pools never share a
+ * row and merging them cannot credit anything twice. In practice an order has
+ * one or the other — `POST /payments` from the order page banks against the
+ * proforma wherever there is one, so the proforma's own document still states
+ * what it took in — and the two-pool case is belt and braces.
+ */
+function advancePool(piId: number | null, orderId: number | null): PaymentRow[] {
+  const conds: string[] = [];
+  const params: unknown[] = [];
+  if (piId != null) { conds.push('pi_id = ?'); params.push(piId); }
+  if (orderId != null) { conds.push('order_id = ?'); params.push(orderId); }
+  if (!conds.length) return [];
+  return db.prepare(
+    `SELECT * FROM payments WHERE invoice_id IS NULL AND (${conds.join(' OR ')}) ORDER BY date, id`
+  ).all(...(params as never[])) as unknown as PaymentRow[];
+}
+
+/** Advances behind a document, split across the invoices raised from it (earliest first). */
+function allocateAdvances(piId: number | null, orderId: number | null): Map<number, AppliedPayment[]> {
+  const pool = advancePool(piId, orderId);
+  if (!pool.length) return new Map();
   /*
    * `credited` rides along because a credit note reduces what this invoice can
    * absorb, and an advance that would otherwise have been trapped against a
    * credited invoice has to flow on to the next one. Without it the pool sits
    * allocated to a bill nobody owes while the invoice after it reads unpaid.
    */
+  const conds: string[] = [];
+  const params: unknown[] = [];
+  if (piId != null) { conds.push('pi_id = ?'); params.push(piId); }
+  if (orderId != null) { conds.push(`${ORDER_BEHIND_INVOICE('commercial_invoices')} = ?`); params.push(orderId); }
   const invoices = db.prepare(
     `SELECT id, currency, grand_total, ${CREDITED_SQL('commercial_invoices.id')} AS credited
-       FROM commercial_invoices WHERE pi_id = ? ORDER BY date, id`
-  ).all(piId) as { id: number; currency: string; grand_total: number; credited: number }[];
+       FROM commercial_invoices WHERE ${conds.join(' OR ')} ORDER BY date, id`
+  ).all(...(params as never[])) as { id: number; currency: string; grand_total: number; credited: number }[];
 
   const remaining = pool.map((payment) => ({ payment, left: payment.amount }));
   const byInvoice = new Map<number, AppliedPayment[]>();
@@ -209,22 +246,22 @@ export function proformaAdvance(piId: number): ProformaAdvance {
 /** What one invoice has actually been credited with. */
 export function invoiceReceivable(invoiceId: number): InvoiceReceivable {
   const inv = db.prepare(
-    `SELECT id, pi_id, currency, grand_total, ${CREDITED_SQL('commercial_invoices.id')} AS credited
+    `SELECT id, pi_id, ${ORDER_BEHIND_INVOICE('commercial_invoices')} AS advance_order_id,
+            currency, grand_total, ${CREDITED_SQL('commercial_invoices.id')} AS credited
        FROM commercial_invoices WHERE id = ?`
   ).get(invoiceId) as
-    | { id: number; pi_id: number | null; currency: string; grand_total: number; credited: number } | undefined;
+    | { id: number; pi_id: number | null; advance_order_id: number | null; currency: string; grand_total: number; credited: number } | undefined;
   if (!inv) return { payments: [], amount_received: 0, balance_due: 0, credited: 0, advance_applied: 0, currency_mismatch: [] };
 
   const own = db.prepare('SELECT * FROM payments WHERE invoice_id = ? ORDER BY date, id').all(invoiceId) as unknown as PaymentRow[];
   const direct = own
     .filter((p) => sameCurrency(p.currency, inv.currency))
     .map((p) => ({ ...p, applied_amount: p.amount }));
-  const advances = inv.pi_id != null ? allocateAdvances(inv.pi_id).get(invoiceId) ?? [] : [];
+  const advances = allocateAdvances(inv.pi_id, inv.advance_order_id).get(invoiceId) ?? [];
 
-  // Advances on the proforma that no invoice in this currency can absorb.
-  const pool = inv.pi_id != null
-    ? db.prepare('SELECT * FROM payments WHERE pi_id = ? AND invoice_id IS NULL ORDER BY date, id').all(inv.pi_id) as unknown as PaymentRow[]
-    : [];
+  // Advances behind it — on the proforma, or on the order where there is no
+  // proforma — that no invoice in this currency can absorb.
+  const pool = advancePool(inv.pi_id, inv.advance_order_id);
 
   const advanceApplied = round2(advances.reduce((s, p) => s + p.applied_amount, 0));
   const received = round2(sumAmounts(direct) + advanceApplied);
@@ -262,14 +299,21 @@ export function advanceAppliedByInvoice(): Map<number, number> {
 
 function allocateAllInvoices(): { received: Map<number, number>; applied: Map<number, number> } {
   const invoices = db.prepare(
-    `SELECT id, pi_id, currency, grand_total, ${CREDITED_SQL('commercial_invoices.id')} AS credited
+    `SELECT id, pi_id, ${ORDER_BEHIND_INVOICE('commercial_invoices')} AS advance_order_id,
+            currency, grand_total, ${CREDITED_SQL('commercial_invoices.id')} AS credited
        FROM commercial_invoices ORDER BY date, id`
-  ).all() as { id: number; pi_id: number | null; currency: string; grand_total: number; credited: number }[];
-  const payments = db.prepare('SELECT pi_id, invoice_id, amount, currency, date, id FROM payments ORDER BY date, id').all() as
-    { pi_id: number | null; invoice_id: number | null; amount: number; currency: string }[];
+  ).all() as { id: number; pi_id: number | null; advance_order_id: number | null; currency: string; grand_total: number; credited: number }[];
+  const payments = db.prepare('SELECT pi_id, order_id, invoice_id, amount, currency, date, id FROM payments ORDER BY date, id').all() as
+    { pi_id: number | null; order_id: number | null; invoice_id: number | null; amount: number; currency: string; date: string; id: number }[];
 
   const directTotal = new Map<number, number>();
-  const pools = new Map<number, { amount: number; currency: string; left: number }[]>();
+  /*
+   * Keyed by the document the advance was banked against — `pi:N` or `ord:N` —
+   * because there are two kinds now and an invoice may reach either. A row
+   * carries exactly one link, so it is filed in exactly one pool and cannot be
+   * drawn twice; `advancePool` above states the same rule for one invoice.
+   */
+  const pools = new Map<string, { amount: number; currency: string; left: number; date: string; id: number }[]>();
   const byId = new Map(invoices.map((i) => [i.id, i]));
   for (const p of payments) {
     if (p.invoice_id != null) {
@@ -279,12 +323,26 @@ function allocateAllInvoices(): { received: Map<number, number>; applied: Map<nu
       const inv = byId.get(p.invoice_id);
       if (inv && !sameCurrency(p.currency, inv.currency)) continue;
       directTotal.set(p.invoice_id, round2((directTotal.get(p.invoice_id) ?? 0) + p.amount));
-    } else if (p.pi_id != null) {
-      const pool = pools.get(p.pi_id) ?? [];
-      pool.push({ amount: p.amount, currency: p.currency, left: p.amount });
-      pools.set(p.pi_id, pool);
+      continue;
     }
+    const key = p.pi_id != null ? `pi:${p.pi_id}` : p.order_id != null ? `ord:${p.order_id}` : '';
+    if (!key) continue;
+    const pool = pools.get(key) ?? [];
+    pool.push({ amount: p.amount, currency: p.currency, left: p.amount, date: p.date, id: p.id });
+    pools.set(key, pool);
   }
+
+  /** The rows one invoice may draw on, earliest payment first. */
+  const reachable = (inv: { pi_id: number | null; advance_order_id: number | null }) => {
+    const rows = [
+      ...(inv.pi_id != null ? pools.get(`pi:${inv.pi_id}`) ?? [] : []),
+      ...(inv.advance_order_id != null ? pools.get(`ord:${inv.advance_order_id}`) ?? [] : []),
+    ];
+    // The same references, re-ordered — the `left` each carries is shared
+    // across every invoice that can reach it, which is what stops one advance
+    // being spent twice.
+    return rows.length > 1 ? [...rows].sort((a, b) => a.date.localeCompare(b.date) || a.id - b.id) : rows;
+  };
 
   const received = new Map<number, number>();
   const appliedBy = new Map<number, number>();
@@ -294,7 +352,7 @@ function allocateAllInvoices(): { received: Map<number, number>; applied: Map<nu
     // invoice page would disagree about where an advance ended up.
     let capacity = round2(Math.max(0, inv.grand_total - inv.credited - direct));
     let applied = 0;
-    for (const r of (inv.pi_id != null ? pools.get(inv.pi_id) ?? [] : [])) {
+    for (const r of reachable(inv)) {
       if (capacity <= 0) break;
       if (r.left <= 0) continue;
       if (!sameCurrency(r.currency, inv.currency)) continue;
@@ -309,7 +367,7 @@ function allocateAllInvoices(): { received: Map<number, number>; applied: Map<nu
   return { received, applied: appliedBy };
 }
 
-/** What an order's proforma has actually taken in. */
+/** What has been banked as an advance behind an order. */
 export interface OrderAdvance {
   /** The proforma the order was booked from, if there is one. */
   pi_id: number | null;
@@ -319,6 +377,18 @@ export interface OrderAdvance {
   last_date: string;
   /** Payments in another currency, counted by nobody and reported instead. */
   currency_mismatch: { currency: string; amount: number }[];
+  /**
+   * The rows behind the figure — the proforma's advance and any banked against
+   * the order itself — so the order page can list and record them rather than
+   * only quote a total.
+   *
+   * The route **strips this key for a caller without `payment`**, the rule
+   * `customerSummary.ts` states: Logistics and Production read the order book
+   * and hold `payment: none`, and a bank reference is not theirs.
+   */
+  payments: PaymentRow[];
+  /** The currency the figure is counted in: the proforma's, else the order's. */
+  currency: string;
 }
 
 /**
@@ -341,14 +411,55 @@ export interface OrderAdvance {
  * already carries an `order_id`, so that is a belt-and-braces case.
  */
 export function orderAdvance(orderId: number): OrderAdvance {
+  const order = db.prepare('SELECT currency FROM orders WHERE id = ?').get(orderId) as
+    | { currency: string } | undefined;
   const pi = db.prepare(
-    'SELECT id FROM proforma_invoices WHERE order_id = ? ORDER BY id LIMIT 1'
-  ).get(orderId) as { id: number } | undefined;
-  return pi ? advanceForProforma(pi.id) : NO_ADVANCE;
+    'SELECT id, number, currency FROM proforma_invoices WHERE order_id = ? ORDER BY id LIMIT 1'
+  ).get(orderId) as { id: number; number: string; currency: string } | undefined;
+
+  /*
+   * One figure over both pools.
+   *
+   * The advance is banked against the **proforma** wherever the chain has one,
+   * which is why the order page records into that pool and the proforma's own
+   * document goes on stating what it took in. An order with no proforma — the
+   * whole backlog, and anything booked outside the chain — banks against
+   * itself, and both are read here so the order quotes one number either way.
+   */
+  const rows = pi
+    ? db.prepare('SELECT * FROM payments WHERE pi_id = ? OR order_id = ? ORDER BY date, id')
+      .all(pi.id, orderId) as unknown as PaymentRow[]
+    : db.prepare('SELECT * FROM payments WHERE order_id = ? ORDER BY date, id')
+      .all(orderId) as unknown as PaymentRow[];
+
+  // The proforma's currency decides where there is one — it is the document
+  // the money was banked against — and the order's own where there is not.
+  const currency = pi ? pi.currency : String(order?.currency ?? 'INR');
+  return advanceOver(rows, currency, pi);
+}
+
+/** The figure, the date of credit and what was not counted, over one set of rows. */
+function advanceOver(
+  rows: PaymentRow[], currency: string, pi?: { id: number; number: string }
+): OrderAdvance {
+  const counted = rows.filter((p) => sameCurrency(p.currency, currency));
+  return {
+    pi_id: pi?.id ?? null,
+    pi_number: pi?.number ?? '',
+    amount_received: round2(counted.reduce((sum, p) => sum + p.amount, 0)),
+    // The date of credit is the most recent payment that actually counted. A
+    // date drawn from a payment in another currency would name money nothing
+    // was credited with, so one rule decides both figures.
+    last_date: counted.length ? String(counted[counted.length - 1].date ?? '') : '',
+    currency_mismatch: mismatches(rows, currency),
+    payments: rows,
+    currency,
+  };
 }
 
 const NO_ADVANCE: OrderAdvance = {
   pi_id: null, pi_number: '', amount_received: 0, last_date: '', currency_mismatch: [],
+  payments: [], currency: '',
 };
 
 /**
@@ -361,25 +472,9 @@ const NO_ADVANCE: OrderAdvance = {
  * where the order is being created.
  */
 export function advanceForProforma(piId: number): OrderAdvance {
-  const pi = db.prepare('SELECT id, number FROM proforma_invoices WHERE id = ?').get(piId) as
-    | { id: number; number: string }
+  const pi = db.prepare('SELECT id, number, currency FROM proforma_invoices WHERE id = ?').get(piId) as
+    | { id: number; number: string; currency: string }
     | undefined;
   if (!pi) return NO_ADVANCE;
-
-  const advance = proformaAdvance(pi.id);
-  // The date of credit is the most recent payment that actually counted. A
-  // date drawn from a payment in another currency would name money nothing
-  // was credited with, so the same `sameCurrency` rule decides both figures.
-  const cur = String(
-    (db.prepare('SELECT currency FROM proforma_invoices WHERE id = ?').get(pi.id) as { currency: string }).currency
-  );
-  const counted = advance.payments.filter((p) => sameCurrency(p.currency, cur));
-  const last = counted.length ? String(counted[counted.length - 1].date ?? '') : '';
-  return {
-    pi_id: pi.id,
-    pi_number: pi.number,
-    amount_received: advance.amount_received,
-    last_date: last,
-    currency_mismatch: advance.currency_mismatch,
-  };
+  return advanceOver(proformaAdvance(pi.id).payments, pi.currency, pi);
 }

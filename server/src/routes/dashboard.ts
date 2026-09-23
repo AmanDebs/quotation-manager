@@ -745,6 +745,16 @@ dashboardRouter.get('/', (req: AuthedRequest, res) => {
     )) {
       if (sameCurrency(pay.currency, pay.pi_currency)) row(pay.pi_currency).advance_held += pay.amount;
     }
+    // And an advance banked against a sales order with no proforma behind it,
+    // which holds money exactly as a proforma's does.
+    for (const pay of q<{ amount: number; currency: string; order_currency: string }>(
+      `SELECT pay.amount, pay.currency, o.currency AS order_currency
+       FROM payments pay JOIN orders o ON o.id = pay.order_id
+       WHERE pay.invoice_id IS NULL AND pay.pi_id IS NULL${docFilter('o').sql}`,
+      ...docFilter('o').params
+    )) {
+      if (sameCurrency(pay.currency, pay.order_currency)) row(pay.order_currency).advance_held += pay.amount;
+    }
     for (const b of orderBook) { const r = row(b.currency); r.still_to_ship = b.pending_value; r.open_orders = b.count; }
     const r2 = (n: number) => Math.round(n * 100) / 100;
     return [...rows.values()]

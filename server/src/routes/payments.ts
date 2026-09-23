@@ -30,15 +30,17 @@ export const paymentsRouter = Router();
 const listSql = `
   SELECT p.*,
          c.name AS customer_name,
-         COALESCE(i.number, pi.number) AS against_number,
+         COALESCE(i.number, pi.number, o.number) AS against_number,
          CASE WHEN p.invoice_id IS NOT NULL THEN 'invoice'
-              WHEN p.pi_id IS NOT NULL THEN 'proforma' ELSE '' END AS against_type,
-         COALESCE(i.currency, pi.currency) AS doc_currency,
-         ${currencyMismatchSql('p.currency', 'COALESCE(i.currency, pi.currency)')} AS mismatched
+              WHEN p.pi_id IS NOT NULL THEN 'proforma'
+              WHEN p.order_id IS NOT NULL THEN 'order' ELSE '' END AS against_type,
+         COALESCE(i.currency, pi.currency, o.currency) AS doc_currency,
+         ${currencyMismatchSql('p.currency', 'COALESCE(i.currency, pi.currency, o.currency)')} AS mismatched
   FROM payments p
   LEFT JOIN customers c ON c.id = p.customer_id
   LEFT JOIN commercial_invoices i ON i.id = p.invoice_id
-  LEFT JOIN proforma_invoices pi ON pi.id = p.pi_id`;
+  LEFT JOIN proforma_invoices pi ON pi.id = p.pi_id
+  LEFT JOIN orders o ON o.id = p.order_id`;
 
 /** Built once so the list and anything derived from it cannot drift apart. */
 function registerWhere(req: AuthedRequest): { where: string[]; params: unknown[] } {
@@ -51,9 +53,13 @@ function registerWhere(req: AuthedRequest): { where: string[]; params: unknown[]
   if (Number(req.query.customer_id) > 0) { where.push('p.customer_id = ?'); params.push(Number(req.query.customer_id)); }
   if (req.query.currency) { where.push('p.currency = ?'); params.push(String(req.query.currency)); }
   if (req.query.method) { where.push('p.method = ?'); params.push(String(req.query.method)); }
-  // An advance is banked against a proforma, a settlement against an invoice.
-  // They are different things to look at, so they can be asked for separately.
+  // An advance is banked against a proforma — or against the sales order,
+  // where there is no proforma — and a settlement against an invoice. They are
+  // different things to look at, so they can be asked for separately, and
+  // `advance` is the two halves of one question read together.
   if (req.query.against === 'proforma') where.push('p.pi_id IS NOT NULL AND p.invoice_id IS NULL');
+  if (req.query.against === 'order') where.push('p.order_id IS NOT NULL AND p.invoice_id IS NULL');
+  if (req.query.against === 'advance') where.push('p.invoice_id IS NULL AND (p.pi_id IS NOT NULL OR p.order_id IS NOT NULL)');
   if (req.query.against === 'invoice') where.push('p.invoice_id IS NOT NULL');
   /*
    * The filter this register largely exists for: money in a currency the
@@ -62,12 +68,12 @@ function registerWhere(req: AuthedRequest): { where: string[]; params: unknown[]
    * document at a time, so nobody could ask how many there were.
    */
   if (req.query.mismatched === '1') {
-    where.push(currencyMismatchSql('p.currency', 'COALESCE(i.currency, pi.currency)'));
+    where.push(currencyMismatchSql('p.currency', 'COALESCE(i.currency, pi.currency, o.currency)'));
   }
   // Bank reference first: "did we get SWIFT REF 8842544" is the lookup this
   // page will actually be opened for.
   const search = searchClause(
-    ['p.reference', 'p.method', 'p.notes', 'c.name', 'i.number', 'pi.number'],
+    ['p.reference', 'p.method', 'p.notes', 'c.name', 'i.number', 'pi.number', 'o.number'],
     String(req.query.q ?? ''),
   );
   if (search.sql) { where.push(search.sql); params.push(...search.params); }
@@ -204,7 +210,12 @@ const paymentColumns: Column<Record<string, unknown>>[] = [
   { header: 'Date', value: (r) => String(r.date ?? ''), type: 'date' },
   { header: 'Customer', value: (r) => String(r.customer_name ?? '') },
   { header: 'Against', value: (r) => String(r.against_number ?? '') },
-  { header: 'Type', value: (r) => (r.against_type === 'proforma' ? 'Advance' : r.against_type === 'invoice' ? 'Against invoice' : '') },
+  {
+    header: 'Type',
+    value: (r) => (r.against_type === 'invoice' ? 'Against invoice'
+      : r.against_type === 'order' ? 'Advance (order)'
+      : r.against_type === 'proforma' ? 'Advance' : ''),
+  },
   { header: 'Method', value: (r) => String(r.method ?? '') },
   { header: 'Reference', value: (r) => String(r.reference ?? '') },
   // `money` rather than `number`, so Excel shows it as currency and it can
@@ -246,11 +257,18 @@ paymentsRouter.post('/', (req: AuthedRequest, res) => {
   const body = req.body ?? {};
   const amount = Number(body.amount);
   if (!amount || amount <= 0) return res.status(400).json({ error: 'Amount must be greater than zero' });
-  if (!body.pi_id && !body.invoice_id) return res.status(400).json({ error: 'Payment must be linked to a proforma or an invoice' });
+  if (!body.pi_id && !body.invoice_id && !body.order_id) {
+    return res.status(400).json({ error: 'Payment must be linked to a proforma, a sales order or an invoice' });
+  }
 
   // Inherit customer/currency from the linked document. A payment is only
   // recordable by someone who may see that document, so out-of-scope ids read
   // as "not found" exactly like the document routes.
+  //
+  // **Exactly one link is written**, in this precedence, so a row sits in one
+  // advance pool and can never be drawn against an invoice twice — the rule
+  // `receivables.ts` relies on. The order page sends `pi_id` wherever the order
+  // has a proforma, so the proforma's own document still states its advance.
   let customerId: number | null = null;
   let currency = 'INR';
   if (body.invoice_id) {
@@ -265,14 +283,21 @@ paymentsRouter.post('/', (req: AuthedRequest, res) => {
     if (!pi || !canAccessCustomer(req, pi.customer_id)) return res.status(404).json({ error: 'Proforma invoice not found' });
     customerId = pi.customer_id;
     currency = pi.currency;
+  } else if (body.order_id) {
+    const order = db.prepare('SELECT customer_id, currency FROM orders WHERE id = ?').get(Number(body.order_id)) as
+      | { customer_id: number; currency: string } | undefined;
+    if (!order || !canAccessCustomer(req, order.customer_id)) return res.status(404).json({ error: 'Sales order not found' });
+    customerId = order.customer_id;
+    currency = order.currency;
   }
 
   const info = db.prepare(
-    `INSERT INTO payments (pi_id, invoice_id, customer_id, date, amount, currency, method, reference, notes)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO payments (pi_id, invoice_id, order_id, customer_id, date, amount, currency, method, reference, notes)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     body.pi_id ? Number(body.pi_id) : null,
     body.invoice_id ? Number(body.invoice_id) : null,
+    !body.pi_id && !body.invoice_id && body.order_id ? Number(body.order_id) : null,
     customerId,
     String(body.date ?? new Date().toISOString().slice(0, 10)),
     amount,
@@ -282,7 +307,7 @@ paymentsRouter.post('/', (req: AuthedRequest, res) => {
     String(body.notes ?? '')
   );
   const payment = db.prepare('SELECT * FROM payments WHERE id = ?').get(Number(info.lastInsertRowid)) as
-    { invoice_id: number | null; pi_id: number | null };
+    { invoice_id: number | null; pi_id: number | null; order_id: number | null };
   // Being paid is a fact about the invoice, so its status follows it. An
   // advance moves every invoice raised from that proforma, not just one.
   syncInvoicesForPayment(payment);
@@ -291,8 +316,8 @@ paymentsRouter.post('/', (req: AuthedRequest, res) => {
 
 paymentsRouter.delete('/:id', (req: AuthedRequest, res) => {
   const id = Number(req.params.id);
-  const payment = db.prepare('SELECT customer_id, invoice_id, pi_id FROM payments WHERE id = ?').get(id) as
-    | { customer_id: number | null; invoice_id: number | null; pi_id: number | null } | undefined;
+  const payment = db.prepare('SELECT customer_id, invoice_id, pi_id, order_id FROM payments WHERE id = ?').get(id) as
+    | { customer_id: number | null; invoice_id: number | null; pi_id: number | null; order_id: number | null } | undefined;
   if (!payment || !canAccessCustomer(req, payment.customer_id)) return res.status(404).json({ error: 'Payment not found' });
   db.prepare('DELETE FROM payments WHERE id = ?').run(id);
   // Deleting a mis-keyed payment reopens the balance, so anything it had marked
