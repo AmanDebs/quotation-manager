@@ -1,11 +1,25 @@
 import { useState, type ChangeEvent } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
-import type { ImportField, OrderImportPreview } from '../types';
+import type { ImportField, OrderImportPreview, OrderImportStatusAction } from '../types';
 import { Button, Select, Modal, ErrorText, CAPTION_CLASS } from './ui';
 import { fmtDate, fmtMoney } from '../lib/format';
 
 const MAX_MB = 8;
+
+/** The spreadsheet's own column name, since a sheet may repeat a heading. */
+function colLabel(i: number): string {
+  let s = '';
+  for (let n = i; n >= 0; n = Math.floor(n / 26) - 1) s = String.fromCharCode(65 + (n % 26)) + s;
+  return s;
+}
+
+const STATUS_ACTIONS: { value: OrderImportStatusAction; label: string }[] = [
+  { value: 'open', label: 'Book as open' },
+  { value: 'completed', label: 'Book as completed' },
+  { value: 'cancelled', label: 'Book as cancelled' },
+  { value: 'skip', label: "Don't import" },
+];
 
 /**
  * Load a backlog of sales orders from a spreadsheet.
@@ -26,7 +40,11 @@ export default function OrderImportModal({ onClose }: { onClose: () => void }) {
   const [headerRow, setHeaderRow] = useState<number | undefined>();
   const [mapping, setMapping] = useState<Record<string, number> | undefined>();
   const [basis, setBasis] = useState<'pieces' | 'billing'>('pieces');
-  const [done, setDone] = useState<{ created: number; lines: number; skipped: number } | null>(null);
+  const [rateBasis, setRateBasis] = useState<'per_piece' | 'per_1000'>('per_piece');
+  // Keyed by the status word exactly as the sheet spells it; a word nobody has
+  // touched is absent, and the server's own guess stands.
+  const [statusActions, setStatusActions] = useState<Record<string, OrderImportStatusAction>>({});
+  const [done, setDone] = useState<{ created: number; closed: number; lines: number; skipped: number } | null>(null);
   const [readError, setReadError] = useState('');
 
   const { data: fields = [] } = useQuery({
@@ -36,7 +54,8 @@ export default function OrderImportModal({ onClose }: { onClose: () => void }) {
 
   const body = () => ({
     file: file?.data, filename: file?.name,
-    sheet, header_row: headerRow, mapping, quantity_basis: basis,
+    sheet, header_row: headerRow, mapping,
+    quantity_basis: basis, rate_basis: rateBasis, status_actions: statusActions,
   });
 
   const preview = useMutation({
@@ -50,7 +69,7 @@ export default function OrderImportModal({ onClose }: { onClose: () => void }) {
   });
 
   const run = useMutation({
-    mutationFn: () => api.post<{ created: number; lines: number; skipped: number }>('/api/orders/import', body()),
+    mutationFn: () => api.post<{ created: number; closed: number; lines: number; skipped: number }>('/api/orders/import', body()),
     onSuccess: (r) => {
       queryClient.invalidateQueries({ queryKey: ['orders'] });
       queryClient.invalidateQueries({ queryKey: ['order-lines'] });
@@ -72,6 +91,7 @@ export default function OrderImportModal({ onClose }: { onClose: () => void }) {
     reader.onload = () => {
       setFile({ name: f.name, data: String(reader.result) });
       setSheet(undefined); setHeaderRow(undefined); setMapping(undefined); setDone(null);
+      setStatusActions({});
       preview.reset(); run.reset();
       setTimeout(() => preview.mutate(), 0);
     };
@@ -94,7 +114,7 @@ export default function OrderImportModal({ onClose }: { onClose: () => void }) {
       <span className="mb-1 block">{f.label}{f.required && <span className="text-red-500"> *</span>}</span>
       <Select value={String(p?.mapping[f.key] ?? -1)} onChange={(e) => setColumn(f.key, e.target.value)}>
         <option value="-1">— not in my sheet —</option>
-        {p?.headers.map((h, i) => <option key={i} value={i}>{h}</option>)}
+        {p?.headers.map((h, i) => <option key={i} value={i}>{colLabel(i)} · {h}</option>)}
       </Select>
     </label>
   );
@@ -110,7 +130,8 @@ export default function OrderImportModal({ onClose }: { onClose: () => void }) {
               {done.lines === 1 ? '' : 's'}, {done.skipped} skipped.
             </div>
             <div className="mt-2 text-green-700">
-              Work orders have been raised against every goods line, as they are on any booking.
+              {done.closed > 0 && `${done.closed} of them were booked closed and raised no work orders. `}
+              Every open order has a work order against each goods line, as it would on any booking.
               Numbering is untouched — set the counters in Settings → Numbering so new documents
               carry on from your own book.
             </div>
@@ -180,23 +201,70 @@ export default function OrderImportModal({ onClose }: { onClose: () => void }) {
 
               {/* 4 — what will happen */}
               <div className="rounded-md border border-slate-200 p-3">
-                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                  <span className="text-xs font-medium text-slate-600">4. Review — nothing is saved yet</span>
-                  <label className="flex items-center gap-2 text-xs text-slate-600">
-                    The Quantity column holds
+                <div className="mb-2 text-xs font-medium text-slate-600">4. Review — nothing is saved yet</div>
+                <div className="mb-3 flex flex-wrap items-end gap-3">
+                  <label className="text-xs text-slate-600">
+                    <span className="mb-1 block">The Quantity column holds</span>
                     <Select
                       value={basis}
-                      className="w-56"
+                      className="w-52"
                       onChange={(e) => { setBasis(e.target.value as 'pieces' | 'billing'); setTimeout(rerun, 0); }}
                     >
-                      <option value="pieces">pieces (priced per 1000)</option>
+                      <option value="pieces">pieces</option>
                       <option value="billing">the billing quantity as typed</option>
+                    </Select>
+                  </label>
+                  {/* A 1000-fold slip either way is exactly what the order
+                      totals beside this are for; a cell saying /PC or per 1000
+                      overrides it, and one saying /KG is not taken as a rate. */}
+                  <label className="text-xs text-slate-600">
+                    <span className="mb-1 block">The Rate column is</span>
+                    <Select
+                      value={rateBasis}
+                      className="w-52"
+                      onChange={(e) => { setRateBasis(e.target.value as 'per_piece' | 'per_1000'); setTimeout(rerun, 0); }}
+                    >
+                      <option value="per_piece">per piece</option>
+                      <option value="per_1000">per 1000 pieces</option>
                     </Select>
                   </label>
                 </div>
 
-                <div className="mb-2 flex gap-4 text-sm">
+                {p.statuses.length > 0 && (
+                  <div className="mb-3 rounded-lg bg-slate-50 p-2 ring-1 ring-slate-200">
+                    <div className={CAPTION_CLASS}>What your Status column means</div>
+                    <div className="mt-1 flex flex-wrap gap-3">
+                      {p.statuses.map((st) => (
+                        <label key={st.text} className="text-xs text-slate-600">
+                          <span className="mb-1 block">
+                            {st.text} <span className="text-slate-400">· {st.count}</span>
+                          </span>
+                          <Select
+                            value={st.action}
+                            className="w-44"
+                            onChange={(e) => {
+                              setStatusActions({ ...statusActions, [st.text]: e.target.value as OrderImportStatusAction });
+                              setTimeout(rerun, 0);
+                            }}
+                          >
+                            {STATUS_ACTIONS.map((a) => <option key={a.value} value={a.value}>{a.label}</option>)}
+                          </Select>
+                        </label>
+                      ))}
+                    </div>
+                    <p className="mt-2 text-xs text-slate-400">
+                      An order booked completed or cancelled raises no work orders — there is nothing left to make.
+                    </p>
+                  </div>
+                )}
+
+                <div className="mb-2 flex flex-wrap gap-4 text-sm">
                   <span className="text-green-700">{p.summary.create} order{p.summary.create === 1 ? '' : 's'} to book</span>
+                  <span className="text-slate-500">
+                    {p.orders.filter((o) => o.action === 'create' && !o.import_status).length} open
+                    {' · '}
+                    {p.orders.filter((o) => o.action === 'create' && o.import_status).length} closed
+                  </span>
                   <span className="text-slate-500">{p.summary.lines} lines</span>
                   <span className="text-slate-400">{p.summary.skip} skipped</span>
                 </div>
@@ -224,7 +292,12 @@ export default function OrderImportModal({ onClose }: { onClose: () => void }) {
                               {o.number || <span className="text-red-500">no number</span>}
                               {!skip && <div className="font-normal text-slate-400">{fmtMoney(o.total, o.currency)}</div>}
                             </td>
-                            <td className={`whitespace-nowrap px-2 py-1 ${tint}`}>{o.date ? fmtDate(o.date) : '—'}</td>
+                            <td className={`whitespace-nowrap px-2 py-1 ${tint}`}>
+                              {o.date ? fmtDate(o.date) : '—'}
+                              {o.import_status && (
+                                <div className="text-slate-400">{o.status_text} → {o.import_status}</div>
+                              )}
+                            </td>
                             <td className={`px-2 py-1 ${tint}`}>
                               {o.customer_name || o.customer_text || '—'}
                               {o.customer_name && o.customer_name !== o.customer_text && (

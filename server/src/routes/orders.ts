@@ -500,6 +500,8 @@ function importOptions(body: Record<string, unknown>): OrderBuildOptions {
     headerRow: body.header_row !== undefined && body.header_row !== null ? Number(body.header_row) : undefined,
     mapping: (body.mapping ?? undefined) as OrderBuildOptions['mapping'],
     quantityBasis: body.quantity_basis === 'billing' ? 'billing' : 'pieces',
+    rateBasis: body.rate_basis === 'per_1000' ? 'per_1000' : 'per_piece',
+    statusActions: (body.status_actions ?? undefined) as OrderBuildOptions['statusActions'],
   };
 }
 
@@ -543,6 +545,7 @@ ordersRouter.post('/import', (req: AuthedRequest, res) => {
    */
   const numbers = transaction(() => {
     const written: string[] = [];
+    let closed = 0;
     for (const o of result.orders) {
       if (o.action !== 'create' || !o.customer_id) continue;
       const companyId = resolveCompanyId(null, o.customer_id);
@@ -571,25 +574,36 @@ ordersRouter.post('/import', (req: AuthedRequest, res) => {
       ).run(
         o.number, companyId,
         ...(headerFields.map((f) => (h as Record<string, unknown>)[f]) as never[]),
-        req.user!.id, JSON.stringify({}), 'pending'
+        req.user!.id, JSON.stringify({}), o.import_status || 'pending'
       );
       const id = Number(info.lastInsertRowid);
       saveItems(id, o.lines as OrderItemInput[], h.tax_type, 0, 0, h.currency);
-      // An imported order is a booked order: it raises its jobs like any
-      // other, and not raising them would only last until the next restart,
-      // when `raiseJobsForOpenOrders()` would raise them anyway.
-      syncOrderJobs(id, req.user!.id);
-      syncOrderStatus(id);
+      /*
+       * An order the sheet still calls live is a booked order: it raises its
+       * jobs like any other, and not raising them would last only until the
+       * next restart, when `raiseJobsForOpenOrders()` would raise them anyway.
+       *
+       * One the sheet calls delivered or cancelled raises **none** — there is
+       * nothing left to make, and the status written above stands because a
+       * person's status is a floor the derived one builds on (the boot pass
+       * skips completed and cancelled orders too, so none appear later).
+       */
+      if (!o.import_status) {
+        syncOrderJobs(id, req.user!.id);
+        syncOrderStatus(id);
+      }
       written.push(o.number);
+      if (o.import_status) closed++;
     }
-    return written;
+    return { written, closed };
   });
 
   res.json({
-    created: numbers.length,
+    created: numbers.written.length,
+    closed: numbers.closed,
     lines: result.summary.lines,
     skipped: result.summary.skip,
-    numbers: numbers.slice(0, 50),
+    numbers: numbers.written.slice(0, 50),
     sheet: result.sheet,
   });
 });

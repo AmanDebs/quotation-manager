@@ -34,14 +34,16 @@ import { piecesPerBillingUnit } from './totals.js';
  *   paper with customers, so the sheet's own number is what is stored, and the
  *   counters in Settings are left exactly where they were — moving those
  *   forward is a separate, deliberate act.
- * - **It imports no status.** Status here is derived from the jobs and the
- *   dispatch record (`orderStatus.ts`), so a word in a Status column would be
- *   overwritten by the first sync and is better not read at all.
+ * - **It copies no status across.** Status here is derived from the jobs and
+ *   the dispatch record (`orderStatus.ts`), so a word copied into the column
+ *   would be restated by the first sync. The sheet's word is read for a
+ *   different question — whether this order is still live — and answered per
+ *   distinct word by whoever is importing; see `StatusAction`.
  */
 
 export type OrderFieldKey =
   | 'number' | 'po_number' | 'po_date' | 'customer' | 'date' | 'revised_date' | 'promised_date'
-  | 'payment_terms' | 'inco_terms' | 'destination' | 'currency' | 'spoc' | 'order_through' | 'remarks'
+  | 'payment_terms' | 'inco_terms' | 'destination' | 'currency' | 'spoc' | 'order_through' | 'remarks' | 'status'
   | 'code' | 'item' | 'color' | 'hsn_code' | 'pcs_per_pack' | 'packs' | 'pieces' | 'qty'
   | 'rate' | 'unit' | 'tax_pct' | 'supplier';
 
@@ -78,6 +80,15 @@ export const ORDER_IMPORT_FIELDS: OrderFieldSpec[] = [
   { key: 'spoc', label: 'SPOC / Prepared By', scope: 'order', synonyms: ['spoc', 'prepared by', 'sales person', 'salesperson', 'entered by', 'ent by', 'executive'] },
   { key: 'order_through', label: 'Order Received Via', scope: 'order', synonyms: ['order through', 'received via', 'order via', 'source'] },
   { key: 'remarks', label: 'Remarks', scope: 'order', synonyms: ['remarks', 'remark', 'comments', 'notes', 'note'] },
+  /*
+   * Read to decide **what to do with the order**, never stored as a status:
+   * status here is derived from the jobs and the dispatch record, so a word
+   * copied into the column would be restated by the first sync. What the
+   * sheet's word does decide is whether the order is still live — on the real
+   * book 288 of 478 orders read *Delivered* and 5 *Cancelled*, and booking
+   * those as open would raise a work order apiece for goods long gone.
+   */
+  { key: 'status', label: 'Status', scope: 'order', synonyms: ['order status', 'status', 'stage'] },
 
   { key: 'code', label: 'Item Code', scope: 'line', synonyms: ['item code', 'product code', 'sku code', 'code'] },
   { key: 'item', label: 'Item', scope: 'line', required: true, synonyms: ['item name', 'product name', 'standard name', 'description of goods', 'description', 'particulars', 'item', 'product', 'sku'] },
@@ -111,8 +122,12 @@ export function autoMapOrders(headers: string[]): OrderMapping {
     normalised.forEach((h, i) => {
       if (!h || taken.has(i)) return;
       for (const syn of field.synonyms) {
+        // A partial match is on **whole words**, not any substring. Measured
+        // against the live book: `po` matched *Transport* — "trans·po·rt" —
+        // so the customer's PO number was read out of a column holding freight
+        // notes. Padding both sides is the cheapest word boundary there is.
         const score = h === syn ? 100 - field.synonyms.indexOf(syn)
-          : h.includes(syn) ? 50 - field.synonyms.indexOf(syn)
+          : ` ${h} `.includes(` ${syn} `) ? 50 - field.synonyms.indexOf(syn)
           : 0;
         if (score > bestScore) { bestScore = score; bestIdx = i; }
       }
@@ -122,14 +137,57 @@ export function autoMapOrders(headers: string[]): OrderMapping {
   return mapping;
 }
 
-/** "1,20,000" → 120000, "₹ 10.50" → 10.5. Unreadable is null, so it can be flagged. */
+/**
+ * The **first number** in a cell: "1,20,000" → 120000, "₹ 10.50" → 10.5,
+ * "@ 0.40+GST" → 0.4. Unreadable is null, so it can be flagged.
+ *
+ * First-token rather than strip-everything, which is what `productImport`
+ * does: on the live order book the price column reads `@0.90+GST(Ex-works)`,
+ * and stripping to `[0-9.-]` leaves `0.90-` — not a number, so a stated price
+ * came through as nothing. 442 of that sheet's 804 price cells carry a figure
+ * and only 27 are plain.
+ */
 export function parseNum(raw: string): number | null {
-  const cleaned = raw.replace(/[^0-9.\-]/g, '');
-  if (!cleaned || cleaned === '-' || cleaned === '.') return null;
-  const n = Number(cleaned);
+  const m = /-?\d[\d,]*\.?\d*/.exec(raw);
+  if (!m) return null;
+  const n = Number(m[0].replace(/,/g, ''));
   // Deliberately not rounded: a rate may be quoted to four places, and the
   // money is rounded once, by `computeTotals`, where all money math lives.
   return Number.isFinite(n) ? n : null;
+}
+
+/** What a rate cell is quoted against, where the cell itself says. */
+export type RateBasis = 'per_piece' | 'per_1000';
+
+/**
+ * A price cell, read as a rate per 1000 pieces — the basis this app prices on.
+ *
+ * The live order book writes prices as notes rather than figures, so the cell
+ * is read for what it says before the dialog's choice is applied:
+ *
+ * - `/KG` is a **resin** price, not a rate for the goods — Aglo's own sheet
+ *   states `@128.40/KG` beside `@3.017/PC` for the same line, the second being
+ *   the first times the piece weight. Converting would need the catalogue's
+ *   `weight_grams` to be right for that product, and a rate is money, so it is
+ *   **refused** with the text shown instead of guessed at.
+ * - `/PC`, `per piece`, `each` is per piece whatever the dialog says, and
+ *   `per 1000` likewise — a marker in the record beats a setting.
+ * - Silence takes the dialog's basis, which defaults to **per piece**: that is
+ *   what this desk's column holds (`@0.65++` on a cap), and the preview's
+ *   order total is what makes a 1000-fold slip visible.
+ */
+export function rateFromCell(raw: string, basis: RateBasis): { pieceRate: number | null; note?: string } {
+  const s = raw.trim();
+  if (!s) return { pieceRate: null };
+  const n = parseNum(s);
+  if (n === null) return { pieceRate: null, note: `Price “${s}” states no figure — imported at 0` };
+  if (/\bkgs?\b/i.test(s)) {
+    return { pieceRate: null, note: `“${s}” is a price per kilo, not per piece — imported at 0` };
+  }
+  const perPiece = /\/\s*pcs?\b|per\s*pcs?\b|per\s*piece|\beach\b/i.test(s) ? true
+    : /per\s*1000|\/\s*1000|per\s*thousand/i.test(s) ? false
+    : basis === 'per_piece';
+  return { pieceRate: perPiece ? n : n / 1000 };
 }
 
 const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
@@ -180,6 +238,25 @@ export function parseDate(raw: string): string {
     return ymd(y < 100 ? 2000 + y : y, Number(dmy[2]), Number(dmy[1]));
   }
   return '';
+}
+
+/**
+ * What to do with an order carrying a given status word.
+ *
+ * `open` books it as this app books any order — jobs raised, status derived.
+ * `completed` and `cancelled` book the order and **raise no jobs**, since
+ * there is nothing left to make; the status is written directly, which the
+ * ladder respects, a person's status being a floor the facts build on.
+ * `skip` leaves it out altogether.
+ */
+export type StatusAction = 'open' | 'completed' | 'cancelled' | 'skip';
+
+/** What a status word most likely means, before anybody overrides it. */
+export function guessStatusAction(text: string): StatusAction {
+  const t = text.toLowerCase();
+  if (/cancel|reject|drop/.test(t)) return 'cancelled';
+  if (/deliver|complete|despatch|dispatch|shipp|closed|done/.test(t)) return 'completed';
+  return 'open';
 }
 
 /* ------------------------------------------------------------------ */
@@ -240,6 +317,11 @@ export interface DraftOrder {
   currency: string;
   is_export: number;
   tax_type: 'none' | 'igst';
+  /** The sheet's own word, and what this import will do about it. */
+  status_text: string;
+  status_action: StatusAction;
+  /** The status to store: blank for an ordinary booking, which then derives it. */
+  import_status: '' | 'completed' | 'cancelled';
   lines: DraftLine[];
   /** Lines read but not imported, with the reason on each. */
   dropped: { row: number; note: string }[];
@@ -256,6 +338,8 @@ export interface OrderBuildResult {
   headers: string[];
   mapping: OrderMapping;
   orders: DraftOrder[];
+  /** Every status word the sheet uses, with its count and what will happen to it. */
+  statuses: { text: string; count: number; action: StatusAction }[];
   summary: { create: number; skip: number; lines: number; rows: number };
 }
 
@@ -274,6 +358,14 @@ export interface OrderBuildOptions {
   defaultUnit?: string;
   /** Tax on a domestic line where the sheet states none. 18% is this catalogue's answer. */
   defaultTaxPct?: number;
+  /**
+   * What an unmarked rate is quoted against. **Per piece by default**, which
+   * is what this desk's price column holds; a cell saying `/PC` or `per 1000`
+   * overrides it either way.
+   */
+  rateBasis?: RateBasis;
+  /** What to do with each status word, keyed by the word as the sheet spells it. */
+  statusActions?: Record<string, StatusAction>;
 }
 
 /** Loose enough to survive "Pvt. Ltd." against "Pvt Ltd", and no looser. */
@@ -336,6 +428,7 @@ export function buildOrderImport(
 
   const mapping = opts.mapping && Object.keys(opts.mapping).length ? opts.mapping : autoMapOrders(headers);
   const basis = opts.quantityBasis ?? 'pieces';
+  const rateBasis = opts.rateBasis ?? 'per_piece';
   const defaultUnit = opts.defaultUnit || 'per 1000';
   const defaultTax = opts.defaultTaxPct ?? 18;
 
@@ -397,6 +490,7 @@ export function buildOrderImport(
     fill('order_through', 'order_through');
     fill('remarks', 'remarks');
     fill('currency', 'currency');
+    fill('status_text', 'status');
 
     const line = readLine(r, rowNo);
     if (line.drop) o.dropped.push({ row: rowNo, note: line.drop });
@@ -408,7 +502,9 @@ export function buildOrderImport(
       number, rows: [], customer_text: customerText, customer_id: null, customer_name: '',
       date: '', po_number: '', po_date: '', promised_date: '', revised_date: '',
       payment_terms: '', inco_terms: '', destination: '', spoc: '', order_through: '', remarks: '',
-      currency: '', is_export: 0, tax_type: 'igst', lines: [], dropped: [], action: 'create', total: 0,
+      currency: '', is_export: 0, tax_type: 'igst',
+      status_text: '', status_action: 'open', import_status: '',
+      lines: [], dropped: [], action: 'create', total: 0,
     };
   }
 
@@ -463,8 +559,19 @@ export function buildOrderImport(
     // dispatch form's own arithmetic read the other way round.
     if (total_pcs == null && packs != null && pcsPerPack != null) total_pcs = packs * pcsPerPack;
 
-    const rate = numCell(r, 'rate');
-    if (rate == null) notes.push('No rate on this row — imported at 0');
+    /*
+     * The rate is read per piece and then converted onto the line's own
+     * billing basis, which is the only place that knows what `per` is: a
+     * `per 1000` line takes ×1000, a per-piece line the figure itself, and a
+     * weight-billed line is quoted per kilo and takes the cell as typed.
+     */
+    const cellText = cell(r, 'rate');
+    const priced = rateFromCell(cellText, rateBasis);
+    if (priced.note) notes.push(priced.note);
+    else if (priced.pieceRate == null) notes.push('No rate on this row — imported at 0');
+    const rate = per != null
+      ? (priced.pieceRate ?? 0) * per
+      : (parseNum(cellText) ?? 0);
     const taxRaw = numCell(r, 'tax_pct');
 
     return {
@@ -477,7 +584,7 @@ export function buildOrderImport(
         hsn_code: cell(r, 'hsn_code') || product?.hsn_code || '',
         unit,
         qty,
-        unit_price: rate ?? 0,
+        unit_price: rate,
         tax_pct: taxRaw ?? defaultTax,
         packs: packs ?? (total_pcs != null && pcsPerPack ? Math.round((total_pcs / pcsPerPack) * 100) / 100 : null),
         pcs_per_pack: pcsPerPack,
@@ -488,6 +595,43 @@ export function buildOrderImport(
       },
     };
   }
+
+  /*
+   * A number used twice on one sheet is two different orders, not one.
+   *
+   * Measured on the live book: 33 of its numbers are stated against more than
+   * one customer — `AP/0216` against three — because the series has run round
+   * across years. Grouping them together would merge one buyer's order into
+   * another's, and writing both under one number is refused by the per-company
+   * unique index, which would take the whole load down with it. So the later
+   * ones are suffixed on the way in, as `connection.ts` suffixes the
+   * duplicates it finds already on file, and the preview says so: the number
+   * on the paperwork is still readable in it, and it can be corrected after.
+   */
+  const usedNumbers = new Map<string, number>();
+  for (const o of order) {
+    if (!o.number) continue;
+    const key = o.number.trim().toLowerCase();
+    const seenBefore = usedNumbers.get(key) ?? 0;
+    usedNumbers.set(key, seenBefore + 1);
+    if (seenBefore) {
+      const original = o.number;
+      o.number = `${o.number}-${seenBefore + 1}`;
+      o.note = `${original} is used by more than one customer on this sheet — imported as ${o.number}`;
+    }
+  }
+
+  const statusSeen = new Map<string, number>();
+  for (const o of order) {
+    const text = o.status_text.trim();
+    if (text) statusSeen.set(text, (statusSeen.get(text) ?? 0) + 1);
+  }
+  const statuses = [...statusSeen].map(([text, count]) => ({
+    text,
+    count,
+    action: opts.statusActions?.[text] ?? guessStatusAction(text),
+  })).sort((a, b) => b.count - a.count);
+  const actionFor = new Map(statuses.map((s) => [s.text, s.action]));
 
   // Now decide what each order would do. Customer, currency and the export
   // flag are settled here because all three follow from the customer record —
@@ -515,11 +659,18 @@ export function buildOrderImport(
       return sum + (billed ?? 0) * l.unit_price;
     }, 0) * 100) / 100;
 
+    o.status_action = actionFor.get(o.status_text.trim()) ?? 'open';
+    o.import_status = o.status_action === 'completed' ? 'completed'
+      : o.status_action === 'cancelled' ? 'cancelled' : '';
+
     const existingId = lookups.orderNumbers.get(o.number.trim().toLowerCase());
     if (existingId !== undefined) {
       o.action = 'skip';
       o.note = 'Already on file — left exactly as it is';
       o.existingId = existingId;
+    } else if (o.status_action === 'skip') {
+      o.action = 'skip';
+      o.note = `Status “${o.status_text}” — not being imported`;
     } else if (!o.customer_id) {
       o.action = 'skip';
       o.note = match.ambiguous
@@ -540,6 +691,7 @@ export function buildOrderImport(
     headers,
     mapping,
     orders: order,
+    statuses,
     summary: {
       create: order.filter((o) => o.action === 'create').length,
       skip: order.filter((o) => o.action === 'skip').length,

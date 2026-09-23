@@ -806,6 +806,9 @@ export interface OrderImportOrder {
   currency: string;
   is_export: number;
   tax_type: 'none' | 'igst';
+  status_text: string;
+  status_action: OrderImportStatusAction;
+  import_status: '' | 'completed' | 'cancelled';
   lines: OrderImportLine[];
   dropped: { row: number; note: string }[];
   action: 'create' | 'skip';
@@ -814,6 +817,8 @@ export interface OrderImportOrder {
   total: number;
 }
 
+export type OrderImportStatusAction = 'open' | 'completed' | 'cancelled' | 'skip';
+
 export interface OrderImportPreview {
   sheetNames: string[];
   sheet: string;
@@ -821,6 +826,7 @@ export interface OrderImportPreview {
   headers: string[];
   mapping: Record<string, number>;
   orders: OrderImportOrder[];
+  statuses: { text: string; count: number; action: OrderImportStatusAction }[];
   summary: { create: number; skip: number; lines: number; rows: number };
 }
 

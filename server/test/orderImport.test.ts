@@ -1,7 +1,8 @@
 import './helpers/scratch.js';
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildOrderImport, autoMapOrders, parseDate, parseNum, type Lookups } from '../src/services/orderImport.js';
+import { buildOrderImport, autoMapOrders, parseDate, parseNum, rateFromCell, guessStatusAction,
+  type Lookups } from '../src/services/orderImport.js';
 import { billedQty } from '../src/services/totals.js';
 
 /**
@@ -74,6 +75,14 @@ describe('reading the cells', () => {
     assert.equal(parseNum('₹ 10.50'), 10.5);
     assert.equal(parseNum(''), null);
     assert.equal(parseNum('n/a'), null);
+  });
+
+  test('the first number in the cell is the figure, not what is left after stripping', () => {
+    // The live book writes prices as notes: stripping everything but digits
+    // leaves "0.90-" from "(Ex-works)", which is not a number at all.
+    assert.equal(parseNum('@0.90+GST(Ex-works)'), 0.9);
+    assert.equal(parseNum('@ 16.54+FOR'), 16.54);
+    assert.equal(parseNum('WO PLUG'), null);
   });
 
   test('a rate is not rounded on the way in — money is rounded once, by computeTotals', () => {
@@ -258,5 +267,95 @@ describe('what is refused', () => {
   test('the summary counts orders and the lines of the ones being booked', () => {
     const r = build(SHEET, { orderNumbers: new Map([['so/002', 7]]) });
     assert.deepEqual(r.summary, { create: 1, skip: 1, lines: 2, rows: 3 });
+  });
+});
+
+
+describe('reading a price cell', () => {
+  test('an unmarked figure takes the chosen basis', () => {
+    assert.equal(rateFromCell('@0.65++', 'per_piece').pieceRate, 0.65);
+    assert.equal(rateFromCell('650', 'per_1000').pieceRate, 0.65);
+  });
+
+  test('a marker in the cell beats the setting, both ways', () => {
+    assert.equal(rateFromCell('@3.017/PC', 'per_1000').pieceRate, 3.017);
+    assert.equal(rateFromCell('₹ 275.00 per 1000 pcs', 'per_piece').pieceRate, 0.275);
+  });
+
+  test('a price per kilo is not a rate for the goods, and is refused rather than guessed', () => {
+    // Aglo's own sheet states @128.40/KG beside @3.017/PC for one line — the
+    // second being the first times the piece weight. Converting would need the
+    // catalogue's weight to be right, and a rate is money.
+    const r = rateFromCell('@128.40/KG', 'per_piece');
+    assert.equal(r.pieceRate, null);
+    assert.match(String(r.note), /per kilo/);
+  });
+
+  test('a cell with no figure in it says so', () => {
+    assert.match(String(rateFromCell('WO PLUG', 'per_piece').note), /states no figure/);
+  });
+});
+
+describe('the sheet’s own status word', () => {
+  const SHEET_S = [
+    'Order No.,Date,Party Name,Item,Quantity,Rate,Status',
+    'SO/501,15-08-2026,Bharat Engineering Works,Handle 5L,1000,4,Pending',
+    'SO/502,15-08-2026,Bharat Engineering Works,Handle 5L,1000,4,Delivered',
+    'SO/503,15-08-2026,Bharat Engineering Works,Handle 5L,1000,4,Cancelled',
+  ].join('\n');
+
+  test('delivered means finished and cancelled means cancelled, before anybody says otherwise', () => {
+    assert.equal(guessStatusAction('Delivered'), 'completed');
+    assert.equal(guessStatusAction('Despatched'), 'completed');
+    assert.equal(guessStatusAction('Cancelled'), 'cancelled');
+    assert.equal(guessStatusAction('Pending'), 'open');
+    assert.equal(guessStatusAction('Awaiting artwork'), 'open');
+  });
+
+  test('every distinct word is reported with its count, so the dialog can offer it', () => {
+    const r = build(SHEET_S);
+    assert.deepEqual(r.statuses, [
+      { text: 'Pending', count: 1, action: 'open' },
+      { text: 'Delivered', count: 1, action: 'completed' },
+      { text: 'Cancelled', count: 1, action: 'cancelled' },
+    ]);
+  });
+
+  test('a closed order is still booked, and carries the status that stops it raising jobs', () => {
+    const r = build(SHEET_S);
+    assert.deepEqual(r.orders.map((o) => [o.action, o.import_status]), [
+      ['create', ''], ['create', 'completed'], ['create', 'cancelled'],
+    ]);
+  });
+
+  test('a word can be told to mean something else, including not importing at all', () => {
+    const r = build(SHEET_S, {}, { statusActions: { Delivered: 'skip', Pending: 'completed' } });
+    assert.equal(r.orders[0].import_status, 'completed');
+    assert.equal(r.orders[1].action, 'skip');
+    assert.match(String(r.orders[1].note), /not being imported/);
+    assert.equal(r.summary.create, 2);
+  });
+});
+
+describe('a number used twice on one sheet', () => {
+  test('is two orders, and the later one is suffixed rather than colliding', () => {
+    // 33 numbers on the live book are stated against more than one customer,
+    // the series having run round; both must be written, and the per-company
+    // unique index would refuse two rows sharing a number.
+    const r = build([
+      HEAD,
+      'SO/601,15-08-2026,Bharat Engineering Works,Handle 5L,,1000,4,500,,',
+      'SO/601,16-08-2026,Shakti Fabricators,Handle 5L,,2000,4,500,,',
+    ].join('\n'), {
+      customers: [
+        { id: 1, name: 'Bharat Engineering Works', currency: 'INR', country: 'India', is_export: 0 },
+        { id: 2, name: 'Shakti Fabricators', currency: 'INR', country: 'India', is_export: 0 },
+      ],
+    });
+    assert.equal(r.orders.length, 2);
+    assert.equal(r.orders[0].number, 'SO/601');
+    assert.equal(r.orders[1].number, 'SO/601-2');
+    assert.match(String(r.orders[1].note), /used by more than one customer/);
+    assert.equal(r.summary.create, 2);
   });
 });
