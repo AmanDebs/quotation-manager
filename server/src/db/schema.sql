@@ -1194,6 +1194,10 @@ CREATE TABLE IF NOT EXISTS purchase_orders (
   -- is why it is a header field and not a line's tax_pct. computeTotals owns
   -- the arithmetic; 0 means the document does not carry it and nothing prints.
   tcs_pct REAL NOT NULL DEFAULT 0,
+  -- Which optional columns this order prints, the way the four selling
+  -- documents carry theirs (2026-09-23: "Option to select columns in purchase
+  -- order like proforma").
+  column_config TEXT NOT NULL DEFAULT '{}',
   tcs_amount REAL NOT NULL DEFAULT 0,
   grand_total REAL NOT NULL DEFAULT 0,
   created_by INTEGER REFERENCES users(id),

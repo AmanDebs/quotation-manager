@@ -635,6 +635,11 @@ export interface PurchaseOrder {
   inco_terms?: string; transport?: string; ship_via?: string; packing?: string;
   /** Tax collected at source: a percentage of the whole, not of a line. */
   tcs_pct?: number; tcs_amount?: number;
+  /**
+   * Which optional columns this order draws, on its own form and on its PDF
+   * (2026-09-23) — one config, so the two cannot disagree.
+   */
+  column_config?: ColumnConfig;
   subtotal: number; tax_total: number; grand_total: number;
   supplier_name?: string; location_name?: string | null; created_by_name?: string | null;
   items?: PoItem[];

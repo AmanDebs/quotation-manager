@@ -40,12 +40,12 @@ function makePo(header: Record<string, unknown>, lines: Line[]): number {
   const sup = db.prepare("INSERT INTO suppliers (name, address) VALUES ('Alternicq Polymers', '12 Industrial Road, Kolkata')").run();
   const cols = ['number', 'supplier_id', 'date', 'currency', 'tax_type', 'subtotal', 'tax_total', 'tcs_pct', 'tcs_amount', 'grand_total',
     'attn', 'vendor_ref', 'ship_to', 'inco_terms', 'transport', 'ship_via', 'packing', 'payment_terms', 'notes',
-    'bill_to', 'bill_to_gstin', 'ship_to_gstin'];
+    'bill_to', 'bill_to_gstin', 'ship_to_gstin', 'column_config'];
   const values: Record<string, unknown> = {
     number: `PO/TEST/${++seq}`, supplier_id: Number(sup.lastInsertRowid), date: '2026-09-04',
     currency: 'INR', tax_type: 'igst', subtotal: 0, tax_total: 0, tcs_pct: 0, tcs_amount: 0, grand_total: 0,
     attn: '', vendor_ref: '', ship_to: '', inco_terms: '', transport: '', ship_via: '', packing: '',
-    payment_terms: '', notes: '', bill_to: '', bill_to_gstin: '', ship_to_gstin: '', ...header,
+    payment_terms: '', notes: '', bill_to: '', bill_to_gstin: '', ship_to_gstin: '', column_config: '{}', ...header,
   };
   const po = db.prepare(
     `INSERT INTO purchase_orders (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`
@@ -200,5 +200,92 @@ describe('how it adds up', () => {
     const texts = textsOf(buildPurchaseOrderPdf(id));
     assert.ok(!texts.some((t) => t.startsWith('TCS')));
     assert.ok(texts.some((t) => t.includes('Add IGST')), 'the tax it does carry should still be there');
+  });
+});
+
+/**
+ * The columns it prints, and the page it has to print them on (2026-09-23,
+ * the client: *"Option to select columns in purchase order like proforma,
+ * also table is going out of frame"* — the two halves of one complaint, since
+ * the second is what the first is for).
+ */
+describe('the columns it prints', () => {
+  /** The goods table's own `widths`, found by its header row. */
+  function goodsWidths(id: number): (number | string)[] {
+    const found: (number | string)[][] = [];
+    const walk = (node: unknown) => {
+      if (node == null || typeof node !== 'object') return;
+      if (Array.isArray(node)) { for (const n of node) walk(n); return; }
+      const n = node as Node;
+      if (n.table && Array.isArray(n.table.widths)) {
+        const labels = textsOf(n.table.body?.[0] ?? []);
+        if (labels.includes('DESCRIPTION')) found.push(n.table.widths);
+      }
+      for (const k of ['stack', 'columns', 'body', 'table', 'content']) if (n[k] !== undefined) walk(n[k]);
+    };
+    walk(buildPurchaseOrderPdf(id));
+    assert.equal(found.length, 1, 'expected exactly one goods table');
+    return found[0];
+  }
+
+  const FULL: Line = {
+    ...GOODS, color: 'Natural',
+    image: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+  };
+
+  /**
+   * A4 less this document's own margins. pdfmake widens a table past the page
+   * rather than break a word, so a star column squeezed under its narrowest
+   * word is what put the goods over the right edge while the header grid
+   * above stopped at it — twice: once when the table was written, and again
+   * when IMAGE and COLOUR were added to it on 2026-09-20.
+   */
+  const PAGE_INNER = 515;
+  const PADDING_PER_CELL = 6;
+
+  test('every column on still leaves the description real room', () => {
+    // A line stating a photo, a colour and an HSN draws all ten.
+    const mat = db.prepare("INSERT INTO materials (name, hsn_code) VALUES ('HDPE', '3901')").run();
+    const widths = goodsWidths(makePo({}, [{ ...FULL, material_id: Number(mat.lastInsertRowid) }]));
+    assert.equal(widths.length, 11, `expected eleven columns, got ${widths.join(', ')}`);
+    assert.equal(widths.filter((w) => w === '*').length, 1, 'the description is the star column');
+    const fixed = widths.filter((w): w is number => typeof w === 'number').reduce((a, b) => a + b, 0);
+    const padding = widths.length * PADDING_PER_CELL;
+    const forDescription = PAGE_INNER - fixed - padding;
+    assert.ok(
+      forDescription >= 80,
+      `the description is left ${forDescription}pt of ${PAGE_INNER} (fixed ${fixed}, padding ${padding}) — the table will run off the page`,
+    );
+  });
+
+  test('a hidden column is dropped, and the table gets its width back', () => {
+    const mat = db.prepare("INSERT INTO materials (name, hsn_code) VALUES ('HDPE', '3901')").run();
+    const line = { ...FULL, material_id: Number(mat.lastInsertRowid) };
+    const all = goodsWidths(makePo({}, [line]));
+    const fewer = goodsWidths(makePo({ column_config: JSON.stringify({ hidden: ['image', 'color', 'hsn'] }) }, [line]));
+    assert.equal(fewer.length, all.length - 3);
+    const texts = textsOf(buildPurchaseOrderPdf(makePo({ column_config: JSON.stringify({ hidden: ['image', 'color', 'hsn'] }) }, [line])));
+    assert.ok(!texts.includes('COLOUR') && !texts.includes('HSN') && !texts.includes('IMAGE'));
+    assert.ok(texts.includes('DESCRIPTION'), 'what is left is still the goods table');
+  });
+
+  test('the quantity and the money cannot be hidden', () => {
+    // `PURCHASE_FORCED`: an order stating neither what is bought nor what will
+    // be paid is not an instruction anybody can act on, and a column hidden by
+    // a stored config cannot be ticked back on from a list that no longer
+    // offers it — `forceColumns`' own reason.
+    const texts = textsOf(buildPurchaseOrderPdf(makePo(
+      { column_config: JSON.stringify({ hidden: ['qty', 'amount', 'tax'] }) }, [GOODS],
+    )));
+    assert.ok(texts.some((t) => t.includes('TOTAL QUANTITY')));
+    assert.ok(texts.some((t) => t.includes('TOTAL (INR)')));
+    assert.ok(!texts.includes('TAX %'), 'tax is genuinely optional');
+  });
+
+  test('an order carrying no config prints what it always did', () => {
+    const texts = textsOf(buildPurchaseOrderPdf(makePo({}, [GOODS])));
+    for (const want of ['DESCRIPTION', 'NO. OF CART./BAGS', 'TOTAL QUANTITY', 'UNIT PRICE']) {
+      assert.ok(texts.some((t) => t.includes(want)), `missing: ${want}`);
+    }
   });
 });

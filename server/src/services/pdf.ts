@@ -612,6 +612,16 @@ const QUOTATION_FORCED = ['color'];
 const PROFORMA_FORCED = ['total_pcs', 'amount', 'color'];
 const INVOICE_FORCED = ['amount', 'color', 'hsn', 'total_pcs'];
 const ORDER_FORCED = ['amount', 'color'];
+/*
+ * A purchase order forces its two quantity-and-money columns and nothing else
+ * (2026-09-23). Total Quantity is what is being bought and Total is what will
+ * be paid for it; an order that states neither is not an instruction anybody
+ * can act on, and — the reason `forceColumns` exists — a column hidden by a
+ * config the document carries cannot be ticked back on from a list that no
+ * longer offers it. Unit Price is `always` in the spec, so it never needs to
+ * be forced here.
+ */
+const PURCHASE_FORCED = ['qty', 'amount'];
 
 /**
  * Builds the line-items table honouring the document's column_config:
@@ -2097,17 +2107,28 @@ export function buildPurchaseOrderPdf(id: number): TDocumentDefinitions {
   const cur = String(po.currency);
   const showTax = po.tax_type !== 'none';
   const hsnOf = (it: Row) => String(it.material_hsn || it.product_hsn || '');
+  // The columns this order prints, as chosen on its own form — the four
+  // selling documents' rule, applied to the one document that buys.
+  const cfg = forceColumns(JSON.parse(String(po.column_config || '{}')) as ColumnConfig, PURCHASE_FORCED);
 
   const specs: ColumnSpec[] = [
     /*
      * The fixed columns are sized so the description keeps real room on an
      * A4 page (2026-09-21, the client: "The table is going out of the
-     * frame"). Nine fixed widths plus ten cells' padding used to leave the
+     * frame"). The fixed widths plus each cell's padding used to leave the
      * star column less than its narrowest word, and pdfmake then widens the
      * table past the margin rather than breaking a word — the goods ran off
-     * the right edge while the header grid above stopped at it. The page
-     * has 515pt inside the margins: these total 372 with 60 of padding at
-     * the tighter layout below, which leaves the description about 80pt.
+     * the right edge while the header grid above stopped at it.
+     *
+     * **It went off again** (2026-09-23, the client with the same complaint
+     * and a screenshot): IMAGE and COLOUR were added on 2026-09-20 and put 84
+     * more points on a table that had about 80 to spare, so the same overhang
+     * came back the moment an order stated both. The ten fixed widths below
+     * total 360, which with eleven cells' padding at 3 a side leaves the
+     * description about 89pt of the page's 515 with **every** column on.
+     * Anything added here has to come out of that margin or out of another
+     * column — the tick-list is the answer for a desk that wants more room,
+     * not a wider table.
      */
     { key: 'sl', label: 'SL', width: 16, align: 'center', always: true, value: (_it, i) => String(i + 1) },
     { key: 'description', label: 'DESCRIPTION', width: '*', always: true, value: (it) => String(it.description || it.material_name || it.product_name || '') },
@@ -2116,28 +2137,28 @@ export function buildPurchaseOrderPdf(id: number): TDocumentDefinitions {
     // The photo, drawn as the proforma draws its IMAGE cell; the column
     // drops out entirely when no line carries one.
     {
-      key: 'image', label: 'IMAGE', width: 46, align: 'center',
+      key: 'image', label: 'IMAGE', width: 34, align: 'center',
       value: (it) => String(it.image || ''),
-      cell: (it) => (it.image ? { image: String(it.image), fit: [40, 40] as [number, number] } : { text: '' }),
+      cell: (it) => (it.image ? { image: String(it.image), fit: [30, 30] as [number, number] } : { text: '' }),
     },
-    { key: 'color', label: 'COLOUR', width: 38, align: 'center', value: (it) => String(it.color || '') },
-    { key: 'hsn', label: 'HSN', width: 36, align: 'center', value: hsnOf },
+    { key: 'color', label: 'COLOUR', width: 34, align: 'center', value: (it) => String(it.color || '') },
+    { key: 'hsn', label: 'HSN', width: 30, align: 'center', value: hsnOf },
     // The reference order's QUANTITY banner sits over these two. The banner
     // shrinks with its run if either auto-hides, which is what makes it safe
     // on an order that states no packing at all.
-    { key: 'packs', label: 'NO. OF CART./BAGS', width: 40, align: 'right', group: 'QUANTITY', value: (it) => fmtNum(it.packs, 0), sum: (rows) => fmtNum(rows.reduce((t, r) => t + (Number(r.packs) || 0), 0), 0) },
-    { key: 'pcs_per_pack', label: 'PCS./KGS. IN CART.', width: 44, align: 'right', group: 'QUANTITY', value: (it) => fmtNum(it.pcs_per_pack, 0) },
+    { key: 'packs', label: 'NO. OF CART./BAGS', width: 34, align: 'right', group: 'QUANTITY', value: (it) => fmtNum(it.packs, 0), sum: (rows) => fmtNum(rows.reduce((t, r) => t + (Number(r.packs) || 0), 0), 0) },
+    { key: 'pcs_per_pack', label: 'PCS./KGS. IN CART.', width: 36, align: 'right', group: 'QUANTITY', value: (it) => fmtNum(it.pcs_per_pack, 0) },
     // Pieces on a piece basis (2026-09-20, the client: "it should show
     // 95000"), the invoice's `piecesOf` reading — `95 per 1000` is how the
     // line is priced, not how much is bought. Kilos print as kilos.
-    { key: 'qty', label: 'TOTAL QUANTITY', width: 60, align: 'right', always: true, value: (it) => {
+    { key: 'qty', label: 'TOTAL QUANTITY', width: 54, align: 'right', always: true, value: (it) => {
       const pcs = piecesOf(it);
       if (pcs != null) return `${fmtNum(pcs, 0)} Pcs`;
       return it.qty != null ? `${fmtNum(it.qty)} ${it.unit ?? ''}`.trim() : '';
     } },
-    { key: 'rate', label: `UNIT PRICE (${cur})`, width: 48, align: 'right', always: true, value: (it) => fmtNum(it.rate, 3) },
-    { key: 'tax', label: 'TAX %', width: 28, align: 'right', value: (it) => (showTax ? `${it.tax_pct ?? 0}%` : '') },
-    { key: 'amount', label: `TOTAL (${cur})`, width: 62, align: 'right', always: true, value: (it) => fmtMoney(Number(it.amount), cur), sum: (rows) => fmtMoney(rows.reduce((t, r) => t + (Number(r.amount) || 0), 0), cur) },
+    { key: 'rate', label: `UNIT PRICE (${cur})`, width: 42, align: 'right', always: true, value: (it) => fmtNum(it.rate, 3) },
+    { key: 'tax', label: 'TAX %', width: 24, align: 'right', value: (it) => (showTax ? `${it.tax_pct ?? 0}%` : '') },
+    { key: 'amount', label: `TOTAL (${cur})`, width: 56, align: 'right', always: true, value: (it) => fmtMoney(Number(it.amount), cur), sum: (rows) => fmtMoney(rows.reduce((t, r) => t + (Number(r.amount) || 0), 0), cur) },
   ];
 
   /*
@@ -2291,7 +2312,7 @@ export function buildPurchaseOrderPdf(id: number): TDocumentDefinitions {
     // rows breathe **downwards** instead — 5pt top and bottom rather than 3 —
     // which costs nothing horizontally and gives a short order some height.
     {
-      stack: [itemsTable(s, items, specs, {}, money, {
+      stack: [itemsTable(s, items, specs, cfg, money, {
         ...gridLayout, paddingLeft: () => 3, paddingRight: () => 3, paddingTop: () => 5, paddingBottom: () => 5,
       // Ruled to twelve rows whatever the order carries (2026-09-23, the client:
       // *"For PO this is only taking half page, I want the page to look

@@ -296,3 +296,34 @@ export function invoiceColumns(): ToggleableColumn[] {
 export function orderColumns(): ToggleableColumn[] {
   return columnsFor(ORDER_FORCED);
 }
+
+/**
+ * A purchase order's own tick-list (2026-09-23, the client: *"Option to select
+ * columns in purchase order like proforma"*, asked in the same breath as
+ * *"also table is going out of frame"* — which is what the list is for: the
+ * two columns added on 2026-09-20 put the goods table over the page margin,
+ * and the honest answer to a desk that wants room is to let it drop the
+ * columns it does not use rather than to widen the table).
+ *
+ * What is left offered is exactly the six optional columns the PDF draws:
+ * photo, HSN, pcs per box, boxes, colour and tax. Everything else is either
+ * `always` on that document — SL, description, Total Quantity, Unit Price,
+ * Total — or a column a purchase order has never had.
+ *
+ * `qty_20ft`/`qty_40ft` are loadability, which answers how many boxes fill a
+ * container we are *sending*; `total_pcs`, `uom` and `per_1000` name columns
+ * the purchase order's own table does not draw; `unit_price` is `always` in
+ * its PDF spec, so offering a tick that cannot take effect would be worse
+ * than not offering one.
+ */
+export const PURCHASE_OMIT = [
+  'qty_20ft', 'qty_40ft', 'total_pcs', 'unit_price', 'uom', 'per_1000',
+  ...ORDER_ONLY_COLUMNS,
+];
+
+/** Kept on the page whatever a config says — see `PURCHASE_FORCED` in `pdf.ts`. */
+export const PURCHASE_FORCED = ['qty', 'amount'];
+
+export function purchaseColumns(): ToggleableColumn[] {
+  return columnsFor([...PURCHASE_OMIT, ...PURCHASE_FORCED]);
+}

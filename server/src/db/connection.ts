@@ -307,6 +307,9 @@ for (const table of ['quotations', 'proforma_invoices', 'commercial_invoices']) 
   addColumnIfMissing(table, 'approval_note', "TEXT NOT NULL DEFAULT ''");
   addColumnIfMissing(table, 'column_config', "TEXT NOT NULL DEFAULT '{}'");
 }
+// The purchase order picks its own columns too (2026-09-23), the way the four
+// selling documents do — it is not in the loop above, having no approval.
+addColumnIfMissing('purchase_orders', 'column_config', "TEXT NOT NULL DEFAULT '{}'");
 addColumnIfMissing('packing_lists', 'created_by', 'INTEGER');
 addColumnIfMissing('packing_lists', 'column_config', "TEXT NOT NULL DEFAULT '{}'");
 for (const table of ['quotation_items', 'pi_items', 'invoice_items', 'packing_list_items']) {

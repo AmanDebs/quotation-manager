@@ -10,6 +10,7 @@ import { DocNumber, PaymentTermsInput, PurchaseTermsInput } from '../components/
 import HistoryCard from '../components/HistoryCard';
 import { productTypeLabel, unitOptions } from './Products';
 import { PhotoCell } from '../components/LineItemsEditor';
+import ColumnsControl, { newColumnConfig, purchaseColumns } from '../components/ColumnsControl';
 import { fmtMoney, today } from '../lib/format';
 import { PIECES_PER_BILLING_UNIT, piecesOrdered } from '../lib/pieces';
 import { useUnsavedChanges } from '../lib/useUnsavedChanges';
@@ -59,7 +60,7 @@ const itemKey = (it: PoItem): string =>
 const emptyDraft = (suppliers: Supplier[], locations: Location[]): PoDraft => ({
   supplier_id: suppliers[0]?.id, location_id: locations[0]?.id ?? null,
   date: today(), expected_date: '', currency: 'INR', tax_type: 'igst' as TaxType,
-  payment_terms: '', notes: '', items: [emptyPoItem()],
+  payment_terms: '', notes: '', column_config: newColumnConfig(), items: [emptyPoItem()],
 });
 
 export default function PurchaseOrderFormPage() {
@@ -262,6 +263,15 @@ export default function PurchaseOrderFormPage() {
   if (!isNew && !existing) return <div className="text-sm text-slate-500">Loading…</div>;
 
   // Preview only — the server recomputes on save, as it does for every document.
+  /*
+   * Which optional columns this order draws. Read from the document's own
+   * config so the form and the PDF cannot disagree, with the same fallback
+   * `ColumnsControl` gives a document saved before the config existed: an
+   * order carrying nothing shows everything.
+   */
+  const hiddenCols = new Set(draft.column_config?.hidden ?? []);
+  const show = (key: string) => !hiddenCols.has(key);
+
   const preview = draft.items.reduce((s, it) => s + (it.qty ?? 0) * (it.rate || 0), 0);
   const cur = draft.currency ?? 'INR';
   const deemed = draft.tax_type === 'igst' && draft.items.length > 0 && draft.items.every((it) => Number(it.tax_pct) === DEEMED_EXPORT_PCT);
@@ -422,7 +432,17 @@ export default function PurchaseOrderFormPage() {
           </div>
         </Card>
 
-        <Card title="Lines">
+        {/*
+          The columns this order prints, chosen the way a proforma's are
+          (2026-09-23). The tick-list governs **both** this table and the PDF
+          from one stored config, which is the whole reason `forceColumns`
+          exists on the server: two lists is how the paper and the screen come
+          to disagree about the same document.
+        */}
+        <Card
+          title="Lines"
+          actions={<ColumnsControl config={draft.column_config ?? {}} onChange={(c) => set({ column_config: c })} columns={purchaseColumns()} />}
+        >
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
@@ -435,17 +455,17 @@ export default function PurchaseOrderFormPage() {
                   {/* A photo per line (2026-09-20, the client: "add a column
                       to insert image") — the line editor's own cell, the
                       catalogue's photo on a pick, replaced or cleared here. */}
-                  <th className="w-14 pb-2 pr-2">Photo</th>
+                  {show('image') && <th className="w-14 pb-2 pr-2">Photo</th>}
                   {/* The colour bought (2026-09-20, the client: "Add Colour
                       column"): the catalogue's on a pick, typed over where
                       the supplier's word differs. */}
-                  <th className="w-28 pb-2 pr-2">Colour</th>
-                  <th className="w-24 pb-2 pr-2 text-right">Boxes</th>
-                  <th className="w-24 pb-2 pr-2 text-right">Pcs/Box</th>
+                  {show('color') && <th className="w-28 pb-2 pr-2">Colour</th>}
+                  {show('packs') && <th className="w-24 pb-2 pr-2 text-right">Boxes</th>}
+                  {show('pcs_per_pack') && <th className="w-24 pb-2 pr-2 text-right">Pcs/Box</th>}
                   <th className="w-32 pb-2 pr-2 text-right">Qty</th>
                   <th className="w-28 pb-2 pr-2">Unit</th>
                   <th className="w-28 pb-2 pr-2 text-right">Rate</th>
-                  <th className="w-20 pb-2 pr-2 text-right">Tax %</th>
+                  {show('tax') && <th className="w-20 pb-2 pr-2 text-right">Tax %</th>}
                   <th className="w-32 pb-2 pr-2 text-right">Amount</th>
                   <th className="w-8 pb-2" />
                 </tr>
@@ -462,10 +482,10 @@ export default function PurchaseOrderFormPage() {
                         onChange={(v) => pickItem(i, v)}
                       />
                     </td>
-                    <td className="py-2 pr-2"><PhotoCell value={it.image ?? ''} onChange={(v) => setItem(i, { image: v })} /></td>
-                    <td className="py-2 pr-2"><Input value={it.color ?? ''} onChange={(e) => setItem(i, { color: e.target.value })} placeholder="e.g. Natural" /></td>
-                    <td className="py-2 pr-2"><Input type="number" min={0} step="any" className="w-full text-right tabular-nums" value={it.packs ?? ''} onChange={(e) => setPacking(i, { packs: e.target.value === '' ? null : Number(e.target.value) })} /></td>
-                    <td className="py-2 pr-2"><Input type="number" min={0} step="any" className="w-full text-right tabular-nums" value={it.pcs_per_pack ?? ''} onChange={(e) => setPacking(i, { pcs_per_pack: e.target.value === '' ? null : Number(e.target.value) })} /></td>
+                    {show('image') && <td className="py-2 pr-2"><PhotoCell value={it.image ?? ''} onChange={(v) => setItem(i, { image: v })} /></td>}
+                    {show('color') && <td className="py-2 pr-2"><Input value={it.color ?? ''} onChange={(e) => setItem(i, { color: e.target.value })} placeholder="e.g. Natural" /></td>}
+                    {show('packs') && <td className="py-2 pr-2"><Input type="number" min={0} step="any" className="w-full text-right tabular-nums" value={it.packs ?? ''} onChange={(e) => setPacking(i, { packs: e.target.value === '' ? null : Number(e.target.value) })} /></td>}
+                    {show('pcs_per_pack') && <td className="py-2 pr-2"><Input type="number" min={0} step="any" className="w-full text-right tabular-nums" value={it.pcs_per_pack ?? ''} onChange={(e) => setPacking(i, { pcs_per_pack: e.target.value === '' ? null : Number(e.target.value) })} /></td>}
                     <td className="py-2 pr-2"><Input type="number" min={0} step="any" className="w-full text-right tabular-nums" value={qtyShown(it) ?? ''} onChange={(e) => setQty(i, e.target.value === '' ? null : Number(e.target.value))} /></td>
                     {/* The catalogue's units, as the proforma's editor offers
                         them (2026-09-20, the client: "Like in proforma there
@@ -477,7 +497,7 @@ export default function PurchaseOrderFormPage() {
                       </Select>
                     </td>
                     <td className="py-2 pr-2"><Input type="number" min={0} step="any" className="w-full text-right tabular-nums" value={it.rate || ''} onChange={(e) => setItem(i, { rate: Number(e.target.value) })} /></td>
-                    <td className="py-2 pr-2"><Input type="number" min={0} step="any" className="w-full text-right tabular-nums" value={it.tax_pct ?? ''} onChange={(e) => setItem(i, { tax_pct: Number(e.target.value) })} /></td>
+                    {show('tax') && <td className="py-2 pr-2"><Input type="number" min={0} step="any" className="w-full text-right tabular-nums" value={it.tax_pct ?? ''} onChange={(e) => setItem(i, { tax_pct: Number(e.target.value) })} /></td>}
                     <td className="py-2 pr-2 text-right tabular-nums">{fmtMoney((it.qty ?? 0) * (it.rate || 0), cur)}</td>
                     <td className="py-2 text-right">
                       <button

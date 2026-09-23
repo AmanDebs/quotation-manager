@@ -38,7 +38,7 @@ const headerFields = [
   'supplier_id', 'location_id', 'date', 'expected_date', 'currency', 'tax_type', 'payment_terms', 'notes',
   // The header Aglo's own purchase order prints, and the import flag.
   'is_import', 'attn', 'vendor_ref', 'ship_to', 'inco_terms', 'transport', 'ship_via', 'packing', 'tcs_pct',
-  'bill_to', 'bill_to_gstin', 'ship_to_gstin',
+  'bill_to', 'bill_to_gstin', 'ship_to_gstin', 'column_config',
 ] as const;
 
 const STATUSES = ['draft', 'sent', 'part_received', 'received', 'cancelled'];
@@ -159,6 +159,8 @@ function getFull(id: number) {
   // inferred from the material, which used to credit two lines of the same
   // material with each other's deliveries.
   const received = receivedByLine(id);
+  // Parsed at the route boundary, as every other document's is.
+  po.column_config = JSON.parse(String(po.column_config || '{}'));
   po.items = items.map((it, i) => {
     const got = received.get(i) ?? 0;
     return { ...it, qty_received: got, qty_pending: round2(Math.max(0, (Number(it.qty) || 0) - got)) };
@@ -257,6 +259,7 @@ purchaseOrdersRouter.post('/', (req: AuthedRequest, res) => {
       String(body.packing ?? ''),
       Number(body.tcs_pct) || 0,
       String(body.bill_to ?? ''), String(body.bill_to_gstin ?? '').trim(), String(body.ship_to_gstin ?? '').trim(),
+      JSON.stringify(body.column_config ?? {}),
       STATUSES.includes(String(body.status)) ? String(body.status) : 'draft',
       req.user!.id
     );
@@ -291,14 +294,16 @@ purchaseOrdersRouter.put('/:id', (req, res) => {
       `UPDATE purchase_orders SET number = ?, supplier_id = ?, location_id = ?, date = ?, expected_date = ?,
          currency = ?, tax_type = ?, payment_terms = ?, notes = ?,
          attn = ?, vendor_ref = ?, ship_to = ?, inco_terms = ?, transport = ?, ship_via = ?,
-         packing = ?, tcs_pct = ?, bill_to = ?, bill_to_gstin = ?, ship_to_gstin = ? WHERE id = ?`
+         packing = ?, tcs_pct = ?, bill_to = ?, bill_to_gstin = ?, ship_to_gstin = ?,
+         column_config = ? WHERE id = ?`
     ).run(
       String(v('number')), Number(v('supplier_id')), numOrNull(v('location_id', null)),
       String(v('date')), String(v('expected_date')), String(v('currency', 'INR')),
       String(v('tax_type', 'igst')), String(v('payment_terms')), String(v('notes')),
       String(v('attn')), String(v('vendor_ref')), String(v('ship_to')), String(v('inco_terms')),
       String(v('transport')), String(v('ship_via')), String(v('packing')), tcsPct,
-      String(v('bill_to')), String(v('bill_to_gstin')).trim(), String(v('ship_to_gstin')).trim(), id
+      String(v('bill_to')), String(v('bill_to_gstin')).trim(), String(v('ship_to_gstin')).trim(),
+      JSON.stringify(body.column_config ?? JSON.parse(String(existing.column_config || '{}'))), id
     );
     if (Array.isArray(body.items)) {
       saveItems(id, body.items, String(v('tax_type', 'igst')) as never, String(v('currency', 'INR')), tcsPct);
