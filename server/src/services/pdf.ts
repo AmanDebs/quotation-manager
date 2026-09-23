@@ -506,16 +506,34 @@ function customerAddress(c: Row, withContact = true): string {
   return lines.filter((l, i) => l.toLowerCase() !== lines[i - 1]?.toLowerCase()).join('\n');
 }
 
-function baseDoc(content: Content[]): TDocumentDefinitions {
+/**
+ * `bottom` anchors a block to the **foot of the last page** rather than
+ * letting it follow the content (2026-09-23, the client with a one-line
+ * purchase order: *"For PO this is only taking half page, I want the page to
+ * look fuller"*). A short document cannot be given more content honestly —
+ * nobody wants invented lines — but a signature floating a third of the way
+ * down reads as a page that stopped early, where the same block sitting on
+ * the page's foot reads as a form with room left for more goods, which is
+ * what it is. pdfmake draws a footer inside the bottom margin, so `bottom`
+ * comes with the margin it needs; it is rendered **on the last page only**,
+ * since a signature repeated on every page of a long order would be a
+ * document signed three times.
+ */
+function baseDoc(content: Content[], bottom?: { block: Content; height: number }): TDocumentDefinitions {
+  const pageNo = (currentPage: number, pageCount: number): Content => ({
+    text: `Page ${currentPage} of ${pageCount}`, alignment: 'center', fontSize: 7, color: '#999999',
+  });
   return {
     pageSize: 'A4',
     // Top margin trimmed to pay for a larger logo: 26pt is ~9mm, well inside
     // the unprintable edge of any office printer.
-    pageMargins: [40, 26, 40, 42],
+    pageMargins: [40, 26, 40, bottom ? bottom.height : 42],
     content,
-    footer: (currentPage, pageCount) => ({
-      text: `Page ${currentPage} of ${pageCount}`, alignment: 'center', fontSize: 7, color: '#999999',
-    }),
+    footer: (currentPage, pageCount) => (
+      bottom && currentPage === pageCount
+        ? { stack: [{ ...(bottom.block as object), margin: [40, 0, 40, 0] }, pageNo(currentPage, pageCount)] } as Content
+        : pageNo(currentPage, pageCount)
+    ),
     defaultStyle: { fontSize: 9, color: '#1a1a1a' },
   };
 }
@@ -600,7 +618,7 @@ const ORDER_FORCED = ['amount', 'color'];
  * explicitly hidden columns are dropped, columns with no data anywhere are
  * dropped automatically, and up to three named custom columns are appended.
  */
-function itemsTable(s: Row, items: Row[], specs: ColumnSpec[], cfg: ColumnConfig, footer: MoneyRow[] = [], layout: TableLayout = gridLayout) {
+function itemsTable(s: Row, items: Row[], specs: ColumnSpec[], cfg: ColumnConfig, footer: MoneyRow[] = [], layout: TableLayout = gridLayout, minRows = 0) {
   const hidden = new Set(cfg.hidden ?? []);
   const customNames = (cfg.custom ?? []).slice(0, 3);
 
@@ -733,6 +751,16 @@ function itemsTable(s: Row, items: Row[], specs: ColumnSpec[], cfg: ColumnConfig
       : [summedClosing({ label: 'TOTAL', value: '' })])
     : footer.map(money);
 
+  /*
+   * Ruled blank rows to a minimum depth (`minRows`), the way a printed order
+   * form is ruled: they are drawn as empty cells rather than as blank *items*,
+   * so no column's `value()` is asked about a row that does not exist — the
+   * amount column would have read `NaN` — and no `sum` counts them. Only the
+   * purchase order asks for any; every other document passes 0 and its table
+   * ends on its last line exactly as before.
+   */
+  const blanks = Math.max(0, minRows - items.length);
+
   const body: Cell[][] = [
     ...headers,
     ...items.map((it, i) =>
@@ -743,6 +771,10 @@ function itemsTable(s: Row, items: Row[], specs: ColumnSpec[], cfg: ColumnConfig
         fillColor: i % 2 ? '#f7f5f4' : undefined,
       }))
     ),
+    ...Array.from({ length: blanks }, (_, b) => {
+      const i = items.length + b;
+      return columns.map(() => ({ text: ' ', fontSize: 8, fillColor: i % 2 ? '#f7f5f4' : undefined } as Cell));
+    }),
     ...closingRows,
   ];
 
@@ -2254,15 +2286,37 @@ export function buildPurchaseOrderPdf(id: number): TDocumentDefinitions {
     // carries the gap the sentence used to.
     // Tighter cell padding than the grid's default 4: ten columns at 4 a side
     // is 80pt of the page's 515, and the description was paying for it.
-    { stack: [itemsTable(s, items, specs, {}, money, { ...gridLayout, paddingLeft: () => 3, paddingRight: () => 3 })], margin: [0, 8, 0, 0] as [number, number, number, number] },
+    // Tighter cell padding than the grid's default 4: ten columns at 4 a side
+    // is 80pt of the page's 515, and the description was paying for it. The
+    // rows breathe **downwards** instead — 5pt top and bottom rather than 3 —
+    // which costs nothing horizontally and gives a short order some height.
+    {
+      stack: [itemsTable(s, items, specs, {}, money, {
+        ...gridLayout, paddingLeft: () => 3, paddingRight: () => 3, paddingTop: () => 5, paddingBottom: () => 5,
+      // Ruled to twelve rows whatever the order carries (2026-09-23, the client:
+      // *"For PO this is only taking half page, I want the page to look
+      // fuller"*). A one-line order left two thirds of the page blank; a form
+      // ruled to a depth reads as stationery rather than as a page that
+      // stopped, and it is the ordinary anti-tamper shape of a printed order
+      // — nothing can be written in under the last line after it is signed.
+      // An order with twelve lines or more is untouched, and the table still
+      // closes on its TOTAL row.
+      }, 12)],
+      margin: [0, 8, 0, 0] as [number, number, number, number],
+    },
     amountWords(po, cur),
     ...(po.packing
       ? [{ text: `Packing: ${String(po.packing)}`, fontSize: 8, margin: [0, 6, 0, 0] as [number, number, number, number] }]
       : []),
     ...notesAndTerms(s, String(po.notes || ''), 'TERMS & CONDITIONS:'),
-    signatureBlock(s, {}),
   ];
-  return baseDoc(content);
+  /*
+   * The signature sits on the foot of the page rather than under the goods.
+   * 118pt is the block's own height (a label, the 42pt signing space, the
+   * line under it) plus the page number and a little air; measured against a
+   * stamped signature, which is the taller of the two shapes.
+   */
+  return baseDoc(content, { block: signatureBlock(s, {}), height: 118 });
 }
 
 /* ------------------------------------------------------------------ *
