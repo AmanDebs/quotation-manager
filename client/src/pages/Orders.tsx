@@ -10,6 +10,49 @@ import { usePagedList, PAGE_SIZE, type PagedList } from '../lib/usePagedList';
 import { useCan } from '../App';
 import { Icon } from '../components/icons';
 import OrderImportModal from '../components/OrderImportModal';
+import { ColumnFilter, isFiltered, type ColumnFilterValue, type FilterKind } from '../components/ColumnFilter';
+
+/**
+ * The columns of the *Sales order lines* view that carry a header filter, and
+ * what each one offers (2026-09-24: *"Is it possible to add filter in header
+ * of each column like in excel"*).
+ *
+ * The labels are the headings' own words and the keys are the server's — one
+ * list, because a key the server does not know would draw a control that
+ * filters nothing, and there is no error anywhere to say so.
+ *
+ * Every filter lives in the URL beside the status and the search term, so a
+ * filtered book is a link somebody can send. A tick list is **newline**
+ * separated rather than comma separated: these are customer names and item
+ * descriptions off the client's own book, and *Bisleri International Pvt.
+ * Ltd., Kolkata* is one value containing a comma.
+ */
+const LINE_FILTERS: { key: string; label: string; kind: FilterKind }[] = [
+  { key: 'order_number', label: 'Sales Order', kind: 'values' },
+  { key: 'date', label: 'Date', kind: 'dates' },
+  { key: 'customer', label: 'Customer', kind: 'values' },
+  { key: 'port', label: 'Dest Port', kind: 'values' },
+  { key: 'item', label: 'Item', kind: 'values' },
+  { key: 'color', label: 'Colour', kind: 'values' },
+  { key: 'qty', label: 'Qty', kind: 'numbers' },
+  { key: 'sent', label: 'Sent', kind: 'numbers' },
+  { key: 'balance', label: 'Balance', kind: 'numbers' },
+  { key: 'promised', label: 'Orig. Prod.', kind: 'dates' },
+  { key: 'revised', label: 'Rev. Prod.', kind: 'dates' },
+  { key: 'added_by', label: 'Added By', kind: 'values' },
+  { key: 'state', label: 'State', kind: 'values' },
+];
+
+const FILTER_KIND = new Map(LINE_FILTERS.map((c) => [c.key, c.kind]));
+
+/** The URL keys one column owns, so clearing it clears all of them. */
+function filterKeys(key: string): string[] {
+  return FILTER_KIND.get(key) === 'values'
+    ? [`f.${key}`]
+    : FILTER_KIND.get(key) === 'dates'
+      ? [`f.${key}_from`, `f.${key}_to`]
+      : [`f.${key}_min`, `f.${key}_max`];
+}
 
 /**
  * A dispatch is recorded from the book (asked for 2026-09-14: "a button to
@@ -178,12 +221,67 @@ export default function OrdersPage() {
   const can = useCan();
   const canDispatch = can('dispatch', 'full');
 
+  /*
+   * The header filters, read off the URL.
+   *
+   * A tick list is **present-and-empty when the blank value alone is ticked**
+   * — `f.color=` means *the lines with no colour*, and no key at all means no
+   * filter. `URLSearchParams.get` tells the two apart (`''` against `null`),
+   * which is why `setParam` above cannot be reused to write them: it drops an
+   * empty value, and that would silently throw the blank tick away on the
+   * round trip somebody makes by copying the link.
+   */
+  const columnFilter = (key: string): ColumnFilterValue | undefined => {
+    const kind = FILTER_KIND.get(key);
+    if (kind === 'values') {
+      const raw = search.get(`f.${key}`);
+      return raw === null ? undefined : { values: raw.split('\n') };
+    }
+    const [lo, hi] = filterKeys(key);
+    const from = search.get(lo) ?? '';
+    const to = search.get(hi) ?? '';
+    return from || to ? { from, to } : undefined;
+  };
+
+  const setColumnFilter = (key: string, v: ColumnFilterValue) => {
+    const next = new URLSearchParams(search);
+    for (const k of filterKeys(key)) next.delete(k);
+    if (FILTER_KIND.get(key) === 'values') {
+      if (v.values?.length) next.set(`f.${key}`, v.values.join('\n'));
+    } else {
+      const [lo, hi] = filterKeys(key);
+      if (v.from) next.set(lo, v.from);
+      if (v.to) next.set(hi, v.to);
+    }
+    setSearch(next, { replace: true });
+  };
+
+  const filteredColumns = LINE_FILTERS.filter((c) => isFiltered(columnFilter(c.key)));
+  const clearColumnFilters = () => {
+    const next = new URLSearchParams(search);
+    for (const c of LINE_FILTERS) for (const k of filterKeys(c.key)) next.delete(k);
+    setSearch(next, { replace: true });
+  };
+
   const params = new URLSearchParams();
   if (statusFilter) params.set('status', statusFilter);
   if (exportFilter) params.set('export', exportFilter);
   if (companyFilter) params.set('company', companyFilter);
   if (openOnly) params.set('open', '1');
   if (q) params.set('q', q);
+  // Carried on every view and on the download, so the spreadsheet holds what
+  // the screen held — `lineFilters` on the server reads one set of keys for
+  // the lines, the per-product fold and the export alike.
+  for (const c of LINE_FILTERS) {
+    const v = columnFilter(c.key);
+    if (!v) continue;
+    if (c.kind === 'values') { if (v.values) params.set(`f.${c.key}`, v.values.join('\n')); }
+    else {
+      const [lo, hi] = filterKeys(c.key);
+      if (v.from) params.set(lo, v.from);
+      if (v.to) params.set(hi, v.to);
+    }
+  }
   const query = params.toString();
 
   // `view` rides in each key so that switching views starts at page 1 — page 3
@@ -274,8 +372,36 @@ export default function OrdersPage() {
 
       <ErrorText error={setStatus.error} />
 
+      {/*
+        Which columns are filtered, said above the table rather than left to be
+        read off thirteen headings — and it is drawn on every view, because the
+        per-product fold and the download obey these filters too, and a figure
+        narrowed by a filter whose control is on another tab is exactly the
+        kind of wrong somebody finds in a meeting.
+      */}
+      {filteredColumns.length > 0 && (
+        <div className="mb-2 flex flex-wrap items-center gap-2 text-xs">
+          <span className="text-slate-500">Filtered by</span>
+          {filteredColumns.map((c) => (
+            <button
+              key={c.key}
+              type="button"
+              onClick={() => setColumnFilter(c.key, {})}
+              title={`Clear the ${c.label} filter`}
+              className="inline-flex items-center gap-1 rounded-full bg-brand-50 px-2 py-0.5 font-medium text-brand-700 ring-1 ring-inset ring-brand-600/20 hover:bg-brand-100"
+            >
+              {c.label}
+              <span aria-hidden="true" className="text-brand-600/60">×</span>
+            </button>
+          ))}
+          <button type="button" onClick={clearColumnFilters} className="text-slate-500 underline hover:text-brand-600">
+            Clear all
+          </button>
+        </div>
+      )}
+
       {view === 'lines' && (
-        <LinesTable lines={lines} pager={lineList} />
+        <LinesTable lines={lines} pager={lineList} filters={{ get: columnFilter, set: setColumnFilter, query }} />
       )}
       {view === 'products' && (
         <DemandTable
@@ -374,9 +500,16 @@ export default function OrdersPage() {
  * word — the sheet is read for what is sold and what has gone. The per-order
  * and by-product views keep theirs, and the spreadsheet export is untouched.
  */
-function LinesTable({ lines, pager }: {
+function LinesTable({ lines, pager, filters }: {
   lines: OrderLine[];
   pager: PagedList<OrderLine>;
+  /** The header filters: what each column holds, how to set it, and the
+   *  filters in force, which is what each tick list is measured against. */
+  filters: {
+    get: (key: string) => ColumnFilterValue | undefined;
+    set: (key: string, v: ColumnFilterValue) => void;
+    query: string;
+  };
 }) {
   const navigate = useNavigate();
   const t = today();
@@ -385,6 +518,29 @@ function LinesTable({ lines, pager }: {
   // A domestic book has no discharge port on any row, and a column that is
   // empty on every line for ever is worse than no column.
   const anyPort = lines.some((l) => l.port_of_discharge);
+
+  /**
+   * One heading, with its filter beside it.
+   *
+   * `whitespace-nowrap` and the flex are not decoration: the funnel is an
+   * inline element inside a `<th>` narrow enough to wrap, and a heading broken
+   * under its own control reads as a fault rather than as a control.
+   */
+  const head = (key: string, label: string, align: 'left' | 'right' = 'left', title?: string) => (
+    <th key={key} className="whitespace-nowrap pb-2 pr-3" title={title}>
+      <span className={`flex items-center gap-0.5 ${align === 'right' ? 'justify-end' : ''}`}>
+        {label}
+        <ColumnFilter
+          column={key}
+          kind={FILTER_KIND.get(key) ?? 'values'}
+          label={title ?? label}
+          value={filters.get(key)}
+          onChange={(v) => filters.set(key, v)}
+          query={filters.query}
+        />
+      </span>
+    </th>
+  );
   // Which order each row belongs to, counted from the top of the page, so
   // alternate orders can be tinted.
   const groupIndex = lines.reduce<number[]>((acc, l, i) => {
@@ -408,26 +564,31 @@ function LinesTable({ lines, pager }: {
           <table className="w-full text-sm">
             <thead>
               <tr className={TH_CLASS}>
-                <th className="pb-2 pr-3">Sales Order</th>
-                <th className="pb-2 pr-3">Date</th>
-                <th className="pb-2 pr-3">Customer</th>
+                {/* Each heading carries its own filter, the spreadsheet habit
+                    (2026-09-24). `head` keeps the funnel beside the words on
+                    one line — a heading that wraps under its own control reads
+                    as a fault — and every list is filled from the server,
+                    since this table is one page of a long book. */}
+                {head('order_number', 'Sales Order')}
+                {head('date', 'Date')}
+                {head('customer', 'Customer')}
                 {/* Only where any row has one: a domestic book would carry an
                     empty column on every line for ever otherwise. */}
-                {anyPort && <th className="pb-2 pr-3">Dest Port</th>}
-                <th className="pb-2 pr-3">Item</th>
-                <th className="pb-2 pr-3">Colour</th>
-                <th className="pb-2 pr-3 text-right">Qty</th>
-                <th className="pb-2 pr-3 text-right">Sent</th>
+                {anyPort && head('port', 'Dest Port')}
+                {head('item', 'Item')}
+                {head('color', 'Colour')}
+                {head('qty', 'Qty', 'right')}
+                {head('sent', 'Sent', 'right')}
                 {/* What is still to go: ordered less what has gone on a lorry
                     (2026-09-16, at the client's word). */}
-                <th className="pb-2 pr-3 text-right">Balance</th>
+                {head('balance', 'Balance', 'right')}
                 {/* The order's two production dates (2026-09-15, at the
                     client's word, in place of the one Promised column): the
                     original, and the revised one where the plan has moved. */}
-                <th className="whitespace-nowrap pb-2 pr-3" title="Original Production Date">Orig. Prod.</th>
-                <th className="whitespace-nowrap pb-2 pr-3" title="Revised Production Date">Rev. Prod.</th>
-                <th className="pb-2 pr-3">Added By</th>
-                <th className="pb-2 pr-3">State</th>
+                {head('promised', 'Orig. Prod.', 'left', 'Original Production Date')}
+                {head('revised', 'Rev. Prod.', 'left', 'Revised Production Date')}
+                {head('added_by', 'Added By')}
+                {head('state', 'State')}
                 {canDispatch && <th className="pb-2" />}
               </tr>
             </thead>

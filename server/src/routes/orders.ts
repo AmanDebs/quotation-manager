@@ -8,7 +8,8 @@ import { despatchedByOrder } from './despatches.js';
 import { orderMaterialCost } from '../services/costing.js';
 import { orderAdvance, advanceForProforma, preDispatchDue } from '../services/receivables.js';
 import { withStock, orderLines, productDemand, countOrderLines, orderSearchClause,
-  type Filters, type OrderLine, type ProductDemand, statusClause } from '../services/orderLines.js';
+  lineFacet, isFilterColumn, FILTERABLE, FILTER_COLUMNS,
+  type ColumnFilters, type Filters, type OrderLine, type ProductDemand, statusClause } from '../services/orderLines.js';
 import { buildXlsx, attachmentName, type Column } from '../services/xlsx.js';
 import { allows, type AuthedRequest } from '../middleware/auth.js';
 import { scopeClause, canAccessCustomer, linkError, customerChangeError } from '../middleware/scope.js';
@@ -327,6 +328,59 @@ ordersRouter.get('/', (req: AuthedRequest, res) => {
  * otherwise read "lines" as an order id. The `/prefill/...` routes below are
  * safe where they are only because they carry more than one segment.
  */
+/**
+ * The header filters, read off the query string.
+ *
+ * One key per column and per end — `f.customer`, `f.date_from`, `f.qty_max` —
+ * so a filtered book is a URL somebody can bookmark or send, which is what the
+ * rest of this page's filters already are. A tick list arrives as a
+ * **newline-separated** list rather than a comma-separated one: these values
+ * are customer names and item descriptions off the client's own book, and
+ * *Bisleri International Pvt. Ltd., Kolkata* is one value containing a comma.
+ *
+ * A column this build does not know is ignored rather than refused: the
+ * vocabulary is the code's, and a link from an older client must not 400.
+ */
+function columnFilters(req: AuthedRequest): ColumnFilters {
+  const values: ColumnFilters['values'] = {};
+  const from: ColumnFilters['from'] = {};
+  const to: ColumnFilters['to'] = {};
+  const min: ColumnFilters['min'] = {};
+  const max: ColumnFilters['max'] = {};
+
+  const read = (key: string) => {
+    const raw = req.query[key];
+    return typeof raw === 'string' ? raw : undefined;
+  };
+
+  for (const col of FILTER_COLUMNS) {
+    const kind = FILTERABLE[col].kind;
+    if (kind === 'values') {
+      const raw = read(`f.${col}`);
+      /*
+       * **Present and empty is not the same as absent.** A blank cell is a
+       * tickable value — *no colour*, *no port*, *nobody recorded* — and on
+       * this book a common one, so `f.color=` means *the blank one* and no key
+       * at all means no filter. Reading an empty string as "no filter" is what
+       * would silently drop that tick on the round trip through the URL, which
+       * is where it would have been noticed last.
+       */
+      if (raw !== undefined) values[col] = raw.split('\n').filter((v, i, a) => a.indexOf(v) === i);
+      continue;
+    }
+    const lo = read(`f.${col}_from`) ?? read(`f.${col}_min`);
+    const hi = read(`f.${col}_to`) ?? read(`f.${col}_max`);
+    if (kind === 'dates') {
+      if (lo) from[col] = lo;
+      if (hi) to[col] = hi;
+    } else {
+      if (lo !== undefined && lo !== '' && Number.isFinite(Number(lo))) min[col] = Number(lo);
+      if (hi !== undefined && hi !== '' && Number.isFinite(Number(hi))) max[col] = Number(hi);
+    }
+  }
+  return { values, from, to, min, max };
+}
+
 function lineFilters(req: AuthedRequest): Filters {
   const scope = scopeClause(req, 'customer_id');
   return {
@@ -337,8 +391,27 @@ function lineFilters(req: AuthedRequest): Filters {
     companyId: Number(req.query.company) > 0 ? Number(req.query.company) : undefined,
     openOnly: req.query.open === '1',
     q: String(req.query.q ?? '').trim() || undefined,
+    columns: columnFilters(req),
   };
 }
+
+/**
+ * What one column's tick list should offer, over the whole filtered book.
+ *
+ * Declared **above `/:id`**, the rule every sibling of `/lines` follows, or
+ * Express reads "lines" as an order id. Scoped by `lineFilters` like the list
+ * it describes, so an employee's dropdown names their own customers and no
+ * more — a facet is a list of real values off real rows, and an unscoped one
+ * would be a customer book handed out through a filter control.
+ */
+ordersRouter.get('/lines/facet', (req: AuthedRequest, res) => {
+  const column = String(req.query.column ?? '');
+  if (!isFilterColumn(column)) return res.status(400).json({ error: `Not a filterable column: ${column}` });
+  if (FILTERABLE[column].kind !== 'values') {
+    return res.status(400).json({ error: `${column} is filtered by range, not by a list of values` });
+  }
+  res.json(lineFacet(lineFilters(req), column, { search: String(req.query.search ?? '') }));
+});
 
 ordersRouter.get('/lines', (req: AuthedRequest, res) => {
   const f = lineFilters(req);

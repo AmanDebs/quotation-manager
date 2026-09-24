@@ -88,6 +88,31 @@ export interface Filters {
   openOnly?: boolean;
   /** Free text — see `orderSearchClause` for the six columns it covers. */
   q?: string;
+  /** Per-column filters, as the header dropdowns set them. */
+  columns?: ColumnFilters;
+}
+
+/**
+ * A filter on one column of the *Sales order lines* view — the spreadsheet
+ * habit, asked for 2026-09-24 (*"Is it possible to add filter in header of
+ * each column like in excel"*).
+ *
+ * A tick list per column, and a from/to for the dates and the three
+ * quantities. It is **kept as a description rather than as SQL** for the
+ * reason `scopeClause` and `searchClause` are: the same object has to reach
+ * the paged list, its count, the per-product fold and the spreadsheet export,
+ * and a second hand-built WHERE in any one of them is how the download comes
+ * to hold rows the screen did not.
+ */
+export interface ColumnFilters {
+  /** Tick lists, keyed by the column's own name in `FILTERABLE`. */
+  values?: Partial<Record<FilterColumn, string[]>>;
+  /** `YYYY-MM-DD` bounds, keyed by column. Either end may stand alone. */
+  from?: Partial<Record<FilterColumn, string>>;
+  to?: Partial<Record<FilterColumn, string>>;
+  /** Numeric bounds, keyed by column. */
+  min?: Partial<Record<FilterColumn, number>>;
+  max?: Partial<Record<FilterColumn, number>>;
 }
 
 /**
@@ -107,6 +132,13 @@ const SQL = `
     u.name AS created_by_name,
     o.is_export, o.status AS order_status, o.currency, o.port_of_discharge,
     l.pos AS order_line, l.product_id, l.description, p.name AS product_name, l.code, l.color, l.unit,
+    -- What the Item column actually prints: the catalogue name where the line
+    -- names a product, else the line's own wording (2026-09-15). Selected as
+    -- its own column so the header filter and its tick list read the one
+    -- expression rather than each rebuilding it — two copies of "what does
+    -- this cell say" is how a dropdown comes to offer a value that matches no
+    -- row.
+    COALESCE(NULLIF(p.name, ''), l.description) AS item_label,
     ${PIECES_ORDERED_SQL('l')} AS ordered,
     l.qty AS billing_qty,
     l.amount,
@@ -214,13 +246,32 @@ export function orderSearchClause(q: string | undefined, itemAlias?: string): { 
  * book's Billed column and the ladder's *Completed* read it — but it no
  * longer stands in for the lorry.
  */
-function stateOf(ordered: number, made: number, sent: number, scheduledJobs: number): LineState {
+export function stateOf(ordered: number, made: number, sent: number, scheduledJobs: number): LineState {
   const out = sent;
   if (ordered > 0 && out >= ordered) return 'fully_dispatched';
   if (out > 0) return 'partially_dispatched';
   if (scheduledJobs > 0 || made > 0) return 'scheduled';
   return 'not_scheduled';
 }
+
+/**
+ * The same four states in SQL, for the State column's own filter.
+ *
+ * A second copy of a rule, which this codebase pays for only where paging
+ * forces it — and it does here exactly as it does for `RESULT_FAILED_SQL`: the
+ * lines are paged, so a state computed after the fetch could only filter and
+ * count the page in hand. What makes it cheaper than that precedent is that it
+ * reads the **same four figures** `stateOf` reads, by their aliases, rather
+ * than restating the arithmetic behind them; `orderLineFilters.test.ts` runs
+ * both over every combination that matters and asserts they never differ.
+ */
+export const LINE_STATE_SQL = `
+  CASE
+    WHEN ordered > 0 AND sent >= ordered THEN 'fully_dispatched'
+    WHEN sent > 0 THEN 'partially_dispatched'
+    WHEN scheduled_jobs > 0 OR made > 0 THEN 'scheduled'
+    ELSE 'not_scheduled'
+  END`;
 
 /**
  * The filters as SQL, kept apart from the query so the paged list and its
@@ -249,7 +300,112 @@ export function statusClause(status: string | undefined, col = 'o.status'): { sq
   return { sql: `${col} IN (${list.map(() => '?').join(', ')})`, params: list };
 }
 
-function lineWhere(f: Filters): { sql: string; params: unknown[] } {
+/**
+ * Which columns carry a header filter, and what each one filters on.
+ *
+ * Every entry is an **alias of the outer query** rather than a table column,
+ * which is what makes one mechanism cover all thirteen: `customer_name` is a
+ * join, `item_label` a COALESCE, `ordered` a conversion, `sent` a correlated
+ * subquery, `balance` arithmetic over two of those and `state` a CASE over
+ * four. Filtering after the row is built costs a wrapper and buys a filter on
+ * *what the column says*, which is the only thing somebody reading the screen
+ * can mean.
+ *
+ * `kind` is what the dropdown offers: a tick list of the values in the book, a
+ * pair of dates, or a pair of numbers. `Balance` is the one that has to be
+ * restated rather than named — it is `Math.max(0, ordered - sent)` on the
+ * client, and a filter that read anything else would disagree with the figure
+ * printed beside it.
+ */
+export const FILTERABLE = {
+  order_number: { sql: 'order_number', kind: 'values' },
+  date: { sql: 'date', kind: 'dates' },
+  customer: { sql: 'customer_name', kind: 'values' },
+  port: { sql: 'port_of_discharge', kind: 'values' },
+  item: { sql: 'item_label', kind: 'values' },
+  color: { sql: 'color', kind: 'values' },
+  qty: { sql: 'ordered', kind: 'numbers' },
+  sent: { sql: 'sent', kind: 'numbers' },
+  balance: { sql: 'CASE WHEN ordered > 0 THEN MAX(ordered - sent, 0) END', kind: 'numbers' },
+  promised: { sql: 'promised_date', kind: 'dates' },
+  revised: { sql: 'revised_date', kind: 'dates' },
+  added_by: { sql: 'created_by_name', kind: 'values' },
+  state: { sql: LINE_STATE_SQL, kind: 'values' },
+} as const;
+
+export type FilterColumn = keyof typeof FILTERABLE;
+
+export const FILTER_COLUMNS = Object.keys(FILTERABLE) as FilterColumn[];
+
+export function isFilterColumn(v: unknown): v is FilterColumn {
+  return typeof v === 'string' && v in FILTERABLE;
+}
+
+/**
+ * The column filters as SQL.
+ *
+ * `except` leaves one column's own filter out, which is what a tick list has
+ * to be built against: Excel's dropdown offers the values still reachable
+ * given every *other* filter, so that unticking something can put it back.
+ * Counting a column against itself would leave each list showing only what
+ * was already chosen.
+ */
+function columnWhere(c: ColumnFilters | undefined, except?: FilterColumn): { sql: string[]; params: unknown[] } {
+  const sql: string[] = [];
+  const params: unknown[] = [];
+  if (!c) return { sql, params };
+
+  for (const col of FILTER_COLUMNS) {
+    if (col === except) continue;
+    const { sql: expr, kind } = FILTERABLE[col];
+
+    if (kind === 'values') {
+      const picked = c.values?.[col];
+      if (picked?.length) {
+        // A blank cell is a real answer — *no colour*, *nobody recorded* — and
+        // is offered in the list as such, so it has to be tickable. `IN` never
+        // matches NULL, hence the explicit arm.
+        const blanks = picked.some((v) => v === '');
+        const named = picked.filter((v) => v !== '');
+        const arms: string[] = [];
+        if (named.length) { arms.push(`(${expr}) IN (${named.map(() => '?').join(', ')})`); params.push(...named); }
+        if (blanks) arms.push(`COALESCE(${expr}, '') = ''`);
+        sql.push(`(${arms.join(' OR ')})`);
+      }
+      continue;
+    }
+
+    const from = kind === 'dates' ? c.from?.[col] : c.min?.[col];
+    const to = kind === 'dates' ? c.to?.[col] : c.max?.[col];
+    const bounded = (from !== undefined && from !== '') || (to !== undefined && to !== '');
+
+    /*
+     * A blank date falls in no range at all, and it has to be said rather than
+     * assumed: a date is stored as text, so SQLite compares `''` as a string
+     * and `'' <= '2026-09-25'` is **true** — an upper bound alone would have
+     * returned every order with no revised date at all, which on the live book
+     * is most of them. Found by the test that was written to assert the
+     * opposite. A blank number is already excluded without help, NULL failing
+     * every comparison, so the guard is the dates' own.
+     */
+    if (bounded && kind === 'dates') sql.push(`COALESCE(${expr}, '') <> ''`);
+    if (from !== undefined && from !== '') { sql.push(`(${expr}) >= ?`); params.push(from); }
+    if (to !== undefined && to !== '') { sql.push(`(${expr}) <= ?`); params.push(to); }
+  }
+  return { sql, params };
+}
+
+/**
+ * The lines matching everything asked of them.
+ *
+ * Two layers, and the split is not cosmetic. The **inner** WHERE narrows rows
+ * before the per-line subqueries run — scope, status, the search box — while
+ * the **outer** one filters on what those subqueries produced, which is the
+ * only place a filter on Sent, Balance or State can live. The query is wrapped
+ * whether or not a column filter is set, so there is one shape to reason about
+ * and `LINE_ORDER` names one set of columns.
+ */
+function lineWhere(f: Filters, except?: FilterColumn): { sql: string; params: unknown[] } {
   const where: string[] = [];
   const params: unknown[] = [];
   if (f.scopeSql) { where.push(`o.${f.scopeSql}`); params.push(...(f.scopeParams ?? [])); }
@@ -262,10 +418,18 @@ function lineWhere(f: Filters): { sql: string; params: unknown[] } {
   const search = orderSearchClause(f.q, 'l');
   if (search.sql) { where.push(search.sql); params.push(...search.params); }
   // The base query already carries a WHERE (charge lines are excluded there).
-  return { sql: `${SQL}${where.length ? ` AND ${where.join(' AND ')}` : ''}`, params };
+  const inner = `${SQL}${where.length ? ` AND ${where.join(' AND ')}` : ''}`;
+
+  const cols = columnWhere(f.columns, except);
+  params.push(...cols.params);
+  return {
+    sql: `SELECT * FROM (${inner}) t${cols.sql.length ? ` WHERE ${cols.sql.join(' AND ')}` : ''}`,
+    params,
+  };
 }
 
-const LINE_ORDER = 'ORDER BY o.date DESC, o.id DESC, l.pos';
+// Over the wrapper's own aliases: `o` and `l` are out of scope outside it.
+const LINE_ORDER = 'ORDER BY date DESC, order_id DESC, order_line';
 
 /**
  * Every order line matching the filters.
@@ -307,6 +471,68 @@ export function withStock<T extends { product_id: number | null }>(rows: T[]): (
 export function countOrderLines(f: Filters = {}): number {
   const { sql, params } = lineWhere(f);
   return countOf(sql, params);
+}
+
+export interface FacetValue {
+  value: string;
+  /** How many lines carry it, under every filter but this column's own. */
+  count: number;
+}
+
+export interface Facet {
+  values: FacetValue[];
+  /** Distinct values there were before the cap; the panel says so when more. */
+  total: number;
+}
+
+/**
+ * What one column's tick list should offer.
+ *
+ * **Measured over the whole filtered book, never the page on screen**, which
+ * is the entire reason this is a server endpoint rather than a walk over the
+ * rows the client already holds: these lines are paged, so a list built from
+ * them would offer the fifty customers on page one and silently hide the other
+ * seven hundred and seventy.
+ *
+ * Every other filter applies but this column's own — Excel's rule, and the one
+ * that lets a choice be undone: a list narrowed by itself would show only what
+ * was already ticked.
+ *
+ * `search` narrows on the server too, for the same reason. The live book names
+ * 820 customers; a cap with a client-side search box would be a list that
+ * stops finding things at an arbitrary depth, and this desk would meet that on
+ * the first column they opened.
+ */
+export function lineFacet(
+  f: Filters,
+  column: FilterColumn,
+  opts: { search?: string; limit?: number } = {},
+): Facet {
+  const { sql, params } = lineWhere(f, column);
+  const expr = FILTERABLE[column].sql;
+  const args = [...params];
+
+  let having = '';
+  const search = String(opts.search ?? '').trim();
+  if (search) {
+    // `%` and `_` are LIKE's own wildcards — escaped for the reason
+    // `searchClause` records, so typing one finds the character.
+    having = ' WHERE value LIKE ? ESCAPE \'\\\'';
+    args.push(`%${search.replace(/[\\%_]/g, (ch) => `\\${ch}`)}%`);
+  }
+
+  const base = `SELECT COALESCE(${expr}, '') AS value, COUNT(*) AS n FROM (${sql}) v GROUP BY value`;
+  const counted = `SELECT value, n FROM (${base})${having}`;
+
+  const total = countOf(counted, args);
+  const limit = opts.limit ?? 300;
+  const rows = db.prepare(
+    // Commonest first, so a capped list is the useful end of it; then by name,
+    // which is a total ordering and so a stable one.
+    `${counted} ORDER BY n DESC, value LIMIT ?`
+  ).all(...([...args, limit] as never[])) as { value: string; n: number }[];
+
+  return { values: rows.map((r) => ({ value: String(r.value), count: Number(r.n) })), total };
 }
 
 export interface ProductDemand {
