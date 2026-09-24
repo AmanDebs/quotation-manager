@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
-import type { User } from '../types';
+import { teamRoleLabel, type User } from '../types';
 import { useCan } from '../App';
 import { Icon, type IconName } from './icons';
 
@@ -10,8 +10,15 @@ import { Icon, type IconName } from './icons';
  * `needs` is the function this entry belongs to. Every entry carries one — an
  * entry with none would be visible to every team, which is the wrong default
  * for a nav that now differs per person.
+ *
+ * `null` is that default declined **on purpose**, and it is written as a value
+ * rather than as a missing key so it cannot happen by forgetting. Exactly one
+ * entry takes it: *My Access*, which tells you what your team may do and so
+ * has to reach the team that may do least. There is no function to gate it on
+ * that would work — since the matrix became editable, any cell can be unticked
+ * — and a page explaining a refusal that is itself refused explains nothing.
  */
-interface NavItem { to: string; label: string; icon: IconName; needs: string }
+interface NavItem { to: string; label: string; icon: IconName; needs: string | null }
 
 /**
  * The sidebar, in four groups.
@@ -106,6 +113,9 @@ const NAV: { heading: string; items: NavItem[] }[] = [
       // Who may do what. Beside the accounts it governs, and on the same cell.
       { to: '/permissions', label: 'User Permissions', icon: 'lock', needs: 'team' },
       { to: '/settings', label: 'Settings', icon: 'cog', needs: 'settings' },
+      // Last, and the one entry with no gate: what your own team may do, for
+      // whoever has just been refused something and wants to know why.
+      { to: '/my-access', label: 'My Access', icon: 'key', needs: null },
     ],
   },
 ];
@@ -158,6 +168,8 @@ function readRail(): boolean {
 
 export default function Layout({ user, onLogout, children }: { user: User; onLogout: () => void; children: ReactNode }) {
   const can = useCan();
+  /** Drawn for this team? Stated once, since both the rail and the groups ask. */
+  const visible = (item: NavItem) => item.needs === null || can(item.needs);
   const { pathname } = useLocation();
 
   // The group holding the current page is always open: navigating somewhere and
@@ -350,9 +362,9 @@ export default function Layout({ user, onLogout, children }: { user: User; onLog
           </button>
         </div>
         <nav className="nav-scroll flex-1 overflow-y-auto py-2">
-          {can(DASHBOARD.needs) && link(DASHBOARD)}
+          {visible(DASHBOARD) && link(DASHBOARD)}
           {NAV.map((group) => {
-            const items = group.items.filter((item) => can(item.needs));
+            const items = group.items.filter(visible);
             // A group this team may see nothing in takes no space at all — a
             // heading over an empty list is worse than no heading, and with
             // five teams most of them have one.
@@ -390,7 +402,16 @@ export default function Layout({ user, onLogout, children }: { user: User; onLog
         </nav>
         <div className={`border-t border-white/10 px-4 py-3 text-sm ${rail ? 'md:px-0 md:text-center' : ''}`}>
           <div className={`mb-0.5 truncate text-white/80 ${rail ? 'md:hidden' : ''}`}>{user.name}</div>
-          <div className={`mb-1 text-xs capitalize text-white/40 ${rail ? 'md:hidden' : ''}`}>{user.role}</div>
+          {/*
+            The team, not the legacy `role`. That column is derived and says
+            *manager* or *employee*, which is two words for six teams — and it
+            read *Manager* under a Team page and a My Access page both saying
+            *Super Admin*. A blank team_role falls back to the old word rather
+            than to nothing, since a row the backfill never reached still has one.
+          */}
+          <div className={`mb-1 text-xs capitalize text-white/40 ${rail ? 'md:hidden' : ''}`}>
+            {user.team_role ? teamRoleLabel(user.team_role) : user.role}
+          </div>
           <button
             onClick={logout}
             title={rail ? `Sign out (${user.name})` : undefined}

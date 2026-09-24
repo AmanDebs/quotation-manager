@@ -1,20 +1,34 @@
 import { Router } from 'express';
-import type { AuthedRequest } from '../middleware/auth.js';
+import { requirePermission, type AuthedRequest } from '../middleware/auth.js';
 import { record } from '../services/audit.js';
 import {
   DEFAULT_ACCESS, EDITABLE_ROLES, FUNCTIONS, FUNCTION_GROUPS, FUNCTION_META, TEAM_ROLES,
-  TEAM_ROLE_LABEL, isEditableRole, isFn, isLevel, type Fn, type Level,
+  TEAM_ROLE_LABEL, isEditableRole, isFn, isLevel, isTeamRole, type Fn, type Level,
 } from '../services/permissions.js';
-import { effectiveAccess, overridesFor, setRoleAccess, type AccessChange } from '../services/accessPolicy.js';
+import { capabilities, effectiveAccess, overridesFor, setRoleAccess, type AccessChange } from '../services/accessPolicy.js';
 
 /**
- * The User Permissions page — who may do what, as ticks.
+ * Who may do what, as ticks — and what *you* may do, which is a different
+ * question with a different answer and a different guard.
  *
- * Mounted on `team: full`, the same cell that owns the accounts themselves:
- * deciding what a team may do and deciding who is on it are one job, and
- * whoever can create a super admin account can already grant themselves
- * anything, so a separate function here would be a cell nobody could honestly
- * fill in on the client's own matrix.
+ * **Mounted on `requireAuth` alone, with every route carrying its own guard.**
+ * The editing half is `team: full`, the same cell that owns the accounts
+ * themselves — deciding what a team may do and deciding who is on it are one
+ * job, and whoever can create a super admin account can already grant
+ * themselves anything, so a separate function here would be a cell nobody
+ * could honestly fill in on the client's own matrix. But `/mine` answers about
+ * the caller's own team and must reach **everybody**, and there is no function
+ * to gate it on that would do: under an editable matrix any cell can be
+ * unticked, so every candidate is one somebody could be refused.
+ *
+ * Mounting the router on `team: full` and making an exception inside it is not
+ * possible — a mount runs first — which is the trap `routes/workOrders.ts`
+ * records from the other side, where a mount too specific for the router
+ * beneath it refused a route its own guard would have allowed. The inverse
+ * trap is `routes/pdf.ts`'s, where a mount too weak let a whole list out
+ * through a route nobody thought of as part of the module: so both writes and
+ * the whole-matrix read below name their guard explicitly, and a route added
+ * here without one is open to every signed-in user.
  *
  * The vocabulary — the roles, the functions, their labels and **which levels
  * mean anything for each** — is sent with the answer rather than kept on the
@@ -43,7 +57,33 @@ function matrix() {
   };
 }
 
-permissionsRouter.get('/', (_req, res) => res.json(matrix()));
+/**
+ * What the signed-in user's own team may do.
+ *
+ * Declared **above** the guarded routes, the rule the `export` endpoints
+ * follow about `/:id` — and gated by nothing but the mount's `requireAuth`,
+ * deliberately: somebody refused a screen should be able to read why without
+ * having to ask the person who refused them.
+ *
+ * It answers about `req.user` and takes no parameter, so there is nothing to
+ * ask it about somebody else. The levels come from `capabilities`, which is
+ * the same function `/auth/me` hands the client its map with — the page cannot
+ * disagree with what the app actually does, because it is the same answer.
+ * A blank `team_role`, which is a row the backfill never reached, reads as no
+ * access to anything, which is exactly what that session may do.
+ */
+permissionsRouter.get('/mine', (req: AuthedRequest, res) => {
+  const role = req.user?.team_role ?? '';
+  res.json({
+    role,
+    label: isTeamRole(role) ? TEAM_ROLE_LABEL[role] : '',
+    functions: functionList,
+    groups: FUNCTION_GROUPS,
+    access: capabilities(role),
+  });
+});
+
+permissionsRouter.get('/', requirePermission('team', 'full'), (_req, res) => res.json(matrix()));
 
 /** What the log should say: the cells that moved, in words. */
 function noteFor(changes: AccessChange[]): string {
@@ -63,7 +103,7 @@ function noteFor(changes: AccessChange[]): string {
  * and every cell that moved, which is the whole of what somebody would come
  * looking for.
  */
-permissionsRouter.put('/:role', (req: AuthedRequest, res) => {
+permissionsRouter.put('/:role', requirePermission('team', 'full'), (req: AuthedRequest, res) => {
   const role = req.params.role;
   if (!isEditableRole(role)) {
     return res.status(400).json({

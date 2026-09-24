@@ -67,10 +67,11 @@ app.use('/api/auth', authRouter);
 // would make the whole database downloadable by every employee.
 app.use('/api/backup', requireAuth, requirePermission('backup', 'full'), backupRouter);
 app.use('/api/users', requireAuth, requirePermission('team', 'full'), usersRouter);
-// What each team may do. The same cell as the accounts themselves: deciding
-// who is on a team and what that team may do is one job, and whoever can
-// create a super admin account can already grant themselves anything.
-app.use('/api/permissions', requireAuth, requirePermission('team', 'full'), permissionsRouter);
+// What each team may do. Editing is the same cell as the accounts themselves —
+// deciding who is on a team and what that team may do is one job — but the
+// router also answers `/mine`, which every signed-in user must reach, so it
+// mounts on requireAuth and **every route inside names its own guard**.
+app.use('/api/permissions', requireAuth, permissionsRouter);
 // The approvals list is deliberately **not** customer-scoped — it is safe only
 // while one team holds it. Widening `approval` means adding a scopeClause here
 // first, or every document number, currency and total is on that screen.

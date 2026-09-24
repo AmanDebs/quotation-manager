@@ -75,6 +75,13 @@ const PATHS: Record<string, ReactNode> = {
    * the body and the shackle are what make it readable.
    */
   lock: <><rect x="4.5" y="10.5" width="15" height="9.5" rx="2" /><path d="M8 10.5V7.8a4 4 0 0 1 8 0v2.7" /><path d="M12 14v2.5" /></>,
+  /*
+   * My access — a key, which is the other half of the padlock beside it: that
+   * page sets what a team may do, this one is what *you* hold. Drawn with the
+   * bow left and the teeth right so the two are told apart at 16px by their
+   * silhouette rather than by their detail.
+   */
+  key: <><circle cx="7.5" cy="12" r="3.5" /><path d="M11 12h9" /><path d="M17 12v3" /><path d="M20 12v2.2" /></>,
   cog: <><path d="M4 7h9" /><path d="M17 7h3" /><path d="M4 12h3" /><path d="M11 12h9" /><path d="M4 17h9" /><path d="M17 17h3" /><circle cx="15" cy="7" r="2" /><circle cx="9" cy="12" r="2" /><circle cx="15" cy="17" r="2" /></>,
 
   // Import from a spreadsheet — a tray with an arrow going into it.

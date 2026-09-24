@@ -41,6 +41,7 @@ import ApprovalsPage from './pages/Approvals';
 import ActivityPage from './pages/Activity';
 import TeamPage from './pages/Team';
 import PermissionsPage from './pages/Permissions';
+import MyAccessPage from './pages/MyAccess';
 import SettingsPage from './pages/Settings';
 
 const UserContext = createContext<User | null>(null);
@@ -233,6 +234,8 @@ export const routes: RouteObject[] = [
       { path: '/activity', element: <Needs fn="audit"><ActivityPage /></Needs> },
       { path: '/team', element: <Needs fn="team"><TeamPage /></Needs> },
       { path: '/permissions', element: <Needs fn="team"><PermissionsPage /></Needs> },
+      // No gate: it says what this team may do, so it must open for every team.
+      { path: '/my-access', element: <MyAccessPage /> },
       { path: '/settings', element: <Needs fn="settings"><SettingsPage /></Needs> },
       { path: '*', element: <Navigate to="/" replace /> },
     ],
