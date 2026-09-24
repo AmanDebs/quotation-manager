@@ -500,6 +500,68 @@ export default function OrdersPage() {
  * word — the sheet is read for what is sold and what has gone. The per-order
  * and by-product views keep theirs, and the spreadsheet export is untouched.
  */
+/**
+ * One of the order's two production dates, changed where it is read (asked for
+ * 2026-09-24: *"Option to edit original and revised dates in the dashboard"*,
+ * over the order book's lines view).
+ *
+ * **Drawn once per order, on its first line**, which is the whole of what
+ * makes it honest: both dates are columns of `orders` and the lines view
+ * repeats them down the group, so a box on every row would invite somebody to
+ * set line 3 to a different date from line 1 and then watch all five change
+ * together. The rows below keep printing the date as plain text — nothing is
+ * hidden — and there is exactly one place to change it. The same reasoning as
+ * the Added By column beside it, and as the Record dispatch button.
+ *
+ * At rest it is the text it always was, tint, warning sign and all; the box
+ * only appears once somebody means to type. It saves through a PATCH of its
+ * own rather than the order's PUT, for the reason that route records.
+ */
+function OrderDateCell({ value, overdue, canEdit, label, onSave }: {
+  value: string;
+  overdue: boolean;
+  canEdit: boolean;
+  /** What is being changed, for somebody who has hovered rather than guessed. */
+  label: string;
+  onSave: (v: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const tint = overdue ? 'font-semibold text-red-600' : 'text-slate-600';
+
+  if (editing) {
+    return (
+      <input
+        type="date"
+        autoFocus
+        defaultValue={value}
+        onClick={(e) => e.stopPropagation()}
+        onBlur={() => setEditing(false)}
+        onKeyDown={(e) => {
+          // Escape leaves it as it was; Enter is the browser's own commit.
+          if (e.key === 'Escape') { e.stopPropagation(); setEditing(false); }
+        }}
+        onChange={(e) => { onSave(e.target.value); setEditing(false); }}
+        className="w-[8.5rem] rounded border border-brand-600 px-1 py-0.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600/25"
+      />
+    );
+  }
+
+  if (!canEdit) {
+    return <span className={tint}>{value ? fmtDate(value) : <span className="text-slate-300">—</span>}{overdue && ' ⚠'}</span>;
+  }
+
+  return (
+    <button
+      type="button"
+      title={`${label} — the order's own, on every line of it. Click to change.`}
+      onClick={(e) => { e.stopPropagation(); setEditing(true); }}
+      className={`-mx-1 rounded px-1 hover:bg-brand-50 hover:ring-1 hover:ring-brand-600/20 ${tint}`}
+    >
+      {value ? fmtDate(value) : <span className="text-slate-300">— set</span>}{overdue && ' ⚠'}
+    </button>
+  );
+}
+
 function LinesTable({ lines, pager, filters }: {
   lines: OrderLine[];
   pager: PagedList<OrderLine>;
@@ -515,6 +577,21 @@ function LinesTable({ lines, pager, filters }: {
   const t = today();
   const can = useCan();
   const canDispatch = can('dispatch', 'full');
+  // Moving the plant's dates is an order write; Logistics and Production
+  // read this book and hold `order: view`, so they see the text and no box.
+  const canEditOrder = can('order', 'full');
+  const queryClient = useQueryClient();
+  const setDates = useMutation({
+    mutationFn: ({ orderId, patch }: { orderId: number; patch: Record<string, string> }) =>
+      api.patch(`/api/orders/${orderId}/production-dates`, patch),
+    // Every view of the book, and the figures that read these dates: the
+    // dashboard's overdue chip and the Reports page both key on them.
+    onSuccess: () => {
+      for (const key of [['order-lines'], ['order-demand'], ['orders'], ['dashboard'], ['reports']]) {
+        queryClient.invalidateQueries({ queryKey: key });
+      }
+    },
+  });
   // A domestic book has no discharge port on any row, and a column that is
   // empty on every line for ever is worse than no column.
   const anyPort = lines.some((l) => l.port_of_discharge);
@@ -650,11 +727,26 @@ function LinesTable({ lines, pager, filters }: {
                     <td className={`py-2 pr-3 text-right tabular-nums ${balance === 0 ? 'text-slate-400' : 'font-medium'}`}>
                       {balance == null ? dash : fmtQty(balance)}
                     </td>
-                    <td className={`whitespace-nowrap py-2 pr-3 ${overdue && !l.revised_date ? 'font-semibold text-red-600' : 'text-slate-600'}`}>
-                      {l.promised_date ? fmtDate(l.promised_date) : dash}{overdue && !l.revised_date && ' ⚠'}
+                    {/* Both dates are the order's own, so only the group's first
+                        line offers the box; the rows under it keep printing
+                        what it says. */}
+                    <td className="whitespace-nowrap py-2 pr-3">
+                      <OrderDateCell
+                        value={l.promised_date}
+                        overdue={overdue && !l.revised_date}
+                        canEdit={canEditOrder && !repeat}
+                        label={`Original promised date for ${l.order_number}`}
+                        onSave={(v) => setDates.mutate({ orderId: l.order_id, patch: { promised_date: v } })}
+                      />
                     </td>
-                    <td className={`whitespace-nowrap py-2 pr-3 ${overdue && l.revised_date ? 'font-semibold text-red-600' : 'text-slate-600'}`}>
-                      {l.revised_date ? fmtDate(l.revised_date) : dash}{overdue && !!l.revised_date && ' ⚠'}
+                    <td className="whitespace-nowrap py-2 pr-3">
+                      <OrderDateCell
+                        value={l.revised_date}
+                        overdue={overdue && !!l.revised_date}
+                        canEdit={canEditOrder && !repeat}
+                        label={`Revised production date for ${l.order_number}`}
+                        onSave={(v) => setDates.mutate({ orderId: l.order_id, patch: { revised_date: v } })}
+                      />
                     </td>
                     {/* A property of the order, not the line — printed once per
                         order like the number and the date above it. */}

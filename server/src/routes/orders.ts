@@ -898,6 +898,56 @@ ordersRouter.put('/:id', (req: AuthedRequest, res) => {
   res.json(getFull(id, req));
 });
 
+/**
+ * The two production dates, set from the order book (2026-09-24, the client
+ * with the lines view in front of them: *"Option to edit original and revised
+ * dates in the dashboard"*).
+ *
+ * **A PATCH rather than the PUT**, the shape `PATCH /invoices/:id/due-date`
+ * and the tracker's sea-leg already use: the order book holds one *line* of an
+ * order, not the order, so a PUT built from what that screen knows would
+ * rewrite every other line, the header and the charges from a partial copy —
+ * and would re-raise the jobs through `syncOrderJobs` over a date.
+ *
+ * **A field omitted is left alone; a field sent blank clears it** — the
+ * `batch_ids` contract, which is what lets the screen send only the box
+ * somebody touched. Nothing is re-synced afterwards: `syncOrderStatus` reads
+ * jobs, trips and invoices and knows nothing about these, and the dashboard's
+ * overdue chip and the Reports page read them live.
+ *
+ * The mount is `requireFunction('order')`, so a PATCH needs `order: full` —
+ * Logistics and Production read this book and may not move the plant's dates.
+ */
+ordersRouter.patch('/:id/production-dates', (req: AuthedRequest, res) => {
+  const id = Number(req.params.id);
+  const existing = db.prepare('SELECT customer_id FROM orders WHERE id = ?').get(id) as
+    { customer_id: number } | undefined;
+  if (!existing || !canAccessCustomer(req, existing.customer_id)) {
+    return res.status(404).json({ error: 'Sales order not found' });
+  }
+
+  const body = req.body ?? {};
+  const sets: string[] = [];
+  const params: unknown[] = [];
+  for (const [key, label] of [
+    ['promised_date', 'Original promised date'],
+    ['revised_date', 'Revised production date'],
+  ] as const) {
+    if (body[key] === undefined) continue;
+    const v = String(body[key] ?? '').trim();
+    if (v && !/^\d{4}-\d{2}-\d{2}$/.test(v)) {
+      return res.status(400).json({ error: `${label} must be a date (YYYY-MM-DD) or blank` });
+    }
+    sets.push(`${key} = ?`);
+    params.push(v);
+  }
+  if (!sets.length) return res.status(400).json({ error: 'Nothing to change' });
+
+  db.prepare(`UPDATE orders SET ${sets.join(', ')} WHERE id = ?`).run(...(params as never[]), id);
+  const row = db.prepare('SELECT id, number, promised_date, revised_date FROM orders WHERE id = ?').get(id);
+  res.json(row);
+});
+
 ordersRouter.post('/:id/status', (req: AuthedRequest, res) => {
   const id = Number(req.params.id);
   const { status } = req.body ?? {};
