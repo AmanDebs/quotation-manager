@@ -443,6 +443,8 @@ describe('the invoice states pieces and a per-1000 rate, as the proforma does', 
     addItem(id, { description: 'Regrind', qty: 600, unit: 'kg', unit_price: 2, amount: 1200 });
     const rows = itemsTableRows(id).map((r) => r.join(' | ')).join('\n');
     assert.match(rows, /Price USD/);
-    assert.match(rows, /600 kg \| 2 \/kg/, rows);
+    // `2.00`, not `2`: a rate carries two decimals whatever the figure is
+    // (2026-09-24), so a column of them lines up on the decimal point.
+    assert.match(rows, /600 kg \| 2\.00 \/kg/, rows);
   });
 });

@@ -44,6 +44,34 @@ function fmtNum(n: number | null | undefined, maxFrac = 3): string {
   return new Intl.NumberFormat('en-IN', { maximumFractionDigits: maxFrac }).format(n);
 }
 
+/**
+ * A rate, always to at least two decimals (2026-09-24, the client with a
+ * quotation's Unit Price column in front of them: *"Can all digit be 2
+ * decimal"*).
+ *
+ * `fmtNum` sets only a *maximum*, so a column of rates came out as 26, 4.8, 7,
+ * 35.75, 55.1 — five different shapes down one column, which is what a price
+ * list is least able to afford: the eye compares those figures against each
+ * other, and a ragged decimal point makes them read as different kinds of
+ * number.
+ *
+ * **Two is the minimum and three is still the maximum**, which is the one
+ * judgement in it. Forcing exactly two would round a genuine three-decimal
+ * rate — this book has them, `@3.017/PC` being the client's own — and the
+ * *amount* beside it is computed from the stored figure, so a rate rounded on
+ * the page would no longer reproduce the total printed next to it. A buyer
+ * checking the arithmetic would find it wrong. So an ordinary rate pads to
+ * 26.00 and 55.10, and a rate that genuinely carries a third decimal keeps it.
+ *
+ * Quantities, weights and box counts deliberately do **not** go through this:
+ * 20,000 pieces is not 20,000.00, and a QC tolerance is a measurement rather
+ * than a price.
+ */
+function fmtRate(n: number | null | undefined): string {
+  if (n == null) return '—';
+  return new Intl.NumberFormat('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 3 }).format(n);
+}
+
 function fmtDate(iso: string): string {
   if (!iso) return '';
   const [y, m, d] = iso.split('-');
@@ -989,7 +1017,7 @@ export function buildQuotationPdf(id: number): TDocumentDefinitions {
     // 1000"). It is still entered in the editor — qty x unit_price is the
     // amount — it just does not print.
     { key: 'color', label: 'Color', width: 48, align: 'center', value: (it) => String(it.color || '') },
-    { key: 'unit_price', label: 'Unit Price', width: 48, align: 'right', always: true, value: (it) => fmtNum(it.unit_price, 3) },
+    { key: 'unit_price', label: 'Unit Price', width: 48, align: 'right', always: true, value: (it) => fmtRate(it.unit_price) },
     // A charge is priced outright, so it has no basis to state.
     { key: 'uom', label: 'UOM', width: 52, align: 'center', always: true, value: (it) => (it.is_charge ? '' : uomLabel(cur, it.unit)) },
     ...(showTax ? [{ key: 'tax', label: 'Tax %', width: 30, align: 'right' as const, value: (it: Row) => `${it.tax_pct ?? 0}%` }] : []),
@@ -1056,7 +1084,7 @@ export function buildOrderPdf(id: number): TDocumentDefinitions {
     { key: 'color', label: 'Colour', width: 50, align: 'center', value: (it) => it.color || '' },
     // A charge line is a fee, not something to make: no quantity, no rate.
     { key: 'qty', label: 'Quantity', width: 58, align: 'right', value: (it) => (!it.is_charge && it.qty != null ? `${fmtNum(it.qty)} ${it.unit}` : '') },
-    { key: 'unit_price', label: `Rate ${cur}`, width: 52, align: 'right', value: (it) => (it.is_charge ? '' : fmtNum(it.unit_price, 3)) },
+    { key: 'unit_price', label: `Rate ${cur}`, width: 52, align: 'right', value: (it) => (it.is_charge ? '' : fmtRate(it.unit_price)) },
     { key: 'supplier', label: 'Supplier', width: 48, align: 'center', value: (it) => it.supplier || '' },
     // When this line in particular falls due, as against the order's own
     // Promised Delivery in the header. `itemsTable` drops a column with no
@@ -1444,11 +1472,11 @@ const quotableInThousands = (it: Row) => (piecesOf(it) ?? 0) >= 1000;
 
 const per1000Rate = (it: Row): string =>
   (quotableInThousands(it)
-    ? fmtNum(round2((it.amount / piecesOf(it)!) * 1000), 2)
+    ? fmtRate(round2((it.amount / piecesOf(it)!) * 1000))
     // A charge has no rate — the amount beside it is the whole story, and
     // "4,500 /unit" only invites the reader to look for the missing quantity.
     : it.is_charge ? ''
-    : `${fmtNum(it.unit_price, 3)}${it.unit ? ` /${it.unit}` : ''}`);
+    : `${fmtRate(it.unit_price)}${it.unit ? ` /${it.unit}` : ''}`);
 
 // Only call the column "/1000 Pcs" when something on the document actually is
 // a piece rate — on a wholly weight-billed document that heading would lie.
@@ -1835,7 +1863,7 @@ export function buildCreditNotePdf(id: number): TDocumentDefinitions {
     { key: 'description', label: 'Description of Goods', width: '*', always: true, value: (it) => String(it.description) },
     // A charge line is credited for its money and has no quantity of its own.
     { key: 'qty', label: n.kind === 'return' ? 'Qty Returned' : 'Quantity', width: 62, align: 'right', always: true, value: (it) => (it.is_charge ? '' : it.qty != null ? `${fmtNum(it.qty)} ${it.unit}` : '—') },
-    { key: 'unit_price', label: 'Rate', width: 55, align: 'right', always: true, value: (it) => (it.is_charge ? '' : `${fmtNum(it.unit_price, 3)}/${it.unit === 'per 1000' ? '1000' : it.unit}`) },
+    { key: 'unit_price', label: 'Rate', width: 55, align: 'right', always: true, value: (it) => (it.is_charge ? '' : `${fmtRate(it.unit_price)}/${it.unit === 'per 1000' ? '1000' : it.unit}`) },
     { key: 'color', label: 'Color', width: 46, align: 'center', value: (it) => String(it.color || '') },
     { key: 'packs', label: 'Boxes', width: 40, align: 'right', value: (it) => (it.packs != null ? fmtNum(it.packs, 0) : '') },
     { key: 'hsn', label: 'HSN Code', width: 45, align: 'center', value: (it) => String(it.hsn_code || '') },
@@ -2188,7 +2216,7 @@ export function buildPurchaseOrderPdf(id: number): TDocumentDefinitions {
       if (pcs != null) return `${fmtNum(pcs, 0)} Pcs`;
       return it.qty != null ? `${fmtNum(it.qty)} ${it.unit ?? ''}`.trim() : '';
     } },
-    { key: 'rate', label: `UNIT PRICE (${cur})`, width: 42, align: 'right', always: true, value: (it) => fmtNum(it.rate, 3) },
+    { key: 'rate', label: `UNIT PRICE (${cur})`, width: 42, align: 'right', always: true, value: (it) => fmtRate(it.rate) },
     { key: 'tax', label: 'TAX %', width: 24, align: 'right', value: (it) => (showTax ? `${it.tax_pct ?? 0}%` : '') },
     { key: 'amount', label: `TOTAL (${cur})`, width: 56, align: 'right', always: true, value: (it) => fmtMoney(Number(it.amount), cur), sum: (rows) => fmtMoney(rows.reduce((t, r) => t + (Number(r.amount) || 0), 0), cur) },
   ];
@@ -2806,7 +2834,7 @@ export function buildDeliveryChallanPdf(id: number): TDocumentDefinitions {
       value: (it) => (isPieceBasis(String(it.unit)) && it.total_pcs != null
         ? `${fmtNum(it.total_pcs, 0)} pcs`
         : it.qty != null ? `${fmtNum(it.qty)} ${it.unit}` : '—') },
-    { key: 'unit_price', label: 'Rate', width: 52, align: 'right', value: (it) => `${fmtNum(it.unit_price, 3)}/${it.unit === 'per 1000' ? '1000' : it.unit}` },
+    { key: 'unit_price', label: 'Rate', width: 52, align: 'right', value: (it) => `${fmtRate(it.unit_price)}/${it.unit === 'per 1000' ? '1000' : it.unit}` },
     ...(showTax ? [{ key: 'tax', label: 'Tax %', width: 28, align: 'right' as const, value: (it: Row) => `${it.tax_pct ?? 0}%` }] : []),
     { key: 'amount', label: `Taxable Value ${cur}`, width: 68, align: 'right', always: true, value: (it) => fmtMoney(it.amount, cur) },
   ];
