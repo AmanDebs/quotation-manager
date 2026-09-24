@@ -7,6 +7,7 @@ import { fmtMoney, fmtDate } from '../lib/format';
 import { shrinkImage } from '../lib/image';
 import { unitOptions, productTypeLabel } from '../pages/Products';
 import { PIECES_PER_BILLING_UNIT } from '../lib/pieces';
+import { DEFAULT_TAX_PCT } from '../lib/tax';
 
 /**
  * The photo for one line. Clicking the thumbnail replaces it, ✕ clears it.
@@ -113,21 +114,9 @@ const CHARGE = 'charge';
 const despatchedOn = (it: LineItem): string =>
   (it as { despatched?: { last_date?: string } }).despatched?.last_date ?? '';
 
-/**
- * The GST rate a new line starts on.
- *
- * Asked for on 2026-09-06. Every line was created at 0 and typed over, on a
- * catalogue where 18% is the answer for essentially everything — so the field
- * existed to be corrected rather than to be filled in, and a line left at zero
- * silently under-charges the tax on a domestic invoice.
- *
- * Safe to apply whatever the document is: `computeTotals` reads `tax_pct` only
- * when `taxType !== 'none'`, so an export document ignores it, and the Tax %
- * column is hidden there anyway. It is a **default, not a rule** — the field is
- * in the row and editable, and nothing already saved changes: a line stored at
- * 0 stays at 0 until somebody says otherwise.
- */
-export const DEFAULT_TAX_PCT = 18;
+/** Re-exported: the figure moved to `lib/tax.ts`, which the deemed-export
+ *  preset needs too, and this is where the forms have always imported it from. */
+export { DEFAULT_TAX_PCT };
 
 const showsPer1000Rate = (unit: string | undefined) => {
   const per = PIECES_PER_BILLING_UNIT[unit ?? ''];
@@ -166,9 +155,16 @@ function billedQty(it: LineItem): number | null {
  */
 export default function LineItemsEditor({
   items, onChange, currency, taxType, showTax, config = {}, omit, forced, requireHsn, share,
+  newLinePct = DEFAULT_TAX_PCT,
 }: {
   items: LineItem[];
   onChange: (items: LineItem[]) => void;
+  /**
+   * What a line added from here is taxed at. The document's own figure,
+   * because a new line at 18% on a deemed-export document would break the
+   * rule that names the concession and take the label off the PDF with it.
+   */
+  newLinePct?: number;
   currency: string;
   taxType: TaxType;
   showTax?: boolean;
@@ -680,7 +676,7 @@ export default function LineItemsEditor({
       <div className="mt-3 flex items-center justify-between">
         <Button
           variant="secondary"
-          onClick={() => onChange([...items, { description: '', hsn_code: '', qty: null, unit: DEFAULT_UNIT, unit_price: 0, tax_pct: DEFAULT_TAX_PCT, color: '', packs: null, pcs_per_pack: null, total_pcs: null, custom1: '', custom2: '', custom3: '' }])}
+          onClick={() => onChange([...items, { description: '', hsn_code: '', qty: null, unit: DEFAULT_UNIT, unit_price: 0, tax_pct: newLinePct, color: '', packs: null, pcs_per_pack: null, total_pcs: null, custom1: '', custom2: '', custom3: '' }])}
         >
           + Add Line
         </Button>

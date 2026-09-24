@@ -23,6 +23,7 @@ import { useDefaultOnce } from '../lib/useDefaultOnce';
 import { useUnsavedChanges } from '../lib/useUnsavedChanges';
 import HistoryCard from '../components/HistoryCard';
 import { SETTABLE_STATUSES, proformaStatusLabel } from './Proformas';
+import { taxChoiceOf, taxPatchFor, newLineTaxPct } from '../lib/tax';
 
 interface Draft {
   number?: string;
@@ -274,6 +275,11 @@ export default function ProformaFormPage() {
     }
   };
 
+  // Which of the four the Tax picker is showing. Derived from the lines
+  // rather than stored, so nothing can claim the concession over rates that
+  // do not carry it — see lib/tax.ts.
+  const taxChoice = taxChoiceOf(draft.tax_type, draft.items);
+
   return (
     <div className="mx-auto max-w-7xl">
       <PageHeader
@@ -408,10 +414,15 @@ export default function ProformaFormPage() {
               </Select>
             </Field>
             <Field label="Tax">
-              <Select disabled={readOnly} value={draft.tax_type} onChange={(e) => set({ tax_type: e.target.value as TaxType })}>
+              <Select disabled={readOnly} value={taxChoice} onChange={(e) => set(taxPatchFor(e.target.value, draft.tax_type, draft.items))}>
                 <option value="none">No tax (export)</option>
                 <option value="cgst_sgst">CGST + SGST (buyer in the same state)</option>
                 <option value="igst">IGST (buyer in another state)</option>
+                {/* A supply to a merchant exporter: domestic, and taxed at the
+                    concessional 0.1% rather than 18%. Not a fourth stored tax type —
+                    the column's CHECK names three — but IGST with every line at that
+                    rate, read back the same way. See lib/tax.ts. */}
+                <option value="deemed_export">Deemed Export (IGST 0.1%)</option>
               </Select>
             </Field>
             <Field label="Production Lead Time *"><Input disabled={readOnly} value={draft.lead_time} onChange={(e) => set({ lead_time: e.target.value })} placeholder="e.g. 4 weeks from advance" /></Field>
@@ -538,7 +549,7 @@ export default function ProformaFormPage() {
           {readOnly ? (
             <ReadOnlyItems items={draft.items} currency={draft.currency} />
           ) : (
-            <LineItemsEditor items={draft.items} onChange={(items) => set({ items })} currency={draft.currency} taxType={draft.tax_type} config={draft.column_config} omit={proformaOmit(!!draft.is_export)} forced={PROFORMA_FORCED} share={draft.is_export ? shareByLine : undefined} />
+            <LineItemsEditor newLinePct={newLineTaxPct(taxChoice)} items={draft.items} onChange={(items) => set({ items })} currency={draft.currency} taxType={draft.tax_type} config={draft.column_config} omit={proformaOmit(!!draft.is_export)} forced={PROFORMA_FORCED} share={draft.is_export ? shareByLine : undefined} />
           )}
           <HeaderCharges
             freight={draft.freight}

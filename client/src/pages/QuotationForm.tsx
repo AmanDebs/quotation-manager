@@ -20,6 +20,7 @@ import { useUnsavedChanges } from '../lib/useUnsavedChanges';
 import HistoryCard from '../components/HistoryCard';
 import ReadOnlyItems from '../components/ReadOnlyItems';
 import { SETTABLE_STATUSES, quotationStatusLabel } from './Quotations';
+import { taxChoiceOf, taxPatchFor, newLineTaxPct } from '../lib/tax';
 
 interface Draft {
   number?: string;
@@ -250,6 +251,11 @@ export default function QuotationFormPage() {
   const readOnly = isSuperseded || !!lockedBy;
   const gridClass = readOnly ? FIELD_GRID_PLAIN : FIELD_GRID;
 
+  // Which of the four the Tax picker is showing. Derived from the lines
+  // rather than stored, so nothing can claim the concession over rates that
+  // do not carry it — see lib/tax.ts.
+  const taxChoice = taxChoiceOf(draft.tax_type, draft.items);
+
   return (
     <div className="mx-auto max-w-7xl">
       <PageHeader
@@ -426,10 +432,15 @@ export default function QuotationFormPage() {
               </Select>
             </Field>
             <Field label="Tax">
-              <Select value={draft.tax_type} disabled={readOnly} onChange={(e) => set({ tax_type: e.target.value as TaxType })}>
+              <Select value={taxChoice} disabled={readOnly} onChange={(e) => set(taxPatchFor(e.target.value, draft.tax_type, draft.items))}>
                 <option value="none">No tax (export)</option>
                 <option value="cgst_sgst">CGST + SGST (buyer in the same state)</option>
                 <option value="igst">IGST (buyer in another state)</option>
+                {/* A supply to a merchant exporter: domestic, and taxed at the
+                    concessional 0.1% rather than 18%. Not a fourth stored tax type —
+                    the column's CHECK names three — but IGST with every line at that
+                    rate, read back the same way. See lib/tax.ts. */}
+                <option value="deemed_export">Deemed Export (IGST 0.1%)</option>
               </Select>
             </Field>
             <Field label="Payment Terms *">
@@ -482,7 +493,7 @@ export default function QuotationFormPage() {
             <ReadOnlyItems items={draft.items} currency={draft.currency} />
           ) : (
             <>
-              <LineItemsEditor items={draft.items} onChange={(items) => set({ items })} currency={draft.currency} taxType={draft.tax_type} config={draft.column_config} omit={quotationOmit(!!draft.is_export)} forced={QUOTATION_FORCED} />
+              <LineItemsEditor newLinePct={newLineTaxPct(taxChoice)} items={draft.items} onChange={(items) => set({ items })} currency={draft.currency} taxType={draft.tax_type} config={draft.column_config} omit={quotationOmit(!!draft.is_export)} forced={QUOTATION_FORCED} />
               <HeaderCharges
                 freight={draft.freight}
                 insurance={draft.insurance}

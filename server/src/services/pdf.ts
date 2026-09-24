@@ -410,15 +410,47 @@ function roundOffOf(doc: Row): number {
   return round2(Number(doc.grand_total) - (Number(doc.subtotal) + Number(doc.freight || 0) + Number(doc.insurance || 0) + Number(doc.tax_total)));
 }
 
-/** The concessional rate a deemed export is bought at; the client's own figure. */
+/** The concessional rate a deemed export carries; the client's own figure. */
 const DEEMED_EXPORT_PCT = 0.1;
 
-function taxRows(doc: Row, currency: string): [string, string][] {
+/**
+ * Is this document a deemed export — a supply to a merchant exporter, taxed at
+ * 0.1% rather than 18%?
+ *
+ * **Derived from the lines, never stored.** Every one of these tables carries a
+ * CHECK naming three tax types and SQLite cannot ALTER one, so the forms offer
+ * it as a *preset* — IGST with every line at 0.1% — and this reads it back the
+ * same way. There is therefore no flag that can come to disagree with the
+ * rates under it: change one line to 18% and the document stops claiming the
+ * concession, on the paper as well as on the screen.
+ *
+ * The client's own `lib/tax.ts` holds the same rule for the picker. That is a
+ * copy across the wire, which this codebase pays for only where a figure has
+ * to be drawn on both sides — and the test asserting the page says what the
+ * form says is the rendered PDF itself.
+ *
+ * **Every line, including a charge.** Freight entered as a charge line at 18%
+ * therefore reads as an ordinary IGST document, which is the conservative
+ * direction: the page declines to name a concession that does not apply
+ * uniformly, rather than claiming one over a line that is not carrying it.
+ */
+function isDeemedExport(doc: Row, items: Row[]): boolean {
+  return doc.tax_type === 'igst'
+    && items.length > 0
+    && items.every((it) => Number(it.tax_pct) === DEEMED_EXPORT_PCT);
+}
+
+function taxRows(doc: Row, currency: string, items: Row[] = []): [string, string][] {
   const rows: [string, string][] = [];
   if (doc.tax_type === 'cgst_sgst' && doc.tax_total > 0) {
     rows.push(['Add CGST', fmtMoney(doc.tax_total / 2, currency)], ['Add SGST', fmtMoney(doc.tax_total / 2, currency)]);
   } else if (doc.tax_type === 'igst' && doc.tax_total > 0) {
-    rows.push(['Add IGST', fmtMoney(doc.tax_total, currency)]);
+    // Said on the row rather than left to be inferred: "Add IGST" over ₹140 on
+    // a ₹1,40,000 document reads as a mistake rather than as a rate.
+    rows.push([
+      isDeemedExport(doc, items) ? `Add IGST @ ${DEEMED_EXPORT_PCT}% (Deemed Export)` : 'Add IGST',
+      fmtMoney(doc.tax_total, currency),
+    ]);
   }
   return rows;
 }
@@ -446,7 +478,7 @@ export interface MoneyRow {
  * round off, grand total. Shared so they read identically whether they are
  * drawn as a band beside the page or folded into the items table itself.
  */
-function totalsRows(doc: Row, currency: string, grandLabel: string): MoneyRow[] {
+function totalsRows(doc: Row, currency: string, grandLabel: string, items: Row[] = []): MoneyRow[] {
   const bandRows: MoneyRow[] = [];
   const hasExtras = Number(doc.freight) || Number(doc.insurance) || doc.tax_total > 0 || roundOffOf(doc) !== 0;
   bandRows.push({ label: 'TOTAL PRICE', value: fmtMoney(doc.subtotal, currency), band: hasExtras ? true : false });
@@ -456,15 +488,15 @@ function totalsRows(doc: Row, currency: string, grandLabel: string): MoneyRow[] 
     if (Number(doc.freight)) bandRows.push({ label: 'Add Freight', value: fmtMoney(doc.freight, currency) });
     if (Number(doc.insurance)) bandRows.push({ label: 'Add Insurance', value: fmtMoney(doc.insurance, currency) });
   }
-  for (const [l, v] of taxRows(doc, currency)) bandRows.push({ label: l, value: v });
+  for (const [l, v] of taxRows(doc, currency, items)) bandRows.push({ label: l, value: v });
   const ro = roundOffOf(doc);
   if (ro !== 0) bandRows.push({ label: 'Round off', value: (ro > 0 ? '' : '(') + Math.abs(ro).toFixed(2) + (ro > 0 ? '' : ')') });
   bandRows.push({ label: grandLabel, value: fmtMoney(doc.grand_total, currency), band: true });
   return bandRows;
 }
 
-function totalsBand(s: Row, doc: Row, currency: string, grandLabel: string): Content {
-  const bandRows = totalsRows(doc, currency, grandLabel);
+function totalsBand(s: Row, doc: Row, currency: string, grandLabel: string, items: Row[] = []): Content {
+  const bandRows = totalsRows(doc, currency, grandLabel, items);
 
   return {
     columns: [
@@ -978,7 +1010,7 @@ export function buildQuotationPdf(id: number): TDocumentDefinitions {
     // for the different case it was written for: a quotation carrying no
     // quantities at all, where saying so is the point.
     ...(showMoney
-      ? [totalsBand(s, q, cur, grandLabel), amountWords(q, cur)]
+      ? [totalsBand(s, q, cur, grandLabel, items), amountWords(q, cur)]
       : hasQty
         ? []
         : [{ text: 'Note: Quantities to be confirmed by the customer. Prices are as stated above.', fontSize: 8, italics: true, margin: [0, 6, 0, 0] as any }]),
@@ -1106,7 +1138,7 @@ export function buildOrderPdf(id: number): TDocumentDefinitions {
       margin: [0, 0, 0, 8] as any,
     },
     itemsTable(s, items, specs, cfg),
-    totalsBand(s, o, cur, 'ORDER VALUE'),
+    totalsBand(s, o, cur, 'ORDER VALUE', items),
     amountWords(o, cur),
     ...(o.remarks ? [{ text: 'REMARKS:', fontSize: 9, bold: true, color: s.theme, margin: [0, 8, 0, 2] as any }, { text: o.remarks, fontSize: 8 }] : []),
     ...notesAndTerms(s, o.notes),
@@ -1347,7 +1379,7 @@ export function buildProformaPdf(id: number): TDocumentDefinitions {
    * property of the boxes being shipped.
    */
   const advance = proformaAdvance(id);
-  const money: MoneyRow[] = totalsRows(pi, cur, grandLabel)
+  const money: MoneyRow[] = totalsRows(pi, cur, grandLabel, items)
     .slice(1)
     .map((r) => (r.label === grandLabel ? { ...r, sums: true } : r));
   if (advance.amount_received > 0) {
@@ -1658,7 +1690,7 @@ export function buildInvoicePdf(id: number): TDocumentDefinitions {
    * has to be legible. The sums stay on the grand total: what is still owed is
    * not a property of the boxes that went out.
    */
-  const money: MoneyRow[] = totalsRows(inv, cur, grandLabel).map((r) => (
+  const money: MoneyRow[] = totalsRows(inv, cur, grandLabel, items).map((r) => (
     r.label === grandLabel ? { ...r, sums: true } : r
   ));
   if (received > 0) {
@@ -1835,7 +1867,7 @@ export function buildCreditNotePdf(id: number): TDocumentDefinitions {
 
   // The money rides inside the items table, as on the invoice; the subtotal
   // stays because the tax reversed is charged on it.
-  const money: MoneyRow[] = totalsRows(n, cur, 'TOTAL CREDIT').map((r) => (
+  const money: MoneyRow[] = totalsRows(n, cur, 'TOTAL CREDIT', items).map((r) => (
     r.label === 'TOTAL CREDIT' ? { ...r, sums: true } : r
   ));
 
@@ -2171,17 +2203,8 @@ export function buildPurchaseOrderPdf(id: number): TDocumentDefinitions {
     Number(po.grand_total) - (Number(po.subtotal) + Number(po.tax_total) + tcs)
   );
 
-  /*
-   * A deemed export is bought at the concessional 0.1% (2026-09-20, the
-   * client: "In tax add Deemed Export (0.1%)"). It is not a fourth stored
-   * tax type — `purchase_orders.tax_type` carries a CHECK naming three, and
-   * SQLite cannot ALTER one — but IGST at 0.1% on every line, which the form
-   * sets and this reads back: the tax row says so, since "Add IGST" over a
-   * ₹140 figure on a ₹1,40,000 order reads as a mistake rather than a rate.
-   */
-  const deemed = po.tax_type === 'igst' && items.length > 0 && items.every((it) => Number(it.tax_pct) === DEEMED_EXPORT_PCT);
   const money: MoneyRow[] = [
-    ...taxRows(po, cur).map(([label, value]) => ({ label: deemed && label === 'Add IGST' ? `Add IGST @ ${DEEMED_EXPORT_PCT}% (Deemed Export)` : label, value })),
+    ...taxRows(po, cur, items).map(([label, value]) => ({ label, value })),
     ...(tcs ? [{ label: `TCS @ ${fmtNum(po.tcs_pct, 3)}%`, value: fmtMoney(tcs, cur) }] : []),
     ...(po.inco_terms ? [{ label: `Incoterms: ${String(po.inco_terms)}`, value: '' }] : []),
     ...(roundOff !== 0 ? [{ label: 'Round off', value: (roundOff > 0 ? '' : '(') + Math.abs(roundOff).toFixed(2) + (roundOff > 0 ? '' : ')') }] : []),
