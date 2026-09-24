@@ -498,7 +498,10 @@ proformasRouter.put('/:id', (req: AuthedRequest, res) => {
     db.prepare(
       `UPDATE proforma_invoices SET number = ?, column_config = ?, ${headerFields.map((f) => `${f} = ?`).join(', ')} WHERE id = ?`
     ).run(
-      String(body.number ?? existing.number),
+      // A blank keeps the issued number: a box cleared by mistake must not
+      // save a proforma with none on it. `??` alone guarded only the *missing*
+      // key, which was enough while nothing could type into the box.
+      String(body.number ?? '').trim() || String(existing.number),
       JSON.stringify(body.column_config ?? JSON.parse(String(existing.column_config || '{}'))),
       ...(headerFields.map((f) => (h as Record<string, unknown>)[f]) as never[]),
       id

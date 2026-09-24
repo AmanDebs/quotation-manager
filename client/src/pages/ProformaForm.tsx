@@ -105,7 +105,7 @@ export default function ProformaFormPage() {
   useEffect(() => {
     if (existing) {
       const {
-        id: _id, number: _n, status: _s, subtotal: _st, tax_total: _tt, grand_total: _gt,
+        id: _id, status: _s, subtotal: _st, tax_total: _tt, grand_total: _gt,
         customer_name: _cn, quotation_number: _qn, payments: _p, amount_received: _ar,
         approval_status: _as, approved_at: _aa, approval_note: _an, approved_by_name: _ab, created_by_name: _cb,
         ...rest
@@ -389,7 +389,8 @@ export default function ProformaFormPage() {
               <Field label="PI Number">
                 <DocNumber
                   value={draft.number}
-                  title="Assigned from this company's numbering series when the proforma was created"
+                  onChange={(v) => set({ number: v })}
+                  title="Assigned from this company's numbering series when the proforma was created; editable, and must be unique"
                 />
               </Field>
             )}
