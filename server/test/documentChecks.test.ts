@@ -480,7 +480,6 @@ describe('an export packing list names its container', () => {
 describe('the sales order mandatory fields', () => {
   const finished = { promised_date: '2026-09-20', revised_date: '2026-09-25' };
   const always: [string, string][] = [
-    ['promised_date', 'so_promised'], ['revised_date', 'so_revised'],
     ['payment_terms', 'so_payment_terms'],
   ];
   const exportOnly: [string, string][] = [
@@ -496,6 +495,23 @@ describe('the sales order mandatory fields', () => {
       assert.deepEqual(keys(doc('orders', { ...finished, is_export: 1, [field]: '' }), 'block'), [key], `blank ${field} on an export`);
     }
   });
+  /**
+   * Both production dates came off the list on 2026-09-24 at the client's
+   * word. They were asked because the Reports page keys on them, which is a
+   * reason to want them filled in rather than to refuse the document: an
+   * order is booked when the buyer commits, and the plant's date is often set
+   * afterwards. Asserted rather than left to the absence of a case, so
+   * putting either back is a decision somebody makes on purpose.
+   */
+  test('neither production date is asked for any more', () => {
+    for (const field of ['promised_date', 'revised_date']) {
+      assert.deepEqual(keys(doc('orders', { ...finished, [field]: '' }), 'block'), [], `blank ${field}`);
+      assert.deepEqual(keys(doc('orders', { ...finished, is_export: 1, [field]: '' }), 'block'), [], `blank ${field} on an export`);
+    }
+    // Neither, on an order that states nothing about production at all.
+    assert.deepEqual(keys(doc('orders', { promised_date: '', revised_date: '', payment_terms: '30 days' }), 'block'), []);
+  });
+
   test('the shipping fields on an export only', () => {
     for (const [field, key] of exportOnly) {
       assert.deepEqual(keys(doc('orders', { ...finished, is_export: 1, [field]: '' }), 'block'), [key], `blank ${field}`);
@@ -520,8 +536,8 @@ describe('the sales order mandatory fields', () => {
     ).get(c) as { id: number }).id);
     db.prepare("INSERT INTO order_items (order_id, description, color, qty, unit, unit_price, amount, sort_order) VALUES (?, 'Cap', 'Natural', 10, 'unit', 10, 100, 0)").run(id);
     const err = incompleteError('orders', id);
-    assert.ok(err && err.startsWith('This sales order is not finished:') && err.includes('Revised Production Date is blank.'), err ?? 'no error');
-    db.prepare("UPDATE orders SET promised_date = '2026-09-18', revised_date = '2026-09-20', payment_terms = '30 days' WHERE id = ?").run(id);
+    assert.ok(err && err.startsWith('This sales order is not finished:') && err.includes('Payment Terms is blank.'), err ?? 'no error');
+    db.prepare("UPDATE orders SET payment_terms = '30 days' WHERE id = ?").run(id);
     assert.equal(incompleteError('orders', id), null);
   });
 });

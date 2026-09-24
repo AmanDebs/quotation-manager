@@ -372,8 +372,8 @@ export default function OrderFormPage() {
             {/* The promised date came back beside it (2026-09-15): it is what the
                 dashboard's overdue-orders chip and the order book's Promised
                 column read, both quiet since the card went. */}
-            <Field label="Original Promised Date *"><Input type="date" value={draft.promised_date} onChange={(e) => set({ promised_date: e.target.value })} /></Field>
-            <Field label="Revised Production Date *"><Input type="date" value={draft.revised_date} onChange={(e) => set({ revised_date: e.target.value })} /></Field>
+            <Field label="Original Promised Date"><Input type="date" value={draft.promised_date} onChange={(e) => set({ promised_date: e.target.value })} /></Field>
+            <Field label="Revised Production Date"><Input type="date" value={draft.revised_date} onChange={(e) => set({ revised_date: e.target.value })} /></Field>
             <Field label="Currency">
               <Select value={draft.currency} onChange={(e) => set({ currency: e.target.value })}>
                 <option value="INR">INR</option><option value="USD">USD</option><option value="EUR">EUR</option>

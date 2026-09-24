@@ -464,12 +464,23 @@ const RULES: Rule[] = [
    * Not asked, and why: the advance figures, which legitimately read zero
    * (credit terms; nothing banked yet) and are read from the proforma once
    * one is linked; issued-by, currency and tax, which carry defaults; and the
-   * exemptions. Customer, date and lines were already blocks. The Revised
-   * Production Date is here because the Reports page keys on it.
+   * exemptions. Customer, date and lines were already blocks.
+   *
+   * **Both production dates came off the list on 2026-09-24** (*"Make Original
+   * promised date and revised production date not mandatory"*), which leaves
+   * Payment Terms as the only order-scope field asked of a domestic order.
+   * They were here because the Reports page keys on them — *Planned for
+   * production* buckets orders under the revised date, falling back to the
+   * scheduled and then the promised one — and that is a reason to want them
+   * filled in rather than a reason to refuse the document: an order is booked
+   * when the buyer commits, and the plant's date is often set afterwards.
+   * What follows is that an order raised without them appears under
+   * *Confirmed – not scheduled* on that page rather than on a date, and is
+   * counted by neither the dashboard's overdue chip nor the order book's
+   * Promised column until somebody fills one in. The fields and every reader
+   * of them are untouched; only the refusal is gone.
    */
   ...([
-    ['so_promised', 'promised_date', 'Original Promised Date'],
-    ['so_revised', 'revised_date', 'Revised Production Date'],
     ['so_payment_terms', 'payment_terms', 'Payment Terms'],
   ] as const).map(([key, column, label]): Rule => ({
     key, level: 'block', tables: ['orders'],
