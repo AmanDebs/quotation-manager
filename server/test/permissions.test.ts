@@ -1,8 +1,8 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  TEAM_ROLES, FUNCTIONS, ACCESS, can, levelFor, legacyRole, isTeamRole, capabilities,
-  exportOnlyInvoice, type Fn, type TeamRole,
+  TEAM_ROLES, FUNCTIONS, DEFAULT_ACCESS, FUNCTION_META, FUNCTION_GROUPS, EDITABLE_ROLES, atLeast, legacyRole,
+  isTeamRole, isEditableRole, exportOnlyInvoice, type Fn, type Level, type TeamRole,
 } from '../src/services/permissions.js';
 
 /**
@@ -11,7 +11,21 @@ import {
  * nothing at all, which is what lets it be sent to the client as a computed
  * map and read in one screen. If it ever grows a `db` import, the scratch
  * import goes back on line 1 or these run against the live database.
+ *
+ * What this file asserts is the **recommended** matrix — where every team
+ * starts. What a team may do *today* is that table with the client's own ticks
+ * over it, which is `accessPolicy.ts` and is tested against a database in
+ * `accessPolicy.test.ts`.
  */
+
+/**
+ * The default's own answer, spelled out here rather than imported, because
+ * `can` and `levelFor` deliberately do not live in the pure module any more:
+ * one function of each name, reading the table in force, is what stops a
+ * screen disagreeing with the guard behind it.
+ */
+const levelFor = (role: unknown, fn: Fn): Level => (isTeamRole(role) ? DEFAULT_ACCESS[role][fn] ?? 'none' : 'none');
+const can = (role: unknown, fn: Fn, need: Level = 'view') => atLeast(levelFor(role, fn), need);
 
 describe('the access table', () => {
   /**
@@ -21,8 +35,8 @@ describe('the access table', () => {
   test('is total — every role, every function', () => {
     for (const role of TEAM_ROLES) {
       for (const fn of FUNCTIONS) {
-        assert.ok(ACCESS[role][fn] !== undefined, `${role} has no cell for ${fn}`);
-        assert.ok(['none', 'view', 'full'].includes(ACCESS[role][fn]), `${role}/${fn} is not a level`);
+        assert.ok(DEFAULT_ACCESS[role][fn] !== undefined, `${role} has no cell for ${fn}`);
+        assert.ok(['none', 'view', 'full'].includes(DEFAULT_ACCESS[role][fn]), `${role}/${fn} is not a level`);
       }
     }
   });
@@ -182,17 +196,45 @@ describe('the row rule the table cannot carry', () => {
   });
 });
 
-describe('the map handed to the client', () => {
-  test('covers every function, so no screen has to guess', () => {
-    const caps = capabilities('production');
-    assert.deepEqual(Object.keys(caps).sort(), [...FUNCTIONS].sort());
-    assert.equal(caps.work_order, 'full');
-    assert.equal(caps.quotation, 'none');
+describe('the vocabulary the permissions page draws', () => {
+  /**
+   * A function with no entry would be drawn with a blank label and no ticks —
+   * a permission nobody can grant, and no error to say so.
+   */
+  test('every function is named, grouped, and says which levels mean anything', () => {
+    for (const fn of FUNCTIONS) {
+      const meta = FUNCTION_META[fn];
+      assert.ok(meta, `${fn} has no label`);
+      assert.ok(meta.label && meta.group && meta.hint, `${fn} is incompletely described`);
+      assert.ok(['both', 'view', 'full'].includes(meta.levels), `${fn}/${meta.levels}`);
+    }
   });
 
-  test('and an unknown role gets a map of nothing rather than an empty object', () => {
-    const caps = capabilities('nobody');
-    assert.equal(Object.keys(caps).length, FUNCTIONS.length);
-    assert.ok(Object.values(caps).every((l) => l === 'none'));
+  /**
+   * The page draws one group at a time, so a function in a group this list
+   * does not name would be drawn nowhere at all — a permission nobody could
+   * grant, and no error anywhere to say why.
+   */
+  test('every group a function claims is one the page draws', () => {
+    for (const fn of FUNCTIONS) {
+      assert.ok(
+        (FUNCTION_GROUPS as readonly string[]).includes(FUNCTION_META[fn].group),
+        `${fn} is in "${FUNCTION_META[fn].group}", which the page does not draw`,
+      );
+    }
+    for (const group of FUNCTION_GROUPS) {
+      assert.ok(FUNCTIONS.some((fn) => FUNCTION_META[fn].group === group), `nothing is in "${group}"`);
+    }
+  });
+
+  /**
+   * The rail the whole page rests on. Untick `team` on the super admin and
+   * nobody can ever open the page again — including whoever just did it — so
+   * that row is not offered.
+   */
+  test('the super admin is not editable, and everyone else is', () => {
+    assert.equal(isEditableRole('super_admin'), false);
+    assert.deepEqual([...EDITABLE_ROLES].sort(), TEAM_ROLES.filter((r) => r !== 'super_admin').sort());
+    for (const role of EDITABLE_ROLES) assert.equal(isEditableRole(role), true, role);
   });
 });

@@ -66,6 +66,8 @@ const ENTITY_FN: Record<string, Fn> = {
   products: 'product',
   'purchase-orders': 'purchasing',
   users: 'team',
+  // Who may do what. The same cell that owns the accounts themselves.
+  permissions: 'team',
   companies: 'settings',
   // Sign-ins. The trail's own subject, so it follows the trail's own function.
   auth: 'audit',
@@ -99,6 +101,7 @@ const OWNER_SQL: Record<string, string | null> = {
   products: null,
   'purchase-orders': null,
   users: null,
+  permissions: null,
   companies: null,
   auth: null,
   locations: null,

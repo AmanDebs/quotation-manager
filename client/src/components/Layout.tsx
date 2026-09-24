@@ -103,6 +103,8 @@ const NAV: { heading: string; items: NavItem[] }[] = [
       // whoever owns it can read it without being a manager.
       { to: '/activity', label: 'Activity', icon: 'clock', needs: 'audit' },
       { to: '/team', label: 'Team', icon: 'users', needs: 'team' },
+      // Who may do what. Beside the accounts it governs, and on the same cell.
+      { to: '/permissions', label: 'User Permissions', icon: 'lock', needs: 'team' },
       { to: '/settings', label: 'Settings', icon: 'cog', needs: 'settings' },
     ],
   },

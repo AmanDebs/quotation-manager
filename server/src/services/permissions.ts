@@ -1,10 +1,20 @@
 /**
- * Who may do what.
+ * Who may do what — **the recommended matrix, and the vocabulary**.
  *
  * Six roles, from the RBAC matrix in the client's ERP specification of
  * 2026-09-10, each with full / view / no access per function. That document
  * supersedes the access matrix of 2026-09-05 — the two disagree, and the
  * client chose this one.
+ *
+ * Since 2026-09-24 this table is a **default rather than the policy**: the
+ * client did not like being held to a matrix somebody else wrote, so the User
+ * Permissions page lets each team be re-ticked and the differences are stored
+ * in `role_permissions`. `services/accessPolicy.ts` lays those over this and
+ * owns the effective answer — which is why `can`, `levelFor` and
+ * `capabilities` are **not** in this file any more. Two functions called `can`,
+ * one reading the default and one reading what the client actually set, is
+ * exactly how a screen comes to disagree with the guard behind it; the
+ * compiler refuses the mistake instead.
  *
  * Its four columns are *modules*, and each cell carries a parenthetical
  * naming what to read: *Read Only (View SO Demand)*, *(Verify COA
@@ -72,10 +82,100 @@ export const FUNCTIONS = [
 
 export type Fn = (typeof FUNCTIONS)[number];
 
-export type Level = 'none' | 'view' | 'full';
+export const LEVELS = ['none', 'view', 'full'] as const;
+
+export type Level = (typeof LEVELS)[number];
+
+export type AccessTable = Record<TeamRole, Record<Fn, Level>>;
+
+export function isFn(v: unknown): v is Fn {
+  return typeof v === 'string' && (FUNCTIONS as readonly string[]).includes(v);
+}
+
+export function isLevel(v: unknown): v is Level {
+  return typeof v === 'string' && (LEVELS as readonly string[]).includes(v);
+}
 
 /** none < view < full, so a `full` grant satisfies a `view` requirement. */
 const RANK: Record<Level, number> = { none: 0, view: 1, full: 2 };
+
+/** Does this level reach that one? The whole of the rank rule, in one place. */
+export function atLeast(have: Level, need: Level): boolean {
+  return RANK[have] >= RANK[need];
+}
+
+/**
+ * What each function is called, what it covers, and **which levels mean
+ * anything for it**.
+ *
+ * The last is the part worth having. `team` is mounted at `full` and nothing
+ * anywhere asks for `view` of it, so a *View* tick beside it would be a
+ * control that does nothing — worse than no control, since somebody would tick
+ * it and conclude the page is broken. So a function declares `levels`, and the
+ * screen draws one box or two accordingly:
+ *
+ * - `both`   — read it with View, change it with Edit (most of them).
+ * - `view`   — there is nothing to change: the dashboard and the audit trail
+ *              are read-only by nature.
+ * - `full`   — an all-or-nothing act: the team page, the backup, the
+ *              numbering counters, raising a purchase order.
+ *
+ * Sent to the client with the matrix rather than copied there, the rule
+ * `capabilities` already follows: a second list is a second policy.
+ */
+export interface FunctionMeta {
+  label: string;
+  group: string;
+  levels: 'both' | 'view' | 'full';
+  /** What this actually opens, in the words the screens use. */
+  hint: string;
+}
+
+export const FUNCTION_META: Record<Fn, FunctionMeta> = {
+  enquiry: { label: 'Enquiries', group: 'Selling', levels: 'both', hint: 'The front of the funnel' },
+  quotation: { label: 'Quotations', group: 'Selling', levels: 'both', hint: 'Offers and their prices, including revisions' },
+  proforma: { label: 'Proforma Invoices', group: 'Selling', levels: 'both', hint: 'The document the advance is paid against' },
+  order: { label: 'Sales Orders', group: 'Selling', levels: 'both', hint: 'The order book and its lines' },
+  invoice: { label: 'Commercial Invoices', group: 'Selling', levels: 'both', hint: 'Export invoices and credit notes' },
+  packing_list: { label: 'Packing Lists', group: 'Selling', levels: 'both', hint: 'Raised from the invoice it belongs to' },
+  approval: { label: 'Approvals', group: 'Selling', levels: 'both', hint: 'View the queue; Edit approves and rejects' },
+
+  work_order: { label: 'Work Orders', group: 'Factory', levels: 'both', hint: 'The jobs the floor works to' },
+  output: { label: 'Production Output', group: 'Factory', levels: 'both', hint: 'Shift entries, batches and what was made' },
+  qc: { label: 'Quality', group: 'Factory', levels: 'both', hint: 'Checks, specifications and the COA' },
+  material: { label: 'Raw Material', group: 'Factory', levels: 'both', hint: 'Stock, issues and the shortfall' },
+  fg: { label: 'Finished Goods', group: 'Factory', levels: 'both', hint: 'What is on the shelf; Edit records a stock count' },
+  dispatch: { label: 'Dispatches', group: 'Factory', levels: 'both', hint: 'Trips, the sea leg and the delivery challan' },
+  purchasing: { label: 'Purchase Orders', group: 'Factory', levels: 'full', hint: 'Buying, and every supplier rate with it' },
+
+  customer: { label: 'Customers', group: 'Reference', levels: 'both', hint: 'The customer book' },
+  product: { label: 'Products', group: 'Reference', levels: 'both', hint: 'The catalogue, which carries the price list' },
+  master: { label: 'Production Masters', group: 'Reference', levels: 'both', hint: 'Plants, machines, moulds, processes, suppliers' },
+  followup: { label: 'Follow-ups', group: 'Reference', levels: 'both', hint: 'Reminders and who chased what' },
+  payment: { label: 'Payments', group: 'Reference', levels: 'both', hint: 'The money register and the receivables tracker' },
+
+  dashboard: { label: 'Dashboard', group: 'Administration', levels: 'view', hint: 'The front page. A team without it lands elsewhere' },
+  audit: { label: 'Activity Log', group: 'Administration', levels: 'view', hint: 'The whole trail. A record’s own history follows the record' },
+  team: { label: 'Team & Permissions', group: 'Administration', levels: 'full', hint: 'Accounts, and this page' },
+  settings: { label: 'Settings', group: 'Administration', levels: 'full', hint: 'Company profile, numbering, note presets' },
+  backup: { label: 'Backup & Reset', group: 'Administration', levels: 'full', hint: 'Downloads the whole database' },
+};
+
+/**
+ * The groups, in the order the page draws them.
+ *
+ * Written out rather than derived from `FUNCTION_META`, and the first attempt
+ * is why: taking the groups in the order the functions happen to be declared
+ * put *Administration* second, because `dashboard` sits in the sales block of
+ * `FUNCTIONS` and is grouped with the app's own screens here. Order is a
+ * different fact from membership, so it is stated.
+ *
+ * The page renders group by group, so a function whose group is missing from
+ * this list would be **drawn nowhere** — a permission nobody could grant, with
+ * nothing on screen to say so. A test asserts the list covers every group
+ * `FUNCTION_META` names.
+ */
+export const FUNCTION_GROUPS = ['Selling', 'Factory', 'Reference', 'Administration'] as const;
 
 /**
  * The table itself.
@@ -90,8 +190,16 @@ const RANK: Record<Level, number> = { none: 0, view: 1, full: 2 };
  * Cells marked (matrix) are the client's own. The rest answer "what does each
  * role have to be able to *read* to do its job" and are the ones to revisit
  * first if somebody cannot see something they need.
+ *
+ * **It is where every team starts, not where it stays.** A cell the client
+ * re-ticks is stored against the role and read over the top of this; a cell
+ * nobody has touched follows this table, so a correction made here still
+ * reaches a deployment that has customised something else — the rule
+ * `DEFAULT_HIDDEN_COLUMNS` and the note presets already follow. A function
+ * added in a later release therefore arrives with a sensible level rather than
+ * silently `none` for a team whose row was frozen the day they first saved it.
  */
-export const ACCESS: Record<TeamRole, Record<Fn, Level>> = {
+export const DEFAULT_ACCESS: AccessTable = {
   /**
    * The owner's account. Deliberately **not** the spec's administrator row:
    * that row is written for somebody whose job is the system rather than the
@@ -217,20 +325,29 @@ export const ACCESS: Record<TeamRole, Record<Fn, Level>> = {
   },
 };
 
-/** What this role may do with this function. An unknown role may do nothing. */
-export function levelFor(role: unknown, fn: Fn): Level {
-  return isTeamRole(role) ? ACCESS[role][fn] ?? 'none' : 'none';
-}
-
 /**
- * May this role do this, to at least this depth?
+ * The roles the User Permissions page may re-tick.
  *
- * An unknown, blank or missing role denies everything — which is the state of
- * a row the backfill has not reached and of a session whose `team_role` was
- * left out of a SELECT, and both should fail closed.
+ * **The super admin is not one of them, and that is the rail that makes the
+ * whole page safe to ship.** Its row is the only guaranteed way back in: untick
+ * `team` on it and nobody can ever open the permissions page again — including
+ * the person who just did it — and there is no screen left to undo it from.
+ * This codebase has built exactly one trap with no way out (`work_orders.
+ * product_id`, found when the invoice gate made it reachable) and does not
+ * intend to build a second, least of all one that locks the owner out of their
+ * own book. So that row is drawn ticked and disabled, the route refuses to
+ * store a cell against it, and the loader ignores one that somehow got in.
+ *
+ * It costs nothing real: a super admin is by definition the account that may
+ * do everything, and holding somebody to less is what the System Administrator
+ * row and the other four are for.
  */
-export function can(role: unknown, fn: Fn, need: 'view' | 'full' = 'view'): boolean {
-  return RANK[levelFor(role, fn)] >= RANK[need];
+export const EDITABLE_ROLES = TEAM_ROLES.filter((r) => r !== 'super_admin');
+
+export type EditableRole = Exclude<TeamRole, 'super_admin'>;
+
+export function isEditableRole(v: unknown): v is EditableRole {
+  return isTeamRole(v) && v !== 'super_admin';
 }
 
 /**
@@ -262,11 +379,4 @@ export function exportOnlyInvoice(role: unknown): boolean {
  */
 export function legacyRole(role: unknown): 'manager' | 'employee' {
   return role === 'super_admin' ? 'manager' : 'employee';
-}
-
-/** The whole table for one role, for the client to drive its screens from. */
-export function capabilities(role: unknown): Record<Fn, Level> {
-  const out = {} as Record<Fn, Level>;
-  for (const fn of FUNCTIONS) out[fn] = levelFor(role, fn);
-  return out;
 }

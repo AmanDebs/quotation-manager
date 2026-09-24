@@ -4,7 +4,8 @@ import { db } from '../db/connection.js';
 import { COOKIE_NAME, requireAuth, signToken, bumpTokenVersion, type AuthedRequest } from '../middleware/auth.js';
 import { loginRateLimit } from '../middleware/rateLimit.js';
 import { record } from '../services/audit.js';
-import { legacyRole, capabilities, type TeamRole } from '../services/permissions.js';
+import { legacyRole, type TeamRole } from '../services/permissions.js';
+import { capabilities } from '../services/accessPolicy.js';
 
 export const authRouter = Router();
 

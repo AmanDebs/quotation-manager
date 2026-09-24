@@ -1,6 +1,6 @@
 import { db } from '../db/connection.js';
 import type { AuthedRequest, SessionUser } from '../middleware/auth.js';
-import { can } from './permissions.js';
+import { can } from './accessPolicy.js';
 import { incompleteError } from './documentChecks.js';
 
 /**

@@ -110,8 +110,13 @@ const REWRITE: Record<string, () => { entity: string; id: number }> = {
 /**
  * Its own records, and sign-in, are not captured here — the first would be a
  * loop and the second is the one place a request body must never be read.
+ *
+ * `permissions` joins them for the reason `settings/sequences` is self-recorded
+ * below: it is keyed on (team, function) rather than an id, so there is no row
+ * to diff and this would file a bare "somebody did something" beside the
+ * route's own entry naming every cell that moved.
  */
-const SKIP = new Set(['audit', 'auth']);
+const SKIP = new Set(['audit', 'auth', 'permissions']);
 
 /**
  * Routes that write their own entry, and must not also get one from here.

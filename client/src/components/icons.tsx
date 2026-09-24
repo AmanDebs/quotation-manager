@@ -66,6 +66,15 @@ const PATHS: Record<string, ReactNode> = {
   users: <><circle cx="9.5" cy="8" r="3" /><path d="M3.5 19.5c0-3 2.7-4.8 6-4.8s6 1.8 6 4.8" /><path d="M16 5.6a3 3 0 0 1 0 5.6" /><path d="M17.6 15.2c1.9.6 3.2 2.1 3.2 4.3" /></>,
   // Settings — sliders. A gear's teeth do not survive 16px, and a circle with
   // eight spokes reads as a sun, which is brightness, not settings.
+  /*
+   * User permissions — a padlock.
+   *
+   * A shield was tried first and is the wrong word: a shield says *protected
+   * from*, and this page is about what each team is *allowed*. A padlock keeps
+   * its silhouette at 16px, where the keyhole fills in and costs nothing —
+   * the body and the shackle are what make it readable.
+   */
+  lock: <><rect x="4.5" y="10.5" width="15" height="9.5" rx="2" /><path d="M8 10.5V7.8a4 4 0 0 1 8 0v2.7" /><path d="M12 14v2.5" /></>,
   cog: <><path d="M4 7h9" /><path d="M17 7h3" /><path d="M4 12h3" /><path d="M11 12h9" /><path d="M4 17h9" /><path d="M17 17h3" /><circle cx="15" cy="7" r="2" /><circle cx="9" cy="12" r="2" /><circle cx="15" cy="17" r="2" /></>,
 
   // Import from a spreadsheet — a tray with an arrow going into it.

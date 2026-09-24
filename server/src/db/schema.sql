@@ -31,6 +31,32 @@ CREATE TABLE IF NOT EXISTS users (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- What each team may do, where it differs from the recommended matrix.
+--
+-- `services/permissions.ts` holds the matrix from the client's ERP spec and is
+-- where every team starts; the User Permissions page writes a row here for each
+-- cell somebody re-ticks, and `services/accessPolicy.ts` lays these over it.
+--
+-- **Only the differences are stored**, which is what makes resetting a team a
+-- DELETE, keeps "customised" meaning something, and lets a correction shipped
+-- in a later release still reach a deployment that has customised a different
+-- cell. A function added later therefore arrives at its recommended level
+-- rather than silently `none`.
+--
+-- No CHECK on either `fn` or `level`, the rule products.product_type records:
+-- SQLite cannot ALTER one, and both lists grow. The vocabulary is the code's —
+-- accessPolicy ignores a row naming a function, level or role it does not know,
+-- so nothing stored here can grant access to something that no longer exists.
+-- A row against `super_admin` is inert for the same reason: that row is the way
+-- back in and is never editable.
+CREATE TABLE IF NOT EXISTS role_permissions (
+  team_role TEXT NOT NULL,
+  fn TEXT NOT NULL,
+  level TEXT NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (team_role, fn)
+);
+
 -- The group's selling entities. Every document records the one that issued it,
 -- so a reprint years later still carries the right name, GSTIN and letterhead.
 -- Each company numbers its own documents: a GST-registered entity keeps one

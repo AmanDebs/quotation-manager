@@ -4,7 +4,10 @@ import crypto from 'node:crypto';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { db, dataDir } from '../db/connection.js';
-import { can, legacyRole, type Fn, type Level, type TeamRole } from '../services/permissions.js';
+import { legacyRole, type Fn, type Level, type TeamRole } from '../services/permissions.js';
+// The effective table — the client's own ticks over the recommended matrix.
+// `permissions.ts` holds the default and cannot answer this; see accessPolicy.
+import { can } from '../services/accessPolicy.js';
 
 const secretFile = path.join(dataDir, 'jwt-secret');
 
