@@ -10,6 +10,7 @@ import { DocNumber, IncoTermsInput, PaymentTermsInput, DeliveryTimelineInput, Co
 import LineItemsEditor from '../components/LineItemsEditor';
 import FollowupButton from '../components/FollowupButton';
 import ApprovalStrip from '../components/ApprovalStrip';
+import ChecksStrip from '../components/ChecksStrip';
 import InternalNotes from '../components/InternalNotes';
 import ColumnsControl, { quotationColumns, quotationOmit, newColumnConfig, QUOTATION_FORCED } from '../components/ColumnsControl';
 import { fmtMoney, fmtDate, today, addDays, DEFAULT_VALIDITY_DAYS } from '../lib/format';
@@ -341,17 +342,26 @@ export default function QuotationFormPage() {
         </div>
       )}
 
+      {/* A domestic quotation goes through no approval (2026-09-25), so it
+          gets the findings alone — the same strip the sales order carries,
+          and for the same reason: with no approval to hold an unfinished
+          document back, the PDF is what waits. The server refuses a submit
+          on one, so this is not merely a hidden control. */}
       {!isNew && !readOnly && (
-        <ApprovalStrip
-          docType="quotations"
-          docId={Number(id)}
-          status={existing!.approval_status}
-          approvedByName={existing!.approved_by_name}
-          approvedAt={existing!.approved_at}
-          note={existing!.approval_note}
-          checks={existing!.checks}
-          queryKey="quotation"
-        />
+        draft.is_export ? (
+          <ApprovalStrip
+            docType="quotations"
+            docId={Number(id)}
+            status={existing!.approval_status}
+            approvedByName={existing!.approved_by_name}
+            approvedAt={existing!.approved_at}
+            note={existing!.approval_note}
+            checks={existing!.checks}
+            queryKey="quotation"
+          />
+        ) : (
+          <ChecksStrip checks={existing!.checks} />
+        )
       )}
 
       {!isNew && !readOnly && (

@@ -53,8 +53,11 @@ dashboardRouter.get('/', (req: AuthedRequest, res) => {
     orders: one(`SELECT COUNT(*) AS c FROM orders WHERE status NOT IN ('cancelled') AND date BETWEEN ? AND ?${and}`, from, to, ...p),
     invoices: one(`SELECT COUNT(*) AS c FROM commercial_invoices WHERE date BETWEEN ? AND ?${and}`, from, to, ...p),
     pendingApprovals: one(
-      `SELECT (SELECT COUNT(*) FROM quotations WHERE approval_status = 'pending'${and})
-            + (SELECT COUNT(*) FROM proforma_invoices WHERE approval_status = 'pending'${and})
+      // A domestic quotation or proforma goes through no approval (2026-09-25),
+      // so it is never pending one — the same `is_export = 1` the approvals
+      // queue and its badge carry, or the chip and the badge disagree.
+      `SELECT (SELECT COUNT(*) FROM quotations WHERE approval_status = 'pending' AND is_export = 1${and})
+            + (SELECT COUNT(*) FROM proforma_invoices WHERE approval_status = 'pending' AND is_export = 1${and})
             + (SELECT COUNT(*) FROM commercial_invoices WHERE approval_status = 'pending'${and}) AS c`,
       ...p, ...p, ...p
     ),

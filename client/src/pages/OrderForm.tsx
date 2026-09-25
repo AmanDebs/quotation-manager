@@ -15,6 +15,7 @@ import { offeredStatuses, orderStatusLabel } from './Orders';
 import { today, fmtMoney, fmtDate } from '../lib/format';
 import { useUnsavedChanges } from '../lib/useUnsavedChanges';
 import HistoryCard from '../components/HistoryCard';
+import ChecksStrip from '../components/ChecksStrip';
 import PaymentsCard from '../components/PaymentsCard';
 import { taxChoiceOf, taxPatchFor, newLineTaxPct } from '../lib/tax';
 
@@ -246,14 +247,11 @@ export default function OrderFormPage() {
 
       {/* Every field is mandatory bar SPOC and the PO number (2026-09-15),
           and the order has no approval to hold an unfinished one back — so
-          the PDF is what waits, and the reasons sit here in the server's
-          own words rather than behind a button that fails when pressed. */}
-      {!isNew && (existing!.checks ?? []).some((f) => f.level === 'block') && (
-        <div className="mb-4 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800 ring-1 ring-inset ring-amber-200">
-          <strong>Not finished — the PDF will not print until these are filled in:</strong>{' '}
-          {(existing!.checks ?? []).filter((f) => f.level === 'block').map((f) => f.message).join(' ')}
-        </div>
-      )}
+          the PDF is what waits, and the reasons sit here in the server's own
+          words rather than behind a button that fails when pressed. The
+          domestic quotation and proforma say it the same way since
+          2026-09-25, which is why the strip is a component. */}
+      {!isNew && <ChecksStrip checks={existing!.checks} />}
       {!isNew && (
         <div className="mb-4 flex flex-wrap items-center gap-2 text-sm">
           <span className="text-slate-500">Status:</span>

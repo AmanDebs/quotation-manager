@@ -6,7 +6,7 @@ import { computeTotals, round2, type LineItemInput } from '../services/totals.js
 import type { AuthedRequest } from '../middleware/auth.js';
 import { scopeClause, canAccessCustomer, linkError, customerChangeError } from '../middleware/scope.js';
 import { resolveCompanyId, foreignBankError } from '../services/companies.js';
-import { submit, decide, resetApprovalOnEdit, blockUnapprovedTransition, blockUnapprovedConversion , mayApprove } from '../services/approval.js';
+import { submit, decide, resetApprovalOnEdit, blockUnapprovedTransition, exemptApprovalError, blockUnapprovedConversion , mayApprove } from '../services/approval.js';
 import { incompleteError, checkDocument } from '../services/documentChecks.js';
 import { listBody } from '../services/pagination.js';
 import { searchClause } from '../services/search.js';
@@ -526,6 +526,11 @@ proformasRouter.post('/:id/submit', (req: AuthedRequest, res) => {
   if (!existing || !canAccessCustomer(req, existing.customer_id)) return res.status(404).json({ error: 'Proforma invoice not found' });
   const lockedSubmit = lockError('proforma_invoices', id, 'submitted for approval');
   if (lockedSubmit) return res.status(409).json({ error: lockedSubmit });
+  // A domestic document answers to no approval, so there is nothing to ask for
+  // and nothing to grant — `services/approval.ts` owns which tables that
+  // covers. Refused rather than merely hidden: the form draws no strip.
+  const exemptSubmit = exemptApprovalError('proforma_invoices', id);
+  if (exemptSubmit) return res.status(409).json({ error: exemptSubmit });
   // Submitting is asking for approval, so the document has to be
   // finished. 422 rather than 409: nothing conflicts, it is incomplete.
   const incomplete = incompleteError('proforma_invoices', id);
@@ -538,6 +543,11 @@ proformasRouter.post('/:id/approve', (req: AuthedRequest, res) => {
   if (!mayApprove(req.user)) return res.status(403).json({ error: 'Your team cannot approve documents' });
   const id = Number(req.params.id);
   if (!db.prepare('SELECT id FROM proforma_invoices WHERE id = ?').get(id)) return res.status(404).json({ error: 'Proforma invoice not found' });
+  // A domestic document answers to no approval, so there is nothing to ask for
+  // and nothing to grant — `services/approval.ts` owns which tables that
+  // covers. Refused rather than merely hidden: the form draws no strip.
+  const exemptDecide = exemptApprovalError('proforma_invoices', id);
+  if (exemptDecide) return res.status(409).json({ error: exemptDecide });
   // Approved by rule before the order could be booked from it.
   const lockedDecide = lockError('proforma_invoices', id, 'approved or rejected');
   if (lockedDecide) return res.status(409).json({ error: lockedDecide });

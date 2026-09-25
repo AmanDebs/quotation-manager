@@ -28,18 +28,26 @@ approvalsRouter.get('/', (req: AuthedRequest, res) => {
     return c.sql ? ` AND ${c.sql}` : '';
   };
   const scp = (alias: string) => scopeClause(req, `${alias}.customer_id`).params;
+  /*
+   * A domestic quotation or proforma goes through no approval at all
+   * (2026-09-25), so it can never be *waiting* for one — and a queue holding
+   * rows nobody can clear is a queue people stop opening. Applied to `pending`
+   * alone: `?status=approved` is the history of the workflow, and a document
+   * approved before the rule changed really was approved.
+   */
+  const outgoing = (alias: string) => (status === 'pending' ? ` AND ${alias}.is_export = 1` : '');
   // Pending is short by definition, but ?status=approved is the whole history
   // of everything the group has ever sent out, so this pages like the rest.
   res.json(listBody(req.query, {
     sql: `SELECT 'quotation' AS type, q.id AS id, q.number, q.date AS date, q.currency, q.grand_total, q.approval_status,
             q.is_export, c.name AS customer_name, u.name AS created_by_name
      FROM quotations q JOIN customers c ON c.id = q.customer_id LEFT JOIN users u ON u.id = q.created_by
-     WHERE q.approval_status = ? AND q.superseded_by IS NULL${sc('q')}
+     WHERE q.approval_status = ? AND q.superseded_by IS NULL${sc('q')}${outgoing('q')}
      UNION ALL
      SELECT 'proforma', p.id, p.number, p.date, p.currency, p.grand_total, p.approval_status,
             p.is_export, c.name, u.name
      FROM proforma_invoices p JOIN customers c ON c.id = p.customer_id LEFT JOIN users u ON u.id = p.created_by
-     WHERE p.approval_status = ?${sc('p')}
+     WHERE p.approval_status = ?${sc('p')}${outgoing('p')}
      UNION ALL
      SELECT 'invoice', i.id, i.number, i.date, i.currency, i.grand_total, i.approval_status,
             i.is_export, c.name, u.name
@@ -65,8 +73,10 @@ approvalsRouter.get('/count', (req: AuthedRequest, res) => {
   const and = scope.sql ? ` AND ${scope.sql}` : '';
   const p = scope.params;
   const row = db.prepare(
-    `SELECT (SELECT COUNT(*) FROM quotations WHERE approval_status = 'pending' AND superseded_by IS NULL${and})
-          + (SELECT COUNT(*) FROM proforma_invoices WHERE approval_status = 'pending'${and})
+    // `is_export = 1` on the two tables a domestic document is exempt on —
+    // the badge has to count exactly what the queue above shows.
+    `SELECT (SELECT COUNT(*) FROM quotations WHERE approval_status = 'pending' AND superseded_by IS NULL AND is_export = 1${and})
+          + (SELECT COUNT(*) FROM proforma_invoices WHERE approval_status = 'pending' AND is_export = 1${and})
           + (SELECT COUNT(*) FROM commercial_invoices WHERE approval_status = 'pending'${and})
           -- A credit note waits on approval like the rest, and it is the one
           -- document where waiting matters most: unapproved, it credits nothing.

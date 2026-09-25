@@ -15,6 +15,7 @@ import FollowupButton from '../components/FollowupButton';
 import InternalNotes from '../components/InternalNotes';
 import PaymentsCard from '../components/PaymentsCard';
 import ApprovalStrip from '../components/ApprovalStrip';
+import ChecksStrip from '../components/ChecksStrip';
 import ColumnsControl, { proformaColumns, proformaOmit, newColumnConfig, hasColumnPrefs, PROFORMA_FORCED } from '../components/ColumnsControl';
 import { today, addDays, DEFAULT_VALIDITY_DAYS } from '../lib/format';
 import { useDefaultNotes } from '../lib/useDefaultNotes';
@@ -364,17 +365,23 @@ export default function ProformaFormPage() {
         </div>
       )}
 
+      {/* Domestic proformas go through no approval either (2026-09-25) —
+          see the quotation form's own note. */}
       {!isNew && !lockedByOrder && (
-        <ApprovalStrip
-          docType="proformas"
-          docId={Number(id)}
-          status={existing!.approval_status}
-          approvedByName={existing!.approved_by_name}
-          approvedAt={existing!.approved_at}
-          note={existing!.approval_note}
-          checks={existing!.checks}
-          queryKey="proforma"
-        />
+        draft.is_export ? (
+          <ApprovalStrip
+            docType="proformas"
+            docId={Number(id)}
+            status={existing!.approval_status}
+            approvedByName={existing!.approved_by_name}
+            approvedAt={existing!.approved_at}
+            note={existing!.approval_note}
+            checks={existing!.checks}
+            queryKey="proforma"
+          />
+        ) : (
+          <ChecksStrip checks={existing!.checks} />
+        )
       )}
 
       {/* Hidden once the order is booked, like the quotation's. The banner

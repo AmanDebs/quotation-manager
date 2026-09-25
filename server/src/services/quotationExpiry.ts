@@ -1,4 +1,5 @@
 import { db } from '../db/connection.js';
+import { approvalExempt } from './approval.js';
 
 /**
  * A quotation lapses when its validity date passes.
@@ -34,6 +35,10 @@ import { db } from '../db/connection.js';
  *   *and* whose approval was reset in the same edit comes back as a `draft`,
  *   not as `sent`: without that check this would be an automatic path from
  *   unapproved to outgoing, which is the one thing the gate exists to prevent.
+ *   **A domestic quotation has no such gate** (2026-09-25), so there is no
+ *   path to close and it revives to where it was — reading a flag that will
+ *   never say `approved` as *not allowed out* would strand every domestic
+ *   offer at `draft` the moment its validity was extended.
  * - **A superseded revision is left alone.** It is read-only and hidden from
  *   the lists; expiring it would add noise to a row nobody can act on.
  */
@@ -84,9 +89,21 @@ export function syncQuotationExpiry(quotationId: number, today = todayLocal()): 
   }
 
   if (!lapsed && q.status === 'expired' && LIVE.includes(q.status_before_expired)) {
-    // Only an automatic expiry is automatically undone — see the note above.
-    // And only back to an outgoing status if the document may still be at one.
-    const back = q.approval_status === 'approved' ? q.status_before_expired : 'draft';
+    /*
+     * Only an automatic expiry is automatically undone — see the note above.
+     * And only back to an outgoing status if the document may still be at one:
+     * editing a document resets its approval, so a quotation whose validity
+     * was extended in the same edit comes back as a **draft** rather than by
+     * an automatic path from unapproved to outgoing.
+     *
+     * **A domestic quotation goes through no approval** (2026-09-25), so there
+     * is no such path to close: `sent` is freely settable on one, and reading
+     * its permanently `not_submitted` flag as *not allowed out* would mean a
+     * domestic offer could never be revived to where it was.
+     */
+    const back = q.approval_status === 'approved' || approvalExempt('quotations', q.id)
+      ? q.status_before_expired
+      : 'draft';
     db.prepare("UPDATE quotations SET status = ?, status_before_expired = '' WHERE id = ?")
       .run(back, quotationId);
     return back;
@@ -108,8 +125,10 @@ export function sweepQuotationExpiry(today = todayLocal()): { expired: number; r
   ).run(...LIVE, today);
 
   const revived = db.prepare(
+    // `is_export = 0` is the exemption above, in SQL: the sweep and the
+    // per-row path have to agree about where an offer comes back to.
     `UPDATE quotations
-        SET status = CASE WHEN approval_status = 'approved' THEN status_before_expired ELSE 'draft' END,
+        SET status = CASE WHEN approval_status = 'approved' OR is_export = 0 THEN status_before_expired ELSE 'draft' END,
             status_before_expired = ''
       WHERE superseded_by IS NULL
         AND status = 'expired'

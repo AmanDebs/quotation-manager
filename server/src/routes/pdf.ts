@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { incompleteError, checkDocument } from '../services/documentChecks.js';
-import type { DocTable } from '../services/approval.js';
+import { approvalExempt, type DocTable } from '../services/approval.js';
 import { db } from '../db/connection.js';
 import {
   buildQuotationPdf, buildOrderPdf, buildProformaPdf, buildInvoicePdf, buildPackingListPdf,
@@ -295,9 +295,19 @@ pdfRouter.get('/:type/:id/:name?', async (req: AuthedRequest, res) => {
     if (appr.approval_status !== 'approved') {
       const unfinished = incompleteError(entry.table as DocTable, id);
       if (unfinished) return res.status(422).json({ error: unfinished });
-      // Not approved but finished: previewable, and watermarked so the draft
-      // can never be passed off as a final document.
-      watermark = appr.approval_status === 'pending' ? 'PENDING APPROVAL' : 'DRAFT — NOT APPROVED';
+      /*
+       * Not approved but finished: previewable, and watermarked so the draft
+       * can never be passed off as a final document — **unless there is no
+       * approval to be waiting for**. A domestic quotation goes through none
+       * (2026-09-25), so a watermark on one would sit there for the life of
+       * the document with nothing anybody could do to clear it, which is the
+       * `— set` rule read the other way: a mark that cannot be acted on reads
+       * as a fault. The completeness gate above is untouched and is what keeps
+       * an unfinished domestic document off paper.
+       */
+      if (!approvalExempt(entry.table as DocTable, id)) {
+        watermark = appr.approval_status === 'pending' ? 'PENDING APPROVAL' : 'DRAFT — NOT APPROVED';
+      }
     }
   }
 

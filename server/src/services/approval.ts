@@ -35,6 +35,72 @@ const outgoingStatuses: Record<DocTable, string[]> = {
 
 export const requiresApproval = (table: DocTable, status: string) => outgoingStatuses[table].includes(status);
 
+/** The word each document calls itself, for the sentences below. */
+const NOUN: Record<DocTable, string> = {
+  quotations: 'quotation',
+  proforma_invoices: 'proforma',
+  commercial_invoices: 'commercial invoice',
+  credit_notes: 'credit note',
+};
+
+/**
+ * **A domestic document does not go through approval** (2026-09-25, the
+ * client: *"Remove approval for domestic"*).
+ *
+ * The workflow was written for the document that goes abroad, and on this desk
+ * that is what it is for: an export offer is checked before it leaves. A
+ * domestic sale is quoted, confirmed and invoiced in Tally by the same few
+ * people, and asking them to submit a quotation to themselves is a step that
+ * only ever produced the state the approvals entry above describes — a queue
+ * fed by nobody.
+ *
+ * **Two of the four tables, and the other two are exceptions with reasons.**
+ * The `commercial_invoice` has been **export-only since 2026-09-16**, so a
+ * domestic one cannot be raised at all and exempting it would change nothing
+ * except the behaviour of the rows already on file — `invoiceStatus.ts` reads
+ * this flag to promote an invoice to `paid`, and a legacy domestic invoice
+ * settled by a payment would stop being marked paid. And a **credit note's
+ * approval is not permission to send it, it is what moves the money**:
+ * `CREDITED_SQL`, `returnedQtyByLine` and the finished-goods ledger all count
+ * an *approved* note alone, which is why `outgoingStatuses.credit_notes` is
+ * empty. Exempting a domestic note would leave one that credits nothing with
+ * no way to make it credit — the trap-with-no-way-out this codebase has built
+ * once already.
+ */
+const EXEMPT_WHEN_DOMESTIC: DocTable[] = ['quotations', 'proforma_invoices'];
+
+const exemptRow = (table: DocTable, row: { is_export: number }) =>
+  EXEMPT_WHEN_DOMESTIC.includes(table) && Number(row.is_export) === 0;
+
+/**
+ * Whether this document answers to the approval workflow at all.
+ *
+ * Nothing is stored: `approval_status` on an exempt document stays wherever it
+ * was and means nothing, the way `expired` is derived on a proforma rather
+ * than written. Stamping one `approved` on creation was the other option and
+ * is worse — it would put an approval in the audit trail that nobody gave, and
+ * name somebody as the approver.
+ *
+ * A row that is not there is **not** exempt, so the callers' own
+ * *Document not found* answers still fire.
+ */
+export function approvalExempt(table: DocTable, id: number): boolean {
+  if (!EXEMPT_WHEN_DOMESTIC.includes(table)) return false;
+  const row = db.prepare(`SELECT is_export FROM ${table} WHERE id = ?`).get(id) as { is_export: number } | undefined;
+  return !!row && exemptRow(table, row);
+}
+
+/**
+ * The sentence to refuse a submit or an approve with on a document that needs
+ * neither. Refused rather than merely hidden, the rule the domestic commercial
+ * invoice's own 409 follows: the screen draws no approval strip, and a request
+ * made by hand is told why.
+ */
+export function exemptApprovalError(table: DocTable, id: number): string | null {
+  if (!approvalExempt(table, id)) return null;
+  return `A domestic ${NOUN[table]} does not go through approval — set its status directly.`;
+}
+
 /**
  * Managers approve implicitly — their own documents go straight to 'approved'
  * when they submit. Employees must wait for a manager.
@@ -91,9 +157,18 @@ export function blockUnapprovedConversion(
    */
   commit = true
 ): string | null {
-  const row = db.prepare(`SELECT approval_status FROM ${table} WHERE id = ?`).get(id) as { approval_status: string } | undefined;
+  const row = db.prepare(`SELECT approval_status, is_export FROM ${table} WHERE id = ?`)
+    .get(id) as { approval_status: string; is_export: number } | undefined;
   if (!row) return 'Document not found';
   if (row.approval_status === 'approved') return null;
+  /*
+   * A domestic document needs no approval — but converting one still **locks**
+   * it, so the completeness gate stays and only the approval goes. Without it
+   * an unfinished domestic quotation could be frozen unfinished, with nothing
+   * left that could print it: the trap this guard's own comment exists to
+   * refuse.
+   */
+  if (exemptRow(table, row)) return incompleteError(table, id);
   if (req.user && mayApprove(req.user)) {
     /*
      * The manager's pass-through is still an approval, so it answers to the
@@ -117,9 +192,17 @@ export function blockUnapprovedConversion(
  */
 export function blockUnapprovedTransition(table: DocTable, id: number, nextStatus: string, req: AuthedRequest): string | null {
   if (!requiresApproval(table, nextStatus)) return null;
-  const row = db.prepare(`SELECT approval_status FROM ${table} WHERE id = ?`).get(id) as { approval_status: string } | undefined;
+  const row = db.prepare(`SELECT approval_status, is_export FROM ${table} WHERE id = ?`)
+    .get(id) as { approval_status: string; is_export: number } | undefined;
   if (!row) return 'Document not found';
   if (row.approval_status === 'approved') return null;
+  /*
+   * Nothing to wait for on a domestic document, and no completeness gate
+   * either: a status is a record of what happened and is settable back, where
+   * the PDF is the thing that reaches the customer and is gated on its own
+   * (`routes/pdf.ts`).
+   */
+  if (exemptRow(table, row)) return null;
   if (req.user && mayApprove(req.user)) {
     // A manager moving a document forward approves it in the same action — and
     // so has to clear the same completeness gate a submitted one does.

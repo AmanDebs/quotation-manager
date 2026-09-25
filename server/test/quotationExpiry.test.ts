@@ -90,17 +90,38 @@ describe('extending the date brings it back', () => {
    * Editing a document resets its approval, and `sent` is an outgoing status.
    * Putting it straight back would be an automatic path from unapproved to
    * outgoing, which is the one thing the approval gate exists to prevent.
+   *
+   * An **export** quotation, because a domestic one goes through no approval
+   * at all (2026-09-25) and so has no such path to close — the two cases
+   * below say so.
    */
   test('but only as a draft when the approval was reset with it', () => {
-    const q = quote('expired', '2026-12-31', { before: 'sent', approval: 'not_submitted' });
+    const q = quote('expired', '2026-12-31', { before: 'sent', approval: 'not_submitted', isExport: 1 });
     sweepQuotationExpiry(DAY_AFTER);
     assert.equal(statusOf('quotations', q), 'draft');
   });
 
   test('and likewise while it waits for a manager', () => {
-    const q = quote('expired', '2026-12-31', { before: 'negotiating', approval: 'pending' });
+    const q = quote('expired', '2026-12-31', { before: 'negotiating', approval: 'pending', isExport: 1 });
     sweepQuotationExpiry(DAY_AFTER);
     assert.equal(statusOf('quotations', q), 'draft');
+  });
+
+  /**
+   * A domestic quotation is never approved and never will be, so reading that
+   * flag as *not allowed out* would strand every domestic offer at `draft` the
+   * moment somebody extended its validity — which is the whole point of
+   * extending it.
+   */
+  test('a domestic one comes back to where it was, approval or no approval', () => {
+    const q = quote('expired', '2026-12-31', { before: 'sent', approval: 'not_submitted' });
+    sweepQuotationExpiry(DAY_AFTER);
+    assert.equal(statusOf('quotations', q), 'sent');
+  });
+
+  test('and the per-row path says the same thing as the sweep', () => {
+    const q = quote('expired', '2026-12-31', { before: 'negotiating', approval: 'not_submitted' });
+    assert.equal(syncQuotationExpiry(q, DAY_AFTER), 'negotiating');
   });
 
   test('clearing the date entirely revives it too', () => {

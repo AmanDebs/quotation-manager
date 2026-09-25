@@ -4,7 +4,7 @@ import { quotationTypeChangeError, nextNumber } from '../services/numbering.js';
 import { computeTotals, type LineItemInput } from '../services/totals.js';
 import type { AuthedRequest } from '../middleware/auth.js';
 import { scopeClause, canAccessCustomer, customerChangeError } from '../middleware/scope.js';
-import { submit, decide, resetApprovalOnEdit, blockUnapprovedTransition , mayApprove } from '../services/approval.js';
+import { submit, decide, resetApprovalOnEdit, blockUnapprovedTransition, exemptApprovalError , mayApprove } from '../services/approval.js';
 import { incompleteError, checkDocument } from '../services/documentChecks.js';
 import { resolveCompanyId } from '../services/companies.js';
 import { enquiryLinkId, syncEnquiryStatus } from '../services/enquiries.js';
@@ -330,6 +330,11 @@ quotationsRouter.post('/:id/submit', (req: AuthedRequest, res) => {
   if (!existing || !canAccessCustomer(req, existing.customer_id)) return res.status(404).json({ error: 'Quotation not found' });
   const lockedSubmit = lockError('quotations', id, 'submitted for approval');
   if (lockedSubmit) return res.status(409).json({ error: lockedSubmit });
+  // A domestic document answers to no approval, so there is nothing to ask for
+  // and nothing to grant — `services/approval.ts` owns which tables that
+  // covers. Refused rather than merely hidden: the form draws no strip.
+  const exemptSubmit = exemptApprovalError('quotations', id);
+  if (exemptSubmit) return res.status(409).json({ error: exemptSubmit });
   // Submitting is asking for approval, so the document has to be
   // finished. 422 rather than 409: nothing conflicts, it is incomplete.
   const incomplete = incompleteError('quotations', id);
@@ -342,6 +347,11 @@ quotationsRouter.post('/:id/approve', (req: AuthedRequest, res) => {
   if (!mayApprove(req.user)) return res.status(403).json({ error: 'Your team cannot approve documents' });
   const id = Number(req.params.id);
   if (!db.prepare('SELECT id FROM quotations WHERE id = ?').get(id)) return res.status(404).json({ error: 'Quotation not found' });
+  // A domestic document answers to no approval, so there is nothing to ask for
+  // and nothing to grant — `services/approval.ts` owns which tables that
+  // covers. Refused rather than merely hidden: the form draws no strip.
+  const exemptDecide = exemptApprovalError('quotations', id);
+  if (exemptDecide) return res.status(409).json({ error: exemptDecide });
   // A converted quotation is approved by rule — the conversion gate saw to it.
   const lockedDecide = lockError('quotations', id, 'approved or rejected');
   if (lockedDecide) return res.status(409).json({ error: lockedDecide });

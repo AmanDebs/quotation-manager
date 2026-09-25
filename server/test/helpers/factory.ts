@@ -84,13 +84,19 @@ export function makePayment(o: {
 export function makeQuotation(o: {
   customerId: number; status: string; validity?: string;
   approval?: string; before?: string; supersededBy?: number | null;
+  /**
+   * Domestic by default, as the column is. It matters to anything that reads
+   * the approval: a domestic quotation goes through none (2026-09-25), so a
+   * test about what an unapproved document may do has to say `isExport: 1`.
+   */
+  isExport?: number;
 }): number {
   const info = db.prepare(
     `INSERT INTO quotations (number, revision, date, customer_id, company_id, currency, status,
-                             status_before_expired, validity_date, approval_status, superseded_by)
-     VALUES (?, 0, '2026-08-01', ?, 1, 'INR', ?, ?, ?, ?, ?)`
+                             status_before_expired, validity_date, approval_status, superseded_by, is_export)
+     VALUES (?, 0, '2026-08-01', ?, 1, 'INR', ?, ?, ?, ?, ?, ?)`
   ).run(`QT/${next()}`, o.customerId, o.status, o.before ?? '', o.validity ?? '',
-    o.approval ?? 'approved', o.supersededBy ?? null);
+    o.approval ?? 'approved', o.supersededBy ?? null, o.isExport ?? 0);
   return Number(info.lastInsertRowid);
 }
 
