@@ -119,7 +119,6 @@ export default function QualityPage() {
                 <th className="pb-2 pr-3">Product</th>
                 <th className="pb-2 pr-3">Customer</th>
                 <th className="pb-2 pr-3">Sales Order</th>
-                <th className="pb-2 pr-3">Process</th>
                 <th className="pb-2 pr-3">Inspector</th>
                 <th className="pb-2 pr-3 text-right">Readings</th>
                 <th className="pb-2 pr-3">Result</th>
@@ -141,7 +140,6 @@ export default function QualityPage() {
                   <td className="py-2 pr-3">
                     <Link to={`/orders/${r.order_id}`} className="text-brand-600 hover:underline">{r.order_number}</Link>
                   </td>
-                  <td className="py-2 pr-3 text-slate-500">{r.process_name || '—'}</td>
                   <td className="py-2 pr-3 text-slate-500">{r.inspector || '—'}</td>
                   <td className="py-2 pr-3 text-right tabular-nums text-slate-500">
                     {/* Readings taken against readings asked for: a spec of six

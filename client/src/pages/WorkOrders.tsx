@@ -1,8 +1,6 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
-import { api } from '../api/client';
-import type { WorkOrder, WorkOrderStatus, Location, Machine } from '../types';
+import type { WorkOrder, WorkOrderStatus } from '../types';
 import { PageHeader, Card, Select, Button, EmptyState, Pagination, TH_CLASS } from '../components/ui';
 import PlanJobsModal from '../components/PlanJobsModal';
 import { useCan } from '../App';
@@ -65,8 +63,6 @@ const todayIso = new Date().toISOString().slice(0, 10);
 export default function WorkOrdersPage() {
   // Status in the URL so the dashboard's factory card can link to one stage.
   const [status, setStatus] = useUrlFilter('status');
-  const [machine, setMachine] = useState('');
-  const [location, setLocation] = useState('');
   const [openOnly, setOpenOnly] = useState(true);
   const can = useCan();
   /*
@@ -87,14 +83,10 @@ export default function WorkOrdersPage() {
 
   const query = new URLSearchParams();
   if (status) query.set('status', status);
-  if (machine) query.set('machine_id', machine);
-  if (location) query.set('location_id', location);
   if (openOnly && !status) query.set('open', '1');
 
   const list = usePagedList<WorkOrder, { jobs: number; unplanned?: number; planned: number; made: number }>(['work-orders', 'all', query.toString()], `/api/work-orders?${query.toString()}`);
   const jobs = list.rows;
-  const { data: locations = [] } = useQuery({ queryKey: ['master', 'locations', false], queryFn: () => api.get<Location[]>('/api/locations') });
-  const { data: machines = [] } = useQuery({ queryKey: ['master', 'machines', false], queryFn: () => api.get<Machine[]>('/api/machines') });
 
   // Over every matching job, not the page on screen — see `summary` in
   // routes/workOrders.ts. Adding up the rows to hand would answer a different
@@ -116,14 +108,6 @@ export default function WorkOrdersPage() {
         <Select className="w-40" value={status} onChange={(e) => setStatus(e.target.value)}>
           <option value="">All statuses</option>
           {WORK_ORDER_STATUSES.map((s) => <option key={s} value={s}>{workOrderStatusLabel(s)}</option>)}
-        </Select>
-        <Select className="w-44" value={location} onChange={(e) => setLocation(e.target.value)}>
-          <option value="">All plants</option>
-          {locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
-        </Select>
-        <Select className="w-44" value={machine} onChange={(e) => setMachine(e.target.value)}>
-          <option value="">All machines</option>
-          {machines.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
         </Select>
         <label className="flex items-center gap-1.5 text-sm text-slate-600">
           <input
@@ -189,8 +173,6 @@ export default function WorkOrdersPage() {
                 )}
                 <th className="pb-2 pr-3">Job</th>
                 <th className="pb-2 pr-3">Item</th>
-                <th className="pb-2 pr-3">Plant</th>
-                <th className="pb-2 pr-3">Machine</th>
                 <th className="pb-2 pr-3">Planned</th>
                 <th className="pb-2 pr-3 text-right">Pcs</th>
                 <th className="pb-2 pr-3 text-right">Made</th>
@@ -238,7 +220,7 @@ export default function WorkOrdersPage() {
                         <Link to={`/orders/${w.order_id}`} className="text-brand-700 hover:underline">{w.order_number}</Link>
                         <span className="ml-2 font-normal text-slate-600">{w.customer_name}</span>
                       </td>
-                      <td className="py-1.5 pr-3 text-xs text-slate-500" colSpan={3}>
+                      <td className="py-1.5 pr-3 text-xs text-slate-500">
                         {group.length} job{group.length === 1 ? '' : 's'}
                       </td>
                       <td className="py-1.5 pr-3 text-right text-xs tabular-nums text-slate-500">{fmtQty(groupPlanned)}</td>
@@ -262,8 +244,6 @@ export default function WorkOrdersPage() {
                       <Link to={`/work-orders/${w.id}`} className="text-brand-600 hover:underline">{w.number}</Link>
                     </td>
                     <td className="py-2 pr-3">{w.description || w.product_name || '—'}</td>
-                    <td className="py-2 pr-3 text-xs text-slate-500">{w.location_name || '—'}</td>
-                    <td className="py-2 pr-3 text-xs text-slate-500">{w.machine_name || '—'}</td>
                     <td className={`whitespace-nowrap py-2 pr-3 text-xs ${late ? 'font-medium text-red-600' : 'text-slate-500'}`}>
                       {w.planned_start || w.planned_end
                         ? `${w.planned_start ? fmtDate(w.planned_start) : '?'} → ${w.planned_end ? fmtDate(w.planned_end) : '?'}`

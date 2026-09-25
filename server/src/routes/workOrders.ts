@@ -279,7 +279,6 @@ const qcColumns: Column<Record<string, unknown>>[] = [
   { header: 'Order', value: (r) => String(r.order_number ?? '') },
   { header: 'Customer', value: (r) => String(r.customer_name ?? '') },
   { header: 'Product', value: (r) => String(r.product_name ?? r.description ?? '') },
-  { header: 'Process', value: (r) => String(r.process_name ?? '') },
   { header: 'Inspector', value: (r) => String(r.inspector ?? '') },
   { header: 'Sample size', value: (r) => (r.sample_size == null ? null : Number(r.sample_size)), type: 'number' },
   { header: 'Readings', value: (r) => Number(r.readings ?? 0), type: 'number' },

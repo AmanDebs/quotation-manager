@@ -2,11 +2,9 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
-import type {
-  Batch, Location, Machine, Mould, Process, WorkOrder, WorkOrderStatus,
-} from '../types';
+import type { Batch, WorkOrder, WorkOrderStatus } from '../types';
 import {
-  Button, Card, EmptyState, ErrorText, Field, Input, PageHeader, Select, Tabs, Textarea,
+  Button, Card, EmptyState, ErrorText, Field, Input, PageHeader, Tabs, Textarea,
   CAPTION_CLASS, TH_CLASS,
 } from '../components/ui';
 import { LogOutput } from '../components/LogOutputModal';
@@ -49,14 +47,16 @@ import { offeredWorkOrderStatuses, workOrderStatusLabel, workOrderStatusStyle } 
 
 type Tab = 'details' | 'production' | 'batches' | 'material' | 'quality';
 
-/** The job's own fields, minus the order line — which is fixed once it exists. */
+/*
+ * The job's own fields, minus the order line — which is fixed once it exists —
+ * and minus plant, machine, mould and process, which the client does not want
+ * in this version (2026-09-25). The four columns stay on `work_orders` and the
+ * PUT falls back to the stored value for any field the body omits, so a job
+ * that already carries one keeps it and an ordinary save cannot clear it.
+ */
 interface Draft {
   description: string;
   qty_planned: number;
-  location_id: number | null;
-  machine_id: number | null;
-  mould_id: number | null;
-  process_id: number | null;
   planned_start: string;
   planned_end: string;
   notes: string;
@@ -90,17 +90,10 @@ export default function WorkOrderDetailPage() {
     setDraft({
       description: job.description ?? '',
       qty_planned: job.qty_planned ?? 0,
-      location_id: job.location_id, machine_id: job.machine_id,
-      mould_id: job.mould_id, process_id: job.process_id,
       planned_start: job.planned_start ?? '', planned_end: job.planned_end ?? '',
       notes: job.notes ?? '',
     });
   }, [job]);
-
-  const { data: locations = [] } = useQuery({ queryKey: ['master', 'locations', false], queryFn: () => api.get<Location[]>('/api/locations') });
-  const { data: machines = [] } = useQuery({ queryKey: ['master', 'machines', false], queryFn: () => api.get<Machine[]>('/api/machines') });
-  const { data: moulds = [] } = useQuery({ queryKey: ['master', 'moulds', false], queryFn: () => api.get<Mould[]>('/api/moulds') });
-  const { data: processes = [] } = useQuery({ queryKey: ['master', 'processes', false], queryFn: () => api.get<Process[]>('/api/processes') });
 
   // Anything recorded here moves the order's own status and its progress
   // figures, so both are invalidated alongside the job itself.
@@ -115,8 +108,8 @@ export default function WorkOrderDetailPage() {
    * The same contract every document form has, and it is what a PDF link on
    * this page needs: `PdfLink` takes `isDirty` as a **required** prop precisely
    * so a page with an editable form cannot quietly open a document built from
-   * the saved version. This page has one — description, quantity, machine,
-   * dates — so it has to answer the question.
+   * the saved version. This page has one — description, quantity, the dates and
+   * the notes — so it has to answer the question.
    *
    * It closes a second gap while it is here: leaving with the Details form
    * edited used to lose them without a word.
@@ -261,30 +254,6 @@ export default function WorkOrderDetailPage() {
               </Field>
               <Field label="Product">
                 <div className="px-0.5 py-1.5 text-sm text-slate-700">{job.product_name || '—'}</div>
-              </Field>
-              <Field label="Plant">
-                <Select disabled={!mayEdit} value={draft.location_id ?? ''} onChange={(e) => set({ location_id: e.target.value ? Number(e.target.value) : null })}>
-                  <option value="">— none —</option>
-                  {locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
-                </Select>
-              </Field>
-              <Field label="Machine">
-                <Select disabled={!mayEdit} value={draft.machine_id ?? ''} onChange={(e) => set({ machine_id: e.target.value ? Number(e.target.value) : null })}>
-                  <option value="">— none —</option>
-                  {machines.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
-                </Select>
-              </Field>
-              <Field label="Mould">
-                <Select disabled={!mayEdit} value={draft.mould_id ?? ''} onChange={(e) => set({ mould_id: e.target.value ? Number(e.target.value) : null })}>
-                  <option value="">— none —</option>
-                  {moulds.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
-                </Select>
-              </Field>
-              <Field label="Process">
-                <Select disabled={!mayEdit} value={draft.process_id ?? ''} onChange={(e) => set({ process_id: e.target.value ? Number(e.target.value) : null })}>
-                  <option value="">— none —</option>
-                  {processes.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                </Select>
               </Field>
               <Field label="Planned start">
                 <Input type="date" disabled={!mayEdit} value={draft.planned_start} onChange={(e) => set({ planned_start: e.target.value })} />

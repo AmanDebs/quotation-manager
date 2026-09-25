@@ -2493,9 +2493,11 @@ function qcReportContent(s: Row, jobs: QcJob[]): Content[] {
           lv('Product', String(job.product_name || job.description || '')),
           lv('Order', `${job.order_number} · line ${job.order_line + 1}`),
         ], [
-          lv('Customer', job.customer_name),
-          lv('Process', String(job.process_name || '')),
-          lv('Machine', String(job.machine_name || '')),
+          // Process and machine left the job on 2026-09-25 at the client's
+          // word, so the cells that stated them would print an em-dash on
+          // every report — a dead box on a document, the rule the notify
+          // parties follow. The customer takes the row.
+          lv('Customer', job.customer_name, { colSpan: 3 }), {}, {},
         ]],
       },
       layout: boxedLayout,
