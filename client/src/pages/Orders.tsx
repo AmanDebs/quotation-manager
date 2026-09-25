@@ -39,7 +39,7 @@ const LINE_FILTERS: { key: string; label: string; kind: FilterKind }[] = [
   { key: 'balance', label: 'Balance', kind: 'numbers' },
   { key: 'promised', label: 'Orig. Prod.', kind: 'dates' },
   { key: 'revised', label: 'Rev. Prod.', kind: 'dates' },
-  { key: 'added_by', label: 'Added By', kind: 'values' },
+  { key: 'spoc', label: 'SPOC', kind: 'values' },
   { key: 'state', label: 'State', kind: 'values' },
 ];
 
@@ -664,7 +664,7 @@ function LinesTable({ lines, pager, filters }: {
                     original, and the revised one where the plan has moved. */}
                 {head('promised', 'Orig. Prod.', 'left', 'Original Production Date')}
                 {head('revised', 'Rev. Prod.', 'left', 'Revised Production Date')}
-                {head('added_by', 'Added By')}
+                {head('spoc', 'SPOC')}
                 {head('state', 'State')}
                 {canDispatch && <th className="pb-2" />}
               </tr>
@@ -748,10 +748,12 @@ function LinesTable({ lines, pager, filters }: {
                         onSave={(v) => setDates.mutate({ orderId: l.order_id, patch: { revised_date: v } })}
                       />
                     </td>
-                    {/* A property of the order, not the line — printed once per
-                        order like the number and the date above it. */}
+                    {/* Who is handling the order (2026-09-24, at the client's
+                        word, in place of who booked it) — a property of the
+                        order, so printed once per order like the number and
+                        the date above it. */}
                     <td className="whitespace-nowrap py-2 pr-3 text-slate-500">
-                      {repeat ? '' : l.created_by_name || dash}
+                      {repeat ? '' : l.spoc || dash}
                     </td>
                     <td className="py-2 pr-3">
                       <span className={`inline-block whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset ${LINE_STATE[l.state].className}`}>

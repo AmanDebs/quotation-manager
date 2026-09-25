@@ -32,14 +32,14 @@ const userId = Number((db.prepare(
 
 function makeOrder(o: {
   number: string; date: string; customer: number; promised?: string; revised?: string;
-  port?: string; createdBy?: number | null;
+  port?: string; spoc?: string;
 }): number {
   return Number((db.prepare(
     `INSERT INTO orders (number, date, customer_id, company_id, currency, tax_type, status,
-                         promised_date, revised_date, port_of_discharge, created_by)
-     VALUES (?, ?, ?, 1, 'INR', 'igst', 'pending', ?, ?, ?, ?) RETURNING id`
+                         promised_date, revised_date, port_of_discharge, created_by, spoc)
+     VALUES (?, ?, ?, 1, 'INR', 'igst', 'pending', ?, ?, ?, ?, ?) RETURNING id`
   ).get(o.number, o.date, o.customer, o.promised ?? '', o.revised ?? '', o.port ?? '',
-    o.createdBy === undefined ? userId : o.createdBy) as { id: number }).id);
+    userId, o.spoc ?? 'Rumela Roy') as { id: number }).id);
 }
 
 function addLine(orderId: number, l: { desc: string; color?: string; pcs: number; pos: number; productId?: number }): void {
@@ -70,7 +70,7 @@ const b = makeOrder({ number: 'SO/26-27/002', date: '2026-09-23', customer: othe
 addLine(b, { desc: 'ignored, the product names it', color: 'Bisleri', pcs: 51000, pos: 0, productId });
 addLine(b, { desc: '48mm Seal Cap', color: '', pcs: 50000, pos: 1 });
 
-const c = makeOrder({ number: 'SO/26-27/003', date: '2026-09-20', customer: customerId, port: 'Nhava Sheva', createdBy: null });
+const c = makeOrder({ number: 'SO/26-27/003', date: '2026-09-20', customer: customerId, port: 'Nhava Sheva', spoc: '' });
 addLine(c, { desc: '2Ltr Deluxe Handle', color: 'Bisleri', pcs: 300000, pos: 0 });
 ship(c, 0, 120000);
 
@@ -166,9 +166,14 @@ describe('filtering by the value in a column', () => {
     assert.equal(of({ values: { color: ['', 'Red-White'] } }).length, noColour.length + 1);
   });
 
-  test('added by names the person, and an order raised by nobody is blank', () => {
-    assert.deepEqual(numbersIn({ values: { added_by: ['Rumela Roy'] } }), ['SO/26-27/001', 'SO/26-27/002', 'SO/26-27/004']);
-    assert.deepEqual(numbersIn({ values: { added_by: [''] } }), ['SO/26-27/003']);
+  /**
+   * The column shows who is *handling* the order rather than who typed it in
+   * (2026-09-24). A blank is tickable here like anywhere else, and on this
+   * book it is common: the SPOC is filled in when there is one.
+   */
+  test('SPOC names whoever is handling it, and a blank is its own answer', () => {
+    assert.deepEqual(numbersIn({ values: { spoc: ['Rumela Roy'] } }), ['SO/26-27/001', 'SO/26-27/002', 'SO/26-27/004']);
+    assert.deepEqual(numbersIn({ values: { spoc: [''] } }), ['SO/26-27/003']);
   });
 
   test('two columns filtered is an and', () => {

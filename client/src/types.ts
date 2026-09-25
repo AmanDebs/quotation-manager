@@ -713,6 +713,9 @@ export interface OrderLine {
   customer_id: number; customer_name: string; company_name: string | null;
   /** Who booked the order. Null on one whose author has since been removed. */
   created_by_name: string | null;
+  /** Who is handling it — the order's *Handled by (SPOC)*, which is what
+   *  the book's own column shows (2026-09-24). */
+  spoc: string;
   is_export: number; order_status: string; currency: string;
   /** Where the goods discharge, from the order. Blank on a domestic one. */
   port_of_discharge: string;

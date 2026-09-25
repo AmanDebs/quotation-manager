@@ -483,7 +483,7 @@ const lineColumns: Column<OrderLine>[] = [
   { header: 'Currency', value: (r) => r.currency },
   { header: 'Type', value: (r) => (r.is_export ? 'Export' : 'Domestic') },
   { header: 'Order status', value: (r) => r.order_status },
-  { header: 'Added by', value: (r) => r.created_by_name },
+  { header: 'SPOC', value: (r) => r.spoc },
 ];
 
 const productColumns: Column<ProductDemand>[] = [

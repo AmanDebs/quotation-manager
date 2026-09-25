@@ -42,6 +42,13 @@ export interface OrderLine {
   company_name: string | null;
   /** Who booked the order. Null on one raised before the column existed. */
   created_by_name: string | null;
+  /**
+   * Who is handling the order — `orders.spoc`, the *Handled by (SPOC)*
+   * field. What the book's own column shows since 2026-09-24, in place of
+   * who booked it: the desk reads this column to find whose order it is,
+   * and the person who typed it in is rarely that person.
+   */
+  spoc: string;
   is_export: number;
   order_status: string;
   /**
@@ -129,7 +136,7 @@ const SQL = `
   SELECT
     o.id AS order_id, o.number AS order_number, o.date, o.promised_date, o.revised_date,
     o.customer_id, c.name AS customer_name, co.company_name,
-    u.name AS created_by_name,
+    u.name AS created_by_name, o.spoc,
     o.is_export, o.status AS order_status, o.currency, o.port_of_discharge,
     l.pos AS order_line, l.product_id, l.description, p.name AS product_name, l.code, l.color, l.unit,
     -- What the Item column actually prints: the catalogue name where the line
@@ -329,7 +336,7 @@ export const FILTERABLE = {
   balance: { sql: 'CASE WHEN ordered > 0 THEN MAX(ordered - sent, 0) END', kind: 'numbers' },
   promised: { sql: 'promised_date', kind: 'dates' },
   revised: { sql: 'revised_date', kind: 'dates' },
-  added_by: { sql: 'created_by_name', kind: 'values' },
+  spoc: { sql: 'spoc', kind: 'values' },
   state: { sql: LINE_STATE_SQL, kind: 'values' },
 } as const;
 
