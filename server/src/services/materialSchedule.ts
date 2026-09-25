@@ -1,6 +1,6 @@
 import { db } from '../db/connection.js';
 import { requirementForJob } from './recipe.js';
-import { LIVE_OK } from './production.js';
+import { LIVE_OK, JOB_START } from './production.js';
 import { round2 } from './totals.js';
 
 /**
@@ -15,7 +15,9 @@ import { round2 } from './totals.js';
  * (`requirementForJob`, the snapshot, so a recipe corrected later does not
  * restate an instruction already issued). Nothing here is stored.
  *
- * The date is the job's `planned_start`. A job with none is not on any day,
+ * The date is the job's **start date that stands** — the revised one where it
+ * is set, else the original (`JOB_START`), since the material is needed on the
+ * day the job actually runs. A job with neither is not on any day,
  * and it is not on *today* either — silence is not a date — so it lands in
  * a **Not scheduled** bucket that the page draws as its own column, since
  * material a job will need on a day nobody has set is still material that
@@ -72,7 +74,8 @@ export interface MaterialSchedule {
 
 export function materialSchedule(locationId?: number | null): MaterialSchedule {
   const jobs = db.prepare(
-    `SELECT w.id, w.number, w.description, w.product_id, w.qty_planned, w.planned_start,
+    `SELECT w.id, w.number, w.description, w.product_id, w.qty_planned,
+            ${JOB_START('w')} AS start_date,
             p.name AS product_name, o.id AS order_id, o.number AS order_number, c.name AS customer_name,
             COALESCE((SELECT SUM(${LIVE_OK('e')}) FROM production_entries e WHERE e.work_order_id = w.id), 0) AS made
        FROM work_orders w
@@ -81,11 +84,11 @@ export function materialSchedule(locationId?: number | null): MaterialSchedule {
        LEFT JOIN products p ON p.id = w.product_id
       WHERE w.status NOT IN ('done','cancelled')
         ${locationId ? 'AND w.location_id = ?' : ''}
-      ORDER BY w.planned_start, w.id`
+      ORDER BY ${JOB_START('w')}, w.id`
   ).all(...(locationId ? [locationId] : []) as never[]) as {
     id: number; number: string; description: string; product_id: number | null;
     product_name: string | null; order_id: number; order_number: string; customer_name: string;
-    qty_planned: number; planned_start: string; made: number;
+    qty_planned: number; start_date: string; made: number;
   }[];
 
   const rows = new Map<number, ScheduleRow>();
@@ -100,7 +103,7 @@ export function materialSchedule(locationId?: number | null): MaterialSchedule {
       uncosted.push({ id: job.id, number: job.number, description: job.description });
       continue;
     }
-    const day = String(job.planned_start ?? '').trim();
+    const day = String(job.start_date ?? '').trim();
     if (day) dates.add(day);
     for (const line of lines) {
       let row = rows.get(line.material_id);

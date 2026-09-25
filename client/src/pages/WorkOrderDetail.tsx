@@ -59,6 +59,8 @@ interface Draft {
   qty_planned: number;
   planned_start: string;
   planned_end: string;
+  revised_start: string;
+  revised_end: string;
   notes: string;
 }
 
@@ -91,6 +93,7 @@ export default function WorkOrderDetailPage() {
       description: job.description ?? '',
       qty_planned: job.qty_planned ?? 0,
       planned_start: job.planned_start ?? '', planned_end: job.planned_end ?? '',
+      revised_start: job.revised_start ?? '', revised_end: job.revised_end ?? '',
       notes: job.notes ?? '',
     });
   }, [job]);
@@ -260,6 +263,17 @@ export default function WorkOrderDetailPage() {
               </Field>
               <Field label="Planned finish">
                 <Input type="date" disabled={!mayEdit} value={draft.planned_end} onChange={(e) => set({ planned_end: e.target.value })} />
+              </Field>
+              {/* When it is actually going to run. The planned pair beside it
+                  is left exactly as it was — what was promised and what is now
+                  expected are two facts, and overwriting the first would lose
+                  the slip; everything that reads a job's date takes the one
+                  that stands (`JOB_START`/`JOB_END` on the server). */}
+              <Field label="Revised start">
+                <Input type="date" disabled={!mayEdit} value={draft.revised_start} onChange={(e) => set({ revised_start: e.target.value })} />
+              </Field>
+              <Field label="Revised finish">
+                <Input type="date" disabled={!mayEdit} value={draft.revised_end} onChange={(e) => set({ revised_end: e.target.value })} />
               </Field>
               <Field label="Notes" className="sm:col-span-2 lg:col-span-4">
                 <Textarea rows={2} disabled={!mayEdit} value={draft.notes} onChange={(e) => set({ notes: e.target.value })} />

@@ -48,7 +48,8 @@ const listSql = `
 
 const fields = [
   'order_id', 'order_line', 'product_id', 'description', 'qty_planned',
-  'location_id', 'machine_id', 'mould_id', 'process_id', 'planned_start', 'planned_end', 'notes',
+  'location_id', 'machine_id', 'mould_id', 'process_id', 'planned_start', 'planned_end',
+  'revised_start', 'revised_end', 'notes',
 ] as const;
 
 const STATUSES = ['planned', 'released', 'running', 'paused', 'done', 'cancelled'];
@@ -359,7 +360,7 @@ workOrdersRouter.post('/plan', requirePermission('work_order', 'full'), (req: Au
   for (const f of ['location_id', 'machine_id', 'mould_id', 'process_id'] as const) {
     if (f in body) { sets.push(`${f} = ?`); params.push(numOrNull(body[f])); }
   }
-  for (const f of ['planned_start', 'planned_end'] as const) {
+  for (const f of ['planned_start', 'planned_end', 'revised_start', 'revised_end'] as const) {
     if (f in body) { sets.push(`${f} = ?`); params.push(String(body[f] ?? '')); }
   }
   const release = body.release === true;
@@ -427,7 +428,8 @@ workOrdersRouter.put('/:id', requirePermission('work_order', 'full'), (req: Auth
   // the production figures onto another customer's line.
   db.prepare(
     `UPDATE work_orders SET number = ?, order_line = ?, product_id = ?, description = ?, qty_planned = ?,
-       location_id = ?, machine_id = ?, mould_id = ?, process_id = ?, planned_start = ?, planned_end = ?, notes = ?
+       location_id = ?, machine_id = ?, mould_id = ?, process_id = ?, planned_start = ?, planned_end = ?,
+       revised_start = ?, revised_end = ?, notes = ?
      WHERE id = ?`
   ).run(
     String(v('number')),
@@ -441,6 +443,8 @@ workOrdersRouter.put('/:id', requirePermission('work_order', 'full'), (req: Auth
     numOrNull(v('process_id', null)),
     String(v('planned_start')),
     String(v('planned_end')),
+    String(v('revised_start')),
+    String(v('revised_end')),
     String(v('notes')),
     id
   );

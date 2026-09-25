@@ -1,6 +1,6 @@
 import { db } from '../db/connection.js';
 import { piecesOrdered } from './totals.js';
-import { productionByOrder } from './production.js';
+import { productionByOrder, JOB_START } from './production.js';
 
 /**
  * What the facts say an order's status is.
@@ -105,9 +105,9 @@ export function impliedStatus(orderId: number): StatusFacts {
    * the rung for that is `confirmed`.
    */
   const anyScheduled = (db.prepare(
-    `SELECT COUNT(*) AS c FROM work_orders
-      WHERE order_id = ? AND status <> 'cancelled'
-        AND (status <> 'planned' OR planned_start <> '')`
+    `SELECT COUNT(*) AS c FROM work_orders w
+      WHERE w.order_id = ? AND w.status <> 'cancelled'
+        AND (w.status <> 'planned' OR ${JOB_START('w')} <> '')`
   ).get(orderId) as { c: number }).c > 0;
 
   // Everything ordered has been made — only answerable when every goods line

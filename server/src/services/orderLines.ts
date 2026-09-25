@@ -4,7 +4,7 @@ import { PIECES_ORDERED_SQL } from './totals.js';
 import { searchClause } from './search.js';
 import { countOf } from './pagination.js';
 import { round2 } from './totals.js';
-import { LIVE_OK } from './production.js';
+import { LIVE_OK, JOB_START } from './production.js';
 
 /**
  * The order book read one item at a time.
@@ -165,7 +165,7 @@ const SQL = `
     (
       SELECT COUNT(*) FROM work_orders w
       WHERE w.order_id = o.id AND w.order_line = l.pos AND w.status <> 'cancelled'
-        AND (w.status <> 'planned' OR w.planned_start <> '')
+        AND (w.status <> 'planned' OR ${JOB_START('w')} <> '')
     ) AS scheduled_jobs,
     -- In pieces, like ordered and sent beside it: an invoice line is billed
     -- in its own basis (3,245 per 1000), and summing that against a piece

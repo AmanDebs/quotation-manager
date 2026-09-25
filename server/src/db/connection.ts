@@ -213,6 +213,10 @@ addColumnIfMissing('po_items', 'image', "TEXT NOT NULL DEFAULT ''");
 // What was done to make it (2026-09), a fourth master on the job beside the
 // location, the machine and the mould.
 addColumnIfMissing('work_orders', 'process_id', 'INTEGER');
+// When a job is actually going to run (2026-09-25), beside what was planned —
+// the sales order's own promised/revised pair, one document down.
+addColumnIfMissing('work_orders', 'revised_start', "TEXT NOT NULL DEFAULT ''");
+addColumnIfMissing('work_orders', 'revised_end', "TEXT NOT NULL DEFAULT ''");
 // A customer's own QC tolerances (2026-09). NULL is the product's default, so
 // every specification on file keeps meaning exactly what it meant.
 addColumnIfMissing('product_qc_params', 'customer_id', 'INTEGER');

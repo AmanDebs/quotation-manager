@@ -181,8 +181,19 @@ export default function WorkOrdersPage() {
             </thead>
             <tbody>
               {jobs.map((w, i) => {
+                /*
+                 * The dates that stand: the revised ones where set, else what
+                 * was planned — the sales order book's own rule, and the whole
+                 * point of a revised date. A plan that was moved must not be
+                 * flagged late on a date nobody is working to, so `late` is
+                 * judged against the finish that stands and the original is
+                 * kept on hover rather than lost.
+                 */
+                const start = w.revised_start || w.planned_start;
+                const end = w.revised_end || w.planned_end;
+                const revised = !!(w.revised_start || w.revised_end);
                 // Late means the finish date has passed with work still to do.
-                const late = !!w.planned_end && w.planned_end < todayIso
+                const late = !!end && end < todayIso
                   && !['done', 'cancelled'].includes(w.status);
                 /*
                  * Clubbed by sales order (2026-09-15): the server sorts the
@@ -245,9 +256,17 @@ export default function WorkOrdersPage() {
                     </td>
                     <td className="py-2 pr-3">{w.description || w.product_name || '—'}</td>
                     <td className={`whitespace-nowrap py-2 pr-3 text-xs ${late ? 'font-medium text-red-600' : 'text-slate-500'}`}>
-                      {w.planned_start || w.planned_end
-                        ? `${w.planned_start ? fmtDate(w.planned_start) : '?'} → ${w.planned_end ? fmtDate(w.planned_end) : '?'}`
+                      {start || end
+                        ? `${start ? fmtDate(start) : '?'} → ${end ? fmtDate(end) : '?'}`
                         : '—'}
+                      {revised && (
+                        <span
+                          className="ml-1 font-normal text-amber-600"
+                          title={`Planned ${w.planned_start ? fmtDate(w.planned_start) : '?'} → ${w.planned_end ? fmtDate(w.planned_end) : '?'}`}
+                        >
+                          rev.
+                        </span>
+                      )}
                       {late && <div>overdue</div>}
                     </td>
                     <td className="py-2 pr-3 text-right tabular-nums">{fmtQty(w.qty_planned)}</td>

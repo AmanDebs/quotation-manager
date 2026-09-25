@@ -70,15 +70,17 @@ export function insertJob(order: OrderRef, body: Record<string, unknown>, userId
   const productId = numOrNull(body.product_id) ?? productOfLine(order.id, line);
   const info = db.prepare(
     `INSERT INTO work_orders (number, company_id, order_id, order_line, product_id, description, qty_planned,
-                              location_id, machine_id, mould_id, process_id, planned_start, planned_end, notes,
+                              location_id, machine_id, mould_id, process_id, planned_start, planned_end,
+                              revised_start, revised_end, notes,
                               status, created_by)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     number, companyId, order.id, line, productId,
     String(body.description ?? ''),
     Number(body.qty_planned) || 0,
     numOrNull(body.location_id), numOrNull(body.machine_id), numOrNull(body.mould_id), numOrNull(body.process_id),
-    String(body.planned_start ?? ''), String(body.planned_end ?? ''), String(body.notes ?? ''),
+    String(body.planned_start ?? ''), String(body.planned_end ?? ''),
+    String(body.revised_start ?? ''), String(body.revised_end ?? ''), String(body.notes ?? ''),
     STATUSES.includes(String(body.status)) ? String(body.status) : 'planned',
     userId
   );

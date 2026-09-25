@@ -99,6 +99,18 @@ describe('raising a job and scheduling it are different steps', () => {
     assert.equal(syncOrderStatus(o), 'scheduled');
   });
 
+  /*
+   * The ladder reads the date that stands, so a job whose only date is a
+   * revised one still counts as committed to a slot — "has a start date" has
+   * to mean the same thing everywhere a job's date is read.
+   */
+  test('a revised start alone schedules it too', () => {
+    const o = order();
+    const j = rawJob(o);
+    db.prepare("UPDATE work_orders SET revised_start = '2026-10-02' WHERE id = ?").run(j);
+    assert.equal(syncOrderStatus(o), 'scheduled');
+  });
+
   test('and so does releasing it, which is the other way a desk says so', () => {
     const o = order();
     const j = rawJob(o);

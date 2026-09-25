@@ -9,7 +9,7 @@ import { creditedByInvoice } from '../services/creditNotes.js';
 import { defaultCompanyId } from '../services/companies.js';
 import { shortfall, onHandAll } from '../services/stock.js';
 import { DOCS_OUTSTANDING_D, SEA_LEG_D } from '../services/despatch.js';
-import { LIVE_OK, LIVE_REJECT } from '../services/production.js';
+import { LIVE_OK, LIVE_REJECT, JOB_START, JOB_END } from '../services/production.js';
 import { dueReport } from '../services/reports.js';
 
 export const dashboardRouter = Router();
@@ -584,7 +584,7 @@ dashboardRouter.get('/', (req: AuthedRequest, res) => {
       `SELECT COUNT(*) AS c FROM work_orders w
        JOIN orders o ON o.id = w.order_id
        WHERE w.status NOT IN ('done','cancelled')
-         AND w.planned_end <> '' AND w.planned_end < ?
+         AND ${JOB_END('w')} <> '' AND ${JOB_END('w')} < ?
          ${scope.sql ? ` AND o.${scope.sql}` : ''}${companyId ? ' AND o.company_id = ?' : ''}`,
       today, ...scope.params, ...(companyId ? [companyId] : [])
     ),
@@ -877,7 +877,7 @@ dashboardRouter.get('/', (req: AuthedRequest, res) => {
       `SELECT w.id, w.number, o.id AS order_id, o.number AS order_number, COALESCE(c.name, '') AS customer_name,
               COALESCE(NULLIF(o.revised_date, ''), NULLIF(o.promised_date, '')) AS due, w.qty_planned
        FROM work_orders w JOIN orders o ON o.id = w.order_id LEFT JOIN customers c ON c.id = o.customer_id
-       WHERE w.status = 'planned' AND w.planned_start = '' AND o.status NOT IN ('completed', 'cancelled')
+       WHERE w.status = 'planned' AND ${JOB_START('w')} = '' AND o.status NOT IN ('completed', 'cancelled')
          AND COALESCE(NULLIF(o.revised_date, ''), NULLIF(o.promised_date, '')) <= date(?, '+14 days')${floorFilter}
        ORDER BY due, w.id LIMIT 8`,
       today, ...floorParams

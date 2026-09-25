@@ -1088,6 +1088,13 @@ CREATE TABLE IF NOT EXISTS work_orders (
   process_id INTEGER REFERENCES processes(id),
   planned_start TEXT NOT NULL DEFAULT '',
   planned_end TEXT NOT NULL DEFAULT '',
+  -- When the job is actually going to run, where that is no longer the plan.
+  -- The original stays put — what was promised and what is now expected are
+  -- two facts, and overwriting the first loses the slip. Everything that reads
+  -- a job's date reads the one that stands (`JOB_START`/`JOB_END` in
+  -- services/production.ts): the revised one where set, else the original.
+  revised_start TEXT NOT NULL DEFAULT '',
+  revised_end TEXT NOT NULL DEFAULT '',
   status TEXT NOT NULL DEFAULT 'planned'
     CHECK (status IN ('planned','released','running','paused','done','cancelled')),
   notes TEXT NOT NULL DEFAULT '',

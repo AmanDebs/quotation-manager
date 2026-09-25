@@ -61,6 +61,19 @@ export const LIVE_OK = (e: string) => `CASE WHEN ${CONDEMNED(e)} THEN 0 ELSE ${e
 export const LIVE_REJECT = (e: string) =>
   `(${e}.qty_reject + CASE WHEN ${CONDEMNED(e)} THEN ${e}.qty_ok ELSE 0 END)`;
 
+/*
+ * The date that stands, as SQL — the revised one where it is set, else the
+ * original (2026-09-25). The sales order's own `COALESCE(NULLIF(revised_date,
+ * ''), promised_date)` rule, one document down, and written once here because
+ * every reader of a job's dates has to agree: a plan that was moved must not
+ * be read as late on a date nobody is working to, and the material for it is
+ * needed on the day the job actually starts.
+ *
+ * `w` is the query's own alias for `work_orders`.
+ */
+export const JOB_START = (w: string) => `COALESCE(NULLIF(${w}.revised_start, ''), ${w}.planned_start)`;
+export const JOB_END = (w: string) => `COALESCE(NULLIF(${w}.revised_end, ''), ${w}.planned_end)`;
+
 export interface Progress {
   produced: number;
   rejected: number;

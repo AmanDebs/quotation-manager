@@ -355,6 +355,12 @@ export interface WorkOrder {
   location_id: number | null; machine_id: number | null; mould_id: number | null;
   process_id: number | null;
   planned_start: string; planned_end: string;
+  /**
+   * When the job is actually going to run, where that is no longer the plan.
+   * The original stays put, and every reader takes the date that stands — the
+   * revised one where set, else the planned one.
+   */
+  revised_start: string; revised_end: string;
   status: WorkOrderStatus;
   /**
    * What the material issued to this job has cost, at the moving average in

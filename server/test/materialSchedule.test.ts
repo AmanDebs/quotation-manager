@@ -103,6 +103,37 @@ describe('the sheet', () => {
     assert.equal(ja.order_number, wo.order_number);
   });
 
+  /*
+   * A job whose start was revised is needed on the day it will actually run,
+   * not on the day it was first planned for — otherwise the resin is bought
+   * for a week nobody is moulding in. The original is not overwritten, so the
+   * only way to say this is to read the date that stands.
+   */
+  test('a revised start moves the material to the day the job will run', () => {
+    const resin = makeMaterial();
+    const p = product(resin, 100);
+    const moved = job(p, 5000, '2026-12-01');
+    db.prepare("UPDATE work_orders SET revised_start = '2026-12-18' WHERE id = ?").run(moved);
+    const r = rowFor(materialSchedule(), resin);
+    assert.equal(r.by_date['2026-12-18'], 500);
+    assert.equal(r.by_date['2026-12-01'], undefined);
+    // And the original is still on the row — nothing was rewritten to do it.
+    assert.equal(
+      (db.prepare('SELECT planned_start FROM work_orders WHERE id = ?').get(moved) as { planned_start: string }).planned_start,
+      '2026-12-01'
+    );
+  });
+
+  test('a job with a revised start and nothing planned is on that day, not unscheduled', () => {
+    const resin = makeMaterial();
+    const p = product(resin, 100);
+    const late = job(p, 2000, '');
+    db.prepare("UPDATE work_orders SET revised_start = '2026-12-22' WHERE id = ?").run(late);
+    const r = rowFor(materialSchedule(), resin);
+    assert.equal(r.by_date['2026-12-22'], 200);
+    assert.equal(r.unscheduled, 0);
+  });
+
   test('completed and cancelled jobs, and a plant filter', () => {
     const resin = makeMaterial();
     const p = product(resin, 100);
