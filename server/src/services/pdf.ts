@@ -975,6 +975,28 @@ export function buildQuotationPdf(id: number): TDocumentDefinitions {
             [{ text: 'Currency:', bold: true, color: s.theme, fontSize: 8.5, border: [false, false, false, false] }, { text: cur, fontSize: 8.5, border: [false, false, false, false] }],
             ...(q.payment_terms ? [[{ text: 'Payment Terms:', bold: true, color: s.theme, fontSize: 8.5, border: [false, false, false, false] }, { text: q.payment_terms, fontSize: 8.5, border: [false, false, false, false] }]] : []),
             ...(q.delivery_terms ? [[{ text: 'Delivery:', bold: true, color: s.theme, fontSize: 8.5, border: [false, false, false, false] }, { text: q.delivery_terms, fontSize: 8.5, border: [false, false, false, false] }]] : []),
+            /*
+             * The delivery basis and the load, stated as the fields they are
+             * (2026-09-25, the client with both boxes filled: *"These two are
+             * not getting captured in the PDF print for quotation"*).
+             *
+             * They used to print **only** inside the grand total's own label
+             * — *TOTAL PRICE IN FOB (1 X 40FT HC)* — which reads as a
+             * qualification of the figure rather than as a statement of the
+             * terms, and which is not printed at all on a quotation sent as a
+             * rate-and-packing price list, since that band is gated on
+             * `showMoney`. Measured before the change: on such a document
+             * neither *FOB* nor the container appeared anywhere on the page.
+             * Both are **mandatory** on this form (INCO always, Containers on
+             * an export), and a field the app refuses to let you leave blank
+             * has to reach the paper.
+             *
+             * Printed where stated rather than always, the em-dash rule: a
+             * domestic quotation is not offered the Containers box, and one
+             * raised before either field existed states neither.
+             */
+            ...(q.inco_terms ? [[{ text: 'INCO Terms:', bold: true, color: s.theme, fontSize: 8.5, border: [false, false, false, false] }, { text: q.inco_terms, fontSize: 8.5, bold: true, border: [false, false, false, false] }]] : []),
+            ...(q.container_count ? [[{ text: 'Containers:', bold: true, color: s.theme, fontSize: 8.5, border: [false, false, false, false] }, { text: q.container_count, fontSize: 8.5, border: [false, false, false, false] }]] : []),
           ] as any,
         },
         layout: 'noBorders',
@@ -1024,9 +1046,13 @@ export function buildQuotationPdf(id: number): TDocumentDefinitions {
     { key: 'amount', label: `Total (${cur})`, width: 62, align: 'right', always: true, value: (it) => (it.qty != null ? fmtMoney(it.amount, cur) : 'price only') },
   ];
 
-  const grandLabel = q.inco_terms
-    ? `TOTAL PRICE IN ${q.inco_terms}${q.container_count ? ` (${q.container_count})` : ''}`
-    : 'GRAND TOTAL';
+  /*
+   * The Sanya sample's own line, which ties the figure to the basis it is
+   * quoted on. The **container is no longer repeated here** — it is stated in
+   * the header block above, and a load printed twice on one page invites the
+   * reader to wonder which is authoritative.
+   */
+  const grandLabel = q.inco_terms ? `TOTAL PRICE IN ${q.inco_terms}` : 'GRAND TOTAL';
 
   const content: Content[] = [
     ...companyHeader(s, { isExport: !!q.is_export }),
