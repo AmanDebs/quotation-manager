@@ -2,10 +2,10 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
-import type { Proforma, Customer, LineItem, TaxType, Settings, ColumnConfig } from '../types';
+import type { Proforma, Customer, LineItem, TaxType, ColumnConfig } from '../types';
 import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, StatusBadge, SettledDocumentType, ReadOnlyFields, FIELD_GRID, FIELD_GRID_PLAIN, NOTES_ROWS } from '../components/ui';
 import { PdfLink } from '../components/PdfLink';
-import CompanySelect from '../components/CompanySelect';
+import CompanySelect, { useCompanies } from '../components/CompanySelect';
 import { DocNumber, IncoTermsInput, PaymentTermsInput, ContainersInput, PortOfLoadingInput, HeaderCharges, ShipToFields } from '../components/DocFields';
 import LineItemsEditor from '../components/LineItemsEditor';
 import ReadOnlyItems from '../components/ReadOnlyItems';
@@ -92,7 +92,6 @@ export default function ProformaFormPage() {
   const fromOrder = search.get('from_order');
 
   const { data: customers = [] } = useQuery({ queryKey: ['customers', ''], queryFn: () => api.get<Customer[]>('/api/customers') });
-  const { data: settings } = useQuery({ queryKey: ['settings'], queryFn: () => api.get<Settings>('/api/settings') });
   const { data: existing, error: loadError } = useQuery({
     queryKey: ['proforma', id],
     queryFn: () => api.get<Proforma>(`/api/proformas/${id}`),
@@ -101,6 +100,27 @@ export default function ProformaFormPage() {
 
   const [draft, setDraft] = useState<Draft>(emptyDraft());
   const [prefilled, setPrefilled] = useState(false);
+  /*
+   * The **issuing** company, not the group's default one.
+   *
+   * The bank picker read `/api/settings`, which is the view of the *default*
+   * company — so on a second entity's proforma it offered the first entity's
+   * accounts, and the document then printed that account under
+   * `BENEFICIARY NAME: <the issuing company>`, which is the one shape of
+   * wrong that looks right (2026-09-25, the client: *"this is picking AGLO
+   * polymers bank details in Aglo Packaging PI / CI"*). Every company's
+   * accounts already ride `GET /api/companies`, which the Issued By control
+   * fetches anyway, so this asks the list it is already holding.
+   *
+   * Declared **after** `draft`, which it reads: a `const` above it is in the
+   * temporal dead zone and the page throws on its first render — which
+   * neither `tsc` nor the lint rules say a word about, and the harness
+   * caught.
+   */
+  const companies = useCompanies();
+  const company = companies.find((c) => c.id === draft.company_id)
+    ?? companies.find((c) => c.is_default) ?? companies[0];
+  const bankAccounts = company?.bank_accounts ?? [];
 
   useEffect(() => {
     if (existing) {
@@ -404,7 +424,15 @@ export default function ProformaFormPage() {
               <CompanySelect
                 value={draft.company_id ?? null}
                 locked={!isNew}
-                onChange={(id) => set({ company_id: id ?? undefined })}
+                /* Switching entity drops a bank account the new one does not
+                   hold: carrying it over is precisely how the wrong details
+                   reach the page. Only reachable while the document is new —
+                   the control locks once a number has been drawn. */
+                onChange={(id) => {
+                  const next = companies.find((c) => c.id === id);
+                  const keep = (next?.bank_accounts ?? []).some((b) => b.details === draft.bank_account);
+                  set({ company_id: id ?? undefined, ...(keep ? {} : { bank_account: '' }) });
+                }}
               />
             </Field>
             <Field label="Date"><Input disabled={readOnly} type="date" value={draft.date} onChange={(e) => set({ date: e.target.value })} /></Field>
@@ -481,15 +509,19 @@ export default function ProformaFormPage() {
                 onChange={(e) => set({ bank_account: e.target.value })}
               >
                 <option value="">— select bank account —</option>
-                {(settings?.bank_accounts ?? []).map((b, i) => (
+                {bankAccounts.map((b, i) => (
                   <option key={i} value={b.details}>{b.label || `Account ${i + 1}`}</option>
                 ))}
-                {draft.bank_account && !(settings?.bank_accounts ?? []).some((b) => b.details === draft.bank_account) && (
+                {/* A saved document whose account has since been edited or
+                    removed in Settings still shows what it carries. */}
+                {draft.bank_account && !bankAccounts.some((b) => b.details === draft.bank_account) && (
                   <option value={draft.bank_account}>(current value)</option>
                 )}
               </Select>
-              {(settings?.bank_accounts ?? []).length === 0 && (
-                <p className="mt-1 text-xs text-amber-600">No bank accounts configured — add them in Settings.</p>
+              {bankAccounts.length === 0 && (
+                <p className="mt-1 text-xs text-amber-600">
+                  {company ? `No bank accounts on ${company.company_name} — add them in Settings.` : 'No bank accounts configured — add them in Settings.'}
+                </p>
               )}
             </Field>
           </div>

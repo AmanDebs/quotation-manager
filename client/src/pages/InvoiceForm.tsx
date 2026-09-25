@@ -130,6 +130,12 @@ export default function InvoiceFormPage() {
   const [typedMarks, setTypedMarks] = useState(false);
   const companies = useCompanies();
   const company = companies.find((c) => c.id === draft.company_id) ?? companies.find((c) => c.is_default) ?? companies[0];
+  /*
+   * The issuing company's accounts, not the group default's — see the same
+   * comment on the proforma form. This page already resolved the company for
+   * the shipping marks; the bank picker was still reading `/api/settings`.
+   */
+  const bankAccounts = company?.bank_accounts ?? [];
   const derivedMarks = shippingMarks(draft.items, company?.company_name ?? settings?.company_name ?? '', draft.port_of_discharge || draft.final_destination);
   useEffect(() => {
     if (typedMarks || !derivedMarks) return;
@@ -461,7 +467,14 @@ export default function InvoiceFormPage() {
               <CompanySelect
                 value={draft.company_id ?? null}
                 locked={!isNew}
-                onChange={(id) => set({ company_id: id ?? undefined })}
+                /* Switching entity drops a bank account the new one does not
+                   hold — carrying it over is how the wrong details reach the
+                   page. Only reachable while the invoice is new. */
+                onChange={(id) => {
+                  const next = companies.find((c) => c.id === id);
+                  const keep = (next?.bank_accounts ?? []).some((b) => b.details === draft.bank_account);
+                  set({ company_id: id ?? undefined, ...(keep ? {} : { bank_account: '' }) });
+                }}
               />
             </Field>
             <Field label="Invoice Date"><Input type="date" value={draft.date} onChange={(e) => set({ date: e.target.value })} /></Field>
@@ -529,10 +542,10 @@ export default function InvoiceFormPage() {
             <Field label="Bank Account *" className="col-span-full">
               <Select value={draft.bank_account} onChange={(e) => set({ bank_account: e.target.value })}>
                 <option value="">— select bank account —</option>
-                {(settings?.bank_accounts ?? []).map((b, i) => (
+                {bankAccounts.map((b, i) => (
                   <option key={i} value={b.details}>{b.label || `Account ${i + 1}`}</option>
                 ))}
-                {draft.bank_account && !(settings?.bank_accounts ?? []).some((b) => b.details === draft.bank_account) && (
+                {draft.bank_account && !bankAccounts.some((b) => b.details === draft.bank_account) && (
                   <option value={draft.bank_account}>(current value)</option>
                 )}
               </Select>

@@ -5,7 +5,7 @@ import { nextNumber, exportChangeError } from '../services/numbering.js';
 import { computeTotals, round2, type LineItemInput } from '../services/totals.js';
 import type { AuthedRequest } from '../middleware/auth.js';
 import { scopeClause, canAccessCustomer, linkError, customerChangeError } from '../middleware/scope.js';
-import { resolveCompanyId } from '../services/companies.js';
+import { resolveCompanyId, foreignBankError } from '../services/companies.js';
 import { submit, decide, resetApprovalOnEdit, blockUnapprovedTransition, blockUnapprovedConversion , mayApprove } from '../services/approval.js';
 import { incompleteError, checkDocument } from '../services/documentChecks.js';
 import { listBody } from '../services/pagination.js';
@@ -449,6 +449,10 @@ proformasRouter.post('/', (req: AuthedRequest, res) => {
   }
   // Fixed at creation: the number below comes from this company's series.
   const companyId = resolveCompanyId(body.company_id, Number(body.customer_id));
+  // And the account printed on it has to be that company's. 400, not 409:
+  // nothing conflicts with what is on file, the value is simply wrong.
+  const foreignBank = foreignBankError(companyId, h.bank_account);
+  if (foreignBank) return res.status(400).json({ error: foreignBank });
   const id = transaction(() => {
     const number = nextNumber('proforma', { isExport: h.is_export === 1, companyId, date: h.date });
     const info = db.prepare(
@@ -494,6 +498,10 @@ proformasRouter.put('/:id', (req: AuthedRequest, res) => {
   const link = linkError(req, 'quotations', h.quotation_id, h.customer_id, 'Quotation')
     ?? linkError(req, 'orders', h.order_id, h.customer_id, 'Order');
   if (link) return res.status(404).json({ error: link });
+  // The issuing company is frozen on the row, so this reads it from there
+  // rather than from the body, which cannot move it.
+  const wrongBank = foreignBankError(Number(existing.company_id), h.bank_account);
+  if (wrongBank) return res.status(400).json({ error: wrongBank });
   transaction(() => {
     db.prepare(
       `UPDATE proforma_invoices SET number = ?, column_config = ?, ${headerFields.map((f) => `${f} = ?`).join(', ')} WHERE id = ?`

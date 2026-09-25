@@ -75,6 +75,44 @@ const REFERENCING = ['quotations', 'orders', 'proforma_invoices', 'commercial_in
  * What still points at this company. A company with documents must not vanish:
  * the paperwork would lose the entity that issued it.
  */
+/**
+ * The account on this document belongs to another entity in the group.
+ *
+ * The fifth guard of this shape (after `lockError`, `qcBlockError`,
+ * `incompleteError` and `coaBlockError`) — a function returning the sentence
+ * to refuse with. The screen offered the wrong list until 2026-09-25, and a
+ * proforma raised in that window printed one company's account under
+ * `BENEFICIARY NAME: <another company>`, which is the one shape of wrong that
+ * looks right: nothing on the page contradicts itself, and the money goes to
+ * the wrong entity.
+ *
+ * **It refuses only what it can positively identify as somebody else's.** An
+ * account matching nothing on file is left alone — the text is stored on the
+ * document rather than referenced, so a value edited or removed in Settings
+ * afterwards no longer matches its own company either, and refusing those
+ * would make every such document unsavable: the trap-with-no-way-out this
+ * codebase has built once and does not intend to build again. So: blank is
+ * fine, this company's own is fine, anything unrecognised is fine, and an
+ * exact match on another company's account is refused by name.
+ *
+ * Whitespace is normalised on both sides before comparing, since the details
+ * are a typed block and a trailing newline is not a different account.
+ */
+export function foreignBankError(companyId: number, bankAccount: unknown): string | null {
+  const wanted = String(bankAccount ?? '').trim();
+  if (!wanted) return null;
+  const same = (a: string) => a.trim().replace(/\s+/g, ' ') === wanted.replace(/\s+/g, ' ');
+
+  const rows = db.prepare('SELECT id, company_name, bank_accounts FROM companies').all() as Company[];
+  const mine = rows.find((r) => Number(r.id) === Number(companyId));
+  const accounts = (r: Company) => JSON.parse(String(r.bank_accounts || '[]')) as { label?: string; details?: string }[];
+  if (mine && accounts(mine).some((b) => same(String(b.details ?? '')))) return null;
+
+  const owner = rows.find((r) => Number(r.id) !== Number(companyId) && accounts(r).some((b) => same(String(b.details ?? ''))));
+  if (!owner) return null;
+  return `That bank account belongs to ${owner.company_name}, and this document is issued by ${mine?.company_name ?? 'another company'}. Pick an account on the issuing company, or add it in Settings.`;
+}
+
 export function companyUsage(id: number): { table: string; count: number }[] {
   const used: { table: string; count: number }[] = [];
   for (const table of REFERENCING) {

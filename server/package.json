@@ -11,6 +11,7 @@
     "reset-password": "tsx src/db/resetPassword.ts",
     "test": "tsx --test test/**/*.test.ts",
     "check-series": "tsx src/db/checkSeries.ts",
+    "check-bank": "tsx src/db/checkBank.ts",
     "reset-book": "tsx src/db/resetBook.ts"
   },
   "dependencies": {
