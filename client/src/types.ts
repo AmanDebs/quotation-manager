@@ -716,6 +716,17 @@ export type LineState = 'not_scheduled' | 'scheduled' | 'partially_dispatched' |
 
 export interface OrderLine {
   order_id: number; order_number: string; date: string; promised_date: string; revised_date: string;
+  /**
+   * When the floor starts and finishes this line, from the jobs raised against
+   * it (2026-09-25) — the **dates that stand**, the revised one where a job
+   * carries it and the planned one otherwise, taken as the earliest start and
+   * the latest finish across the line's live jobs. Null where the line has no
+   * job, or no job of it states a date. `planned_*` is the same read from the
+   * plan alone, so a revision can say what it replaced instead of quietly
+   * standing in for it.
+   */
+  job_start: string | null; job_end: string | null;
+  planned_start: string | null; planned_end: string | null;
   customer_id: number; customer_name: string; company_name: string | null;
   /** Who booked the order. Null on one whose author has since been removed. */
   created_by_name: string | null;

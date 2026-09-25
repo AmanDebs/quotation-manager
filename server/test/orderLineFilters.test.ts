@@ -56,6 +56,20 @@ function ship(orderId: number, line: number, qty: number): void {
   db.prepare('INSERT INTO despatch_items (despatch_id, order_line, qty) VALUES (?, ?, ?)').run(trip, line, qty);
 }
 
+let jobSeq = 0;
+
+/** A job on a line, which is where the book's two date columns now come from. */
+function plan(orderId: number, line: number, d: {
+  start?: string; end?: string; revisedStart?: string; revisedEnd?: string; status?: string;
+}): void {
+  db.prepare(
+    `INSERT INTO work_orders (number, order_id, order_line, qty_planned, status,
+                              planned_start, planned_end, revised_start, revised_end)
+     VALUES (?, ?, ?, 1000, ?, ?, ?, ?, ?)`
+  ).run(`WO/F-${++jobSeq}`, orderId, line, d.status ?? 'released',
+    d.start ?? '', d.end ?? '', d.revisedStart ?? '', d.revisedEnd ?? '');
+}
+
 /** A catalogue product, so the Item column prints a name rather than the line's own words. */
 const productId = Number((db.prepare(
   "INSERT INTO products (name, color, unit) VALUES ('48mm Preform', 'Bisleri', 'per 1000') RETURNING id"
@@ -65,10 +79,16 @@ const productId = Number((db.prepare(
 // to leave out.
 const a = makeOrder({ number: 'SO/26-27/001', date: '2026-09-24', customer: customerId, promised: '2026-09-27', revised: '2026-09-25', port: 'Nhava Sheva' });
 addLine(a, { desc: '48mm Handle', color: 'Bisleri Green', pcs: 20000, pos: 0 });
+// A split run: two jobs on one line, one of them moved. The line's dates are
+// the earliest start and the latest finish across both.
+plan(a, 0, { start: '2026-10-01', end: '2026-10-05' });
+plan(a, 0, { start: '2026-10-03', end: '2026-10-08', revisedStart: '2026-09-28' });
 
 const b = makeOrder({ number: 'SO/26-27/002', date: '2026-09-23', customer: otherId, promised: '2026-09-28' });
 addLine(b, { desc: 'ignored, the product names it', color: 'Bisleri', pcs: 51000, pos: 0, productId });
 addLine(b, { desc: '48mm Seal Cap', color: '', pcs: 50000, pos: 1 });
+// Line 0 is planned and then finishes later than planned; line 1 has no job.
+plan(b, 0, { start: '2026-10-10', end: '2026-10-12', revisedEnd: '2026-10-20' });
 
 const c = makeOrder({ number: 'SO/26-27/003', date: '2026-09-20', customer: customerId, port: 'Nhava Sheva', spoc: '' });
 addLine(c, { desc: '2Ltr Deluxe Handle', color: 'Bisleri', pcs: 300000, pos: 0 });
@@ -77,6 +97,9 @@ ship(c, 0, 120000);
 const d = makeOrder({ number: 'SO/26-27/004', date: '2026-09-18', customer: otherId });
 addLine(d, { desc: '48mm Handle', color: 'Red-White', pcs: 5000, pos: 0 });
 ship(d, 0, 5000);
+// A start and no finish, beside a cancelled job that must count for nothing.
+plan(d, 0, { start: '2026-09-18' });
+plan(d, 0, { start: '2030-01-01', end: '2030-01-09', status: 'cancelled' });
 
 const ALL = orderLines({});
 const of = (columns: ColumnFilters) => orderLines({ columns });
@@ -185,6 +208,49 @@ describe('filtering by the value in a column', () => {
   });
 });
 
+/*
+ * The book's two date columns are the floor's, not the order header's
+ * (2026-09-25, at the client's word): when work on this line starts and when
+ * it finishes, read from the jobs raised against it.
+ */
+describe('the start and finish a line gets from its jobs', () => {
+  const lineOf = (number: string, pos = 0) =>
+    ALL.find((l) => l.order_number === number && l.order_line === pos)!;
+
+  test("the earliest start and the latest finish across the line's jobs", () => {
+    const l = lineOf('SO/26-27/001');
+    // Jobs at 01/10→05/10 and 03/10→08/10, the second moved to start 28/09.
+    assert.equal(l.job_start, '2026-09-28');
+    assert.equal(l.job_end, '2026-10-08');
+  });
+
+  test('a revised date stands in for the plan, and the plan is still readable', () => {
+    const l = lineOf('SO/26-27/002');
+    assert.equal(l.job_start, '2026-10-10');
+    assert.equal(l.job_end, '2026-10-20');       // revised
+    assert.equal(l.planned_end, '2026-10-12');   // what it replaced
+  });
+
+  test('a line with no job has no dates, and neither does the line beside it', () => {
+    assert.equal(lineOf('SO/26-27/003').job_start, null);
+    assert.equal(lineOf('SO/26-27/003').job_end, null);
+    assert.equal(lineOf('SO/26-27/002', 1).job_start, null);
+  });
+
+  test('a cancelled job counts for nothing', () => {
+    const l = lineOf('SO/26-27/004');
+    assert.equal(l.job_start, '2026-09-18');
+    // The cancelled job runs to 2030; the line must not claim it.
+    assert.equal(l.job_end, null);
+  });
+
+  /** The order's own dates are still on the row — the export carries them. */
+  test("the order's own production dates are untouched", () => {
+    assert.equal(lineOf('SO/26-27/001').promised_date, '2026-09-27');
+    assert.equal(lineOf('SO/26-27/001').revised_date, '2026-09-25');
+  });
+});
+
 describe('filtering by a range', () => {
   test('a date range takes both ends, and either alone', () => {
     assert.deepEqual(numbersIn({ from: { date: '2026-09-23' } }), ['SO/26-27/001', 'SO/26-27/002']);
@@ -202,13 +268,16 @@ describe('filtering by a range', () => {
    * that have no plan — and there are hundreds of those on the live book.
    */
   test('a blank date is in no range at all', () => {
-    const all = numbersIn({ from: { revised: '1900-01-01' }, to: { revised: '2999-12-31' } });
-    assert.deepEqual(all, ['SO/26-27/001']);
+    // SO/003 has no job, so it has no start date — and an order with no start
+    // date is not "before today".
+    const all = numbersIn({ from: { start: '1900-01-01' }, to: { start: '2999-12-31' } });
+    assert.deepEqual(all, ['SO/26-27/001', 'SO/26-27/002', 'SO/26-27/004']);
   });
 
-  test('the production dates are filtered apart from the order date', () => {
-    assert.deepEqual(numbersIn({ from: { promised: '2026-09-28' } }), ['SO/26-27/002']);
-    assert.deepEqual(numbersIn({ to: { revised: '2026-09-25' } }), ['SO/26-27/001']);
+  test('the job dates are filtered apart from the order date', () => {
+    assert.deepEqual(numbersIn({ from: { start: '2026-10-05' } }), ['SO/26-27/002']);
+    // SO/004 states a start and no finish, so it is in no finish range either.
+    assert.deepEqual(numbersIn({ to: { end: '2026-10-09' } }), ['SO/26-27/001']);
   });
 
   test('quantity and sent take a min and a max', () => {

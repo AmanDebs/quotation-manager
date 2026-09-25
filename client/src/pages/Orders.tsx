@@ -37,8 +37,8 @@ const LINE_FILTERS: { key: string; label: string; kind: FilterKind }[] = [
   { key: 'qty', label: 'Qty', kind: 'numbers' },
   { key: 'sent', label: 'Sent', kind: 'numbers' },
   { key: 'balance', label: 'Balance', kind: 'numbers' },
-  { key: 'promised', label: 'Orig. Prod.', kind: 'dates' },
-  { key: 'revised', label: 'Rev. Prod.', kind: 'dates' },
+  { key: 'start', label: 'Start Date', kind: 'dates' },
+  { key: 'end', label: 'End Date', kind: 'dates' },
   { key: 'spoc', label: 'SPOC', kind: 'values' },
   { key: 'state', label: 'State', kind: 'values' },
 ];
@@ -501,64 +501,44 @@ export default function OrdersPage() {
  * and by-product views keep theirs, and the spreadsheet export is untouched.
  */
 /**
- * One of the order's two production dates, changed where it is read (asked for
- * 2026-09-24: *"Option to edit original and revised dates in the dashboard"*,
- * over the order book's lines view).
+ * When the floor starts or finishes this line, from its own work orders
+ * (2026-09-25, at the client's word: *"instead of Orig. Production date and
+ * Revised production date, it should show Start Date and End Date from work
+ * order, if revised date is present it should show revised, else it should
+ * show planned"*).
  *
- * **Drawn once per order, on its first line**, which is the whole of what
- * makes it honest: both dates are columns of `orders` and the lines view
- * repeats them down the group, so a box on every row would invite somebody to
- * set line 3 to a different date from line 1 and then watch all five change
- * together. The rows below keep printing the date as plain text — nothing is
- * hidden — and there is exactly one place to change it. The same reasoning as
- * the Added By column beside it, and as the Record dispatch button.
+ * It replaces the order header's two production dates, which were one pair of
+ * figures repeated down every line of a group. These are **per line**, because
+ * a job is: a five-line order can have one line starting this week and another
+ * next month, which the order's own dates could never say.
  *
- * At rest it is the text it always was, tint, warning sign and all; the box
- * only appears once somebody means to type. It saves through a PATCH of its
- * own rather than the order's PUT, for the reason that route records.
+ * **Read-only, and that is a decision rather than an omission.** The date
+ * belongs to the job and is set on the job's page, where a split run's two
+ * jobs can be told apart — a single box here would have to pick one of them.
+ * It could not be editable here anyway: writing a job is `work_order: full`
+ * and Sales, whose book this is, holds `view`, so the box would answer 403 to
+ * exactly the people reading the screen. The order's own dates are still
+ * stored, still on the order form, and still what the dashboard's overdue chip
+ * and the Reports page key on.
+ *
+ * A revision is **marked rather than substituted**: the date that stands is
+ * printed, with an amber *rev.* and what it replaced on hover — the shape the
+ * Work Orders list uses for the same pair.
  */
-function OrderDateCell({ value, overdue, canEdit, label, onSave }: {
-  value: string;
+function JobDateCell({ value, planned, overdue }: {
+  value: string | null;
+  planned: string | null;
   overdue: boolean;
-  canEdit: boolean;
-  /** What is being changed, for somebody who has hovered rather than guessed. */
-  label: string;
-  onSave: (v: string) => void;
 }) {
-  const [editing, setEditing] = useState(false);
-  const tint = overdue ? 'font-semibold text-red-600' : 'text-slate-600';
-
-  if (editing) {
-    return (
-      <input
-        type="date"
-        autoFocus
-        defaultValue={value}
-        onClick={(e) => e.stopPropagation()}
-        onBlur={() => setEditing(false)}
-        onKeyDown={(e) => {
-          // Escape leaves it as it was; Enter is the browser's own commit.
-          if (e.key === 'Escape') { e.stopPropagation(); setEditing(false); }
-        }}
-        onChange={(e) => { onSave(e.target.value); setEditing(false); }}
-        className="w-[8.5rem] rounded border border-brand-600 px-1 py-0.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600/25"
-      />
-    );
-  }
-
-  if (!canEdit) {
-    return <span className={tint}>{value ? fmtDate(value) : <span className="text-slate-300">—</span>}{overdue && ' ⚠'}</span>;
-  }
-
+  if (!value) return <span className="text-slate-300">—</span>;
+  const revised = !!planned && planned !== value;
   return (
-    <button
-      type="button"
-      title={`${label} — the order's own, on every line of it. Click to change.`}
-      onClick={(e) => { e.stopPropagation(); setEditing(true); }}
-      className={`-mx-1 rounded px-1 hover:bg-brand-50 hover:ring-1 hover:ring-brand-600/20 ${tint}`}
-    >
-      {value ? fmtDate(value) : <span className="text-slate-300">— set</span>}{overdue && ' ⚠'}
-    </button>
+    <span className={overdue ? 'font-semibold text-red-600' : 'text-slate-600'}>
+      {fmtDate(value)}{overdue && ' ⚠'}
+      {revised && (
+        <span className="ml-1 font-normal text-amber-600" title={`Planned ${fmtDate(planned)}`}>rev.</span>
+      )}
+    </span>
   );
 }
 
@@ -577,21 +557,6 @@ function LinesTable({ lines, pager, filters }: {
   const t = today();
   const can = useCan();
   const canDispatch = can('dispatch', 'full');
-  // Moving the plant's dates is an order write; Logistics and Production
-  // read this book and hold `order: view`, so they see the text and no box.
-  const canEditOrder = can('order', 'full');
-  const queryClient = useQueryClient();
-  const setDates = useMutation({
-    mutationFn: ({ orderId, patch }: { orderId: number; patch: Record<string, string> }) =>
-      api.patch(`/api/orders/${orderId}/production-dates`, patch),
-    // Every view of the book, and the figures that read these dates: the
-    // dashboard's overdue chip and the Reports page both key on them.
-    onSuccess: () => {
-      for (const key of [['order-lines'], ['order-demand'], ['orders'], ['dashboard'], ['reports']]) {
-        queryClient.invalidateQueries({ queryKey: key });
-      }
-    },
-  });
   // A domestic book has no discharge port on any row, and a column that is
   // empty on every line for ever is worse than no column.
   const anyPort = lines.some((l) => l.port_of_discharge);
@@ -659,11 +624,11 @@ function LinesTable({ lines, pager, filters }: {
                 {/* What is still to go: ordered less what has gone on a lorry
                     (2026-09-16, at the client's word). */}
                 {head('balance', 'Balance', 'right')}
-                {/* The order's two production dates (2026-09-15, at the
-                    client's word, in place of the one Promised column): the
-                    original, and the revised one where the plan has moved. */}
-                {head('promised', 'Orig. Prod.', 'left', 'Original Production Date')}
-                {head('revised', 'Rev. Prod.', 'left', 'Revised Production Date')}
+                {/* The floor's own dates, per line, from the jobs raised
+                    against it (2026-09-25, at the client's word, in place of
+                    the order header's two production dates). */}
+                {head('start', 'Start Date')}
+                {head('end', 'End Date')}
                 {head('spoc', 'SPOC')}
                 {head('state', 'State')}
                 {canDispatch && <th className="pb-2" />}
@@ -678,10 +643,10 @@ function LinesTable({ lines, pager, filters }: {
                 const repeat = i > 0 && lines[i - 1].order_id === l.order_id;
                 const group = groupIndex[i];
                 const tint = group % 2 === 1 ? 'bg-slate-50/70' : '';
-                // Overdue is judged against the date that stands — the revised
-                // one where set, else the original — and marked on that column.
-                const due = l.revised_date || l.promised_date;
-                const overdue = !!due && due < t && l.state !== 'fully_dispatched';
+                // Overdue is judged against the finish the floor is working
+                // to — the job's revised date where it carries one, else its
+                // planned one, which is what `job_end` already is.
+                const overdue = !!l.job_end && l.job_end < t && l.state !== 'fully_dispatched';
                 // The dispatch record alone — an invoice is not a lorry (2026-09-16).
                 const sent = l.sent;
                 const balance = l.ordered ? Math.max(0, l.ordered - sent) : null;
@@ -727,26 +692,12 @@ function LinesTable({ lines, pager, filters }: {
                     <td className={`py-2 pr-3 text-right tabular-nums ${balance === 0 ? 'text-slate-400' : 'font-medium'}`}>
                       {balance == null ? dash : fmtQty(balance)}
                     </td>
-                    {/* Both dates are the order's own, so only the group's first
-                        line offers the box; the rows under it keep printing
-                        what it says. */}
+                    {/* Per line, not per order: these are the line's own jobs. */}
                     <td className="whitespace-nowrap py-2 pr-3">
-                      <OrderDateCell
-                        value={l.promised_date}
-                        overdue={overdue && !l.revised_date}
-                        canEdit={canEditOrder && !repeat}
-                        label={`Original promised date for ${l.order_number}`}
-                        onSave={(v) => setDates.mutate({ orderId: l.order_id, patch: { promised_date: v } })}
-                      />
+                      <JobDateCell value={l.job_start} planned={l.planned_start} overdue={false} />
                     </td>
                     <td className="whitespace-nowrap py-2 pr-3">
-                      <OrderDateCell
-                        value={l.revised_date}
-                        overdue={overdue && !!l.revised_date}
-                        canEdit={canEditOrder && !repeat}
-                        label={`Revised production date for ${l.order_number}`}
-                        onSave={(v) => setDates.mutate({ orderId: l.order_id, patch: { revised_date: v } })}
-                      />
+                      <JobDateCell value={l.job_end} planned={l.planned_end} overdue={overdue} />
                     </td>
                     {/* Who is handling the order (2026-09-24, at the client's
                         word, in place of who booked it) — a property of the
@@ -775,8 +726,10 @@ function LinesTable({ lines, pager, filters }: {
             </tbody>
           </table>
           <p className="mt-2 text-xs text-slate-400">
-            Sent and state are worked out from the work orders, despatches and invoices
-            recorded against each line — there is nothing here to keep up to date by hand.
+            Start and End are the line's own work orders — the revised date where one
+            carries it, else the planned one — and Sent and State are worked out from the
+            jobs, despatches and invoices recorded against each line. There is nothing
+            here to keep up to date by hand.
           </p>
           <Pagination
             page={pager.page} pages={pager.pages} total={pager.total} limit={PAGE_SIZE}

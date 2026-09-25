@@ -4,7 +4,7 @@ import { PIECES_ORDERED_SQL } from './totals.js';
 import { searchClause } from './search.js';
 import { countOf } from './pagination.js';
 import { round2 } from './totals.js';
-import { LIVE_OK, JOB_START } from './production.js';
+import { LIVE_OK, JOB_START, JOB_END } from './production.js';
 
 /**
  * The order book read one item at a time.
@@ -34,9 +34,32 @@ export interface OrderLine {
   order_id: number;
   order_number: string;
   date: string;
-  /** The order's original production date, and the revised one where set. */
+  /**
+   * The order's own production dates — its original and the revised one where
+   * set. Still sent and still on the row (the by-product fold's `next_due`
+   * reads the first, and the spreadsheet export carries both), but since
+   * 2026-09-25 the book's two date columns are the **job's** dates below.
+   */
   promised_date: string;
   revised_date: string;
+  /**
+   * When the floor starts and finishes this line, from the work orders raised
+   * against it (2026-09-25, at the client's word) — the **dates that stand**,
+   * the revised one where a job carries it and the planned one otherwise
+   * (`JOB_START`/`JOB_END`). Earliest start and latest finish across the
+   * line's live jobs, since a split run is two jobs describing one line's
+   * work. Blank where the line has no job, or none of its jobs has a date:
+   * silence is not a date.
+   */
+  job_start: string | null;
+  job_end: string | null;
+  /**
+   * The same two read from the plan alone, so the screen can say which of the
+   * dates beside it is a revision and show what it replaced rather than
+   * substituting one date for another in silence.
+   */
+  planned_start: string | null;
+  planned_end: string | null;
   customer_id: number;
   customer_name: string;
   company_name: string | null;
@@ -182,9 +205,24 @@ const SQL = `
         WHERE x.invoice_id = ii.invoice_id
           AND (x.sort_order < ii.sort_order OR (x.sort_order = ii.sort_order AND x.id < ii.id))
       ) = l.pos
-    ), 0) AS billed
+    ), 0) AS billed,
+    -- What the floor is doing about this line, from its own jobs. A **join**
+    -- rather than the correlated subqueries above, and safe where those are
+    -- necessary because it is grouped: one row per (order, line) whatever the
+    -- job count, so a split run cannot multiply the line.
+    j.job_start, j.job_end, j.planned_start, j.planned_end
   FROM lines l
   JOIN orders o ON o.id = l.order_id
+  LEFT JOIN (
+    SELECT order_id, order_line,
+           MIN(NULLIF(${JOB_START('work_orders')}, '')) AS job_start,
+           MAX(NULLIF(${JOB_END('work_orders')}, '')) AS job_end,
+           MIN(NULLIF(planned_start, '')) AS planned_start,
+           MAX(NULLIF(planned_end, '')) AS planned_end
+      FROM work_orders
+     WHERE status <> 'cancelled'
+     GROUP BY order_id, order_line
+  ) j ON j.order_id = o.id AND j.order_line = l.pos
   JOIN customers c ON c.id = o.customer_id
   LEFT JOIN companies co ON co.id = o.company_id
   -- LEFT: a custom line names no product and must still list.
@@ -334,8 +372,8 @@ export const FILTERABLE = {
   qty: { sql: 'ordered', kind: 'numbers' },
   sent: { sql: 'sent', kind: 'numbers' },
   balance: { sql: 'CASE WHEN ordered > 0 THEN MAX(ordered - sent, 0) END', kind: 'numbers' },
-  promised: { sql: 'promised_date', kind: 'dates' },
-  revised: { sql: 'revised_date', kind: 'dates' },
+  start: { sql: 'job_start', kind: 'dates' },
+  end: { sql: 'job_end', kind: 'dates' },
   spoc: { sql: 'spoc', kind: 'values' },
   state: { sql: LINE_STATE_SQL, kind: 'values' },
 } as const;

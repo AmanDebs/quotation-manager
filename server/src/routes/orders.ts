@@ -476,6 +476,12 @@ const lineColumns: Column<OrderLine>[] = [
   { header: 'Balance', value: (r) => (r.ordered ? Math.max(0, r.ordered - r.sent) : ''), type: 'number' },
   { header: 'Billed', value: (r) => r.billed, type: 'number' },
   { header: 'In stock', value: (r) => r.in_stock ?? '', type: 'number' },
+  // What the screen's two date columns say since 2026-09-25 — the floor's
+  // own, the date that stands on each of the line's jobs. The order's own two
+  // stay beside them: the download is the wider record, the call this file
+  // already makes about Made, Billed and In stock.
+  { header: 'Start Date', value: (r) => r.job_start ?? '', type: 'date' },
+  { header: 'End Date', value: (r) => r.job_end ?? '', type: 'date' },
   { header: 'Original Production Date', value: (r) => r.promised_date, type: 'date' },
   { header: 'Revised Production Date', value: (r) => r.revised_date, type: 'date' },
   { header: 'State', value: (r) => STATE_LABEL[r.state] ?? r.state },
