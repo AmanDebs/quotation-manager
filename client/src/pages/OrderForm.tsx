@@ -365,15 +365,6 @@ export default function OrderFormPage() {
             <Field label="Handled By (SPOC)"><Input value={draft.spoc} onChange={(e) => set({ spoc: e.target.value })} placeholder="Who took this order" /></Field>
             <Field label="Customer's PO Number"><Input value={draft.po_number} onChange={(e) => set({ po_number: e.target.value })} /></Field>
             <Field label="Customer's PO Date"><Input type="date" value={draft.po_date} onChange={(e) => set({ po_date: e.target.value })} /></Field>
-            {/* Back on 2026-09-15, alone of the production-plan dates the
-                form dropped on 2026-09-07: the Reports page's *Planned for
-                production* sheet is keyed on it, and a column nobody can
-                type into is a sheet nobody can fill. */}
-            {/* The promised date came back beside it (2026-09-15): it is what the
-                dashboard's overdue-orders chip and the order book's Promised
-                column read, both quiet since the card went. */}
-            <Field label="Original Promised Date"><Input type="date" value={draft.promised_date} onChange={(e) => set({ promised_date: e.target.value })} /></Field>
-            <Field label="Revised Production Date"><Input type="date" value={draft.revised_date} onChange={(e) => set({ revised_date: e.target.value })} /></Field>
             <Field label="Currency">
               <Select value={draft.currency} onChange={(e) => set({ currency: e.target.value })}>
                 <option value="INR">INR</option><option value="USD">USD</option><option value="EUR">EUR</option>
@@ -505,21 +496,30 @@ export default function OrderFormPage() {
           header freight fields follow: an order raised before this keeps every
           value it holds, an ordinary save cannot zero one, and the order PDF,
           the spreadsheet export and the order book still print what is there.
-          What is gone is the only way to type a new one — except **Revised
-          Date**, which came back into Details on 2026-09-15 because the
-          Reports page's *Planned for production* sheet is keyed on it, and
-          **Promised Despatch** (as *Original Promised Date*) the same day,
-          which wakes the three figures below up again.
+          What is gone is the only way to type a new one.
 
-          Two consequences worth knowing rather than discovering. The dashboard's
-          **overdue orders** counts orders past `promised_date`, and the order
-          book's Promised column and `next_due` read the same header field — all
-          three go quiet on orders raised from here on, since nothing can set it.
-          Per-line **Promised** (`order_items.scheduled_date`) is untouched: it is
-          a column in the item editor and prints on the order PDF, so a date per
-          line is still recorded. Destination and Transport are recorded per trip
-          in the despatch register, which is the record the lorry actually leaves
-          against.
+          **Original Promised Date and Revised Production Date came back into
+          Details on 2026-09-15 and left again on 2026-09-25**, both at the
+          client's word — the second time with the order book's own date
+          columns already reading the *work orders* rather than these
+          (`job_start`/`job_end`), which is what makes the pair answerable
+          elsewhere. The floor's dates are set on the job.
+
+          What goes quiet with them, stated rather than discovered, since
+          nothing can set either field on an order raised from here on: the
+          dashboard's **overdue orders** chip and its **deliveries due** card,
+          the **Reports** page's *Planned for production* and *Yet to be
+          scheduled* sheets, the by-product view's **Next due**, and the
+          per-order view's **Promised** column. Every one of them reads
+          `promised_date`/`revised_date` and none falls back to the jobs. The
+          cheap repair, if those figures are missed, is to point them at the
+          line's job dates the way the lines view now does.
+
+          Per-line **Promised** (`order_items.scheduled_date`) is untouched: it
+          is a column in the item editor and prints on the order PDF, so a date
+          per line is still recorded. Destination and Transport are recorded per
+          trip in the despatch register, which is the record the lorry actually
+          leaves against.
 
           INCO Terms and Containers were in this card too but are not part of
           that removal — they are export-only and were hidden on the domestic
