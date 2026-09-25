@@ -1,9 +1,8 @@
-import crypto from 'node:crypto';
 import readline from 'node:readline/promises';
 import { stdin, stdout } from 'node:process';
-import bcrypt from 'bcryptjs';
 import { db, dataDir } from './connection.js';
 import { record } from '../services/audit.js';
+import { resetUserPassword } from '../services/passwordReset.js';
 
 /**
  * The way back in when nobody can sign in.
@@ -26,6 +25,12 @@ import { record } from '../services/audit.js';
  * habit anyway. That is why there is no `--password` flag, and adding one
  * would be a step backwards.
  *
+ * **The Team page does the same thing for the ordinary case** — an employee who
+ * has forgotten theirs — through `POST /api/users/:id/reset-password`. Both go
+ * through `services/passwordReset.ts`, so there is one definition of what a
+ * reset does. This one stays because it is the only door that works when
+ * nobody can sign in to open the other.
+ *
  * Two things it does besides setting the hash, both matching what the app
  * itself does on `PUT /users/:id`:
  *
@@ -44,21 +49,6 @@ interface UserRow {
   email: string;
   role: string;
   active: number;
-}
-
-/**
- * Readable, and no ambiguity a person can mistype.
- *
- * `0/O` and `1/l/I` are left out because this gets read off a terminal and
- * typed into a browser, sometimes over the phone. Five groups of four from a
- * 30-character alphabet is a shade under 100 bits — far past anything the
- * login rate limiter would let through, and short enough to read aloud.
- */
-function generatePassword(): string {
-  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  const bytes = crypto.randomBytes(20);
-  const chars = [...bytes].map((b) => alphabet[b % alphabet.length]);
-  return [0, 4, 8, 12, 16].map((i) => chars.slice(i, i + 4).join('')).join('-');
 }
 
 const arg = (name: string): string | undefined => {
@@ -129,12 +119,9 @@ async function main() {
     }
   }
 
-  const password = generatePassword();
-  // Hash and version bump together: a hash written without the bump would
-  // leave old sessions alive, which is the failure this is meant to prevent.
-  db.prepare(
-    'UPDATE users SET password_hash = ?, token_version = token_version + 1, active = ? WHERE id = ?'
-  ).run(bcrypt.hashSync(password, 10), has('activate') ? 1 : user.active, user.id);
+  // The hash, the session bump and `--activate` all live in the service the
+  // Team page's own reset goes through.
+  const password = resetUserPassword(user.id, { activate: has('activate') });
 
   record({
     user: undefined,

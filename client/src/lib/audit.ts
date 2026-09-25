@@ -63,6 +63,7 @@ export const ACTION_LABEL: Record<string, string> = {
   login_refused: 'Sign-in refused — account deactivated',
   register: 'Account created',
   'change-password': 'Password changed',
+  'reset-password': 'Password reset by an administrator',
 };
 
 /** Where a database column has a name a person would use. */

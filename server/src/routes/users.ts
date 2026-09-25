@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import { db, transaction } from '../db/connection.js';
 import { bumpTokenVersion, type AuthedRequest } from '../middleware/auth.js';
 import { TEAM_ROLES, isTeamRole, legacyRole } from '../services/permissions.js';
+import { resetUserPassword } from '../services/passwordReset.js';
 
 export const usersRouter = Router();
 
@@ -104,6 +105,46 @@ usersRouter.put('/:id', (req: AuthedRequest, res) => {
     }
   });
   res.json(db.prepare(`SELECT ${publicFields} FROM users WHERE id = ?`).get(id));
+});
+
+/**
+ * Reset one account's password to a generated one and hand it back **once**.
+ *
+ * It exists because the only reset the app had was the *New Password* box
+ * inside the Edit dialog, which asks whoever is doing it to invent a password
+ * for somebody else — buried where nobody looking for a reset would find it,
+ * and producing exactly the weak temporary passwords the command-line script
+ * refuses to accept. The generated string is returned in the response and
+ * stored nowhere: this is the one moment it exists in clear, which is why the
+ * dialog says to copy it before closing.
+ *
+ * Everything else is `services/passwordReset.ts`'s, including the session bump
+ * that is the whole point — and the audit trail needs nothing here: the
+ * middleware reads `reset-password` off the path as a **named action** and
+ * reports `password_hash` as changed with no value, which is the rule
+ * `services/audit.ts` already states about a secret.
+ */
+usersRouter.post('/:id/reset-password', (req: AuthedRequest, res) => {
+  const id = Number(req.params.id);
+  const user = db.prepare('SELECT id, name, email, active FROM users WHERE id = ?').get(id) as
+    { id: number; name: string; email: string; active: number } | undefined;
+  if (!user) return res.status(404).json({ error: 'User not found' });
+  /*
+   * Never your own, and this one is a trap rather than a policy. A reset ends
+   * every session on the account and — unlike `POST /auth/change-password` —
+   * hands back no fresh cookie, deliberately, because a manager resetting
+   * somebody else's password is meant to sign that person out wherever they
+   * are. Pressed on your own row it would sign *you* out of the tab showing
+   * the only copy of the new password, which is the trap-with-no-way-out this
+   * codebase refuses to build twice.
+   */
+  if (id === req.user!.id) {
+    return res.status(409).json({
+      error: 'Use Change password at the foot of the sidebar to change your own — a reset here would sign you out before you could read it',
+    });
+  }
+  const password = resetUserPassword(id);
+  res.json({ id: user.id, name: user.name, email: user.email, active: !!user.active, password });
 });
 
 usersRouter.delete('/:id', (req: AuthedRequest, res) => {

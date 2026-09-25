@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
+import ChangePasswordModal from './ChangePasswordModal';
 import { teamRoleLabel, type User } from '../types';
 import { useCan } from '../App';
 import { Icon, type IconName } from './icons';
@@ -187,6 +188,7 @@ export default function Layout({ user, onLogout, children }: { user: User; onLog
    * menu you tapped it in is the classic version of this bug.
    */
   const [drawer, setDrawer] = useState(false);
+  const [changingPassword, setChangingPassword] = useState(false);
   useEffect(() => { setDrawer(false); }, [pathname]);
 
   const [open, setOpen] = useState<string[]>(() => readOpen() ?? [NAV[0].heading]);
@@ -412,6 +414,19 @@ export default function Layout({ user, onLogout, children }: { user: User; onLog
           <div className={`mb-1 text-xs capitalize text-white/40 ${rail ? 'md:hidden' : ''}`}>
             {user.team_role ? teamRoleLabel(user.team_role) : user.role}
           </div>
+          {/* Your own password, which had an endpoint and no screen until
+              2026-09-25 — and the Team page now hands out generated ones that
+              are meant to be changed by whoever receives them. Here rather
+              than on a page of its own: this is where a person looks for the
+              things that are about their account, next to Sign out. It is
+              hidden on the rail, where there is no room for a second control
+              and the icon would be guessed at. */}
+          <button
+            onClick={() => setChangingPassword(true)}
+            className={`mb-1 block text-xs text-white/50 transition-colors hover:text-white ${rail ? 'md:hidden' : ''}`}
+          >
+            Change password
+          </button>
           <button
             onClick={logout}
             title={rail ? `Sign out (${user.name})` : undefined}
@@ -434,6 +449,7 @@ export default function Layout({ user, onLogout, children }: { user: User; onLog
         not exist above `md`.
       */}
       <main className={`min-w-0 flex-1 p-4 pt-16 md:p-6 md:pt-6 ${rail ? 'md:ml-14' : 'md:ml-56'}`}>{children}</main>
+      {changingPassword && <ChangePasswordModal onClose={() => setChangingPassword(false)} />}
     </div>
   );
 }

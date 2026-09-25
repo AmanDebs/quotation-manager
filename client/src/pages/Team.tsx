@@ -8,10 +8,16 @@ import { Button, Input, Select, Field, PageHeader, EmptyState, ErrorText, Modal,
 
 interface Draft { id?: number; name: string; email: string; password: string; team_role: TeamRole }
 
+/** What the reset hands back — the password exists here and nowhere else. */
+interface ResetResult { name: string; email: string; active: boolean; password: string }
+
 export default function TeamPage() {
   const me = useUser();
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState<Draft | null>(null);
+  /** Whose password is being reset. The dialog is the same one before and after. */
+  const [resetting, setResetting] = useState<User | null>(null);
+  const [copied, setCopied] = useState(false);
 
   const { data: users = [] } = useQuery({ queryKey: ['users'], queryFn: () => api.get<User[]>('/api/users') });
 
@@ -28,6 +34,17 @@ export default function TeamPage() {
 
   const toggleActive = useMutation({
     mutationFn: (u: User) => api.put(`/api/users/${u.id}`, { active: !u.active }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['users'] }),
+  });
+
+  /*
+   * The password is generated on the server and returned **once**. It lives in
+   * this mutation's result and nowhere else — not in the users list, not in the
+   * database in clear — which is why the dialog says to copy it before closing
+   * and why closing throws it away rather than offering to show it again.
+   */
+  const resetPassword = useMutation({
+    mutationFn: (u: User) => api.post<ResetResult>(`/api/users/${u.id}/reset-password`, {}),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['users'] }),
   });
 
@@ -81,6 +98,19 @@ export default function TeamPage() {
                     </Button>
                     {u.id !== me.id && (
                       <>
+                        {/* Not on your own row: a reset signs every session on
+                            the account out and hands back no fresh cookie, so
+                            pressed here it would sign you out of the tab
+                            showing the only copy of the new password. Your own
+                            is *Change password* at the foot of the sidebar,
+                            which asks for the current one and keeps you in. */}
+                        <Button
+                          variant="secondary"
+                          className="ml-1"
+                          onClick={() => { resetPassword.reset(); setCopied(false); setResetting(u); }}
+                        >
+                          Reset password
+                        </Button>
                         <Button variant="secondary" className="ml-1" onClick={() => toggleActive.mutate(u)}>
                           {u.active ? 'Deactivate' : 'Reactivate'}
                         </Button>
@@ -103,6 +133,72 @@ export default function TeamPage() {
       <p className="mt-3 text-xs text-slate-400">
         Employees cannot open Settings, Team or Approvals, and can only see customers assigned to them. Assign a customer's owner on the customer's page.
       </p>
+
+      {resetting && (
+        <Modal
+          title={resetPassword.data ? 'New password' : `Reset password for ${resetting.name}`}
+          onClose={() => setResetting(null)}
+        >
+          {resetPassword.data ? (
+            <div className="space-y-3 text-sm">
+              <p className="text-slate-600">
+                {resetPassword.data.name}&rsquo;s password has been reset and every session on the
+                account signed out. Give them this, privately:
+              </p>
+              <div className="flex items-center gap-2">
+                <code className="flex-1 rounded-lg bg-slate-50 px-3 py-2 text-base font-semibold tracking-wide text-slate-800 ring-1 ring-inset ring-slate-200">
+                  {resetPassword.data.password}
+                </code>
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    // Best effort: the clipboard is refused outside a secure
+                    // context, and the password is on screen to be read either
+                    // way — so a failure says nothing rather than alarming.
+                    navigator.clipboard?.writeText(resetPassword.data!.password).then(
+                      () => setCopied(true),
+                      () => setCopied(false)
+                    );
+                  }}
+                >
+                  {copied ? 'Copied' : 'Copy'}
+                </Button>
+              </div>
+              <p className="text-xs text-slate-400">
+                Shown once and stored nowhere — copy it before closing. They should change it under
+                <strong> Change password</strong> at the foot of their own sidebar once they are in.
+              </p>
+              {!resetPassword.data.active && (
+                <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800 ring-1 ring-inset ring-amber-200">
+                  This account is deactivated, so sign-in is refused even with the right password.
+                  Reactivate it first.
+                </p>
+              )}
+              <div className="flex justify-end">
+                <Button onClick={() => setResetting(null)}>Done</Button>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-3 text-sm">
+              <p className="text-slate-600">
+                A new password will be generated for <strong>{resetting.name}</strong> ({resetting.email})
+                and shown to you once. Every session that account has open is signed out.
+              </p>
+              <p className="text-xs text-slate-400">
+                Use this when somebody has forgotten theirs. To set a particular password instead,
+                use <strong>Edit</strong>.
+              </p>
+              <ErrorText error={resetPassword.error} />
+              <div className="flex justify-end gap-2">
+                <Button variant="secondary" onClick={() => setResetting(null)}>Cancel</Button>
+                <Button onClick={() => resetPassword.mutate(resetting)} disabled={resetPassword.isPending}>
+                  Reset Password
+                </Button>
+              </div>
+            </div>
+          )}
+        </Modal>
+      )}
 
       {editing && (
         <Modal title={editing.id ? `Edit ${editing.name}` : 'Add Employee'} onClose={() => setEditing(null)}>
