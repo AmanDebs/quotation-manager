@@ -94,7 +94,13 @@ export const INCO_TERMS_EXPORT: Suggestion[] = [
  *   credit counted **from the BL date** rather than from the invoice.
  *
  * The advance percentage genuinely varies by deal, hence three of each rather
- * than one with a blank to fill in. `value` and `label` are the same string
+ * than one with a blank to fill in. **100% Advance sits above them on both
+ * sides** (2026-09-25, at the client's word): it is the one term that settles
+ * the whole document by itself, where the three below it are partial and are
+ * ordinarily ticked alongside a credit term — so it carries no "and Balance"
+ * clause, there being no balance, and it is worded identically on an export,
+ * which is how the client's own export tracker writes it. `value` and `label`
+ * are the same string
  * here — unlike the INCO list, where the gloss helps at the moment of choosing
  * and would be noise printed on a customer's invoice — because these terms are
  * written on the document exactly as they read.
@@ -106,12 +112,21 @@ export const INCO_TERMS_EXPORT: Suggestion[] = [
 const ADVANCE_PCT = [30, 40, 50];
 const term = (t: string): Suggestion => ({ value: t, label: t });
 
+/**
+ * Paid in full up front, on either side. `advanceDueFrom` reads the 100 out of
+ * it like any other percentage, so the dispatch gate holds the **whole order
+ * value** before a trip may be recorded — which is what the sentence says.
+ */
+const PAID_IN_FULL = term('100% Advance');
+
 export const PAYMENT_TERMS_DOMESTIC: Suggestion[] = [
+  PAID_IN_FULL,
   ...ADVANCE_PCT.map((p) => term(`${p}% Advance and Balance before Dispatch`)),
   ...[30, 45, 60].map((d) => term(`${d} Days Credit`)),
 ];
 
 export const PAYMENT_TERMS_EXPORT: Suggestion[] = [
+  PAID_IN_FULL,
   ...ADVANCE_PCT.map((p) => term(`${p}% Advance and Balance against shipping documents`)),
   ...[30, 60, 75].map((d) => term(`${d} Days from BL date`)),
 ];

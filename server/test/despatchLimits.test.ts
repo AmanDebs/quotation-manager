@@ -250,6 +250,27 @@ describe('the advance gate on a dispatch', () => {
     }
   });
 
+  /*
+   * The client's list gained *100% Advance* on 2026-09-25, and it is the one
+   * term on it that asks for the whole document up front. It carries no "and
+   * Balance" clause — there is no balance — so `balanceBeforeDispatch` is
+   * false and the figure comes from the percentage alone, which is already
+   * everything. Worth a case of its own because the two routes to the whole
+   * value (this, and a partial advance whose balance settles before dispatch)
+   * must agree about the money and differ about the word.
+   */
+  test('100% Advance holds the whole order value, on the advance basis', () => {
+    const o = orderWith('100% Advance', 59000);
+    const err = String(advanceBlockError(o.id));
+    assert.match(err, /59,000/, 'the whole total is what is due');
+    assert.equal(preDispatchDue(o.id).due, 59000);
+    assert.equal(preDispatchDue(o.id).basis, 'advance');
+    bank(o, 58999);
+    assert.ok(advanceBlockError(o.id), 'a rupee short is still short');
+    bank(o, 1);
+    assert.equal(advanceBlockError(o.id), null);
+  });
+
   test('an order with no total decides nothing either', () => {
     const o = orderWith('30% Advance and Balance against shipping documents', 0);
     assert.equal(advanceBlockError(o.id), null);
