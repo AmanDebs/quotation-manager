@@ -368,11 +368,24 @@ export default function LineItemsEditor({
   return (
     <div>
       <div className="overflow-x-auto">
-        {/* Twelve columns do not fit a narrow window. Without a floor the
-            table squeezed every column to make itself fit — Description worst,
-            since it is the only one with no width of its own — so below this
-            it scrolls in the wrapper instead, as the other tables do. */}
-        <table className="w-full min-w-[1100px] text-sm">
+        {/*
+          Twelve columns do not fit a narrow window. Without a floor the table
+          squeezed every column to make itself fit — Description worst, since
+          it is the only one with no width of its own — so below this it
+          scrolls in the wrapper instead, as the other tables do.
+
+          **1060, not 1100** (2026-09-26). The form is `max-w-7xl`, so this
+          wrapper is about 1090px wide *whatever the window is*, and a floor of
+          1100 therefore overflowed it by ten pixels on every desktop —
+          permanently, which is the scrollbar under these rows. That is what
+          put the pinned Remove column ten pixels inside the table's own edge,
+          where its white background covered the last 3px of the Amount figure.
+          Measured at 1442px: the table now fits exactly, nothing is covered,
+          and the pin still earns its keep below ~1100px where the table really
+          does scroll. Description keeps its own `min-w-[13rem]`, so the column
+          this floor exists to protect is protected either way.
+        */}
+        <table className="w-full min-w-[1060px] text-sm">
           <thead>
             <tr className={TH_CLASS}>
               <th className="w-8 pb-2 pr-2 font-medium">#</th>
@@ -404,7 +417,8 @@ export default function LineItemsEditor({
                 </th>
               )}
               {amountVisible && <th className="w-32 pb-2 pr-2 text-right font-medium">Amount</th>}
-              <th className="w-8 pb-2" />
+              {/* Pinned, like the cells under it — see the remove button below. */}
+              <th className="sticky right-0 w-8 bg-white pb-2" />
             </tr>
           </thead>
 
@@ -571,9 +585,31 @@ export default function LineItemsEditor({
                       {amount != null ? fmtMoney(amount, currency) : <span className="font-normal text-slate-400">price only</span>}
                     </td>
                   )}
-                  <td className="py-2 pt-4 text-right">
+                  {/*
+                    Removing a line, and it is **pinned and always drawn**
+                    (2026-09-26, the user: *"How to remove a line after adding
+                    it"*). It used to be `opacity-0` until the row was hovered,
+                    which is the ordinary way to keep a row's controls quiet —
+                    and it fails here for a reason particular to this table:
+                    twelve columns do not fit, so the table has a `min-w` and
+                    scrolls inside its card, and this column is the **last**
+                    one. Measured on the user's own quotation at 1442px, the
+                    button sat **9.6px past the right edge of the scroller**,
+                    so hovering the row revealed something nobody could see.
+                    Invisible at rest *and* off the edge is a control that does
+                    not exist.
+
+                    So: `sticky right-0` keeps the column on screen whatever
+                    the table's width, and the ✕ is drawn faintly at all times,
+                    darkening on the row's hover and going red under the
+                    pointer. The cell carries `bg-white` because a sticky cell
+                    has the scrolled table sliding underneath it, and it takes
+                    the row's own hover tint so it does not read as a white
+                    stripe down a hovered row.
+                  */}
+                  <td className="sticky right-0 bg-white py-2 pt-4 text-right transition-colors group-hover:bg-slate-50">
                     <button
-                      className="text-slate-300 opacity-0 transition-opacity hover:text-red-500 focus:opacity-100 focus:outline-none group-hover:opacity-100"
+                      className="text-slate-300 transition-colors hover:text-red-500 focus:text-red-500 focus:outline-none group-hover:text-slate-400"
                       onClick={() => removeLine(i)}
                       aria-label={`Remove line ${i + 1}`}
                       title="Remove line"
