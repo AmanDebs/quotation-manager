@@ -210,6 +210,14 @@ export default function QuotationsPage() {
                 <th className="pb-2 pr-3">Date</th>
                 <th className="pb-2 pr-3">Customer</th>
                 {showCompany && <th className="pb-2 pr-3">Issued By</th>}
+                {/* Who wrote the offer, beside the entity that issued it —
+                    the desk reads this column to find whose quotation it is,
+                    and *Issued By* is the company rather than a person. It is
+                    the document's own `prepared_by`, which every quotation has
+                    carried and been unable to be approved without since
+                    2026-09-12, and which the spreadsheet export has printed
+                    all along; only the screen was missing it. */}
+                <th className="pb-2 pr-3">Prepared By</th>
                 <th className="pb-2 pr-3">Type</th>
                 <th className="pb-2 pr-3 text-right">Total</th>
                 <th className="pb-2 pr-3">Status</th>
@@ -233,6 +241,12 @@ export default function QuotationsPage() {
                   {showCompany && (
                     <td className="py-2 pr-3 text-xs text-slate-500">{q.company_name ?? "—"}</td>
                   )}
+                  {/* A name is one word on this book, so it does not wrap; a
+                      blank recedes rather than reading as a fault, the rule the
+                      order book's own empty cells follow. */}
+                  <td className="py-2 pr-3 whitespace-nowrap">
+                    {q.prepared_by?.trim() || <span className="text-slate-300">—</span>}
+                  </td>
                   <td className="py-2 pr-3 text-xs">{q.is_export ? '🌍 Export' : '🇮🇳 Domestic'}</td>
                   <td className="py-2 pr-3 text-right tabular-nums">{q.grand_total ? fmtMoney(q.grand_total, q.currency) : '—'}</td>
                   {/* Editable in place — the click must not open the quotation. */}
