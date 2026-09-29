@@ -1095,6 +1095,10 @@ CREATE TABLE IF NOT EXISTS work_orders (
   -- services/production.ts): the revised one where set, else the original.
   revised_start TEXT NOT NULL DEFAULT '',
   revised_end TEXT NOT NULL DEFAULT '',
+  -- The status in place before booked output raised this job above it, and ''
+  -- whenever the status on the row is a person's own. See services/jobStatus.ts
+  -- -- the same memory `orders.status_before_auto` keeps, one document down.
+  status_before_auto TEXT NOT NULL DEFAULT '',
   status TEXT NOT NULL DEFAULT 'planned'
     CHECK (status IN ('planned','released','running','paused','done','cancelled')),
   notes TEXT NOT NULL DEFAULT '',

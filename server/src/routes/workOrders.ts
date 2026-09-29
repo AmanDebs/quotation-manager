@@ -9,6 +9,7 @@ import { paramsFor, checksForWorkOrder, summaryForWorkOrder, specOwner, RESULT_F
 import { requirementForJob, snapshotRecipe, recipeDiffers } from '../services/recipe.js';
 import { insertJob, plannedDateError, type OrderRef } from '../services/orderJobs.js';
 import { syncOrderStatus } from '../services/orderStatus.js';
+import { syncJobStatus } from '../services/jobStatus.js';
 import { requirePermission, type AuthedRequest } from '../middleware/auth.js';
 import { scopeClause, canAccessCustomer } from '../middleware/scope.js';
 import { resolveCompanyId } from '../services/companies.js';
@@ -539,6 +540,9 @@ workOrdersRouter.put('/:id', requirePermission('work_order', 'full'), (req: Auth
    * despatch *count* — so a call there would be symmetry rather than
    * correctness. Here it is correctness, because `planned_start` is an input.
    */
+  // `qty_planned` is what "everything made" is measured against, so correcting
+  // it can complete a job or re-open one.
+  syncJobStatus(id);
   syncOrderStatus(Number(existing.order_id));
   res.json(getFull(req, id));
 });
@@ -548,7 +552,13 @@ workOrdersRouter.post('/:id/status', requirePermission('work_order', 'full'), (r
   if (!accessible(req, id)) return res.status(404).json({ error: 'Work order not found' });
   const status = String(req.body?.status ?? '');
   if (!STATUSES.includes(status)) return res.status(400).json({ error: 'Unknown status' });
-  db.prepare('UPDATE work_orders SET status = ? WHERE id = ?').run(status, id);
+  /*
+   * A status set by hand **is** the floor, so the memory is cleared with it:
+   * a job somebody marked Completed on a short run stays completed however the
+   * shift book later adds up, and one they paused is left alone entirely. The
+   * same call `POST /orders/:id/status` makes about its own memory.
+   */
+  db.prepare("UPDATE work_orders SET status = ?, status_before_auto = '' WHERE id = ?").run(status, id);
   /*
    * Releasing a job schedules the order, and **cancelling one un-does
    * whatever it had raised** — `impliedStatus` counts only live jobs, so
@@ -617,6 +627,9 @@ workOrdersRouter.post('/:id/entries', requirePermission('output', 'full'), (req:
     String(body.operator ?? ''), String(body.notes ?? ''), req.user!.id);
 
   const job = db.prepare('SELECT order_id FROM work_orders WHERE id = ?').get(id) as { order_id: number };
+  // The job first: booked output is what moves it to Running, and the order's
+  // own ladder reads job statuses in turn.
+  syncJobStatus(id);
   syncOrderStatus(job.order_id);
   res.status(201).json(getFull(req, id));
 });
@@ -823,6 +836,9 @@ workOrdersRouter.post('/batches/:batchId/disposition', requirePermission('qc', '
    * `orderStatus.ts` exists to prevent.
    */
   const wo = accessible(req, Number(b.work_order_id))!;
+  // Condemned output stops counting as made, so a job held at Running or
+  // Completed by a lot that has just been scrapped has to come back down too.
+  syncJobStatus(Number(b.work_order_id));
   syncOrderStatus(Number(wo.order_id));
   res.json(batchById(batchId));
 });
@@ -938,10 +954,11 @@ workOrdersRouter.delete('/entries/:entryId', requirePermission('output', 'full')
     return res.status(404).json({ error: 'Entry not found' });
   }
   db.prepare('DELETE FROM production_entries WHERE id = ?').run(entryId);
-  // A mis-keyed shift is corrected by deleting it, which is exactly why the
-  // order's status must be able to follow it back down.
+  // A mis-keyed shift is corrected by deleting it, which is exactly why both
+  // statuses must be able to follow it back down.
   const owner = db.prepare('SELECT order_id FROM work_orders WHERE id = ?')
     .get(entry.work_order_id) as { order_id: number };
+  syncJobStatus(entry.work_order_id);
   syncOrderStatus(owner.order_id);
   res.json(getFull(req, entry.work_order_id));
 });

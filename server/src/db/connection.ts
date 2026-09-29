@@ -80,6 +80,11 @@ addColumnIfMissing('orders', 'status_before_completed', "TEXT NOT NULL DEFAULT '
  * withdrawn. Idempotent: the seed only fills rows that are still empty.
  */
 addColumnIfMissing('orders', 'status_before_auto', "TEXT NOT NULL DEFAULT ''");
+// A job's own floor, for the same reason and with the same shape. Every job on
+// file starts with no memory, which reads as "the status on the row is a
+// person's own" -- the conservative direction, so nothing already recorded is
+// silently lowered on the first boot.
+addColumnIfMissing('work_orders', 'status_before_auto', "TEXT NOT NULL DEFAULT ''");
 db.exec(`UPDATE orders SET status_before_auto = status_before_completed
           WHERE status_before_auto = '' AND status_before_completed <> ''`);
 // Where to put a lapsed quotation back if its validity is extended (2026-08).
