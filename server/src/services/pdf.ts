@@ -954,7 +954,10 @@ export function buildQuotationPdf(id: number): TDocumentDefinitions {
     columns: [
       {
         table: {
-          widths: [92, '*'],
+          // 72 is enough for the longest label here ("Customer / Buyer:",
+          // measured at 67pt), and the 20pt it gives back is what pays for the
+          // gutter below without narrowing the address column by a point.
+          widths: [72, '*'],
           body: [
             // No quotation number on the page, by request. It still names the
             // downloaded file and still identifies the record in the app.
@@ -1003,6 +1006,27 @@ export function buildQuotationPdf(id: number): TDocumentDefinitions {
         width: 230,
       },
     ],
+    /*
+     * A gutter between the two halves, which this block had none of (2026-09-29,
+     * the client with a long buyer address in front of them: *"alignment is not
+     * coming properly"*).
+     *
+     * pdfmake's default `columnGap` is 0, so the left block's `'*'` ran right up
+     * to the left edge of the right one: measured, the address's longest line
+     * ended at x=321.3 and *"Payment Terms:"* began at x=325.3 — **4pt apart**,
+     * so the two read as one line of running text ("...73 East Payment Terms:")
+     * and neither column looked like a column.
+     *
+     * The 20pt comes out of the left **label** column rather than out of the
+     * address, so the value column keeps the 185.28pt it always had and the
+     * address wraps on exactly the lines it did before — the fix separates the
+     * two halves without reflowing either.
+     *
+     * Every other document here escapes this by putting its header facts in a
+     * boxed grid (`boxedLayout`), whose cell padding does the same job; the
+     * quotation is the one that draws them bare, so it has to say so.
+     */
+    columnGap: 20,
     margin: [0, 0, 0, 8] as any,
   };
 
@@ -1010,8 +1034,37 @@ export function buildQuotationPdf(id: number): TDocumentDefinitions {
   // photo), then how it packs (pcs/box, boxes, total qty), then what it costs
   // (unit price, total). UOM sits with Unit Price because it is what makes
   // "10" mean "INR/1000", and Tax % lands just before the money it applies to.
+  /*
+   * The fixed widths were trimmed on 2026-09-29 because the table was running
+   * off the page — the other half of the client's *"alignment is not coming
+   * properly"*, and the same failure `buildPurchaseOrderPdf` records.
+   *
+   * pdfmake will not break a word, so a column narrower than its own longest
+   * unbreakable run makes the **whole table** grow past the right margin rather
+   * than wrap. The nine fixed columns came to 395pt, which with ten lots of
+   * cell padding and eleven rules left Description a `'*'` share of **34.8pt**
+   * — narrower than the word *preform-700gm* (55.6pt, measured). Measured on
+   * the client's own quotation: the items table finished **20.5pt past** the
+   * letterhead rule and the totals band, so nothing on the page lined up down
+   * the right-hand edge.
+   *
+   * Every width below is now comfortably above what it has to hold, measured at
+   * the size it prints (headers 7.5 bold, values 8 regular): Pcs/Box 36 over
+   * *10,00,000* (34.6), Boxes 32 over *12,345* (24.1), Total Qty 46 over
+   * *1,20,00,000* (40.7), Color 44 over *Transparent* (42.7), Unit Price 40
+   * over *1,234.567* (35.2), UOM 38 over *EUR/1000* (35.9), Tax % 22 over
+   * *18%* (14.9), Total 62 over *₹1,23,45,678.00* (55.9). That leaves
+   * Description **93.8pt** on a domestic quotation and 69.8 on an export one
+   * carrying photos — room for its longest word either way.
+   *
+   * What still does not fit, stated rather than discovered: an export quotation
+   * showing photos **and** both loadability columns is 122pt of extra column on
+   * a 515pt page and cannot fit whatever these are set to. Both are off by
+   * default (`DEFAULT_HIDDEN_COLUMNS` hides loadability; Photo auto-hides with
+   * no images), and the Columns picker is the answer if somebody turns both on.
+   */
   const specs: ColumnSpec[] = [
-    { key: 'sl', label: 'SL', width: 18, align: 'center', always: true, value: (_it, i) => String(i + 1) },
+    { key: 'sl', label: 'SL', width: 16, align: 'center', always: true, value: (_it, i) => String(i + 1) },
     { key: 'description', label: 'Product Description', width: '*', always: true, value: (it) => String(it.description) },
     // Photos are a selling aid, so they appear on the quotation and nowhere
     // else. The column drops out entirely when no line carries one.
@@ -1022,27 +1075,27 @@ export function buildQuotationPdf(id: number): TDocumentDefinitions {
     },
     // No HSN: a quotation is not a tax document. The value is still stored and
     // still carries forward to the proforma and invoice, which do print it.
-    { key: 'pcs_per_pack', label: 'Pcs/Box', width: 42, align: 'right', value: (it) => (it.pcs_per_pack != null ? fmtNum(it.pcs_per_pack, 0) : '') },
-    { key: 'packs', label: 'Boxes', width: 40, align: 'right', value: (it) => (it.packs != null ? fmtNum(it.packs, 0) : '') },
+    { key: 'pcs_per_pack', label: 'Pcs/Box', width: 36, align: 'right', value: (it) => (it.pcs_per_pack != null ? fmtNum(it.pcs_per_pack, 0) : '') },
+    { key: 'packs', label: 'Boxes', width: 32, align: 'right', value: (it) => (it.packs != null ? fmtNum(it.packs, 0) : '') },
     // Loadability, the way the real Aglo quotations state it. Export only: a
     // domestic GST buyer is not shipping in containers. Both still auto-hide
     // when no line has the figures.
     ...(q.is_export
       ? [
-        { key: 'qty_20ft', label: 'Boxes/20ft', width: 44, align: 'right' as const, value: (it: Row) => (it.qty_20ft != null ? fmtNum(it.qty_20ft, 0) : '') },
-        { key: 'qty_40ft', label: 'Boxes/40ft HC', width: 50, align: 'right' as const, value: (it: Row) => (it.qty_40ft != null ? fmtNum(it.qty_40ft, 0) : '') },
+        { key: 'qty_20ft', label: 'Boxes/20ft', width: 40, align: 'right' as const, value: (it: Row) => (it.qty_20ft != null ? fmtNum(it.qty_20ft, 0) : '') },
+        { key: 'qty_40ft', label: 'Boxes/40ft HC', width: 44, align: 'right' as const, value: (it: Row) => (it.qty_40ft != null ? fmtNum(it.qty_40ft, 0) : '') },
       ]
       : []),
-    { key: 'total_pcs', label: 'Total Qty', width: 55, align: 'right', value: (it) => (it.total_pcs != null ? fmtNum(it.total_pcs, 0) : '') },
+    { key: 'total_pcs', label: 'Total Qty', width: 46, align: 'right', value: (it) => (it.total_pcs != null ? fmtNum(it.total_pcs, 0) : '') },
     // No Qty column: Total Qty already says how much is being quoted, and the
     // billing quantity restates it in whatever the rate basis is ("12 per
     // 1000"). It is still entered in the editor — qty x unit_price is the
     // amount — it just does not print.
-    { key: 'color', label: 'Color', width: 48, align: 'center', value: (it) => String(it.color || '') },
-    { key: 'unit_price', label: 'Unit Price', width: 48, align: 'right', always: true, value: (it) => fmtRate(it.unit_price) },
+    { key: 'color', label: 'Color', width: 44, align: 'center', value: (it) => String(it.color || '') },
+    { key: 'unit_price', label: 'Unit Price', width: 40, align: 'right', always: true, value: (it) => fmtRate(it.unit_price) },
     // A charge is priced outright, so it has no basis to state.
-    { key: 'uom', label: 'UOM', width: 52, align: 'center', always: true, value: (it) => (it.is_charge ? '' : uomLabel(cur, it.unit)) },
-    ...(showTax ? [{ key: 'tax', label: 'Tax %', width: 30, align: 'right' as const, value: (it: Row) => `${it.tax_pct ?? 0}%` }] : []),
+    { key: 'uom', label: 'UOM', width: 38, align: 'center', always: true, value: (it) => (it.is_charge ? '' : uomLabel(cur, it.unit)) },
+    ...(showTax ? [{ key: 'tax', label: 'Tax %', width: 22, align: 'right' as const, value: (it: Row) => `${it.tax_pct ?? 0}%` }] : []),
     { key: 'amount', label: `Total (${cur})`, width: 62, align: 'right', always: true, value: (it) => (it.qty != null ? fmtMoney(it.amount, cur) : 'price only') },
   ];
 

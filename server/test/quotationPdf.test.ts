@@ -34,13 +34,25 @@ function textOf(def: any): string {
   return out.join(' | ');
 }
 
+/** A 1x1 PNG, so the photo column is drawn without carrying a fixture file. */
+const PIXEL = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+
 let seq = 0;
 
 function makeQuotation(over: Record<string, unknown> = {}, qty: number | null = 25.2): number {
   const customerId = makeCustomer(`Quotation PDF ${++seq}`);
   const cols: string[] = ['number', 'revision', 'date', 'customer_id', 'company_id', 'currency', 'tax_type', 'is_export', 'status'];
   const vals: unknown[] = [`QT/PDF/${seq}`, 0, '2026-09-20', customerId, 1, 'USD', 'none', 1, 'draft'];
-  for (const [k, v] of Object.entries(over)) { cols.push(k); vals.push(v); }
+  // Overriding a column the base list already names replaces its value rather
+  // than naming it twice: `INSERT INTO quotations (… is_export …, is_export)`
+  // takes the first, so an override of `tax_type` or `is_export` was silently
+  // ignored — which is how the domestic shape below first tested as an export
+  // one and passed against widths that did not fit.
+  for (const [k, v] of Object.entries(over)) {
+    const at = cols.indexOf(k);
+    if (at >= 0) vals[at] = v;
+    else { cols.push(k); vals.push(v); }
+  }
   const id = Number(db.prepare(
     `INSERT INTO quotations (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`
   ).run(...(vals as never[])).lastInsertRowid);
@@ -108,5 +120,102 @@ describe('the basis and the load on a quotation', () => {
     assert.ok(!/INCO Terms:/.test(t));
     assert.ok(!/Containers:/.test(t));
     assert.match(t, /GRAND TOTAL/);
+  });
+});
+
+
+/**
+ * The items table has to fit between the margins, and nothing renders here to
+ * say whether it does — so this asserts the arithmetic that decides it
+ * (2026-09-29, the client: *"alignment is not coming properly"*).
+ *
+ * pdfmake will not break a word. A column narrower than its own longest
+ * unbreakable run therefore makes the **whole table** grow past the right
+ * margin rather than wrap, and the page then has an items table finishing
+ * 20pt beyond the letterhead rule and the totals band — which is what the
+ * client was looking at. The nine fixed columns left Description a `'*'`
+ * share of 34.8pt against the word *preform-700gm*, measured at 55.6pt.
+ *
+ * The guard is on the share left for Description, because that is the column
+ * that must never be squeezed: every other one holds a number or a short
+ * word. Adding a column here, or widening one, trips this with the reason on
+ * it rather than shipping a table that hangs off the page.
+ */
+describe('the items table fits the page', () => {
+  /** A4 less `baseDoc`'s 40pt margins. */
+  const CONTENT = 595.28 - 40 - 40;
+  /**
+   * What one column costs besides its declared width: `gridLayout` leaves
+   * pdfmake's default 4pt of padding a side, and each of the n+1 vertical
+   * rules is 0.5pt. Verified against a rendered quotation, whose cells came
+   * back at exactly `width + 8.5` apiece.
+   */
+  const PER_COLUMN = 8;
+  const RULE = 0.5;
+
+  /**
+   * The longest word the catalogue actually produces in this column is
+   * *preform-700gm* at 55.6pt; 60 keeps headroom without pretending to a
+   * precision a test cannot measure.
+   */
+  const MIN_DESCRIPTION = 60;
+
+  /** The items table is the one table on the page with a header row. */
+  function itemsTable(def: any): any {
+    let found: any;
+    const walk = (n: any) => {
+      if (!n || typeof n !== 'object' || found) return;
+      if (Array.isArray(n)) return n.forEach(walk);
+      if (n.table?.headerRows && Array.isArray(n.table.widths)) { found = n.table; return; }
+      for (const k of ['stack', 'columns', 'content', 'table', 'body']) if (n[k]) walk(n[k]);
+    };
+    walk(def.content);
+    assert.ok(found, 'no items table in the document');
+    return found;
+  }
+
+  /** What the `'*'` column is left with once every fixed width is paid for. */
+  function descriptionShare(def: any): number {
+    const widths: (number | string)[] = itemsTable(def).widths;
+    const stars = widths.filter((w) => w === '*').length;
+    assert.equal(stars, 1, 'Description is the only flexible column');
+    const fixed = widths.reduce((sum: number, w) => sum + (typeof w === 'number' ? w : 0), 0);
+    return CONTENT - fixed - widths.length * PER_COLUMN - (widths.length + 1) * RULE;
+  }
+
+  test('a domestic quotation, which carries the most columns', () => {
+    const def = buildQuotationPdf(makeQuotation({ tax_type: 'igst', is_export: 0, currency: 'INR' })) as any;
+    const share = descriptionShare(def);
+    assert.ok(
+      share >= MIN_DESCRIPTION,
+      `Description is left ${share.toFixed(2)}pt, under the ${MIN_DESCRIPTION}pt it needs`
+    );
+  });
+
+  /** The tightest shape that still has to fit: the photo column costs 46pt. */
+  test('an export quotation carrying line photos', () => {
+    const id = makeQuotation({ tax_type: 'none', is_export: 1 });
+    db.prepare('UPDATE quotation_items SET image = ? WHERE quotation_id = ?').run(PIXEL, id);
+    const def = buildQuotationPdf(id) as any;
+    const widths = itemsTable(def).widths;
+    assert.equal(widths.length, 10, 'the photo column is drawn');
+    const share = descriptionShare(def);
+    assert.ok(
+      share >= MIN_DESCRIPTION,
+      `Description is left ${share.toFixed(2)}pt, under the ${MIN_DESCRIPTION}pt it needs`
+    );
+  });
+
+  /**
+   * The header block's two halves must not touch. pdfmake's default gap is 0,
+   * which put the buyer's address 4pt from *"Payment Terms:"* — measured on
+   * the client's own quotation, where the two read as one line of running
+   * text. The value is a judgement; having one at all is the rule.
+   */
+  test('and the two halves of the header block are held apart', () => {
+    const def = buildQuotationPdf(makeQuotation()) as any;
+    const meta = (def.content as any[]).find((n) => Array.isArray(n?.columns) && n.columns.length === 2 && n.columns[0]?.table);
+    assert.ok(meta, 'no two-column header block');
+    assert.ok(meta.columnGap > 0, 'the buyer block would run into the offer block');
   });
 });
