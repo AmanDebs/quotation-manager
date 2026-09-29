@@ -7,7 +7,7 @@ import { progressFor, progressForMany, LIVE_OK } from '../services/production.js
 import { materialCostByWorkOrder } from '../services/costing.js';
 import { paramsFor, checksForWorkOrder, summaryForWorkOrder, specOwner, RESULT_FAILED_SQL } from '../services/qc.js';
 import { requirementForJob, snapshotRecipe, recipeDiffers } from '../services/recipe.js';
-import { insertJob, type OrderRef } from '../services/orderJobs.js';
+import { insertJob, linesWithoutJobs, type OrderRef } from '../services/orderJobs.js';
 import { syncOrderStatus } from '../services/orderStatus.js';
 import { requirePermission, type AuthedRequest } from '../middleware/auth.js';
 import { scopeClause, canAccessCustomer } from '../middleware/scope.js';
@@ -64,7 +64,13 @@ function accessible(req: AuthedRequest, id: number) {
   return row;
 }
 
-function getFull(req: AuthedRequest, id: number) {
+/**
+ * Everything about one job. `costs` is an optional pre-built map: building it
+ * replays the whole material ledger, so a caller asking about several jobs at
+ * once — the order view below — builds it once and hands it in rather than
+ * paying for a replay per job. Omitted, it is built here as it always was.
+ */
+function getFull(req: AuthedRequest, id: number, costs?: Map<number, number>) {
   const wo = accessible(req, id);
   if (!wo) return undefined;
   wo.entries = db.prepare(
@@ -80,7 +86,7 @@ function getFull(req: AuthedRequest, id: number) {
   // force when each issue was made. Zero means nothing has been issued yet,
   // which is a real answer — unlike an uncosted product, whose need is
   // unknown rather than nil.
-  wo.material_cost = materialCostByWorkOrder().get(id) ?? 0;
+  wo.material_cost = (costs ?? materialCostByWorkOrder()).get(id) ?? 0;
   // The product's QC specification and every inspection against this job.
   // `has_spec: false` means nobody has said what to measure — not that
   // everything passed, the same distinction `has_recipe` draws for material.
@@ -299,6 +305,54 @@ workOrdersRouter.get('/qc-checks/export', requirePermission('qc'), (req: AuthedR
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.setHeader('Content-Disposition', `attachment; filename="${attachmentName('QC checks')}"`);
   res.send(buildXlsx('QC checks', qcColumns, rows));
+});
+
+/* ------------------------------------------------------------------ *
+ * Every job on one sales order
+ * ------------------------------------------------------------------ */
+
+/**
+ * All of an order's products at once (2026-09-29, the client with the list in
+ * front of them: *"Work order should open all product at once"*).
+ *
+ * A sales order raises one job per goods line, so a five-product order is five
+ * work orders — and since the order's Production tab went (2026-09-11) the only
+ * way to reach any of them is the list, one at a time. This answers about the
+ * **order**, so a screen can hold the lot.
+ *
+ * **Declared above `/:id`**, or Express reads "order" as a work order id — the
+ * trap `/qc-checks` is already placed above that route for.
+ *
+ * `getFull` is asked per job rather than a lighter query written, so this and
+ * the job's own page cannot come to disagree about the same job; it is bounded
+ * by the order's line count rather than by trading volume, which is the reason
+ * `/orders/by-product` is not paged either. The material cost map is built
+ * **once** for the page — asking per job would replay the whole material ledger
+ * per job.
+ *
+ * Scoped **once, on the order**, and 404 rather than 403 when it is not the
+ * caller's, so an id cannot be probed for. Every job is returned, cancelled
+ * ones included: a cancelled job is what explains a line with none, and hiding
+ * it would make this page disagree with the list.
+ */
+workOrdersRouter.get('/order/:orderId', requirePermission('work_order'), (req: AuthedRequest, res) => {
+  const orderId = Number(req.params.orderId);
+  const order = db.prepare(
+    `SELECT o.id, o.number, o.date, o.status, o.customer_id, c.name AS customer_name
+       FROM orders o JOIN customers c ON c.id = o.customer_id
+      WHERE o.id = ?`
+  ).get(orderId) as { id: number; customer_id: number } | undefined;
+  if (!order || !canAccessCustomer(req, Number(order.customer_id))) {
+    return res.status(404).json({ error: 'Sales order not found' });
+  }
+  const ids = (db.prepare(
+    'SELECT id FROM work_orders WHERE order_id = ? ORDER BY order_line, id'
+  ).all(orderId) as { id: number }[]).map((r) => r.id);
+  const costs = materialCostByWorkOrder();
+  const jobs = ids.map((id) => getFull(req, id, costs)).filter(Boolean);
+  // What the floor was given nothing to make, and why — `syncOrderJobs`' own
+  // decision, reported rather than restated.
+  res.json({ order, jobs, unmade: linesWithoutJobs(orderId) });
 });
 
 workOrdersRouter.get('/:id', requirePermission('work_order'), (req: AuthedRequest, res) => {

@@ -231,8 +231,14 @@ export default function WorkOrdersPage() {
                         <Link to={`/orders/${w.order_id}`} className="text-brand-700 hover:underline">{w.order_number}</Link>
                         <span className="ml-2 font-normal text-slate-600">{w.customer_name}</span>
                       </td>
-                      <td className="py-1.5 pr-3 text-xs text-slate-500">
-                        {group.length} job{group.length === 1 ? '' : 's'}
+                      {/* The way in to all of this order's products at once
+                          (2026-09-29): this row already names the order and the
+                          customer, so it is where somebody looking for its jobs
+                          is already pointing. */}
+                      <td className="py-1.5 pr-3 text-xs">
+                        <Link to={`/work-orders/order/${w.order_id}`} className="text-brand-700 hover:underline" title="Open every product on this sales order at once">
+                          {group.length} job{group.length === 1 ? '' : 's'}
+                        </Link>
                       </td>
                       <td className="py-1.5 pr-3 text-right text-xs tabular-nums text-slate-500">{fmtQty(groupPlanned)}</td>
                       <td className="py-1.5 pr-3 text-right text-xs tabular-nums text-slate-500">{fmtQty(groupMade)}</td>

@@ -14,6 +14,7 @@ import FollowupButton from '../components/FollowupButton';
 import { offeredStatuses, orderStatusLabel } from './Orders';
 import { today, fmtMoney, fmtDate } from '../lib/format';
 import { useUnsavedChanges } from '../lib/useUnsavedChanges';
+import { useCan } from '../App';
 import HistoryCard from '../components/HistoryCard';
 import ChecksStrip from '../components/ChecksStrip';
 import PaymentsCard from '../components/PaymentsCard';
@@ -77,6 +78,7 @@ export default function OrderFormPage() {
   const [search] = useSearchParams();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const can = useCan();
   const isNew = !id;
   const fromQuotation = search.get('from_quotation');
   // Booked from a proforma the buyer has confirmed. The prefill returns pi_id,
@@ -230,6 +232,14 @@ export default function OrderFormPage() {
                   <Button variant="secondary">📄 Order PDF</Button>
                 </PdfLink>
                 <FollowupButton docType="general" docId={Number(id)} customerId={existing!.customer_id} />
+                {/* Every product this order put on the floor, on one page. Since
+                    the Production tab went (2026-09-11) there was no way at all
+                    to get from an order to the jobs it raised. */}
+                {can('work_order') && (
+                  <Button variant="secondary" onClick={() => navigate(`/work-orders/order/${id}`)}>
+                    Work orders
+                  </Button>
+                )}
                 {/* The invoice is what follows an order now. Raising a proforma
                     from here ran the chain backwards — the proforma comes
                     first and the order is booked from it — and would have made

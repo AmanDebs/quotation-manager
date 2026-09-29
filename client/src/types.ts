@@ -407,6 +407,28 @@ export interface WorkOrder {
   };
 }
 
+/**
+ * Why an order line was given no job: it is a charge, the product is bought in
+ * rather than made here, there is no quantity to make, or the order is
+ * cancelled. Not a fault — a line with nothing on it has to be accounted for,
+ * or three jobs under a five-line order reads as one.
+ */
+export type UnmadeReason = 'charge' | 'bought_in' | 'no_quantity' | 'order_cancelled';
+
+/**
+ * Every job on one sales order at once, from `GET /api/work-orders/order/:id`.
+ * The jobs are `getFull`'s own rows, so each carries its progress, entries,
+ * lots, material and QC exactly as the job's own page reads them.
+ */
+export interface OrderJobsView {
+  order: {
+    id: number; number: string; date: string; status: string;
+    customer_id: number; customer_name: string;
+  };
+  jobs: WorkOrder[];
+  unmade: { line: number; label: string; reason: UnmadeReason }[];
+}
+
 /** Production against one order line, summed over its work orders. */
 export interface LineProduction {
   planned: number;
