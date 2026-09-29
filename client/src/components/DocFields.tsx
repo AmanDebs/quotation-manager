@@ -78,6 +78,26 @@ export const PURCHASE_TERMS: Suggestion[] = [
 export const INCO_TERMS_EXPORT: Suggestion[] = [
   { value: 'EX-Works', label: 'EX-Works' },
   { value: 'FOB', label: 'FOB (Free on Board)' },
+  /*
+   * The three FOBs this desk actually quotes, in full (2026-09-29, the client:
+   * *"In INCO Terms add FOB India, FOB Nhava Seva Port, FOB Kolkata Port"*).
+   *
+   * A basis qualified with a place is the ordinary shape of one here — the
+   * real Aglo documents read *FOB Nhava Sheva*, *CIF Mozambique* — which is
+   * why this box has always been free text; what was missing was the three
+   * being one pick rather than typed out every time. `value` and `label` are
+   * the same string, the payment terms' own rule: these print on the document
+   * exactly as they read, so there is no gloss to keep off a customer's
+   * invoice.
+   *
+   * **Spelled Nhava Sheva**, which is the port's own name (JNPT) and what this
+   * app's placeholder and Aglo's own AP/EX-101 invoice both already say. The
+   * request wrote *Seva*; a basis prints on a document that clears customs, so
+   * the spelling already on their paperwork wins over the one in the message.
+   */
+  { value: 'FOB India', label: 'FOB India' },
+  { value: 'FOB Nhava Sheva Port', label: 'FOB Nhava Sheva Port' },
+  { value: 'FOB Kolkata Port', label: 'FOB Kolkata Port' },
   { value: 'CIF', label: 'CIF (Cost, Insurance & Freight)' },
   { value: 'CFR', label: 'CFR (Cost & Freight)' },
   { value: 'DDP', label: 'DDP (Delivered Duty Paid)' },
