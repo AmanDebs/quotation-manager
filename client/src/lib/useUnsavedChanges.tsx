@@ -71,7 +71,17 @@ export function useUnsavedChanges(
    * document with no customer or no lines cannot be saved at all, so the
    * dialog says why rather than offering a button that only produces a 400.
    */
-  saver?: { run: () => Promise<unknown>; can?: boolean },
+  saver?: {
+    run: () => Promise<unknown>;
+    can?: boolean;
+    /**
+     * What is about to be lost, where "this document" is not what it is. The
+     * five document forms leave it alone; the Work Orders planning grid says
+     * *dates*, because a list of jobs is not a document and a sentence that
+     * names the wrong thing is how people learn to click these away.
+     */
+    message?: string;
+  },
 ): {
   markSaved: () => void;
   isDirty: () => boolean;
@@ -257,7 +267,7 @@ export function useUnsavedChanges(
   ) : blocker.state === 'blocked' ? (
     <Modal title="Save changes?" onClose={stay}>
       <p className="text-sm text-slate-700">
-        This document has changes that have not been saved.
+        {saver?.message ?? 'This document has changes that have not been saved.'}
       </p>
       {saver && saver.can === false && (
         <p className="mt-1 text-sm text-slate-500">

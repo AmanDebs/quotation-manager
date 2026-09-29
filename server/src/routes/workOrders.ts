@@ -7,7 +7,7 @@ import { progressFor, progressForMany, LIVE_OK } from '../services/production.js
 import { materialCostByWorkOrder } from '../services/costing.js';
 import { paramsFor, checksForWorkOrder, summaryForWorkOrder, specOwner, RESULT_FAILED_SQL } from '../services/qc.js';
 import { requirementForJob, snapshotRecipe, recipeDiffers } from '../services/recipe.js';
-import { insertJob, linesWithoutJobs, type OrderRef } from '../services/orderJobs.js';
+import { insertJob, type OrderRef } from '../services/orderJobs.js';
 import { syncOrderStatus } from '../services/orderStatus.js';
 import { requirePermission, type AuthedRequest } from '../middleware/auth.js';
 import { scopeClause, canAccessCustomer } from '../middleware/scope.js';
@@ -66,9 +66,9 @@ function accessible(req: AuthedRequest, id: number) {
 
 /**
  * Everything about one job. `costs` is an optional pre-built map: building it
- * replays the whole material ledger, so a caller asking about several jobs at
- * once — the order view below — builds it once and hands it in rather than
- * paying for a replay per job. Omitted, it is built here as it always was.
+ * replays the whole material ledger, so a caller answering about many jobs at
+ * once builds it once and hands it in rather than replaying per job. Omitted,
+ * it is built here as it always was.
  */
 function getFull(req: AuthedRequest, id: number, costs?: Map<number, number>) {
   const wo = accessible(req, id);
@@ -307,54 +307,6 @@ workOrdersRouter.get('/qc-checks/export', requirePermission('qc'), (req: AuthedR
   res.send(buildXlsx('QC checks', qcColumns, rows));
 });
 
-/* ------------------------------------------------------------------ *
- * Every job on one sales order
- * ------------------------------------------------------------------ */
-
-/**
- * All of an order's products at once (2026-09-29, the client with the list in
- * front of them: *"Work order should open all product at once"*).
- *
- * A sales order raises one job per goods line, so a five-product order is five
- * work orders — and since the order's Production tab went (2026-09-11) the only
- * way to reach any of them is the list, one at a time. This answers about the
- * **order**, so a screen can hold the lot.
- *
- * **Declared above `/:id`**, or Express reads "order" as a work order id — the
- * trap `/qc-checks` is already placed above that route for.
- *
- * `getFull` is asked per job rather than a lighter query written, so this and
- * the job's own page cannot come to disagree about the same job; it is bounded
- * by the order's line count rather than by trading volume, which is the reason
- * `/orders/by-product` is not paged either. The material cost map is built
- * **once** for the page — asking per job would replay the whole material ledger
- * per job.
- *
- * Scoped **once, on the order**, and 404 rather than 403 when it is not the
- * caller's, so an id cannot be probed for. Every job is returned, cancelled
- * ones included: a cancelled job is what explains a line with none, and hiding
- * it would make this page disagree with the list.
- */
-workOrdersRouter.get('/order/:orderId', requirePermission('work_order'), (req: AuthedRequest, res) => {
-  const orderId = Number(req.params.orderId);
-  const order = db.prepare(
-    `SELECT o.id, o.number, o.date, o.status, o.customer_id, c.name AS customer_name
-       FROM orders o JOIN customers c ON c.id = o.customer_id
-      WHERE o.id = ?`
-  ).get(orderId) as { id: number; customer_id: number } | undefined;
-  if (!order || !canAccessCustomer(req, Number(order.customer_id))) {
-    return res.status(404).json({ error: 'Sales order not found' });
-  }
-  const ids = (db.prepare(
-    'SELECT id FROM work_orders WHERE order_id = ? ORDER BY order_line, id'
-  ).all(orderId) as { id: number }[]).map((r) => r.id);
-  const costs = materialCostByWorkOrder();
-  const jobs = ids.map((id) => getFull(req, id, costs)).filter(Boolean);
-  // What the floor was given nothing to make, and why — `syncOrderJobs`' own
-  // decision, reported rather than restated.
-  res.json({ order, jobs, unmade: linesWithoutJobs(orderId) });
-});
-
 workOrdersRouter.get('/:id', requirePermission('work_order'), (req: AuthedRequest, res) => {
   const wo = getFull(req, Number(req.params.id));
   if (!wo) return res.status(404).json({ error: 'Work order not found' });
@@ -377,6 +329,15 @@ workOrdersRouter.get('/:id', requirePermission('work_order'), (req: AuthedReques
  * job page was the day's chore. This is one press over a ticked set on the
  * Work Orders list.
  *
+ * **Two shapes, one act** (2026-09-29). `ids` plus shared fields is the
+ * dialog's: one date across a ticked set. `jobs` is the list's planning grid's:
+ * `[{ id, planned_start, … }]`, a date **per job**, typed down the page and
+ * saved in one press. They share the guards, the transaction and the single
+ * re-sync per order because they are the same act — the dialog cannot express a
+ * date per job, and the grid must not be one request per row, but neither is a
+ * reason for a second route that would then have to be kept in step with this
+ * one.
+ *
  * **A field omitted is left alone; a field sent blank clears it** — the
  * despatch `batch_ids` contract. So planning the mould on four jobs does not
  * wipe the machine two of them already had, and clearing a date is a thing
@@ -395,8 +356,29 @@ workOrdersRouter.get('/:id', requirePermission('work_order'), (req: AuthedReques
  */
 workOrdersRouter.post('/plan', requirePermission('work_order', 'full'), (req: AuthedRequest, res) => {
   const body = req.body ?? {};
-  const ids = [...new Set((Array.isArray(body.ids) ? body.ids : []).map(Number).filter((n: number) => Number.isInteger(n) && n > 0))] as number[];
-  if (!ids.length) return res.status(400).json({ error: 'Tick at least one job to plan' });
+  const perJob = Array.isArray(body.jobs);
+  // One shape inside: an id and the patch that applies to it. For `ids` every
+  // row takes the same patch, which is the body itself.
+  const rows: { id: number; patch: Record<string, unknown> }[] = perJob
+    ? (body.jobs as Record<string, unknown>[]).map((r) => ({ id: Number(r?.id), patch: r ?? {} }))
+    : (Array.isArray(body.ids) ? body.ids : []).map((n: unknown) => ({ id: Number(n), patch: body }));
+
+  if (!rows.length) {
+    return res.status(400).json({ error: perJob ? 'Send at least one job to plan' : 'Tick at least one job to plan' });
+  }
+  /*
+   * A malformed id is **refused, not dropped**. Filtering it out is right for a
+   * writer and wrong for a guard: the press then succeeds with the job somebody
+   * meant to plan silently absent from it, which is the quiet loss
+   * `despatchBatchError` records finding the same way.
+   */
+  if (rows.some((r) => !Number.isInteger(r.id) || r.id <= 0)) {
+    return res.status(400).json({ error: 'Every job to plan needs an id' });
+  }
+  const ids = rows.map((r) => r.id);
+  if (new Set(ids).size !== ids.length) {
+    return res.status(400).json({ error: 'The same job was sent twice' });
+  }
 
   const jobs = ids.map((id) => accessible(req, id));
   const missing = jobs.findIndex((j) => !j);
@@ -408,22 +390,28 @@ workOrdersRouter.post('/plan', requirePermission('work_order', 'full'), (req: Au
     });
   }
 
-  // Only what was sent is written. `undefined` means "not in the body".
-  const sets: string[] = [];
-  const params: unknown[] = [];
-  for (const f of ['location_id', 'machine_id', 'mould_id', 'process_id'] as const) {
-    if (f in body) { sets.push(`${f} = ?`); params.push(numOrNull(body[f])); }
-  }
-  for (const f of ['planned_start', 'planned_end', 'revised_start', 'revised_end'] as const) {
-    if (f in body) { sets.push(`${f} = ?`); params.push(String(body[f] ?? '')); }
-  }
+  // Only what was sent is written, per job. `undefined` means "not in the
+  // patch" and is left alone; blank clears.
+  const patches = rows.map(({ id, patch }) => {
+    const sets: string[] = [];
+    const params: unknown[] = [];
+    for (const f of ['location_id', 'machine_id', 'mould_id', 'process_id'] as const) {
+      if (f in patch) { sets.push(`${f} = ?`); params.push(numOrNull(patch[f])); }
+    }
+    for (const f of ['planned_start', 'planned_end', 'revised_start', 'revised_end'] as const) {
+      if (f in patch) { sets.push(`${f} = ?`); params.push(String(patch[f] ?? '')); }
+    }
+    return { id, sets, params };
+  });
   const release = body.release === true;
-  if (!sets.length && !release) return res.status(400).json({ error: 'Nothing to plan: send at least one field, or release' });
+  if (!patches.some((p) => p.sets.length) && !release) {
+    return res.status(400).json({ error: 'Nothing to plan: send at least one field, or release' });
+  }
 
   transaction(() => {
-    if (sets.length) {
-      const upd = db.prepare(`UPDATE work_orders SET ${sets.join(', ')} WHERE id = ?`);
-      for (const id of ids) upd.run(...(params as never[]), id);
+    for (const p of patches) {
+      if (!p.sets.length) continue;
+      db.prepare(`UPDATE work_orders SET ${p.sets.join(', ')} WHERE id = ?`).run(...(p.params as never[]), p.id);
     }
     // Forward only: a job already released, running or paused stays where it is.
     if (release) db.prepare(`UPDATE work_orders SET status = 'released' WHERE id IN (${ids.map(() => '?').join(',')}) AND status = 'planned'`).run(...ids);
@@ -431,7 +419,9 @@ workOrdersRouter.post('/plan', requirePermission('work_order', 'full'), (req: Au
   // A start date or a release is what schedules the order, so every order
   // touched is asked again — once each, however many of its jobs were ticked.
   for (const orderId of new Set((jobs as Record<string, unknown>[]).map((j) => Number(j.order_id)))) syncOrderStatus(orderId);
-  res.json({ planned: ids.length, jobs: ids.map((id) => getFull(req, id)) });
+  // Once for the answer, not once per job: a page of the grid can carry eighty.
+  const costs = materialCostByWorkOrder();
+  res.json({ planned: ids.length, jobs: ids.map((id) => getFull(req, id, costs)) });
 });
 
 workOrdersRouter.post('/', requirePermission('work_order', 'full'), (req: AuthedRequest, res) => {

@@ -2,7 +2,7 @@ import './helpers/scratch.js';
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { db } from '../src/db/connection.js';
-import { syncOrderJobs, raiseJobsForOpenOrders, linesWithoutJobs } from '../src/services/orderJobs.js';
+import { syncOrderJobs, raiseJobsForOpenOrders } from '../src/services/orderJobs.js';
 import { makeCustomer } from './helpers/factory.js';
 
 /**
@@ -191,61 +191,5 @@ describe('the book as it stands', () => {
     assert.equal(live(declined).length, 0, 'a deliberately cancelled job was re-raised on boot');
     raiseJobsForOpenOrders();
     assert.equal(jobs(fresh).length, 1, 'a second boot raised again');
-  });
-});
-
-/**
- * A screen showing "every product on this order" has to account for the lines
- * with nothing on them, so this reports the sync's own decision back. The cases
- * that matter most are the ones it must *not* report: a line that really does
- * have a job, and a line whose job was cancelled, which has that job to explain
- * it.
- */
-describe('the lines with nothing to make', () => {
-  test('a charge line is named as one', () => {
-    const o = order([{ pcs: 1000, desc: 'Cap' }, { charge: true, desc: 'Freight' }]);
-    syncOrderJobs(o, null);
-    assert.deepEqual(linesWithoutJobs(o), [{ line: 1, label: 'Freight', reason: 'charge' }]);
-  });
-
-  test('a bought-in product is named as bought in, under the catalogue name', () => {
-    const bought = Number((db.prepare(
-      "INSERT INTO products (name, unit, unit_price, made_here) VALUES ('Traded flange', 'unit', 1, 0) RETURNING id"
-    ).get() as { id: number }).id);
-    const o = order([{ pcs: 1000, product: bought, desc: 'as ordered' }, { pcs: 2000 }]);
-    syncOrderJobs(o, null);
-    assert.deepEqual(linesWithoutJobs(o), [{ line: 0, label: 'Traded flange', reason: 'bought_in' }]);
-  });
-
-  test('a line with no quantity has nothing to make', () => {
-    const o = order([{ qty: null, pcs: null, desc: 'Price on application' }, { pcs: 2000 }]);
-    syncOrderJobs(o, null);
-    assert.deepEqual(linesWithoutJobs(o), [{ line: 0, label: 'Price on application', reason: 'no_quantity' }]);
-  });
-
-  test('a goods line that has a job is not reported', () => {
-    const o = order([{ pcs: 1000, desc: 'Cap' }, { pcs: 2000, desc: 'Handle' }]);
-    syncOrderJobs(o, null);
-    assert.deepEqual(linesWithoutJobs(o), []);
-  });
-
-  test('a line whose job was cancelled is left to that job to explain', () => {
-    const o = order([{ pcs: 1000, desc: 'Cap' }]);
-    syncOrderJobs(o, null);
-    db.prepare("UPDATE work_orders SET status = 'cancelled' WHERE order_id = ?").run(o);
-    assert.deepEqual(linesWithoutJobs(o), [], 'a cancelled job is on the page already');
-  });
-
-  test('a cancelled order accounts for every line, and a charge line is still a charge line', () => {
-    const o = order([{ pcs: 1000, desc: 'Cap' }, { charge: true, desc: 'Freight' }], 'cancelled');
-    syncOrderJobs(o, null);
-    assert.deepEqual(linesWithoutJobs(o), [
-      { line: 0, label: 'Cap', reason: 'order_cancelled' },
-      { line: 1, label: 'Freight', reason: 'charge' },
-    ]);
-  });
-
-  test('an order that is not there reports nothing', () => {
-    assert.deepEqual(linesWithoutJobs(999999), []);
   });
 });

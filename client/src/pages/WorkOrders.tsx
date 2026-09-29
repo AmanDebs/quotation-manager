@@ -1,12 +1,15 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { api } from '../api/client';
 import type { WorkOrder, WorkOrderStatus } from '../types';
-import { PageHeader, Card, Select, Button, EmptyState, Pagination, TH_CLASS } from '../components/ui';
+import { PageHeader, Card, Select, Button, EmptyState, ErrorText, Input, Pagination, TH_CLASS } from '../components/ui';
 import PlanJobsModal from '../components/PlanJobsModal';
 import { useCan } from '../App';
 import { fmtQty, fmtDate } from '../lib/format';
 import { useUrlFilter } from '../lib/useUrlFilter';
 import { usePagedList, PAGE_SIZE } from '../lib/usePagedList';
+import { useUnsavedChanges } from '../lib/useUnsavedChanges';
 
 /**
  * Every job across every order — the shop floor's own view.
@@ -60,6 +63,21 @@ export const workOrderStatusStyle: Record<WorkOrderStatus, string> = {
 
 const todayIso = new Date().toISOString().slice(0, 10);
 
+/**
+ * Which pair of columns a date box on this page writes to.
+ *
+ * Every reader of a job's date takes **the one that stands** — the revised one
+ * where set, else the planned one (`JOB_START`/`JOB_END` on the server) — so a
+ * box has to write the one it is showing, or typing over a revised date would
+ * silently move the original plan instead and the row would not change. A job
+ * carrying any revision is on its revised plan; every other job is on its
+ * first one, which is what all 79 unplanned jobs are.
+ */
+const datePair = (w: WorkOrder) => (w.revised_start || w.revised_end ? 'revised' : 'planned') as 'revised' | 'planned';
+
+/** Only what somebody typed: a field absent is left alone by the server. */
+type DatePatch = Partial<Record<'planned_start' | 'planned_end' | 'revised_start' | 'revised_end', string>>;
+
 export default function WorkOrdersPage() {
   // Status in the URL so the dashboard's factory card can link to one stage.
   const [status, setStatus] = useUrlFilter('status');
@@ -73,6 +91,23 @@ export default function WorkOrdersPage() {
    */
   const [ticked, setTicked] = useState<Set<number>>(new Set());
   const [planning, setPlanning] = useState(false);
+  /*
+   * The planning grid (2026-09-29, the client: *"I can record all the dates in
+   * a single page"*). `Plan jobs…` beside it writes **one** date across a
+   * ticked set, which is right for a run of jobs that share a slot and no use
+   * at all for filling in a book where every product runs on its own dates —
+   * which, on the live list, is 79 jobs reading *Not planned*.
+   *
+   * Keyed by job id and holding only the fields somebody typed, so an edit
+   * survives paging and filtering: the bar below says how many are waiting,
+   * and one Save writes the lot in one request. Nothing is dropped quietly —
+   * that is the whole reason the count is on screen rather than the edits
+   * being cleared when the rows change.
+   */
+  const [dates, setDates] = useState<Record<number, DatePatch>>({});
+  const [release, setRelease] = useState(true);
+  const dirtyIds = Object.keys(dates).map(Number);
+  const queryClient = useQueryClient();
   const mayPlan = can('work_order', 'full');
   const plannable = (w: WorkOrder) => !['done', 'cancelled'].includes(w.status);
   const toggle = (id: number, on: boolean) => setTicked((t) => {
@@ -87,6 +122,51 @@ export default function WorkOrdersPage() {
 
   const list = usePagedList<WorkOrder, { jobs: number; unplanned?: number; planned: number; made: number }>(['work-orders', 'all', query.toString()], `/api/work-orders?${query.toString()}`);
   const jobs = list.rows;
+
+  /*
+   * One request for the page of edits, and the same route the dialog uses —
+   * the guards, the transaction and the one re-sync per order are all already
+   * there, and a second endpoint would be a second thing to keep in step.
+   */
+  const saveDates = useMutation({
+    mutationFn: () => api.post('/api/work-orders/plan', {
+      jobs: dirtyIds.map((id) => ({ id, ...dates[id] })),
+      release,
+    }),
+    onSuccess: () => {
+      markSaved();
+      setDates({});
+      queryClient.invalidateQueries({ queryKey: ['work-orders'] });
+      queryClient.invalidateQueries({ queryKey: ['orders'] });
+      queryClient.invalidateQueries({ queryKey: ['order-lines'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+    },
+  });
+
+  /*
+   * The blocker compares pathnames, so paging and filtering — which are search
+   * params — leave the typed dates alone, which is what lets somebody fill in
+   * two pages and save once. Leaving the list is the case that would lose them,
+   * and that is what this asks about.
+   */
+  const { markSaved, prompt } = useUnsavedChanges(dates, {
+    run: () => saveDates.mutateAsync(),
+    can: dirtyIds.length > 0,
+    message: 'The dates typed on this page have not been saved.',
+  });
+
+  /** A job on screen, or one edited and since paged away, that release would move. */
+  const toRelease = dirtyIds.filter((id) => (jobs.find((w) => w.id === id) ?? { status: '' }).status === 'planned').length;
+
+  const setDate = (w: WorkOrder, end: boolean, value: string) => setDates((d) => ({
+    ...d,
+    [w.id]: { ...d[w.id], [`${datePair(w)}_${end ? 'end' : 'start'}`]: value },
+  }));
+  /** What the box shows: what was typed, else what the job carries. */
+  const dateValue = (w: WorkOrder, end: boolean) => {
+    const key = `${datePair(w)}_${end ? 'end' : 'start'}` as keyof DatePatch;
+    return dates[w.id]?.[key] ?? (w[key] ?? '');
+  };
 
   // Over every matching job, not the page on screen — see `summary` in
   // routes/workOrders.ts. Adding up the rows to hand would answer a different
@@ -231,14 +311,8 @@ export default function WorkOrdersPage() {
                         <Link to={`/orders/${w.order_id}`} className="text-brand-700 hover:underline">{w.order_number}</Link>
                         <span className="ml-2 font-normal text-slate-600">{w.customer_name}</span>
                       </td>
-                      {/* The way in to all of this order's products at once
-                          (2026-09-29): this row already names the order and the
-                          customer, so it is where somebody looking for its jobs
-                          is already pointing. */}
-                      <td className="py-1.5 pr-3 text-xs">
-                        <Link to={`/work-orders/order/${w.order_id}`} className="text-brand-700 hover:underline" title="Open every product on this sales order at once">
-                          {group.length} job{group.length === 1 ? '' : 's'}
-                        </Link>
+                      <td className="py-1.5 pr-3 text-xs text-slate-500">
+                        {group.length} job{group.length === 1 ? '' : 's'}
                       </td>
                       <td className="py-1.5 pr-3 text-right text-xs tabular-nums text-slate-500">{fmtQty(groupPlanned)}</td>
                       <td className="py-1.5 pr-3 text-right text-xs tabular-nums text-slate-500">{fmtQty(groupMade)}</td>
@@ -261,10 +335,36 @@ export default function WorkOrdersPage() {
                       <Link to={`/work-orders/${w.id}`} className="text-brand-600 hover:underline">{w.number}</Link>
                     </td>
                     <td className="py-2 pr-3">{w.description || w.product_name || '—'}</td>
+                    {/*
+                      Typed here, saved with the page. A closed job keeps the
+                      text it always had: the server refuses to plan a completed
+                      or cancelled job by name, so a box on one would be a
+                      control that only ever produces a refusal.
+                    */}
                     <td className={`whitespace-nowrap py-2 pr-3 text-xs ${late ? 'font-medium text-red-600' : 'text-slate-500'}`}>
-                      {start || end
-                        ? `${start ? fmtDate(start) : '?'} → ${end ? fmtDate(end) : '?'}`
-                        : '—'}
+                      {mayPlan && plannable(w) ? (
+                        <div className="flex items-center gap-1">
+                          <Input
+                            type="date"
+                            className={`w-[8.25rem] ${dates[w.id] ? 'border-brand-400 bg-brand-50/60' : ''}`}
+                            value={dateValue(w, false)}
+                            onChange={(e) => setDate(w, false, e.target.value)}
+                            title={`Start — ${datePair(w) === 'revised' ? 'the revised plan' : 'the plan'} for ${w.number}`}
+                          />
+                          <span className="text-slate-300">→</span>
+                          <Input
+                            type="date"
+                            className={`w-[8.25rem] ${dates[w.id] ? 'border-brand-400 bg-brand-50/60' : ''}`}
+                            value={dateValue(w, true)}
+                            onChange={(e) => setDate(w, true, e.target.value)}
+                            title={`Finish — ${datePair(w) === 'revised' ? 'the revised plan' : 'the plan'} for ${w.number}`}
+                          />
+                        </div>
+                      ) : (
+                        start || end
+                          ? `${start ? fmtDate(start) : '?'} → ${end ? fmtDate(end) : '?'}`
+                          : '—'
+                      )}
                       {revised && (
                         <span
                           className="ml-1 font-normal text-amber-600"
@@ -273,7 +373,7 @@ export default function WorkOrdersPage() {
                           rev.
                         </span>
                       )}
-                      {late && <div>overdue</div>}
+                      {late && <span className="ml-1">overdue</span>}
                     </td>
                     <td className="py-2 pr-3 text-right tabular-nums">{fmtQty(w.qty_planned)}</td>
                     <td className="py-2 pr-3 text-right tabular-nums">
@@ -305,6 +405,41 @@ export default function WorkOrdersPage() {
           onPage={list.setPage} noun="jobs"
         />
       </Card>
+
+      {/*
+        Sticky, because the list is long and the dates are typed down it — a
+        Save in the toolbar is a Save you have scrolled away from by the third
+        row. It counts what is waiting rather than what is on screen, since an
+        edit survives paging; that count is what makes the survival honest
+        rather than hidden.
+      */}
+      {dirtyIds.length > 0 && (
+        <div className="sticky bottom-4 z-20 mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-white/95 px-4 py-3 shadow-lg backdrop-blur">
+          <span className="text-sm font-medium text-slate-700">
+            {dirtyIds.length} job{dirtyIds.length === 1 ? '' : 's'} dated
+          </span>
+          {/* On by default: a date with no release leaves every row still
+              reading *Not planned*, which reads as a save that did nothing.
+              Forward only on the server, so it never demotes anything. */}
+          <label className="flex items-center gap-1.5 text-sm text-slate-600">
+            <input type="checkbox" checked={release} onChange={(e) => setRelease(e.target.checked)} />
+            Release them
+            {release && toRelease > 0 && (
+              <span className="text-xs text-slate-400">({toRelease} → Scheduled)</span>
+            )}
+          </label>
+          <ErrorText error={saveDates.error} />
+          <div className="ml-auto flex items-center gap-2">
+            <Button variant="secondary" onClick={() => setDates({})} disabled={saveDates.isPending}>Discard</Button>
+            <Button onClick={() => saveDates.mutate()} disabled={saveDates.isPending}>
+              {saveDates.isPending ? 'Saving…' : 'Save dates'}
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Renders nothing until leaving the list is actually blocked. */}
+      {prompt}
     </div>
   );
 }

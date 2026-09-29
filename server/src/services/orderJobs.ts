@@ -166,62 +166,6 @@ export function syncOrderJobs(orderId: number, userId: number | null, opts: { ra
 }
 
 /**
- * The lines of an order that raise no job, and why.
- *
- * `syncOrderJobs` above decides this — a charge line, a bought-in product, a
- * line with no quantity to make, a cancelled order — and this reports the same
- * decision rather than restating it, so the two can never disagree about which
- * lines the floor was given. It exists because a screen showing "every product
- * on this order" has to account for the ones with nothing on them: three jobs
- * under a five-line order reads as a fault where three jobs and *"line 2
- * (Freight) is a charge line"* reads as an answer.
- *
- * Only a line with **no live job** is reported. A line whose job was cancelled
- * has that job to explain it and is left to it, or the same line would be
- * described twice.
- *
- * The most specific reason wins: a charge line on a cancelled order is still a
- * charge line.
- */
-export type UnmadeReason = 'charge' | 'bought_in' | 'no_quantity' | 'order_cancelled';
-export interface UnmadeLine { line: number; label: string; reason: UnmadeReason }
-
-export function linesWithoutJobs(orderId: number): UnmadeLine[] {
-  const order = db.prepare('SELECT status FROM orders WHERE id = ?').get(orderId) as
-    { status: string } | undefined;
-  if (!order) return [];
-
-  // Positions count charge lines — the chain's index rule — so the position is
-  // taken over every line exactly as the sync takes it.
-  const lines = (db.prepare(
-    `SELECT oi.description, oi.qty, oi.unit, oi.total_pcs, oi.is_charge,
-            p.name AS product_name, COALESCE(p.made_here, 1) AS made_here
-       FROM order_items oi LEFT JOIN products p ON p.id = oi.product_id
-      WHERE oi.order_id = ? ORDER BY oi.sort_order, oi.id`
-  ).all(orderId) as { description: string; qty: number | null; unit: string; total_pcs: number | null;
-                      is_charge: number; product_name: string | null; made_here: number }[])
-    .map((it, line) => ({ ...it, line }));
-
-  const live = new Set((db.prepare(
-    "SELECT order_line FROM work_orders WHERE order_id = ? AND status <> 'cancelled'"
-  ).all(orderId) as { order_line: number }[]).map((r) => r.order_line));
-
-  const out: UnmadeLine[] = [];
-  for (const it of lines) {
-    if (live.has(it.line)) continue;
-    const label = it.product_name || it.description || `Line ${it.line + 1}`;
-    const reason: UnmadeReason | null =
-      it.is_charge ? 'charge'
-      : !it.made_here ? 'bought_in'
-      : target(it) <= 0 ? 'no_quantity'
-      : order.status === 'cancelled' ? 'order_cancelled'
-      : null;
-    if (reason) out.push({ line: it.line, label, reason });
-  }
-  return out;
-}
-
-/**
  * The one-off for the book as it stands: every open order with **no** job at
  * all gets its jobs. Runs on boot, and is idempotent by construction — an
  * order with any job, live or cancelled, is not touched, so an order whose
