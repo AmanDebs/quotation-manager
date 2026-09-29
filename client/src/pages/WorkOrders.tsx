@@ -85,6 +85,64 @@ const DATE_INPUT = 'w-[7.5rem] tabular-nums [&::-webkit-calendar-picker-indicato
 /** A group of two date columns opens on a rule; the pair inside shares it. */
 const GROUP_EDGE = 'border-l border-slate-200';
 
+/**
+ * A date that is quiet until somebody means to type (2026-09-29, the client:
+ * *"Is there a better way to fill in dates in this, it is not looking
+ * beautiful"*).
+ *
+ * With 78 jobs unplanned the page drew **156 empty date boxes**, every one of
+ * them a grey `dd-mm-yyyy` placeholder shouting for attention it did not need.
+ * At rest a cell is now the date, or a faint dash where there is none, and the
+ * box appears on the click that means to change it — which is the shape the
+ * sales order book's own date cell took at the client's word, for exactly this
+ * reason. A filled date reads as a date rather than as a control.
+ *
+ * It closes again on blur **only when nothing was typed into it**: a pending
+ * edit stays open so the figure that is about to be saved is visible, and
+ * Escape puts an untouched cell back. Everything returns to text when the page
+ * is saved and the pending edits are cleared.
+ */
+function DateCell({ value, editable, pending, open, onOpen, onClose, onChange, title }: {
+  value: string;
+  editable: boolean;
+  pending: boolean;
+  open: boolean;
+  onOpen: () => void;
+  onClose: () => void;
+  onChange: (v: string) => void;
+  title?: string;
+}) {
+  if (editable && open) {
+    return (
+      <Input
+        type="date"
+        autoFocus
+        className={`${DATE_INPUT} ${pending ? 'border-brand-400 bg-brand-50/60' : ''}`}
+        value={value}
+        title={title}
+        onChange={(e) => onChange(e.target.value)}
+        onBlur={() => { if (!pending) onClose(); }}
+        onKeyDown={(e) => { if (e.key === 'Escape') onClose(); }}
+      />
+    );
+  }
+  if (!editable) {
+    return value
+      ? <span className={DATE_BOX} title={title}>{fmtDate(value)}</span>
+      : <span className={`${DATE_BOX} text-slate-300`} title={title}>—</span>;
+  }
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      title={title}
+      className={`${DATE_BOX} rounded text-left transition-colors hover:bg-brand-50 hover:text-brand-700 focus:bg-brand-50 focus:outline-none ${pending ? 'font-medium text-brand-700' : ''}`}
+    >
+      {value ? fmtDate(value) : <span className="text-slate-300">—</span>}
+    </button>
+  );
+}
+
 export default function WorkOrdersPage() {
   // Status in the URL so the dashboard's factory card can link to one stage.
   const [status, setStatus] = useUrlFilter('status');
@@ -113,6 +171,17 @@ export default function WorkOrdersPage() {
    */
   const [dates, setDates] = useState<Record<number, DatePatch>>({});
   const [release, setRelease] = useState(true);
+  /** The one cell showing a box, as `jobId:column`. */
+  const [editing, setEditing] = useState<string | null>(null);
+  /*
+   * The orders whose own date pair is open, and what was typed into it. Jobs on
+   * one sales order run in one window far more often than not — same customer,
+   * same shipment — so setting the order once and correcting the odd job is
+   * the way this book is actually planned, where typing a pair per job is the
+   * same two dates over and over.
+   */
+  const [groupOpen, setGroupOpen] = useState<Set<number>>(new Set());
+  const [groupDates, setGroupDates] = useState<Record<number, { start?: string; end?: string }>>({});
   const dirtyIds = Object.keys(dates).map(Number);
   const queryClient = useQueryClient();
   const mayPlan = can('work_order', 'full');
@@ -143,6 +212,9 @@ export default function WorkOrdersPage() {
     onSuccess: () => {
       markSaved();
       setDates({});
+      setEditing(null);
+      setGroupDates({});
+      setGroupOpen(new Set());
       queryClient.invalidateQueries({ queryKey: ['work-orders'] });
       queryClient.invalidateQueries({ queryKey: ['orders'] });
       queryClient.invalidateQueries({ queryKey: ['order-lines'] });
@@ -180,6 +252,19 @@ export default function WorkOrdersPage() {
   });
   /** What a cell shows: what was typed into it, else what its own column holds. */
   const dateValue = (w: WorkOrder, field: JobDateField) => dates[w.id]?.[field] ?? jobDateOf(w, field);
+
+  /*
+   * One date for a whole sales order. It stages the same edit on every
+   * plannable job of that order through `setDate`, so each job still lands in
+   * the column its own state allows — a job with a plan on file takes it as a
+   * revision and one without takes it as its first plan. Nothing special is
+   * saved: these are the same pending edits as any typed by hand, and any one
+   * of them can be corrected on its own row before Save.
+   */
+  const setGroupDate = (orderId: number, group: WorkOrder[], end: boolean, value: string) => {
+    setGroupDates((g) => ({ ...g, [orderId]: { ...g[orderId], [end ? 'end' : 'start']: value } }));
+    for (const j of group) setDate(j, jobDateColumn(jobDateIsRevision(j, end), end), value);
+  };
 
   // Over every matching job, not the page on screen — see `summary` in
   // routes/workOrders.ts. Adding up the rows to hand would answer a different
@@ -298,7 +383,6 @@ export default function WorkOrdersPage() {
             <tbody>
               {jobs.map((w, i) => {
                 /*
-                /*
                  * Late is judged against the finish that **stands** — the revised
                  * one where set, else the planned one, the rule every reader of a
                  * job's date follows — so a plan that was moved is not flagged on
@@ -344,8 +428,51 @@ export default function WorkOrdersPage() {
                         <Link to={`/orders/${w.order_id}`} className="text-brand-700 hover:underline">{w.order_number}</Link>
                         <span className="ml-2 font-normal text-slate-600">{w.customer_name}</span>
                       </td>
+                      {/*
+                        The order's own pair: two dates that fill every job under
+                        it. Quiet until asked for, like the cells below — an
+                        order already fully dated does not need a control over
+                        it, and one that does needs it only once.
+                      */}
                       <td className={`${GROUP_EDGE} py-1.5 pl-5 pr-3 text-xs text-slate-500`} colSpan={4}>
-                        {group.length} job{group.length === 1 ? '' : 's'}
+                        <span className="mr-3">{group.length} job{group.length === 1 ? '' : 's'}</span>
+                        {mayPlan && groupPlannable.length > 0 && (
+                          groupOpen.has(w.order_id) ? (
+                            <span className="inline-flex items-center gap-1 align-middle">
+                              <Input
+                                type="date"
+                                autoFocus
+                                className={DATE_INPUT}
+                                value={groupDates[w.order_id]?.start ?? ''}
+                                title={`Start for all ${groupPlannable.length} jobs on ${w.order_number}`}
+                                onChange={(e) => setGroupDate(w.order_id, groupPlannable, false, e.target.value)}
+                              />
+                              <span className="text-slate-300">→</span>
+                              <Input
+                                type="date"
+                                className={DATE_INPUT}
+                                value={groupDates[w.order_id]?.end ?? ''}
+                                title={`Finish for all ${groupPlannable.length} jobs on ${w.order_number}`}
+                                onChange={(e) => setGroupDate(w.order_id, groupPlannable, true, e.target.value)}
+                              />
+                              <button
+                                type="button"
+                                className="rounded px-1 text-slate-400 hover:text-slate-600"
+                                title="Close — what was filled in stays until you discard it"
+                                onClick={() => setGroupOpen((g) => { const n = new Set(g); n.delete(w.order_id); return n; })}
+                              >✕</button>
+                            </span>
+                          ) : (
+                            <button
+                              type="button"
+                              className="rounded px-1.5 py-0.5 text-brand-600 transition-colors hover:bg-brand-50 hover:text-brand-700"
+                              title={`Set one start and finish for all ${groupPlannable.length} jobs on this order — each lands in its own column, and any one of them can be corrected on its row afterwards`}
+                              onClick={() => setGroupOpen((g) => new Set(g).add(w.order_id))}
+                            >
+                              Set dates for all {groupPlannable.length}
+                            </button>
+                          )
+                        )}
                       </td>
                       <td className={`${GROUP_EDGE} py-1.5 pl-3 pr-3 text-right text-xs tabular-nums text-slate-500`}>{fmtQty(groupPlanned)}</td>
                       <td className="py-1.5 pr-3 text-right text-xs tabular-nums text-slate-500">{fmtQty(groupMade)}</td>
@@ -420,31 +547,22 @@ export default function WorkOrdersPage() {
                           key={field}
                           className={`whitespace-nowrap py-1.5 pr-3 text-xs ${flag ? 'font-medium text-red-600' : 'text-slate-600'} ${isEnd ? '' : `${GROUP_EDGE} pl-2`}`}
                         >
-                          {editable ? (
-                            <Input
-                              type="date"
-                              className={`${DATE_INPUT} ${dates[w.id]?.[field] ? 'border-brand-400 bg-brand-50/60' : ''}`}
-                              value={dateValue(w, field)}
-                              onChange={(e) => setDate(w, field, e.target.value)}
-                              title={revised
+                          <DateCell
+                            value={dateValue(w, field)}
+                            editable={editable}
+                            pending={!!dates[w.id]?.[field]}
+                            open={editing === `${w.id}:${field}`}
+                            onOpen={() => setEditing(`${w.id}:${field}`)}
+                            onClose={() => setEditing(null)}
+                            onChange={(v) => setDate(w, field, v)}
+                            title={editable
+                              ? revised
                                 ? `${w.number} — the revised ${word}; the original stays as it was recorded`
-                                : `${w.number} — the original planned ${word}, recorded once`}
-                            />
-                          ) : own ? (
-                            <span
-                              className={DATE_BOX}
-                              title={revised ? undefined : 'Recorded once, and what the revision beside it is measured against'}
-                            >
-                              {fmtDate(own)}
-                            </span>
-                          ) : (
-                            <span
-                              className={`${DATE_BOX} text-slate-300`}
-                              title={revised
-                                ? (isEnd ? w.planned_end : w.planned_start) ? 'Not revised' : 'Nothing planned yet to revise'
-                                : undefined}
-                            >—</span>
-                          )}
+                                : `${w.number} — the original planned ${word}, recorded once`
+                              : revised
+                                ? own ? undefined : (isEnd ? w.planned_end : w.planned_start) ? 'Not revised' : 'Nothing planned yet to revise'
+                                : own ? 'Recorded once, and what the revision beside it is measured against' : undefined}
+                          />
                           {flag && <span className="ml-1">overdue</span>}
                         </td>
                       );
@@ -507,7 +625,16 @@ export default function WorkOrdersPage() {
           </label>
           <ErrorText error={saveDates.error} />
           <div className="ml-auto flex items-center gap-2">
-            <Button variant="secondary" onClick={() => setDates({})} disabled={saveDates.isPending}>Discard</Button>
+            {/* Everything the pending edits put on screen goes with them — an
+                open cell left behind after a discard is a box holding nothing,
+                which the blur that would have closed it can no longer reach. */}
+            <Button
+              variant="secondary"
+              onClick={() => { setDates({}); setEditing(null); setGroupDates({}); setGroupOpen(new Set()); }}
+              disabled={saveDates.isPending}
+            >
+              Discard
+            </Button>
             <Button onClick={() => saveDates.mutate()} disabled={saveDates.isPending}>
               {saveDates.isPending ? 'Saving…' : 'Save dates'}
             </Button>
