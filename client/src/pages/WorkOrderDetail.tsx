@@ -206,6 +206,36 @@ export default function WorkOrderDetailPage() {
         }
       />
 
+      {/*
+        What the desk wrote on the sales order — how the goods are to be
+        packed, whether the box is printed, whether it wants wrapping. Above
+        everything else on the page because it is an **instruction**, not a
+        detail: somebody opening this job needs it before they need the dates
+        or the figures, and it was reaching the floor nowhere at all.
+
+        Read from the order, never copied onto the job, so correcting the
+        order corrects every job on it at once. Read-only here for the same
+        reason: this is the sales desk's word, and the job's own Notes
+        underneath are where the floor writes back.
+
+        Drawn only when there is one — an empty instruction box on every job
+        would be a heading people stop reading.
+      */}
+      {!!job.order_remarks?.trim() && (
+        <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50/70 px-4 py-2.5">
+          <div className={`${CAPTION_CLASS} text-amber-800`}>Instructions from the sales order</div>
+          {/* Typed as a block: line breaks in a packing instruction are the
+              list the person wrote, not accidental whitespace. */}
+          <p className="mt-1 whitespace-pre-wrap text-sm text-amber-900">{job.order_remarks}</p>
+          <Link
+            to={`/orders/${job.order_id}`}
+            className="mt-1 inline-block text-xs text-amber-700 underline underline-offset-2 hover:text-amber-900"
+          >
+            on {job.order_number}
+          </Link>
+        </div>
+      )}
+
       {/* The floor's own vocabulary, set by hand — unlike the order's status,
           which follows the facts. A job is released and paused by a person. */}
       <div className="mb-3 flex flex-wrap items-center gap-1.5 text-sm">

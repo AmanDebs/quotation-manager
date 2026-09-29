@@ -383,6 +383,11 @@ export interface WorkOrder {
   batches?: Batch[];
   notes: string;
   order_number?: string; customer_id?: number; customer_name?: string;
+  /**
+   * The sales order's own Remarks, read live rather than copied onto the job —
+   * how the goods are to be packed is written there, and the floor needs it.
+   */
+  order_remarks?: string | null;
   product_name?: string | null;
   /**
    * The colour of the order line this job is against, falling back to the

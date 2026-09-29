@@ -55,8 +55,23 @@ const LINE_AT_POSITION = `
       FROM order_items
   ) oi ON oi.order_id = w.order_id AND oi.pos = w.order_line`;
 
+/**
+ * `order_remarks` is what the desk wrote on the sales order, carried to the
+ * floor (2026-09-29, the client: *"Work order does not catch packing
+ * instruction / notes captured in sales order — this guide factory team on how
+ * to pack, printed or non-printed box, whether box needs to be wrapped etc"*).
+ *
+ * **Read, never copied.** Stamping it onto the job when the job is raised
+ * would be a second copy, stale the moment somebody corrects the order — and
+ * `syncOrderJobs` only touches a job nothing has happened on, so the
+ * correction would reach some jobs and not others, which is worse than not
+ * carrying it at all. Joined here, a remark edited this morning is on the
+ * floor's screen this morning, and `work_orders.notes` stays what the floor
+ * writes for itself.
+ */
 const listSql = `
   SELECT w.*, o.number AS order_number, o.customer_id,
+         o.remarks AS order_remarks,
          c.name AS customer_name,
          p.name AS product_name,
          COALESCE(NULLIF(oi.color, ''), p.color, '') AS color,
