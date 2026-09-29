@@ -165,6 +165,58 @@ export function syncOrderJobs(orderId: number, userId: number | null, opts: { ra
   return out;
 }
 
+/** dd-mm-yyyy, the way every date this app prints reads. */
+const day = (iso: string) => {
+  const [y, m, d] = iso.split('-');
+  return d ? `${d}-${m}-${y}` : iso;
+};
+
+/**
+ * The original plan is recorded once and then does not change (2026-09-29, the
+ * client: *"Original planned start and end date cannot be edited after
+ * input."*).
+ *
+ * `planned_start`/`planned_end` and `revised_start`/`revised_end` are two
+ * facts, not one field with a spare — what was promised, and what is now
+ * expected — and the whole value of the pair is that the **slip** is visible.
+ * Overwriting the original loses it silently: the row goes on looking like a
+ * job that was always going to run on that date, which is the one thing the
+ * second column exists to prevent. So the first date typed is the record, and
+ * every date after it is a revision.
+ *
+ * The fifth guard of this shape — after `lockError`, `qcBlockError`,
+ * `incompleteError` and `renameError` — a function returning the sentence to
+ * refuse with, so the rule is testable without the HTTP harness this codebase
+ * does not have, and so the screen can explain it rather than keep a copy of
+ * it.
+ *
+ * **Per field, not per job.** A job given a start and no finish has not
+ * recorded its original finish yet, so the first finish typed is still an
+ * input rather than a revision — reading the pair as one would leave that
+ * column permanently blank with a revision beside it and nothing to measure it
+ * against.
+ *
+ * Three things it deliberately does not refuse. A **blank** column is the
+ * input this is about, which is every job the order raises. **Saying the same
+ * date again** is not a change, so an ordinary save that sends the whole row
+ * back — which `PUT /work-orders/:id` does — is never refused. And the
+ * **revised** pair is not guarded at all: a plan that moves twice is ordinary,
+ * and that is the column this points people at.
+ */
+export function plannedDateError(
+  job: { number: string; planned_start?: string | null; planned_end?: string | null },
+  patch: Record<string, unknown>,
+): string | null {
+  for (const [field, word] of [['planned_start', 'start'], ['planned_end', 'finish']] as const) {
+    if (!(field in patch)) continue;
+    const was = String(job[field] ?? '').trim();
+    if (!was) continue;
+    if (String(patch[field] ?? '').trim() === was) continue;
+    return `The original planned ${word} for ${job.number} was recorded as ${day(was)} and does not change — it is what a revision is measured against. Set the revised ${word} instead.`;
+  }
+  return null;
+}
+
 /**
  * The one-off for the book as it stands: every open order with **no** job at
  * all gets its jobs. Runs on boot, and is idempotent by construction — an

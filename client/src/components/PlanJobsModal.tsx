@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { WorkOrder } from '../types';
 import { Button, Input, Field, Modal, ErrorText } from './ui';
+import { jobDateField, type JobDateField } from '../lib/jobDates';
 
 /**
  * Plan a ticked set of jobs in one press: when — and release.
@@ -18,6 +19,13 @@ import { Button, Input, Field, Modal, ErrorText } from './ui';
  * Plant, machine, mould and process left this dialog on 2026-09-25 with the
  * job page's own four, at the client's word. `POST /work-orders/plan` still
  * accepts them — nothing on screen sends them.
+ *
+ * **It sends a patch per job** since 2026-09-29, not one shared set of fields,
+ * because the original plan is recorded once (`plannedDateError`): a job that
+ * already has a planned start takes this date as a **revision**, and one that
+ * does not takes it as its first plan. Routed by `jobDateField`, the same rule
+ * the list's own date boxes use — so the two controls cannot come to disagree
+ * about which column a date lands in, and neither can produce the refusal.
  */
 
 type Draft = { planned_start?: string; planned_end?: string };
@@ -34,7 +42,15 @@ export default function PlanJobsModal({ jobs, onClose, onPlanned }: {
   const touch = (patch: Draft) => setDraft((d) => ({ ...d, ...patch }));
 
   const plan = useMutation({
-    mutationFn: () => api.post('/api/work-orders/plan', { ids: jobs.map((j) => j.id), ...draft, release }),
+    mutationFn: () => api.post('/api/work-orders/plan', {
+      jobs: jobs.map((j) => {
+        const patch: Partial<Record<JobDateField, string>> & { id: number } = { id: j.id };
+        if (draft.planned_start !== undefined) patch[jobDateField(j, false)] = draft.planned_start;
+        if (draft.planned_end !== undefined) patch[jobDateField(j, true)] = draft.planned_end;
+        return patch;
+      }),
+      release,
+    }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['work-orders'] });
       queryClient.invalidateQueries({ queryKey: ['orders'] });
@@ -45,6 +61,10 @@ export default function PlanJobsModal({ jobs, onClose, onPlanned }: {
 
   const nothing = Object.keys(draft).length === 0 && !release;
   const stillPlanned = jobs.filter((j) => j.status === 'planned').length;
+  // Jobs whose original is already on file, so what is typed here revises it.
+  const revising = jobs.filter((j) =>
+    (draft.planned_start !== undefined && j.planned_start) || (draft.planned_end !== undefined && j.planned_end)
+  ).length;
 
   return (
     <Modal title={`Plan ${jobs.length} job${jobs.length === 1 ? '' : 's'}`} onClose={onClose}>
@@ -71,6 +91,13 @@ export default function PlanJobsModal({ jobs, onClose, onPlanned }: {
       <p className="mt-2 text-xs text-slate-400">
         A date not touched is not changed.
       </p>
+      {/* Said before the press, not discovered after it: the original plan is
+          what a revision is measured against, so it is never overwritten. */}
+      {revising > 0 && (
+        <p className="mt-1 text-xs text-amber-700">
+          {revising} of these {revising === 1 ? 'has' : 'have'} an original plan on file already, so this is recorded as {revising === 1 ? 'its revised date' : 'their revised dates'} — the original does not change.
+        </p>
+      )}
       <ErrorText error={plan.error} />
       <div className="mt-4 flex justify-end gap-2">
         <Button variant="secondary" onClick={onClose}>Cancel</Button>

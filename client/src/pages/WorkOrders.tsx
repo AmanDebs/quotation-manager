@@ -10,6 +10,7 @@ import { fmtQty, fmtDate } from '../lib/format';
 import { useUrlFilter } from '../lib/useUrlFilter';
 import { usePagedList, PAGE_SIZE } from '../lib/usePagedList';
 import { useUnsavedChanges } from '../lib/useUnsavedChanges';
+import { jobDateField, jobDateValue, jobDateIsRevision, type JobDateField } from '../lib/jobDates';
 
 /**
  * Every job across every order — the shop floor's own view.
@@ -63,20 +64,8 @@ export const workOrderStatusStyle: Record<WorkOrderStatus, string> = {
 
 const todayIso = new Date().toISOString().slice(0, 10);
 
-/**
- * Which pair of columns a date box on this page writes to.
- *
- * Every reader of a job's date takes **the one that stands** — the revised one
- * where set, else the planned one (`JOB_START`/`JOB_END` on the server) — so a
- * box has to write the one it is showing, or typing over a revised date would
- * silently move the original plan instead and the row would not change. A job
- * carrying any revision is on its revised plan; every other job is on its
- * first one, which is what all 79 unplanned jobs are.
- */
-const datePair = (w: WorkOrder) => (w.revised_start || w.revised_end ? 'revised' : 'planned') as 'revised' | 'planned';
-
 /** Only what somebody typed: a field absent is left alone by the server. */
-type DatePatch = Partial<Record<'planned_start' | 'planned_end' | 'revised_start' | 'revised_end', string>>;
+type DatePatch = Partial<Record<JobDateField, string>>;
 
 export default function WorkOrdersPage() {
   // Status in the URL so the dashboard's factory card can link to one stage.
@@ -158,15 +147,23 @@ export default function WorkOrdersPage() {
   /** A job on screen, or one edited and since paged away, that release would move. */
   const toRelease = dirtyIds.filter((id) => (jobs.find((w) => w.id === id) ?? { status: '' }).status === 'planned').length;
 
-  const setDate = (w: WorkOrder, end: boolean, value: string) => setDates((d) => ({
-    ...d,
-    [w.id]: { ...d[w.id], [`${datePair(w)}_${end ? 'end' : 'start'}`]: value },
-  }));
-  /** What the box shows: what was typed, else what the job carries. */
-  const dateValue = (w: WorkOrder, end: boolean) => {
-    const key = `${datePair(w)}_${end ? 'end' : 'start'}` as keyof DatePatch;
-    return dates[w.id]?.[key] ?? (w[key] ?? '');
-  };
+  /*
+   * Typing the date that already stands is not a change, so it is dropped
+   * rather than sent — otherwise picking the same day from the calendar would
+   * write a "revision" identical to the plan, and the row would wear a `rev.`
+   * marker that records nothing.
+   */
+  const setDate = (w: WorkOrder, end: boolean, value: string) => setDates((d) => {
+    const field = jobDateField(w, end);
+    const row = { ...d[w.id] };
+    if (value === jobDateValue(w, end)) delete row[field]; else row[field] = value;
+    if (Object.keys(row).length) return { ...d, [w.id]: row };
+    const { [w.id]: _gone, ...rest } = d;
+    return rest;
+  });
+  /** What the box shows: what was typed, else the date that stands. */
+  const dateValue = (w: WorkOrder, end: boolean) =>
+    dates[w.id]?.[jobDateField(w, end)] ?? jobDateValue(w, end);
 
   // Over every matching job, not the page on screen — see `summary` in
   // routes/workOrders.ts. Adding up the rows to hand would answer a different
@@ -349,7 +346,9 @@ export default function WorkOrdersPage() {
                             className={`w-[8.25rem] ${dates[w.id] ? 'border-brand-400 bg-brand-50/60' : ''}`}
                             value={dateValue(w, false)}
                             onChange={(e) => setDate(w, false, e.target.value)}
-                            title={`Start — ${datePair(w) === 'revised' ? 'the revised plan' : 'the plan'} for ${w.number}`}
+                            title={jobDateIsRevision(w, false)
+                              ? `${w.number} — the original planned start was recorded as ${fmtDate(w.planned_start)} and does not change, so this moves the revised start`
+                              : `${w.number} — the original planned start, recorded once`}
                           />
                           <span className="text-slate-300">→</span>
                           <Input
@@ -357,7 +356,9 @@ export default function WorkOrdersPage() {
                             className={`w-[8.25rem] ${dates[w.id] ? 'border-brand-400 bg-brand-50/60' : ''}`}
                             value={dateValue(w, true)}
                             onChange={(e) => setDate(w, true, e.target.value)}
-                            title={`Finish — ${datePair(w) === 'revised' ? 'the revised plan' : 'the plan'} for ${w.number}`}
+                            title={jobDateIsRevision(w, true)
+                              ? `${w.number} — the original planned finish was recorded as ${fmtDate(w.planned_end)} and does not change, so this moves the revised finish`
+                              : `${w.number} — the original planned finish, recorded once`}
                           />
                         </div>
                       ) : (

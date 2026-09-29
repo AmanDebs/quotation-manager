@@ -258,17 +258,42 @@ export default function WorkOrderDetailPage() {
               <Field label="Product">
                 <div className="px-0.5 py-1.5 text-sm text-slate-700">{job.product_name || '—'}</div>
               </Field>
+              {/*
+                The original plan is recorded once and then fixed — the server
+                refuses to move it (`plannedDateError`), and the whole value of
+                the pair is that the slip stays visible. So the box takes the
+                first date and is settled afterwards, rather than staying open
+                and producing a 409 on Save. The Revised pair below is where a
+                date that has moved goes.
+              */}
               <Field label="Planned start">
-                <Input type="date" disabled={!mayEdit} value={draft.planned_start} onChange={(e) => set({ planned_start: e.target.value })} />
+                <Input
+                  type="date"
+                  disabled={!mayEdit || !!job.planned_start}
+                  title={job.planned_start ? 'Recorded once, and what a revision is measured against — set the revised start instead' : undefined}
+                  value={draft.planned_start}
+                  onChange={(e) => set({ planned_start: e.target.value })}
+                />
               </Field>
               <Field label="Planned finish">
-                <Input type="date" disabled={!mayEdit} value={draft.planned_end} onChange={(e) => set({ planned_end: e.target.value })} />
+                <Input
+                  type="date"
+                  disabled={!mayEdit || !!job.planned_end}
+                  title={job.planned_end ? 'Recorded once, and what a revision is measured against — set the revised finish instead' : undefined}
+                  value={draft.planned_end}
+                  onChange={(e) => set({ planned_end: e.target.value })}
+                />
               </Field>
               {/* When it is actually going to run. The planned pair beside it
                   is left exactly as it was — what was promised and what is now
                   expected are two facts, and overwriting the first would lose
                   the slip; everything that reads a job's date takes the one
                   that stands (`JOB_START`/`JOB_END` on the server). */}
+              {(job.planned_start || job.planned_end) && (
+                <p className="text-xs text-slate-400 sm:col-span-2 lg:col-span-4">
+                  The original plan is recorded once and does not change — a date that has moved goes in Revised.
+                </p>
+              )}
               <Field label="Revised start">
                 <Input type="date" disabled={!mayEdit} value={draft.revised_start} onChange={(e) => set({ revised_start: e.target.value })} />
               </Field>

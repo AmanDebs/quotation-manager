@@ -7,7 +7,7 @@ import { progressFor, progressForMany, LIVE_OK } from '../services/production.js
 import { materialCostByWorkOrder } from '../services/costing.js';
 import { paramsFor, checksForWorkOrder, summaryForWorkOrder, specOwner, RESULT_FAILED_SQL } from '../services/qc.js';
 import { requirementForJob, snapshotRecipe, recipeDiffers } from '../services/recipe.js';
-import { insertJob, type OrderRef } from '../services/orderJobs.js';
+import { insertJob, plannedDateError, type OrderRef } from '../services/orderJobs.js';
 import { syncOrderStatus } from '../services/orderStatus.js';
 import { requirePermission, type AuthedRequest } from '../middleware/auth.js';
 import { scopeClause, canAccessCustomer } from '../middleware/scope.js';
@@ -390,6 +390,14 @@ workOrdersRouter.post('/plan', requirePermission('work_order', 'full'), (req: Au
     });
   }
 
+  // The original plan is recorded once. Checked before anything is written, so
+  // one refused row leaves the whole press unwritten like the closed-job check
+  // above it.
+  for (let i = 0; i < rows.length; i++) {
+    const err = plannedDateError(jobs[i] as { number: string; planned_start?: string; planned_end?: string }, rows[i].patch);
+    if (err) return res.status(409).json({ error: err });
+  }
+
   // Only what was sent is written, per job. `undefined` means "not in the
   // patch" and is left alone; blank clears.
   const patches = rows.map(({ id, patch }) => {
@@ -468,6 +476,10 @@ workOrdersRouter.put('/:id', requirePermission('work_order', 'full'), (req: Auth
   if (!(Number(v('qty_planned', 0)) > 0)) {
     return res.status(400).json({ error: 'Planned quantity must be more than zero' });
   }
+  // A save that sends the row back unchanged is never refused — the guard asks
+  // whether the body *moves* an original that was already recorded.
+  const fixed = plannedDateError(existing as { number: string; planned_start?: string; planned_end?: string }, body);
+  if (fixed) return res.status(409).json({ error: fixed });
   // The order a job belongs to is not editable: moving it would silently move
   // the production figures onto another customer's line.
   db.prepare(

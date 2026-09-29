@@ -2,7 +2,7 @@ import './helpers/scratch.js';
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { db } from '../src/db/connection.js';
-import { syncOrderJobs, raiseJobsForOpenOrders } from '../src/services/orderJobs.js';
+import { syncOrderJobs, raiseJobsForOpenOrders, plannedDateError } from '../src/services/orderJobs.js';
 import { makeCustomer } from './helpers/factory.js';
 
 /**
@@ -191,5 +191,51 @@ describe('the book as it stands', () => {
     assert.equal(live(declined).length, 0, 'a deliberately cancelled job was re-raised on boot');
     raiseJobsForOpenOrders();
     assert.equal(jobs(fresh).length, 1, 'a second boot raised again');
+  });
+});
+
+/**
+ * The original plan is recorded once. Most of these are about what it must
+ * **not** refuse: a guard on a date that fires wrongly stops the floor being
+ * planned at all.
+ */
+describe('the original planned dates do not change', () => {
+  const job = { number: 'WO/26-27/001', planned_start: '2026-10-01', planned_end: '2026-10-06' };
+  const fresh = { number: 'WO/26-27/002', planned_start: '', planned_end: '' };
+
+  test('a blank column takes the first date typed — which is every job the order raises', () => {
+    assert.equal(plannedDateError(fresh, { planned_start: '2026-10-01', planned_end: '2026-10-06' }), null);
+  });
+
+  test('moving one that was recorded is refused, and says where to put it', () => {
+    const err = plannedDateError(job, { planned_start: '2026-10-09' });
+    assert.match(String(err), /original planned start for WO\/26-27\/001 was recorded as 01-10-2026/);
+    assert.match(String(err), /Set the revised start instead/);
+  });
+
+  test('clearing one is a change too', () => {
+    assert.ok(plannedDateError(job, { planned_end: '' }));
+  });
+
+  test('sending the same date back is not a change — an ordinary save is never refused', () => {
+    assert.equal(plannedDateError(job, { planned_start: '2026-10-01', planned_end: '2026-10-06' }), null);
+  });
+
+  test('a field the body does not mention is not judged', () => {
+    assert.equal(plannedDateError(job, { revised_start: '2026-11-02', notes: 'moved' }), null);
+  });
+
+  test('the revised pair is never guarded — a plan that moves twice is ordinary', () => {
+    assert.equal(plannedDateError(job, { revised_start: '2026-11-02', revised_end: '2026-11-09' }), null);
+  });
+
+  test('per field: a job with a start and no finish still records its first finish', () => {
+    const half = { number: 'WO/26-27/003', planned_start: '2026-10-01', planned_end: '' };
+    assert.equal(plannedDateError(half, { planned_end: '2026-10-06' }), null);
+    assert.ok(plannedDateError(half, { planned_start: '2026-10-02' }), 'the start it already has moved');
+  });
+
+  test('the finish is named as the finish, not as the start', () => {
+    assert.match(String(plannedDateError(job, { planned_end: '2026-10-09' })), /original planned finish/);
   });
 });
