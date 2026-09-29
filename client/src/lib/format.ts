@@ -79,6 +79,26 @@ export function addDays(iso: string, days: number): string {
 }
 
 /**
+ * Whole days from one ISO date to another, signed — positive where the second
+ * is later.
+ *
+ * Parsed into digits and differenced in UTC, `addDays`' own rule: `new
+ * Date('2026-10-02')` reads as UTC midnight and is then asked about locally,
+ * which puts the answer out by one on either side of Greenwich. Null when
+ * either date is missing or unreadable, so a caller shows nothing rather than
+ * a confident zero.
+ */
+export function daysBetween(from: string, to: string): number | null {
+  const at = (iso: string) => {
+    const [y, m, d] = String(iso ?? '').split('-').map(Number);
+    return y && m && d ? Date.UTC(y, m - 1, d) : null;
+  };
+  const a = at(from);
+  const b = at(to);
+  return a === null || b === null ? null : Math.round((b - a) / 86400000);
+}
+
+/**
  * How long a new quotation or proforma is offered for, unless somebody says
  * otherwise. Asked for on 2026-09-06; it is a **default, not a rule** — the
  * field is on the form and editable before the document is ever saved, and

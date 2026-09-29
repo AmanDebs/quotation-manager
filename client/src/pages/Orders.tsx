@@ -5,7 +5,7 @@ import { api } from '../api/client';
 import type { Order, OrderStatus, OrderLine, ProductDemand, LineState } from '../types';
 import { Button, Select, Input, PageHeader, EmptyState, Card, ExportTabs, ErrorText, Pagination, DownloadButton, SegmentedTabs, TH_CLASS, MultiSelectFilter } from '../components/ui';
 import { useCompanies } from '../components/CompanySelect';
-import { fmtDate, fmtMoney, fmtQty, today } from '../lib/format';
+import { fmtDate, fmtMoney, fmtQty, today, daysBetween } from '../lib/format';
 import { usePagedList, PAGE_SIZE, type PagedList } from '../lib/usePagedList';
 import { useCan } from '../App';
 import { Icon } from '../components/icons';
@@ -525,6 +525,21 @@ export default function OrdersPage() {
  * printed, with an amber *rev.* and what it replaced on hover — the shape the
  * Work Orders list uses for the same pair.
  */
+/**
+ * A line's start or finish: the date that stands, and the plan it replaced.
+ *
+ * The original was on hover behind a `rev.` marker (2026-09-29, the client:
+ * *"Sales order should show planned date too .. to identify delays"*), and
+ * hover is not somewhere a delay can be **spotted** — it has to be found one
+ * row at a time, which is the opposite of what reading a book of orders is
+ * for. Both dates are on the page now, and the **slip itself** with them: the
+ * question is never *what was the plan* but *by how much has it moved*, and
+ * making the reader subtract two dates in their head is how a week's delay
+ * goes unnoticed in a column of them.
+ *
+ * The second line is drawn **only where the date has actually moved**, so an
+ * unrevised book reads exactly as it did and stays one line a row.
+ */
 function JobDateCell({ value, planned, overdue }: {
   value: string | null;
   planned: string | null;
@@ -532,13 +547,22 @@ function JobDateCell({ value, planned, overdue }: {
 }) {
   if (!value) return <span className="text-slate-300">—</span>;
   const revised = !!planned && planned !== value;
+  // Signed: a job pulled forward is not a delay, and saying so is worth as
+  // much as naming one.
+  const slip = revised ? daysBetween(planned, value) : null;
   return (
-    <span className={overdue ? 'font-semibold text-red-600' : 'text-slate-600'}>
-      {fmtDate(value)}{overdue && ' ⚠'}
+    <div className={overdue ? 'font-semibold text-red-600' : 'text-slate-600'}>
+      <div className="whitespace-nowrap">{fmtDate(value)}{overdue && ' ⚠'}</div>
       {revised && (
-        <span className="ml-1 font-normal text-amber-600" title={`Planned ${fmtDate(planned)}`}>rev.</span>
+        <div
+          className={`whitespace-nowrap text-xs font-normal ${slip && slip > 0 ? 'text-amber-700' : 'text-slate-400'}`}
+          title={`Originally planned for ${fmtDate(planned)}`}
+        >
+          was {fmtDate(planned)}
+          {slip ? ` · ${slip > 0 ? '+' : '−'}${Math.abs(slip)}d` : ''}
+        </div>
       )}
-    </span>
+    </div>
   );
 }
 
