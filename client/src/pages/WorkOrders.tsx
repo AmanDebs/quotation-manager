@@ -266,6 +266,7 @@ export default function WorkOrdersPage() {
                 )}
                 <th className="pb-2 pr-3" rowSpan={2}>Job</th>
                 <th className="pb-2 pr-3" rowSpan={2}>Item</th>
+                <th className="pb-2 pr-3" rowSpan={2}>Colour</th>
                 {/*
                   Both pairs are drawn (2026-09-29, the client with one pair and
                   a `rev.` marker in front of them: *"This page should show both
@@ -339,7 +340,7 @@ export default function WorkOrdersPage() {
                           )}
                         </td>
                       )}
-                      <td className="whitespace-nowrap py-1.5 pr-3 font-semibold" colSpan={2}>
+                      <td className="whitespace-nowrap py-1.5 pr-3 font-semibold" colSpan={3}>
                         <Link to={`/orders/${w.order_id}`} className="text-brand-700 hover:underline">{w.order_number}</Link>
                         <span className="ml-2 font-normal text-slate-600">{w.customer_name}</span>
                       </td>
@@ -374,6 +375,11 @@ export default function WorkOrdersPage() {
                       <div className="max-w-[15rem] truncate" title={w.description || w.product_name || undefined}>
                         {w.description || w.product_name || '—'}
                       </div>
+                    </td>
+                    {/* One word on this book, so it does not wrap; a blank
+                        recedes rather than reading as a fault. */}
+                    <td className="whitespace-nowrap py-1.5 pr-3 text-xs text-slate-600">
+                      {w.color?.trim() || <span className="text-slate-300">—</span>}
                     </td>
                     {/*
                       Four cells, and **exactly one box per date**: `jobDateField`

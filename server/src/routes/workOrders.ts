@@ -30,10 +30,35 @@ export const workOrdersRouter = Router();
  * none and their PDFs are never watermarked.
  */
 
+/*
+ * The colour of the line a job is against (2026-09-29, the client: *"Add colour
+ * column"*).
+ *
+ * A work order has no colour of its own and should not grow one: what is being
+ * made is the order line, and its colour is the one on the quotation, the
+ * proforma, the order and the invoice — mandatory on all four since
+ * 2026-09-17. Reached by **position**, the chain's own index rule that
+ * `work_orders.order_line` already is, and by the same `ROW_NUMBER()` walk
+ * `orderLines.ts` uses rather than by reading `sort_order` directly, so
+ * positions count charge lines exactly as they do everywhere else.
+ *
+ * It falls through to the catalogue's own colour where the line states none —
+ * a product is identified by name **and** colour, so the catalogue is the
+ * honest second answer; a custom line naming no product has only the line's,
+ * which is why the line is asked first.
+ */
+const LINE_AT_POSITION = `
+  LEFT JOIN (
+    SELECT order_id, color,
+           ROW_NUMBER() OVER (PARTITION BY order_id ORDER BY sort_order, id) - 1 AS pos
+      FROM order_items
+  ) oi ON oi.order_id = w.order_id AND oi.pos = w.order_line`;
+
 const listSql = `
   SELECT w.*, o.number AS order_number, o.customer_id,
          c.name AS customer_name,
          p.name AS product_name,
+         COALESCE(NULLIF(oi.color, ''), p.color, '') AS color,
          l.name AS location_name, m.name AS machine_name, md.name AS mould_name, pr.name AS process_name,
          u.name AS created_by_name
   FROM work_orders w
@@ -44,7 +69,8 @@ const listSql = `
   LEFT JOIN machines m ON m.id = w.machine_id
   LEFT JOIN moulds md ON md.id = w.mould_id
   LEFT JOIN processes pr ON pr.id = w.process_id
-  LEFT JOIN users u ON u.id = w.created_by`;
+  LEFT JOIN users u ON u.id = w.created_by
+  ${LINE_AT_POSITION}`;
 
 const fields = [
   'order_id', 'order_line', 'product_id', 'description', 'qty_planned',

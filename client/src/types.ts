@@ -384,6 +384,11 @@ export interface WorkOrder {
   notes: string;
   order_number?: string; customer_id?: number; customer_name?: string;
   product_name?: string | null;
+  /**
+   * The colour of the order line this job is against, falling back to the
+   * catalogue's. A job has none of its own: what is being made is the line.
+   */
+  color?: string | null;
   location_name?: string | null; machine_name?: string | null; mould_name?: string | null;
   process_name?: string | null;
   created_by_name?: string | null;
