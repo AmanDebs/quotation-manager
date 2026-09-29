@@ -67,6 +67,24 @@ const todayIso = new Date().toISOString().slice(0, 10);
 /** Only what somebody typed: a field absent is left alone by the server. */
 type DatePatch = Partial<Record<JobDateField, string>>;
 
+/*
+ * The four date cells share one set of metrics (2026-09-29, the client:
+ * *"Make it cleaner and beautify it"*).
+ *
+ * Three different things were being drawn under four headings — a bordered
+ * box, a line of bare text and an em-dash — each with its own padding, so the
+ * dates in a column did not line up with each other and a row's height
+ * depended on which of its columns happened to be editable. A settled date is
+ * drawn in the **same box the input occupies**, without the border or the
+ * background: the column reads as one run of dates, and the only thing the
+ * border says is *this one you can change*.
+ */
+const DATE_BOX = 'inline-flex h-[30px] w-[7.5rem] items-center px-2.5 tabular-nums';
+/** The native picker glyph at full strength is the loudest thing in the row. */
+const DATE_INPUT = 'w-[7.5rem] tabular-nums [&::-webkit-calendar-picker-indicator]:opacity-40 [&::-webkit-calendar-picker-indicator]:hover:opacity-70';
+/** A group of two date columns opens on a rule; the pair inside shares it. */
+const GROUP_EDGE = 'border-l border-slate-200';
+
 export default function WorkOrdersPage() {
   // Status in the URL so the dashboard's factory card can link to one stage.
   const [status, setStatus] = useUrlFilter('status');
@@ -257,19 +275,23 @@ export default function WorkOrdersPage() {
                   promised, and by how much it has moved. The original was on
                   hover, which is not somewhere a column can be read from.
                 */}
-                <th className="border-l border-slate-100 pb-1 pl-3 pr-3 text-center" colSpan={2}>Planned</th>
-                <th className="border-l border-slate-100 pb-1 pl-3 pr-3 text-center" colSpan={2}>Revised</th>
-                <th className="border-l border-slate-100 pb-2 pl-3 pr-3 text-right" rowSpan={2}>Pcs</th>
+                <th className={`${GROUP_EDGE} pb-1 pl-3 pr-3`} colSpan={2}>Planned</th>
+                <th className={`${GROUP_EDGE} pb-1 pl-3 pr-3`} colSpan={2}>Revised</th>
+                <th className={`${GROUP_EDGE} pb-2 pl-3 pr-3 text-right`} rowSpan={2}>Pcs</th>
                 <th className="pb-2 pr-3 text-right" rowSpan={2}>Made</th>
                 <th className="pb-2 pr-3" rowSpan={2}>Status</th>
               </tr>
-              {/* The sub-row carries the rule; the banner above it carries none,
-                  or the heading reads as two stacked tables. */}
+              {/*
+                The sub-row carries the rule and the banner above it carries
+                none, or the heading reads as two stacked tables. Both are
+                left-aligned over cells whose dates are left-aligned — a banner
+                centred over its pair floats away from the column it names.
+              */}
               <tr className={`${CAPTION_CLASS} border-b border-slate-200 text-left font-normal text-slate-400`}>
-                <th className="border-l border-slate-100 pb-2 pl-3 pr-3">Start</th>
-                <th className="pb-2 pr-3">Finish</th>
-                <th className="border-l border-slate-100 pb-2 pl-3 pr-3">Start</th>
-                <th className="pb-2 pr-3">Finish</th>
+                <th className={`${GROUP_EDGE} pb-2 pl-5 pr-3`}>Start</th>
+                <th className="pb-2 pl-2.5 pr-3">Finish</th>
+                <th className={`${GROUP_EDGE} pb-2 pl-5 pr-3`}>Start</th>
+                <th className="pb-2 pl-2.5 pr-3">Finish</th>
               </tr>
             </thead>
             <tbody>
@@ -321,10 +343,10 @@ export default function WorkOrdersPage() {
                         <Link to={`/orders/${w.order_id}`} className="text-brand-700 hover:underline">{w.order_number}</Link>
                         <span className="ml-2 font-normal text-slate-600">{w.customer_name}</span>
                       </td>
-                      <td className="py-1.5 pl-3 pr-3 text-xs text-slate-500" colSpan={4}>
+                      <td className={`${GROUP_EDGE} py-1.5 pl-5 pr-3 text-xs text-slate-500`} colSpan={4}>
                         {group.length} job{group.length === 1 ? '' : 's'}
                       </td>
-                      <td className="py-1.5 pl-3 pr-3 text-right text-xs tabular-nums text-slate-500">{fmtQty(groupPlanned)}</td>
+                      <td className={`${GROUP_EDGE} py-1.5 pl-3 pr-3 text-right text-xs tabular-nums text-slate-500`}>{fmtQty(groupPlanned)}</td>
                       <td className="py-1.5 pr-3 text-right text-xs tabular-nums text-slate-500">{fmtQty(groupMade)}</td>
                       <td />
                     </tr>
@@ -344,7 +366,15 @@ export default function WorkOrdersPage() {
                     <td className="whitespace-nowrap py-2 pl-4 pr-3 font-medium">
                       <Link to={`/work-orders/${w.id}`} className="text-brand-600 hover:underline">{w.number}</Link>
                     </td>
-                    <td className="py-2 pr-3">{w.description || w.product_name || '—'}</td>
+                    {/* One line, with the whole wording on hover — the rule the
+                        order book's own lines view follows about its customer
+                        column, and for the same reason: a name that wraps makes
+                        every row in the table two lines tall to serve one. */}
+                    <td className="py-1.5 pr-3">
+                      <div className="max-w-[15rem] truncate" title={w.description || w.product_name || undefined}>
+                        {w.description || w.product_name || '—'}
+                      </div>
+                    </td>
                     {/*
                       Four cells, and **exactly one box per date**: `jobDateField`
                       says which column a date may go to — planned while that
@@ -362,71 +392,71 @@ export default function WorkOrdersPage() {
                       A closed job keeps plain text throughout — the server
                       refuses to plan a completed or cancelled one by name.
                     */}
-                    {([false, true] as const).map((isEnd) => {
-                      const field = jobDateColumn(false, isEnd);
-                      const editable = mayPlan && plannable(w) && !jobDateIsRevision(w, isEnd);
+                    {/*
+                      One renderer for all four, which is what makes the columns
+                      line up: the box, the settled date and the em-dash occupy
+                      the same shape, so a row is one height whichever of its
+                      four cells happen to be editable.
+                    */}
+                    {([[false, false], [false, true], [true, false], [true, true]] as const).map(([revised, isEnd]) => {
+                      const field = jobDateColumn(revised, isEnd);
+                      const editable = mayPlan && plannable(w) && jobDateIsRevision(w, isEnd) === revised;
                       const own = jobDateOf(w, field);
-                      return (
-                        <td key={`p${isEnd}`} className={`whitespace-nowrap py-2 pr-3 text-xs text-slate-500 ${isEnd ? '' : 'border-l border-slate-100 pl-3'}`}>
-                          {editable ? (
-                            <Input
-                              type="date"
-                              className={`w-[8rem] ${dates[w.id]?.[field] ? 'border-brand-400 bg-brand-50/60' : ''}`}
-                              value={dateValue(w, field)}
-                              onChange={(e) => setDate(w, field, e.target.value)}
-                              title={`${w.number} — the original planned ${isEnd ? 'finish' : 'start'}, recorded once`}
-                            />
-                          ) : own ? (
-                            <span title="Recorded once, and what the revision beside it is measured against">{fmtDate(own)}</span>
-                          ) : (
-                            <span className="text-slate-300">—</span>
-                          )}
-                        </td>
-                      );
-                    })}
-                    {([false, true] as const).map((isEnd) => {
-                      const field = jobDateColumn(true, isEnd);
-                      const editable = mayPlan && plannable(w) && jobDateIsRevision(w, isEnd);
-                      const own = jobDateOf(w, field);
+                      const word = isEnd ? 'finish' : 'start';
                       /*
                        * Late is judged on the finish that stands and drawn on the
                        * cell holding it, so a plan that was moved is not flagged
                        * on a date nobody is working to.
                        */
-                      const flag = late && isEnd && !!w.revised_end;
+                      const flag = late && isEnd && (revised ? !!w.revised_end : !w.revised_end);
                       return (
-                        <td key={`r${isEnd}`} className={`whitespace-nowrap py-2 pr-3 text-xs ${flag ? 'font-medium text-red-600' : 'text-slate-500'} ${isEnd ? '' : 'border-l border-slate-100 pl-3'}`}>
+                        <td
+                          key={field}
+                          className={`whitespace-nowrap py-1.5 pr-3 text-xs ${flag ? 'font-medium text-red-600' : 'text-slate-600'} ${isEnd ? '' : `${GROUP_EDGE} pl-2`}`}
+                        >
                           {editable ? (
                             <Input
                               type="date"
-                              className={`w-[8rem] ${dates[w.id]?.[field] ? 'border-brand-400 bg-brand-50/60' : ''}`}
+                              className={`${DATE_INPUT} ${dates[w.id]?.[field] ? 'border-brand-400 bg-brand-50/60' : ''}`}
                               value={dateValue(w, field)}
                               onChange={(e) => setDate(w, field, e.target.value)}
-                              title={`${w.number} — the revised ${isEnd ? 'finish' : 'start'}; the original stays as it was recorded`}
+                              title={revised
+                                ? `${w.number} — the revised ${word}; the original stays as it was recorded`
+                                : `${w.number} — the original planned ${word}, recorded once`}
                             />
                           ) : own ? (
-                            <span>{fmtDate(own)}</span>
+                            <span
+                              className={DATE_BOX}
+                              title={revised ? undefined : 'Recorded once, and what the revision beside it is measured against'}
+                            >
+                              {fmtDate(own)}
+                            </span>
                           ) : (
                             <span
-                              className="text-slate-300"
-                              title={(isEnd ? w.planned_end : w.planned_start) ? 'Not revised' : 'Nothing planned yet to revise'}
+                              className={`${DATE_BOX} text-slate-300`}
+                              title={revised
+                                ? (isEnd ? w.planned_end : w.planned_start) ? 'Not revised' : 'Nothing planned yet to revise'
+                                : undefined}
                             >—</span>
                           )}
-                          {flag && <div>overdue</div>}
+                          {flag && <span className="ml-1">overdue</span>}
                         </td>
                       );
                     })}
-                    <td className="border-l border-slate-100 py-2 pl-3 pr-3 text-right tabular-nums">{fmtQty(w.qty_planned)}</td>
-                    <td className="py-2 pr-3 text-right tabular-nums">
+                    <td className={`${GROUP_EDGE} py-1.5 pl-3 pr-3 text-right tabular-nums`}>{fmtQty(w.qty_planned)}</td>
+                    {/* The percentage sits beside the figure rather than under
+                        it: stacked, it made every one of eighty rows two lines
+                        tall to say something one word wide. */}
+                    <td className="whitespace-nowrap py-1.5 pr-3 text-right tabular-nums">
                       {fmtQty(w.progress?.produced ?? 0)}
                       {w.qty_planned > 0 && (() => {
                         const pct = Math.round(((w.progress?.produced ?? 0) / w.qty_planned) * 100);
                         // Past the plan is a fact worth a colour: the figure is
                         // right, and it is the plan that is now wrong.
                         return (
-                          <div className={`text-xs ${pct > 100 ? 'font-medium text-amber-700' : 'text-slate-400'}`} title={pct > 100 ? 'More made than planned — the plan is behind the floor' : undefined}>
+                          <span className={`ml-1.5 text-xs ${pct > 100 ? 'font-medium text-amber-700' : 'text-slate-400'}`} title={pct > 100 ? 'More made than planned — the plan is behind the floor' : undefined}>
                             {pct}%{pct > 100 ? ' over' : ''}
-                          </div>
+                          </span>
                         );
                       })()}
                     </td>
