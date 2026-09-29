@@ -1,5 +1,5 @@
 import { db } from '../db/connection.js';
-import { progressFor } from './production.js';
+import { progressFor, JOB_START } from './production.js';
 
 /**
  * What the recorded output says a job's status is.
@@ -38,6 +38,35 @@ import { progressFor } from './production.js';
  * say is that the job *is running*, and that everything planned *has been
  * made*.
  */
+
+/**
+ * A job whose start date has arrived with nobody having said whether it began
+ * (2026-09-29, the client: *"There should be confirmation process from factory
+ * on original / revised start date — whether process has started, if not
+ * revised dates to be entered"*).
+ *
+ * **The confirmation is the act, not a flag beside it.** There are exactly two
+ * honest answers and the app already records both: it started, which is the
+ * job moving to *Running* — by the first shift booked, or by somebody saying
+ * so before the shift is closed — or it did not, which is a **revised start
+ * date**. Either answer takes the job off this list by construction, so the
+ * list can never disagree with the record; a stored *"confirmed not started on
+ * the 3rd"* would be a second account of the same thing, and the revised date
+ * is the part anybody downstream actually needs.
+ *
+ * It leans on `syncJobStatus` above: booked output moves a job to *Running*,
+ * so `planned`/`released` **is** "nothing has been booked" and no second sum
+ * over the shift book is needed here. `paused` and `done` are answers already
+ * given, and `cancelled` is not a job any more.
+ *
+ * The date that stands — revised where set, else planned — which is why
+ * entering a revision is the way to answer *no*: it moves the question to the
+ * day the work is now expected. `date('now')` is UTC, so east of Greenwich a
+ * job falls due a few hours late, which is the safe direction: it is asked
+ * about once it really is due and never before.
+ */
+export const DUE_TO_START = (w: string) =>
+  `(${JOB_START(w)} <> '' AND ${JOB_START(w)} <= date('now') AND ${w}.status IN ('planned', 'released'))`;
 
 /** Forward order. `paused` and `cancelled` are deliberately absent. */
 const LADDER = ['planned', 'released', 'running', 'done'] as const;

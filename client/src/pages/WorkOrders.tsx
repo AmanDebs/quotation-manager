@@ -146,6 +146,9 @@ function DateCell({ value, editable, pending, open, onOpen, onClose, onChange, t
 export default function WorkOrdersPage() {
   // Status in the URL so the dashboard's factory card can link to one stage.
   const [status, setStatus] = useUrlFilter('status');
+  // The floor's own queue, in the URL like every other filter so it can be
+  // kept open on a second screen.
+  const [awaiting, setAwaiting] = useUrlFilter('awaiting');
   const [openOnly, setOpenOnly] = useState(true);
   const can = useCan();
   /*
@@ -194,9 +197,10 @@ export default function WorkOrdersPage() {
 
   const query = new URLSearchParams();
   if (status) query.set('status', status);
+  if (awaiting) query.set('awaiting', awaiting);
   if (openOnly && !status) query.set('open', '1');
 
-  const list = usePagedList<WorkOrder, { jobs: number; unplanned?: number; planned: number; made: number }>(['work-orders', 'all', query.toString()], `/api/work-orders?${query.toString()}`);
+  const list = usePagedList<WorkOrder, { jobs: number; unplanned?: number; awaiting?: number; planned: number; made: number }>(['work-orders', 'all', query.toString()], `/api/work-orders?${query.toString()}`);
   const jobs = list.rows;
 
   /*
@@ -274,6 +278,25 @@ export default function WorkOrdersPage() {
   // hand would shrink as you paged through it. Optional for a server not yet
   // redeployed, which simply shows no chip.
   const unplanned = summary.unplanned ?? 0;
+  // Optional, for a server not yet redeployed: no key, no chip.
+  const toConfirm = summary.awaiting ?? 0;
+
+  /*
+   * "It started." The other answer is a revised start date, which is the cell
+   * beside it — so *No* opens that box rather than recording anything of its
+   * own. Saying so before the shift is closed is a person's assertion, which is
+   * why it goes through the status route: that clears `status_before_auto`, so
+   * the job is *Running* on their word and `syncJobStatus` will not lower it
+   * when the shift book is still empty.
+   */
+  const confirmStarted = useMutation({
+    mutationFn: (jobId: number) => api.post(`/api/work-orders/${jobId}/status`, { status: 'running' }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['work-orders'] });
+      queryClient.invalidateQueries({ queryKey: ['orders'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+    },
+  });
 
   return (
     <div>
@@ -308,6 +331,24 @@ export default function WorkOrdersPage() {
             title="Show only the jobs still to plan"
           >
             {unplanned} not planned
+          </button>
+        )}
+        {/*
+          Due to start and unanswered. Red rather than the amber beside it: a
+          job nobody has confirmed is a machine that may be standing idle,
+          where a job nobody has planned is only a job nobody has planned.
+        */}
+        {toConfirm > 0 && (
+          <button
+            className={`rounded-md px-2 py-1 text-xs ring-1 ${awaiting
+              ? 'bg-red-100 text-red-800 ring-red-300'
+              : 'bg-red-50 text-red-700 ring-red-200 hover:bg-red-100'}`}
+            onClick={() => setAwaiting(awaiting ? '' : '1')}
+            title={awaiting
+              ? 'Show every job again'
+              : 'Jobs whose start date has come with nobody saying whether they started — confirm, or revise the date'}
+          >
+            {toConfirm} to confirm
           </button>
         )}
         {mayPlan && (
@@ -545,7 +586,15 @@ export default function WorkOrdersPage() {
                       return (
                         <td
                           key={field}
-                          className={`whitespace-nowrap py-1.5 pr-3 text-xs ${flag ? 'font-medium text-red-600' : 'text-slate-600'} ${isEnd ? '' : `${GROUP_EDGE} pl-2`}`}
+                          className={`whitespace-nowrap py-1.5 pr-3 text-xs ${
+                            flag ? 'font-medium text-red-600'
+                            // The date that **stands** is the one being asked about, which is
+                            // not the same cell as the one that takes the answer: a job with no
+                            // revision is due on its plan, and answering *No* opens the revised
+                            // box beside it.
+                            : (!isEnd && !!w.due_to_start && revised === !!w.revised_start) ? 'font-medium text-red-700'
+                            : 'text-slate-600'
+                          } ${isEnd ? '' : `${GROUP_EDGE} pl-2`}`}
                         >
                           <DateCell
                             value={dateValue(w, field)}
@@ -584,10 +633,39 @@ export default function WorkOrdersPage() {
                         );
                       })()}
                     </td>
-                    <td className="py-2 pr-3">
+                    <td className="py-1.5 pr-3">
                       <span className={`inline-block whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ${workOrderStatusStyle[w.status]}`}>
                         {workOrderStatusLabel(w.status)}
                       </span>
+                      {/*
+                        The confirmation, asked where the answer changes
+                        something. Two answers and no third: *Yes* runs the job,
+                        *No* opens the revised start box beside it — which is
+                        the answer, not a note about it. Drawn only on a job
+                        that is actually due, so it is a queue that empties
+                        rather than a control on every row.
+                      */}
+                      {!!w.due_to_start && mayPlan && (
+                        <div className="mt-0.5 whitespace-nowrap text-xs text-red-700">
+                          Started?{' '}
+                          <button
+                            className="rounded px-1 font-medium underline decoration-red-300 underline-offset-2 hover:bg-red-50"
+                            disabled={confirmStarted.isPending}
+                            onClick={() => confirmStarted.mutate(w.id)}
+                            title={`Mark ${w.number} as running — it started on time`}
+                          >
+                            Yes
+                          </button>
+                          <span className="text-red-300"> · </span>
+                          <button
+                            className="rounded px-1 font-medium underline decoration-red-300 underline-offset-2 hover:bg-red-50"
+                            onClick={() => setEditing(`${w.id}:${jobDateColumn(true, false)}`)}
+                            title={`Not started — give ${w.number} a revised start date`}
+                          >
+                            No
+                          </button>
+                        </div>
+                      )}
                     </td>
                   </tr>,
                 ];

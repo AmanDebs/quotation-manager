@@ -2,7 +2,7 @@ import './helpers/scratch.js';
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { db } from '../src/db/connection.js';
-import { syncJobStatus, impliedJobStatus } from '../src/services/jobStatus.js';
+import { syncJobStatus, impliedJobStatus, DUE_TO_START } from '../src/services/jobStatus.js';
 import { makeCustomer } from './helpers/factory.js';
 
 /**
@@ -169,5 +169,49 @@ describe('what it must not move', () => {
 
   test('a job that is not there is left alone', () => {
     assert.equal(syncJobStatus(999999), null);
+  });
+});
+
+/**
+ * The floor's queue: due to start, and nobody has said whether it did. SQL
+ * rather than a function, so it is asked of the database the way the list asks
+ * it — the five branches are what a wrong answer would put on or off the
+ * floor's screen.
+ */
+describe('a job due to start with no answer', () => {
+  const due = (jobId: number) => Number((db.prepare(
+    `SELECT ${DUE_TO_START('w')} AS d FROM work_orders w WHERE w.id = ?`
+  ).get(jobId) as { d: number }).d);
+
+  const dated = (start: string, status = 'released', revised = '') => {
+    const id = job(1000, status);
+    db.prepare('UPDATE work_orders SET planned_start = ?, revised_start = ? WHERE id = ?')
+      .run(start, revised, id);
+    return id;
+  };
+
+  test('a start date in the past, still only released: due', () => {
+    assert.equal(due(dated('2020-01-01')), 1);
+  });
+
+  test('a start date still to come: not yet', () => {
+    assert.equal(due(dated('2099-01-01')), 0);
+  });
+
+  test('no start date at all: never asked — silence is not a date', () => {
+    assert.equal(due(dated('')), 0);
+  });
+
+  test('already running, done, paused or cancelled: the answer has been given', () => {
+    for (const s of ['running', 'done', 'paused', 'cancelled']) {
+      assert.equal(due(dated('2020-01-01', s)), 0, `${s} was still being asked about`);
+    }
+  });
+
+  test('the revised date is what is asked about, in both directions', () => {
+    // Overdue on the plan, but moved out: no longer due.
+    assert.equal(due(dated('2020-01-01', 'released', '2099-01-01')), 0);
+    // Planned far out, revised into the past: due on the date that stands.
+    assert.equal(due(dated('2099-01-01', 'released', '2020-01-01')), 1);
   });
 });

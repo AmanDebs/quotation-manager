@@ -9,7 +9,7 @@ import { paramsFor, checksForWorkOrder, summaryForWorkOrder, specOwner, RESULT_F
 import { requirementForJob, snapshotRecipe, recipeDiffers } from '../services/recipe.js';
 import { insertJob, plannedDateError, type OrderRef } from '../services/orderJobs.js';
 import { syncOrderStatus } from '../services/orderStatus.js';
-import { syncJobStatus } from '../services/jobStatus.js';
+import { syncJobStatus, DUE_TO_START } from '../services/jobStatus.js';
 import { requirePermission, type AuthedRequest } from '../middleware/auth.js';
 import { scopeClause, canAccessCustomer } from '../middleware/scope.js';
 import { resolveCompanyId } from '../services/companies.js';
@@ -60,6 +60,7 @@ const listSql = `
          c.name AS customer_name,
          p.name AS product_name,
          COALESCE(NULLIF(oi.color, ''), p.color, '') AS color,
+         ${DUE_TO_START('w')} AS due_to_start,
          l.name AS location_name, m.name AS machine_name, md.name AS mould_name, pr.name AS process_name,
          u.name AS created_by_name
   FROM work_orders w
@@ -165,6 +166,10 @@ function jobSummary(sql: string, params: unknown[]) {
             -- Still to plan, over the whole filtered set: the chip that names
             -- the queue must not count the page in hand.
             (SELECT COUNT(*) FROM f WHERE status = 'planned') AS unplanned,
+            -- Due to start with no answer yet. Over the whole filtered set for
+            -- the reason the queue above it is: a count of the page in hand
+            -- shrinks as you page through it.
+            (SELECT COUNT(*) FROM f WHERE due_to_start = 1) AS awaiting,
             COALESCE((SELECT SUM(qty_planned) FROM f), 0) AS planned,
             COALESCE((SELECT SUM(${LIVE_OK('e')}) FROM production_entries e
                        WHERE e.work_order_id IN (SELECT id FROM f)), 0) AS made`
@@ -178,6 +183,8 @@ workOrdersRouter.get('/', requirePermission('work_order'), (req: AuthedRequest, 
   if (scope.sql) { where.push(scope.sql); params.push(...scope.params); }
   if (req.query.order_id) { where.push('w.order_id = ?'); params.push(Number(req.query.order_id)); }
   if (req.query.status) { where.push('w.status = ?'); params.push(String(req.query.status)); }
+  // The floor's own queue: due to start, and nobody has said whether it did.
+  if (req.query.awaiting === '1') where.push(DUE_TO_START('w'));
   if (req.query.machine_id) { where.push('w.machine_id = ?'); params.push(Number(req.query.machine_id)); }
   if (req.query.location_id) { where.push('w.location_id = ?'); params.push(Number(req.query.location_id)); }
   // "Open" is everything still to finish — the default view of a shop floor.

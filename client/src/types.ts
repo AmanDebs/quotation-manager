@@ -389,6 +389,12 @@ export interface WorkOrder {
    * catalogue's. A job has none of its own: what is being made is the line.
    */
   color?: string | null;
+  /**
+   * 1 when the start date that stands has arrived and nobody has said whether
+   * the job began. Answered by starting it or by revising the date — see
+   * `DUE_TO_START` in services/jobStatus.ts.
+   */
+  due_to_start?: number;
   location_name?: string | null; machine_name?: string | null; mould_name?: string | null;
   process_name?: string | null;
   created_by_name?: string | null;
