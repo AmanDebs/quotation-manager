@@ -72,10 +72,10 @@ export default function PlanJobsModal({ jobs, onClose, onPlanned }: {
         {jobs.map((j) => j.number).join(' · ')}
       </p>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <Field label="Planned start">
+        <Field label="Start">
           <Input type="date" value={draft.planned_start ?? ''} onChange={(e) => touch({ planned_start: e.target.value })} />
         </Field>
-        <Field label="Planned finish">
+        <Field label="Finish">
           <Input type="date" value={draft.planned_end ?? ''} onChange={(e) => touch({ planned_end: e.target.value })} />
         </Field>
       </div>

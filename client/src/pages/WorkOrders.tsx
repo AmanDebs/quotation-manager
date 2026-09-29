@@ -3,14 +3,14 @@ import { Link } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { WorkOrder, WorkOrderStatus } from '../types';
-import { PageHeader, Card, Select, Button, EmptyState, ErrorText, Input, Pagination, TH_CLASS } from '../components/ui';
+import { PageHeader, Card, Select, Button, EmptyState, ErrorText, Input, Pagination, CAPTION_CLASS, TH_CLASS } from '../components/ui';
 import PlanJobsModal from '../components/PlanJobsModal';
 import { useCan } from '../App';
 import { fmtQty, fmtDate } from '../lib/format';
 import { useUrlFilter } from '../lib/useUrlFilter';
 import { usePagedList, PAGE_SIZE } from '../lib/usePagedList';
 import { useUnsavedChanges } from '../lib/useUnsavedChanges';
-import { jobDateField, jobDateValue, jobDateIsRevision, type JobDateField } from '../lib/jobDates';
+import { jobDateOf, jobDateColumn, jobDateIsRevision, type JobDateField } from '../lib/jobDates';
 
 /**
  * Every job across every order — the shop floor's own view.
@@ -148,22 +148,20 @@ export default function WorkOrdersPage() {
   const toRelease = dirtyIds.filter((id) => (jobs.find((w) => w.id === id) ?? { status: '' }).status === 'planned').length;
 
   /*
-   * Typing the date that already stands is not a change, so it is dropped
-   * rather than sent — otherwise picking the same day from the calendar would
-   * write a "revision" identical to the plan, and the row would wear a `rev.`
-   * marker that records nothing.
+   * Typing back the date the column already holds is not a change, so it is
+   * dropped rather than sent — otherwise picking the same day from the
+   * calendar would write a revision identical to the plan, recording a slip
+   * that never happened.
    */
-  const setDate = (w: WorkOrder, end: boolean, value: string) => setDates((d) => {
-    const field = jobDateField(w, end);
+  const setDate = (w: WorkOrder, field: JobDateField, value: string) => setDates((d) => {
     const row = { ...d[w.id] };
-    if (value === jobDateValue(w, end)) delete row[field]; else row[field] = value;
+    if (value === jobDateOf(w, field)) delete row[field]; else row[field] = value;
     if (Object.keys(row).length) return { ...d, [w.id]: row };
     const { [w.id]: _gone, ...rest } = d;
     return rest;
   });
-  /** What the box shows: what was typed, else the date that stands. */
-  const dateValue = (w: WorkOrder, end: boolean) =>
-    dates[w.id]?.[jobDateField(w, end)] ?? jobDateValue(w, end);
+  /** What a cell shows: what was typed into it, else what its own column holds. */
+  const dateValue = (w: WorkOrder, field: JobDateField) => dates[w.id]?.[field] ?? jobDateOf(w, field);
 
   // Over every matching job, not the page on screen — see `summary` in
   // routes/workOrders.ts. Adding up the rows to hand would answer a different
@@ -233,9 +231,9 @@ export default function WorkOrdersPage() {
         ) : (
           <table className="w-full text-sm">
             <thead>
-              <tr className={TH_CLASS}>
+              <tr className={`${TH_CLASS} border-b-0`}>
                 {mayPlan && (
-                  <th className="pb-2 pr-2">
+                  <th className="pb-2 pr-2" rowSpan={2}>
                     <input
                       type="checkbox"
                       title="Tick every job on this page that can be planned"
@@ -248,29 +246,44 @@ export default function WorkOrdersPage() {
                     />
                   </th>
                 )}
-                <th className="pb-2 pr-3">Job</th>
-                <th className="pb-2 pr-3">Item</th>
-                <th className="pb-2 pr-3">Planned</th>
-                <th className="pb-2 pr-3 text-right">Pcs</th>
-                <th className="pb-2 pr-3 text-right">Made</th>
-                <th className="pb-2 pr-3">Status</th>
+                <th className="pb-2 pr-3" rowSpan={2}>Job</th>
+                <th className="pb-2 pr-3" rowSpan={2}>Item</th>
+                {/*
+                  Both pairs are drawn (2026-09-29, the client with one pair and
+                  a `rev.` marker in front of them: *"This page should show both
+                  planned and revised dates"*). One pair showing whichever date
+                  stands answers *when does this run* and hides the other half of
+                  the question the two columns exist to answer — what was
+                  promised, and by how much it has moved. The original was on
+                  hover, which is not somewhere a column can be read from.
+                */}
+                <th className="border-l border-slate-100 pb-1 pl-3 pr-3 text-center" colSpan={2}>Planned</th>
+                <th className="border-l border-slate-100 pb-1 pl-3 pr-3 text-center" colSpan={2}>Revised</th>
+                <th className="border-l border-slate-100 pb-2 pl-3 pr-3 text-right" rowSpan={2}>Pcs</th>
+                <th className="pb-2 pr-3 text-right" rowSpan={2}>Made</th>
+                <th className="pb-2 pr-3" rowSpan={2}>Status</th>
+              </tr>
+              {/* The sub-row carries the rule; the banner above it carries none,
+                  or the heading reads as two stacked tables. */}
+              <tr className={`${CAPTION_CLASS} border-b border-slate-200 text-left font-normal text-slate-400`}>
+                <th className="border-l border-slate-100 pb-2 pl-3 pr-3">Start</th>
+                <th className="pb-2 pr-3">Finish</th>
+                <th className="border-l border-slate-100 pb-2 pl-3 pr-3">Start</th>
+                <th className="pb-2 pr-3">Finish</th>
               </tr>
             </thead>
             <tbody>
               {jobs.map((w, i) => {
                 /*
-                 * The dates that stand: the revised ones where set, else what
-                 * was planned — the sales order book's own rule, and the whole
-                 * point of a revised date. A plan that was moved must not be
-                 * flagged late on a date nobody is working to, so `late` is
-                 * judged against the finish that stands and the original is
-                 * kept on hover rather than lost.
+                /*
+                 * Late is judged against the finish that **stands** — the revised
+                 * one where set, else the planned one, the rule every reader of a
+                 * job's date follows — so a plan that was moved is not flagged on
+                 * a date nobody is working to. Both dates are drawn in their own
+                 * columns now, so there is nothing left to keep on hover.
                  */
-                const start = w.revised_start || w.planned_start;
-                const end = w.revised_end || w.planned_end;
-                const revised = !!(w.revised_start || w.revised_end);
-                // Late means the finish date has passed with work still to do.
-                const late = !!end && end < todayIso
+                const standingEnd = w.revised_end || w.planned_end;
+                const late = !!standingEnd && standingEnd < todayIso
                   && !['done', 'cancelled'].includes(w.status);
                 /*
                  * Clubbed by sales order (2026-09-15): the server sorts the
@@ -308,10 +321,10 @@ export default function WorkOrdersPage() {
                         <Link to={`/orders/${w.order_id}`} className="text-brand-700 hover:underline">{w.order_number}</Link>
                         <span className="ml-2 font-normal text-slate-600">{w.customer_name}</span>
                       </td>
-                      <td className="py-1.5 pr-3 text-xs text-slate-500">
+                      <td className="py-1.5 pl-3 pr-3 text-xs text-slate-500" colSpan={4}>
                         {group.length} job{group.length === 1 ? '' : 's'}
                       </td>
-                      <td className="py-1.5 pr-3 text-right text-xs tabular-nums text-slate-500">{fmtQty(groupPlanned)}</td>
+                      <td className="py-1.5 pl-3 pr-3 text-right text-xs tabular-nums text-slate-500">{fmtQty(groupPlanned)}</td>
                       <td className="py-1.5 pr-3 text-right text-xs tabular-nums text-slate-500">{fmtQty(groupMade)}</td>
                       <td />
                     </tr>
@@ -333,50 +346,77 @@ export default function WorkOrdersPage() {
                     </td>
                     <td className="py-2 pr-3">{w.description || w.product_name || '—'}</td>
                     {/*
-                      Typed here, saved with the page. A closed job keeps the
-                      text it always had: the server refuses to plan a completed
-                      or cancelled job by name, so a box on one would be a
-                      control that only ever produces a refusal.
+                      Four cells, and **exactly one box per date**: `jobDateField`
+                      says which column a date may go to — planned while that
+                      column is blank, revised after — so the Planned cell holds
+                      the box until it has taken its date and settles to text
+                      afterwards, and the Revised cell is the box from then on.
+                      The rule deciding which is editable is the one the server
+                      guards with, so a box can never produce a refusal.
+
+                      A revision with no plan to revise is not offered: nothing
+                      has been promised yet, so the first date typed belongs in
+                      Planned. That also keeps the row two boxes wide however far
+                      along the job is.
+
+                      A closed job keeps plain text throughout — the server
+                      refuses to plan a completed or cancelled one by name.
                     */}
-                    <td className={`whitespace-nowrap py-2 pr-3 text-xs ${late ? 'font-medium text-red-600' : 'text-slate-500'}`}>
-                      {mayPlan && plannable(w) ? (
-                        <div className="flex items-center gap-1">
-                          <Input
-                            type="date"
-                            className={`w-[8.25rem] ${dates[w.id] ? 'border-brand-400 bg-brand-50/60' : ''}`}
-                            value={dateValue(w, false)}
-                            onChange={(e) => setDate(w, false, e.target.value)}
-                            title={jobDateIsRevision(w, false)
-                              ? `${w.number} — the original planned start was recorded as ${fmtDate(w.planned_start)} and does not change, so this moves the revised start`
-                              : `${w.number} — the original planned start, recorded once`}
-                          />
-                          <span className="text-slate-300">→</span>
-                          <Input
-                            type="date"
-                            className={`w-[8.25rem] ${dates[w.id] ? 'border-brand-400 bg-brand-50/60' : ''}`}
-                            value={dateValue(w, true)}
-                            onChange={(e) => setDate(w, true, e.target.value)}
-                            title={jobDateIsRevision(w, true)
-                              ? `${w.number} — the original planned finish was recorded as ${fmtDate(w.planned_end)} and does not change, so this moves the revised finish`
-                              : `${w.number} — the original planned finish, recorded once`}
-                          />
-                        </div>
-                      ) : (
-                        start || end
-                          ? `${start ? fmtDate(start) : '?'} → ${end ? fmtDate(end) : '?'}`
-                          : '—'
-                      )}
-                      {revised && (
-                        <span
-                          className="ml-1 font-normal text-amber-600"
-                          title={`Planned ${w.planned_start ? fmtDate(w.planned_start) : '?'} → ${w.planned_end ? fmtDate(w.planned_end) : '?'}`}
-                        >
-                          rev.
-                        </span>
-                      )}
-                      {late && <span className="ml-1">overdue</span>}
-                    </td>
-                    <td className="py-2 pr-3 text-right tabular-nums">{fmtQty(w.qty_planned)}</td>
+                    {([false, true] as const).map((isEnd) => {
+                      const field = jobDateColumn(false, isEnd);
+                      const editable = mayPlan && plannable(w) && !jobDateIsRevision(w, isEnd);
+                      const own = jobDateOf(w, field);
+                      return (
+                        <td key={`p${isEnd}`} className={`whitespace-nowrap py-2 pr-3 text-xs text-slate-500 ${isEnd ? '' : 'border-l border-slate-100 pl-3'}`}>
+                          {editable ? (
+                            <Input
+                              type="date"
+                              className={`w-[8rem] ${dates[w.id]?.[field] ? 'border-brand-400 bg-brand-50/60' : ''}`}
+                              value={dateValue(w, field)}
+                              onChange={(e) => setDate(w, field, e.target.value)}
+                              title={`${w.number} — the original planned ${isEnd ? 'finish' : 'start'}, recorded once`}
+                            />
+                          ) : own ? (
+                            <span title="Recorded once, and what the revision beside it is measured against">{fmtDate(own)}</span>
+                          ) : (
+                            <span className="text-slate-300">—</span>
+                          )}
+                        </td>
+                      );
+                    })}
+                    {([false, true] as const).map((isEnd) => {
+                      const field = jobDateColumn(true, isEnd);
+                      const editable = mayPlan && plannable(w) && jobDateIsRevision(w, isEnd);
+                      const own = jobDateOf(w, field);
+                      /*
+                       * Late is judged on the finish that stands and drawn on the
+                       * cell holding it, so a plan that was moved is not flagged
+                       * on a date nobody is working to.
+                       */
+                      const flag = late && isEnd && !!w.revised_end;
+                      return (
+                        <td key={`r${isEnd}`} className={`whitespace-nowrap py-2 pr-3 text-xs ${flag ? 'font-medium text-red-600' : 'text-slate-500'} ${isEnd ? '' : 'border-l border-slate-100 pl-3'}`}>
+                          {editable ? (
+                            <Input
+                              type="date"
+                              className={`w-[8rem] ${dates[w.id]?.[field] ? 'border-brand-400 bg-brand-50/60' : ''}`}
+                              value={dateValue(w, field)}
+                              onChange={(e) => setDate(w, field, e.target.value)}
+                              title={`${w.number} — the revised ${isEnd ? 'finish' : 'start'}; the original stays as it was recorded`}
+                            />
+                          ) : own ? (
+                            <span>{fmtDate(own)}</span>
+                          ) : (
+                            <span
+                              className="text-slate-300"
+                              title={(isEnd ? w.planned_end : w.planned_start) ? 'Not revised' : 'Nothing planned yet to revise'}
+                            >—</span>
+                          )}
+                          {flag && <div>overdue</div>}
+                        </td>
+                      );
+                    })}
+                    <td className="border-l border-slate-100 py-2 pl-3 pr-3 text-right tabular-nums">{fmtQty(w.qty_planned)}</td>
                     <td className="py-2 pr-3 text-right tabular-nums">
                       {fmtQty(w.progress?.produced ?? 0)}
                       {w.qty_planned > 0 && (() => {

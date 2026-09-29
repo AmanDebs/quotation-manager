@@ -18,9 +18,19 @@ export type JobDateField = 'planned_start' | 'planned_end' | 'revised_start' | '
 export const jobDateField = (w: WorkOrder, end: boolean): JobDateField =>
   `${(end ? w.planned_end : w.planned_start) ? 'revised' : 'planned'}_${end ? 'end' : 'start'}` as JobDateField;
 
-/** The date on screen: the one that stands — revised where set, else planned. */
-export const jobDateValue = (w: WorkOrder, end: boolean): string =>
-  (end ? w.revised_end || w.planned_end : w.revised_start || w.planned_start) ?? '';
+/**
+ * What one column holds, which is what a cell under that heading must show.
+ *
+ * Deliberately **not** the date that stands. Both pairs are drawn now, so a
+ * Revised cell showing the planned date where there is no revision would state
+ * that the job had been revised to the day it was already on — the one thing
+ * two columns beside each other must not say.
+ */
+export const jobDateOf = (w: WorkOrder, field: JobDateField): string => w[field] ?? '';
+
+/** The column under a heading, for a cell that knows which heading it is under. */
+export const jobDateColumn = (revised: boolean, end: boolean): JobDateField =>
+  `${revised ? 'revised' : 'planned'}_${end ? 'end' : 'start'}` as JobDateField;
 
 /** True once this column is the record rather than the box being filled in. */
 export const jobDateIsRevision = (w: WorkOrder, end: boolean) => jobDateField(w, end).startsWith('revised');
