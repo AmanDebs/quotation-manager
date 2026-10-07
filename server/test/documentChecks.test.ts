@@ -33,6 +33,8 @@ const doc = (table: CheckedDoc['table'], row: Record<string, unknown> = {}, item
     final_destination: 'Mauritius', container_count: '1 X 40ft HQ',
     // And the invoice's (2026-09-16).
     lot_no: '90/2025', shipping_details: 'MV Ever Given, BL MEDUJB634981', arn_ref: 'AD1904250005855',
+    // And the sales order's own (2026-10-07).
+    spoc: 'Sanjib',
     ...row,
   },
   items,
@@ -481,12 +483,17 @@ describe('the sales order mandatory fields', () => {
   const finished = { promised_date: '2026-09-20', revised_date: '2026-09-25' };
   const always: [string, string][] = [
     ['payment_terms', 'so_payment_terms'],
+    // Asked for 2026-10-07, in the same breath as the dropdown that offers the
+    // six names the desk uses: a blank SPOC is an order nobody is answerable
+    // for, and the book and all three Reports pivots are read by that column.
+    ['spoc', 'so_spoc'],
   ];
   const exportOnly: [string, string][] = [
     ['inco_terms', 'so_inco'], ['container_count', 'so_containers'], ['port_of_discharge', 'so_port'],
   ];
-  test('a finished order blocks nothing, and the five exemptions are not asked', () => {
-    assert.deepEqual(keys(doc('orders', { ...finished, spoc: '', po_number: '', po_date: '', remarks: '', order_through: '' }), 'block'), []);
+  test('a finished order blocks nothing, and the four exemptions are not asked', () => {
+    // SPOC left this list on 2026-10-07 — it is a block now, asserted above.
+    assert.deepEqual(keys(doc('orders', { ...finished, po_number: '', po_date: '', remarks: '', order_through: '' }), 'block'), []);
     assert.deepEqual(keys(doc('orders', { ...finished, is_export: 1 }), 'block'), []);
   });
   test('each blank field blocks the order by name, on either type', () => {
@@ -536,8 +543,14 @@ describe('the sales order mandatory fields', () => {
     ).get(c) as { id: number }).id);
     db.prepare("INSERT INTO order_items (order_id, description, color, qty, unit, unit_price, amount, sort_order) VALUES (?, 'Cap', 'Natural', 10, 'unit', 10, 100, 0)").run(id);
     const err = incompleteError('orders', id);
-    assert.ok(err && err.startsWith('This sales order is not finished:') && err.includes('Payment Terms is blank.'), err ?? 'no error');
+    assert.ok(err && err.startsWith('This sales order is not finished:'), err ?? 'no error');
+    // Both order-scope blocks, named through the real row rather than the
+    // fixture — which is what proves the column names match the schema.
+    assert.ok(err!.includes('Payment Terms is blank.'), err!);
+    assert.ok(err!.includes('Handled By (SPOC) is blank.'), err!);
     db.prepare("UPDATE orders SET payment_terms = '30 days' WHERE id = ?").run(id);
+    assert.ok((incompleteError('orders', id) ?? '').includes('Handled By (SPOC)'), 'SPOC still blocks on its own');
+    db.prepare("UPDATE orders SET spoc = 'Rumela' WHERE id = ?").run(id);
     assert.equal(incompleteError('orders', id), null);
   });
 });

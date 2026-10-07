@@ -415,6 +415,44 @@ export function PortOfLoadingInput({
   );
 }
 
+/**
+ * Who on the desk is handling an order, in the client's own list (2026-10-07:
+ * *"SPOC to be through drop down option — Meisha, Tannistha, Rumela, Sanjib,
+ * Ashwin, Prasun"*). It was a free text box, so the same person arrived on the
+ * book as *Sanjib*, *Sanjib Das* and *sanjib* — and the Orders page filters on
+ * that column by exact value, so three spellings is three filters and none of
+ * them finds the whole of anybody's work.
+ *
+ * **Free text behind the list, as every suggest field here is**, and that is
+ * load-bearing rather than habit on this one. The column is live: 198 of the
+ * imported orders carry a SPOC the import read off the client's own sheet, the
+ * order prefill carries `prepared_by` across from the quotation or proforma it
+ * was booked from, and `/auth/me` fills Prepared By in with whoever is signed
+ * in. A hard `<select>` would draw every one of those as blank and clear it on
+ * the next ordinary save — the `unitOptions` rule, that a value a saved row
+ * holds stays on it even when the list stops offering it.
+ *
+ * Alphabetical would have been the obvious order and is not what is used: this
+ * is the client's own list in the client's own order, which is the shape they
+ * read it in.
+ */
+export const SPOC_NAMES: Suggestion[] = ['Meisha', 'Tannistha', 'Rumela', 'Sanjib', 'Ashwin', 'Prasun']
+  .map((s) => ({ value: s, label: s }));
+
+/** The order's Handled By (SPOC) field, offered from `SPOC_NAMES`. */
+export function SpocInput({ value, onChange, disabled }: { value: string; onChange: (v: string) => void; disabled?: boolean }) {
+  return (
+    <SuggestInput
+      options={SPOC_NAMES}
+      value={value}
+      onChange={onChange}
+      disabled={disabled}
+      label="Show the desk"
+      placeholder="Who took this order"
+    />
+  );
+}
+
 /** The purchase order's delivery basis: FOR or Ex-Factory, or typed. */
 export function PurchaseTermsInput({ value, onChange, disabled }: { value: string; onChange: (v: string) => void; disabled?: boolean }) {
   return (

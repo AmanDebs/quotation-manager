@@ -6,7 +6,7 @@ import type { Order, OrderItem, TaxType, ColumnConfig } from '../types';
 import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, Tabs, SettledDocumentType, FIELD_GRID, NOTES_ROWS } from '../components/ui';
 import { PdfLink } from '../components/PdfLink';
 import CompanySelect from '../components/CompanySelect';
-import { DocNumber, IncoTermsInput, PaymentTermsInput, ContainersInput, HeaderCharges } from '../components/DocFields';
+import { DocNumber, IncoTermsInput, PaymentTermsInput, ContainersInput, HeaderCharges, SpocInput } from '../components/DocFields';
 import DispatchTab from '../components/DispatchTab';
 import LineItemsEditor from '../components/LineItemsEditor';
 import ColumnsControl, { newColumnConfig, hasColumnPrefs, orderColumns, ORDER_FORCED } from '../components/ColumnsControl';
@@ -361,7 +361,9 @@ export default function OrderFormPage() {
                 {ORDER_THROUGH.map((o) => <option key={o}>{o}</option>)}
               </Select>
             </Field>
-            <Field label="Handled By (SPOC)"><Input value={draft.spoc} onChange={(e) => set({ spoc: e.target.value })} placeholder="Who took this order" /></Field>
+            {/* The asterisk is the contract `Field` reads to tint a blank box,
+                and the server's own `so_spoc` rule is what refuses. */}
+            <Field label="Handled By (SPOC) *"><SpocInput value={draft.spoc} onChange={(v) => set({ spoc: v })} /></Field>
             <Field label="Customer's PO Number"><Input value={draft.po_number} onChange={(e) => set({ po_number: e.target.value })} /></Field>
             <Field label="Customer's PO Date"><Input type="date" value={draft.po_date} onChange={(e) => set({ po_date: e.target.value })} /></Field>
             <Field label="Currency">

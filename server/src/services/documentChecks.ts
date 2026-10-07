@@ -482,6 +482,22 @@ const RULES: Rule[] = [
    */
   ...([
     ['so_payment_terms', 'payment_terms', 'Payment Terms'],
+    /*
+     * Handled By (SPOC) — asked for 2026-10-07, in the same breath as the
+     * dropdown that now offers the six names the desk actually uses. It is
+     * the column the order book is read by to find whose order a row is,
+     * and the Reports page folds its three pivots on it, so a blank one is
+     * a row nobody is answerable for and a figure that falls into the
+     * `(blank)` group on every sheet.
+     *
+     * The consequence is the one this list states about itself and is worth
+     * repeating here, because this column has a backlog behind it: an order
+     * already on file with no SPOC is **refused a reprint** until somebody
+     * fills it in, there being no "an approved document always prints" on a
+     * document with no approval. That is the trade the client asked for with
+     * the form in front of them; the way back is deleting this one line.
+     */
+    ['so_spoc', 'spoc', 'Handled By (SPOC)'],
   ] as const).map(([key, column, label]): Rule => ({
     key, level: 'block', tables: ['orders'],
     check: (d) => (text(d.row[column]) ? null : `${label} is blank.`),
