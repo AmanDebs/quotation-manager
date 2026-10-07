@@ -404,6 +404,18 @@ function signatureBlock(s: Row, opts: { buyerSide?: boolean; preparedBy?: string
         : [{ text: ' ', margin: [0, signingSpace / 2, 0, 0] as any }]),
       { text: 'Authorised Signatory', fontSize: 8 },
       ...(opts.preparedBy
+        /*
+         * **Still "Prepared By" on paper**, where the four forms now say SPOC
+         * (2026-10-07). The label on a screen is ours to change; this one is on
+         * a document that has gone to customers, and a reprint of a proforma
+         * already sent would come back worded differently — the call this file
+         * records about the order PDF's own `ORDER CONFIRMATION` title, that
+         * renaming paper is a bigger decision than renaming a screen and is
+         * flagged rather than assumed. "Prepared By" is also plain English on a
+         * document that crosses a border, where SPOC is regional. One line to
+         * change here, and in `buildQuotationPdf` and `buildInvoicePdf`, if the
+         * client wants the paper to match.
+         */
         ? [{ text: `Prepared By: ${opts.preparedBy}`, fontSize: 7.5, color: '#666666', margin: [0, 6, 0, 0] as any }]
         : []),
     ],

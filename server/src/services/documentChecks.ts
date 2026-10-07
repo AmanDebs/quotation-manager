@@ -334,7 +334,15 @@ const RULES: Rule[] = [
   },
   {
     key: 'prepared_by', level: 'block', tables: ['quotations'],
-    check: (d) => (text(d.row.prepared_by) ? null : 'Prepared By is blank.'),
+    /*
+     * `prepared_by` reads **SPOC** on screen since 2026-10-07 (the client, with
+     * a proforma in front of them: *"Change prepared by to SPOC"*) — a display
+     * change, the call this codebase keeps making: the column, the API and the
+     * carry-forward are untouched and only the word moved. These messages are
+     * what the findings strip prints and what the 422 says, so they move with
+     * the labels or the strip would name a field that is not on the page.
+     */
+    check: (d) => (text(d.row.prepared_by) ? null : 'SPOC is blank.'),
   },
   {
     key: 'inco', level: 'block', tables: ['quotations'],
@@ -374,7 +382,7 @@ const RULES: Rule[] = [
     ['pi_method', 'method_of_despatch', 'Method of Dispatch'],
     ['pi_tolerance', 'quantity_tolerance', 'Quantity Tolerance'],
     ['pi_hs_code', 'hs_code', 'HS Code'],
-    ['pi_prepared_by', 'prepared_by', 'Prepared By'],
+    ['pi_prepared_by', 'prepared_by', 'SPOC'],
     ['pi_remarks', 'remarks', 'Remarks'],
   ] as const).map(([key, column, label]): Rule => ({
     key, level: 'block', tables: ['proforma_invoices'],
@@ -412,7 +420,7 @@ const RULES: Rule[] = [
     ['ci_inco', 'inco_terms', 'INCO Terms'],
     ['ci_method', 'method_of_despatch', 'Method of Dispatch'],
     ['ci_lot_no', 'lot_no', 'Lot No.'],
-    ['ci_prepared_by', 'prepared_by', 'Prepared By'],
+    ['ci_prepared_by', 'prepared_by', 'SPOC'],
     ['ci_shipping', 'shipping_details', 'Shipping Details'],
     ['ci_bank', 'bank_account', 'Bank Account'],
   ] as const).map(([key, column, label]): Rule => ({

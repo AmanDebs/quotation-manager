@@ -175,7 +175,7 @@ const quotationColumns: Column<Row>[] = [
   { header: 'Total', value: (r) => num(r.grand_total), type: 'money' },
   { header: 'Status', value: (r) => str(r.status) },
   { header: 'Approval', value: (r) => str(r.approval_status) },
-  { header: 'Prepared by', value: (r) => str(r.prepared_by) },
+  { header: 'SPOC', value: (r) => str(r.prepared_by) },
   { header: 'Created by', value: (r) => str(r.created_by_name) },
   { header: 'Approved by', value: (r) => str(r.approved_by_name) },
 ];

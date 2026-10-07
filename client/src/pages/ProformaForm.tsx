@@ -503,7 +503,7 @@ export default function ProformaFormPage() {
             <Field label="HS Code (header) *">
               <Input disabled={readOnly} value={draft.hs_code} onChange={(e) => set({ hs_code: e.target.value })} placeholder="e.g. 3923" />
             </Field>
-            <Field label="Prepared By *">
+            <Field label="SPOC *">
               <DeskPersonInput disabled={readOnly} value={draft.prepared_by} onChange={(v) => set({ prepared_by: v })} />
             </Field>
             {/* The buyer's own reference. This was a card of its own — a

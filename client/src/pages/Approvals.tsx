@@ -76,7 +76,7 @@ export default function ApprovalsPage() {
                 <th className="pb-2 pr-3">Type</th>
                 <th className="pb-2 pr-3">Date</th>
                 <th className="pb-2 pr-3">Customer</th>
-                <th className="pb-2 pr-3">Prepared by</th>
+                <th className="pb-2 pr-3">SPOC</th>
                 <th className="pb-2 pr-3 text-right">Value</th>
                 <th className="pb-2" />
               </tr>

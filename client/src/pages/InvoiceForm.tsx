@@ -536,7 +536,7 @@ export default function InvoiceFormPage() {
                 />
               </Field>
             )}
-            <Field label="Prepared By *"><DeskPersonInput value={draft.prepared_by} onChange={(v) => set({ prepared_by: v })} /></Field>
+            <Field label="SPOC *"><DeskPersonInput value={draft.prepared_by} onChange={(v) => set({ prepared_by: v })} /></Field>
             <Field label="Shipping Details *" className="sm:col-span-2">
               <Input value={draft.shipping_details} onChange={(e) => set({ shipping_details: e.target.value })} placeholder="Vessel/flight, BL number, shipping line…" />
             </Field>

@@ -463,7 +463,7 @@ export default function QuotationFormPage() {
               />
             </Field>
             <Field label="Delivery Timeline *"><DeliveryTimelineInput disabled={readOnly} value={draft.delivery_terms} onChange={(v) => set({ delivery_terms: v })} /></Field>
-            <Field label="Prepared By *">
+            <Field label="SPOC *">
               <DeskPersonInput
                 disabled={readOnly}
                 value={draft.prepared_by}

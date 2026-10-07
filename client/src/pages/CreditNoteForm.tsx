@@ -227,7 +227,7 @@ export default function CreditNoteFormPage() {
             </Field>
             <Field label="Type"><SettledDocumentType isExport={!!draft.is_export} number={draft.number} /></Field>
             <Field label="Currency"><DocNumber value={draft.currency} title="The invoice's currency" /></Field>
-            <Field label="Prepared By"><DeskPersonInput value={draft.prepared_by} onChange={(v) => set({ prepared_by: v })} /></Field>
+            <Field label="SPOC"><DeskPersonInput value={draft.prepared_by} onChange={(v) => set({ prepared_by: v })} /></Field>
             {/* Where the goods came back to, so the finished-goods ledger can
                 place them. Only a return has a plant; an adjustment moves nothing. */}
             {draft.kind === 'return' && (

@@ -217,7 +217,7 @@ export default function QuotationsPage() {
                     carried and been unable to be approved without since
                     2026-09-12, and which the spreadsheet export has printed
                     all along; only the screen was missing it. */}
-                <th className="pb-2 pr-3">Prepared By</th>
+                <th className="pb-2 pr-3">SPOC</th>
                 <th className="pb-2 pr-3">Type</th>
                 <th className="pb-2 pr-3 text-right">Total</th>
                 <th className="pb-2 pr-3">Status</th>
