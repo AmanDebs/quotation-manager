@@ -209,6 +209,12 @@ export default function ProformasPage() {
                 <th className="pb-2 pr-3 text-right">Balance</th>
                 <th className="pb-2 pr-3">Payment Terms</th>
                 <th className="pb-2 pr-3">Issued By</th>
+                {/* Who on the desk is answerable for this offer — `prepared_by`,
+                    the field the form calls SPOC since 2026-10-07. Beside
+                    *Issued By*, which on this list is whoever typed the row in
+                    and is rarely the same person; the order book made exactly
+                    that distinction when its *Added By* column became SPOC. */}
+                <th className="pb-2 pr-3">SPOC</th>
                 <th className="pb-2 pr-3">Sales Order</th>
                 <th className="pb-2 pr-3">Status</th>
                 <th className="w-14 pb-2" />
@@ -245,6 +251,10 @@ export default function ProformasPage() {
                   </td>
                   <td className="py-2 pr-3 text-xs text-slate-600">{p.payment_terms || '—'}</td>
                   <td className="py-2 pr-3 text-xs text-slate-500">{p.created_by_name ?? '—'}</td>
+                  {/* A blank recedes to an em-dash rather than reading as a
+                      fault, and the cell does not wrap — a name on this book is
+                      one word. */}
+                  <td className="py-2 pr-3 whitespace-nowrap text-xs text-slate-600">{p.prepared_by || '—'}</td>
                   {/* The order booked from this proforma, which is also why its
                       status is frozen. Without it on screen the disabled picker
                       beside it has no visible cause and reads as a fault. */}

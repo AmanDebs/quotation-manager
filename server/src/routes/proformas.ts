@@ -269,6 +269,10 @@ const proformaColumns: Column<Row>[] = [
   { header: 'Payment terms', value: (r) => str(r.payment_terms) },
   { header: 'Status', value: (r) => str(r.status) },
   { header: 'Approval', value: (r) => str(r.approval_status) },
+  // The download has to match the screen, and the list gained this column on
+  // 2026-10-07. Placed where the quotation export already has it, between the
+  // approval and the people — two files, one order, so the two read alike.
+  { header: 'SPOC', value: (r) => str(r.prepared_by) },
   { header: 'Issued by (user)', value: (r) => str(r.created_by_name) },
 ];
 
