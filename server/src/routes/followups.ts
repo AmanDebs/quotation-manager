@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { db } from '../db/connection.js';
 import type { AuthedRequest } from '../middleware/auth.js';
-import { scopeClause, canAccessCustomer } from '../middleware/scope.js';
+import { scopeClause, canAccessCustomer, canRaiseFor } from '../middleware/scope.js';
 import { listBody } from '../services/pagination.js';
 
 export const followupsRouter = Router();
@@ -55,9 +55,10 @@ followupsRouter.get('/count', (req: AuthedRequest, res) => {
 followupsRouter.post('/', (req: AuthedRequest, res) => {
   const body = req.body ?? {};
   if (!body.due_date) return res.status(400).json({ error: 'Due date is required' });
-  // A follow-up attached to a customer is only creatable by someone who may
-  // see that customer — otherwise it would surface on their dashboard.
-  if (body.customer_id != null && !canAccessCustomer(req, Number(body.customer_id))) {
+  // Open to the whole customer book (2026-10-07), like every other thing raised
+  // for a customer — and a chase carries its own `created_by`, so the customer
+  // it names is in the chaser's book and the reminder reaches them.
+  if (body.customer_id != null && !canRaiseFor(req, Number(body.customer_id))) {
     return res.status(404).json({ error: 'Customer not found' });
   }
   const info = db.prepare(

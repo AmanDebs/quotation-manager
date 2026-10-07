@@ -4,7 +4,7 @@ import { STATUS_SQL } from '../services/proformaStatus.js';
 import { nextNumber, exportChangeError } from '../services/numbering.js';
 import { computeTotals, round2, type LineItemInput } from '../services/totals.js';
 import type { AuthedRequest } from '../middleware/auth.js';
-import { scopeClause, canAccessCustomer, linkError, customerChangeError } from '../middleware/scope.js';
+import { scopeClause, canAccessCustomer, linkError, customerChangeError, canRaiseFor } from '../middleware/scope.js';
 import { resolveCompanyId, foreignBankError } from '../services/companies.js';
 import { submit, decide, resetApprovalOnEdit, blockUnapprovedTransition, exemptApprovalError, blockUnapprovedConversion , mayApprove } from '../services/approval.js';
 import { incompleteError, checkDocument } from '../services/documentChecks.js';
@@ -429,7 +429,10 @@ proformasRouter.get('/prefill/from-order/:orderId', (req: AuthedRequest, res) =>
 proformasRouter.post('/', (req: AuthedRequest, res) => {
   const body = req.body ?? {};
   if (!body.customer_id) return res.status(400).json({ error: 'Customer is required' });
-  if (!canAccessCustomer(req, Number(body.customer_id))) return res.status(403).json({ error: 'That customer is not assigned to you' });
+  // Any customer in the book may be quoted, ordered or invoiced for — see
+  // `canRaiseFor`. Ownership decides whose documents you *read*, and raising
+  // one puts that customer in your book, so you keep what you raised.
+  if (!canRaiseFor(req, Number(body.customer_id))) return res.status(400).json({ error: 'Customer not found' });
   const h = headerValues(body);
   // An order_id pointing at another owner's order would fold this proforma's
   // invoices into that order's dispatch figures — checked, like the customer.
@@ -482,8 +485,10 @@ proformasRouter.put('/:id', (req: AuthedRequest, res) => {
   const existing = db.prepare('SELECT * FROM proforma_invoices WHERE id = ?').get(id) as Record<string, unknown> | undefined;
   if (!existing || !canAccessCustomer(req, Number(existing.customer_id))) return res.status(404).json({ error: 'Proforma invoice not found' });
   const h = headerValues(body, existing);
-  const moved = customerChangeError(req, existing.customer_id as number, h.customer_id);
-  if (moved) return res.status(403).json({ error: moved });
+  const moved = customerChangeError(
+    req, existing.customer_id as number, h.customer_id, existing.created_by as number | null
+  );
+  if (moved) return res.status(400).json({ error: moved });
   // An order was booked from this proforma, so its figures are what that order
   // was built from. Note this guards the document's *content* only: the status
   // pipeline deliberately carries on past order_confirmed to advance_received

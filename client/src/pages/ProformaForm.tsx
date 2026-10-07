@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
-import type { Proforma, Customer, LineItem, TaxType, ColumnConfig } from '../types';
+import type { Proforma, LineItem, TaxType, ColumnConfig } from '../types';
 import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, StatusBadge, SettledDocumentType, ReadOnlyFields, FIELD_GRID, FIELD_GRID_PLAIN, NOTES_ROWS } from '../components/ui';
 import { PdfLink } from '../components/PdfLink';
 import CompanySelect, { useCompanies } from '../components/CompanySelect';
@@ -25,6 +25,7 @@ import { useUnsavedChanges } from '../lib/useUnsavedChanges';
 import HistoryCard from '../components/HistoryCard';
 import { SETTABLE_STATUSES, proformaStatusLabel } from './Proformas';
 import { taxChoiceOf, taxPatchFor, newLineTaxPct } from '../lib/tax';
+import { useCustomerBook } from '../lib/useCustomerBook';
 
 interface Draft {
   number?: string;
@@ -92,7 +93,7 @@ export default function ProformaFormPage() {
   const fromQuotation = search.get('from_quotation');
   const fromOrder = search.get('from_order');
 
-  const { data: customers = [] } = useQuery({ queryKey: ['customers', ''], queryFn: () => api.get<Customer[]>('/api/customers') });
+  const customers = useCustomerBook();
   const { data: existing, error: loadError } = useQuery({
     queryKey: ['proforma', id],
     queryFn: () => api.get<Proforma>(`/api/proformas/${id}`),

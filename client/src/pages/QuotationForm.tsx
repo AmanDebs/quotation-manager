@@ -22,6 +22,7 @@ import HistoryCard from '../components/HistoryCard';
 import ReadOnlyItems from '../components/ReadOnlyItems';
 import { SETTABLE_STATUSES, quotationStatusLabel } from './Quotations';
 import { taxChoiceOf, taxPatchFor, newLineTaxPct } from '../lib/tax';
+import { useCustomerBook } from '../lib/useCustomerBook';
 
 interface Draft {
   number?: string;
@@ -66,7 +67,7 @@ export default function QuotationFormPage() {
   // Who is filling this in — see the prepared-by default below.
   const user = useUser();
 
-  const { data: customers = [] } = useQuery({ queryKey: ['customers', ''], queryFn: () => api.get<Customer[]>('/api/customers') });
+  const customers = useCustomerBook();
   const { data: existing, error: loadError } = useQuery({
     queryKey: ['quotation', id],
     queryFn: () => api.get<Quotation>(`/api/quotations/${id}`),

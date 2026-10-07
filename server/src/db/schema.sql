@@ -231,6 +231,10 @@ CREATE TABLE IF NOT EXISTS enquiries (
   date TEXT NOT NULL,
   notes TEXT NOT NULL DEFAULT '',
   status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','quoted','lost')),
+  -- Who raised it. The enquiry is the front of the funnel and so the first
+  -- document somebody raises for a customer who is not theirs, which is what
+  -- puts that customer in their book -- see middleware/scope.ts.
+  created_by INTEGER REFERENCES users(id),
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 

@@ -132,8 +132,16 @@ export default function CustomerDetailPage() {
    *
    * The condition is the server's own: only Sales is scoped.
    */
+  /*
+   * Read off what the server actually sent, not off ownership alone. Since
+   * 2026-10-07 a customer enters your book the moment you raise a document for
+   * them, so an unowned customer you have worked on comes back with every
+   * section — and a line saying "only the details below are shown" over nine
+   * populated cards would be the page contradicting itself.
+   */
   const notMine = user?.team_role === 'sales'
-    && Number(customer.owner_id) !== Number(user?.id);
+    && Number(customer.owner_id) !== Number(user?.id)
+    && !!summary && Object.keys(summary).length === 0;
 
   const money = summary?.money;
   const contact = [customer.contact_person, customer.email, customer.phone].filter(Boolean).join(' · ');
@@ -159,6 +167,7 @@ export default function CustomerDetailPage() {
             {customer.owner_name ? `${customer.owner_name} handles this customer.` : 'This customer is assigned to somebody else.'}
           </span>{' '}
           Their quotations, orders, invoices and payments stay with them, so only the details below are shown here.
+          You can still raise a document for this customer — what you raise appears here.
         </div>
       )}
 

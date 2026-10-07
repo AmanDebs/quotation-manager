@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { db } from '../db/connection.js';
 import type { AuthedRequest } from '../middleware/auth.js';
-import { scopeClause, canAccessCustomer } from '../middleware/scope.js';
+import { scopeClause, canAccessCustomer, canRaiseFor, customerChangeError } from '../middleware/scope.js';
 import { listBody } from '../services/pagination.js';
 
 /**
@@ -68,29 +68,34 @@ enquiriesRouter.get('/:id', (req: AuthedRequest, res) => {
 enquiriesRouter.post('/', (req: AuthedRequest, res) => {
   const { customer_id, date, notes } = req.body ?? {};
   if (!customer_id) return res.status(400).json({ error: 'Customer is required' });
-  if (!canAccessCustomer(req, Number(customer_id))) {
-    return res.status(403).json({ error: 'That customer is not assigned to you' });
+  // Open to the whole customer book (2026-10-07) — and `created_by` is what
+  // keeps it readable afterwards, an enquiry being the first thing raised for a
+  // customer who is not yours. See `canRaiseFor`.
+  if (!canRaiseFor(req, Number(customer_id))) {
+    return res.status(400).json({ error: 'Customer not found' });
   }
   const info = db
-    .prepare('INSERT INTO enquiries (customer_id, date, notes) VALUES (?, ?, ?)')
-    .run(Number(customer_id), String(date ?? new Date().toISOString().slice(0, 10)), String(notes ?? ''));
+    .prepare('INSERT INTO enquiries (customer_id, date, notes, created_by) VALUES (?, ?, ?, ?)')
+    .run(
+      Number(customer_id), String(date ?? new Date().toISOString().slice(0, 10)), String(notes ?? ''),
+      req.user?.id ?? null
+    );
   res.status(201).json(db.prepare(`${withCustomer} WHERE e.id = ?`).get(Number(info.lastInsertRowid)));
 });
 
 enquiriesRouter.put('/:id', (req: AuthedRequest, res) => {
   const id = Number(req.params.id);
   const { customer_id, date, notes, status } = req.body ?? {};
-  const existing = db.prepare('SELECT customer_id FROM enquiries WHERE id = ?').get(id) as
-    { customer_id: number } | undefined;
+  const existing = db.prepare('SELECT customer_id, created_by FROM enquiries WHERE id = ?').get(id) as
+    { customer_id: number; created_by: number | null } | undefined;
   if (!existing || !canAccessCustomer(req, existing.customer_id)) {
     return res.status(404).json({ error: 'Enquiry not found' });
   }
-  // Moving it to a customer the caller does not own would push it out of their
-  // own scope — the same one-way door the document routes guard against.
+  // The same guard the four selling documents use: moving it is open, moving it
+  // somewhere the caller could no longer see it is not.
   const nextCustomer = customer_id === undefined ? existing.customer_id : Number(customer_id);
-  if (nextCustomer !== existing.customer_id && !canAccessCustomer(req, nextCustomer)) {
-    return res.status(403).json({ error: 'That customer is not assigned to you' });
-  }
+  const moved = customerChangeError(req, existing.customer_id, nextCustomer, existing.created_by);
+  if (moved) return res.status(400).json({ error: moved });
   db.prepare('UPDATE enquiries SET customer_id = ?, date = ?, notes = ?, status = ? WHERE id = ?').run(
     nextCustomer, String(date ?? ''), String(notes ?? ''), String(status ?? 'open'), id
   );

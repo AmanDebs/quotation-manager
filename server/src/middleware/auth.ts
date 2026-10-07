@@ -57,6 +57,13 @@ export interface SessionUser {
 
 export interface AuthedRequest extends Request {
   user?: SessionUser;
+  /**
+   * `visibleCustomerIds`' answer, memoised for this request alone — it is nine
+   * statements since a customer may be in your book through a document you
+   * raised, and one route asks for it six times. Written by that function and
+   * read by nothing else; see middleware/scope.ts.
+   */
+  scopedCustomerIds?: number[];
 }
 
 /**

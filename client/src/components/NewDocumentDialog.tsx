@@ -27,9 +27,23 @@ export default function NewDocumentDialog({
   const [type, setType] = useState<'export' | 'domestic' | null>(exportOnly ? 'export' : null);
   const [q, setQ] = useState('');
 
+  /**
+   * The whole customer book, narrowed to the Type that was just chosen.
+   *
+   * `?all=1` since 2026-10-07 (*"Sales user still cannot raise a document for a
+   * customer they don't own, allow them"*): a document may now be raised for
+   * any customer on file, so the picker offers every one of them — the
+   * picker-matches-the-save invariant, satisfied from the other side. The
+   * filtering stays on the server because this searches as you type over a book
+   * of several hundred.
+   *
+   * Scoped is still the default of that endpoint, and still right for the
+   * dropdowns that **filter** documents; this is a picker that chooses who a
+   * document is *for*. `lib/useCustomerBook.ts` states the split.
+   */
   const { data: customers = [] } = useQuery({
-    queryKey: ['customers', q, type],
-    queryFn: () => api.get<Customer[]>(`/api/customers?q=${encodeURIComponent(q)}${type ? `&export=${type === 'export' ? 1 : 0}` : ''}`),
+    queryKey: ['customers', 'book', q, type],
+    queryFn: () => api.get<Customer[]>(`/api/customers?all=1&q=${encodeURIComponent(q)}${type ? `&export=${type === 'export' ? 1 : 0}` : ''}`),
     enabled: !!type,
   });
 
@@ -52,29 +66,20 @@ export default function NewDocumentDialog({
    */
   const other = type === 'export' ? 'domestic' : 'export';
   const { data: otherCustomers = [] } = useQuery({
-    queryKey: ['customers', q, other],
-    queryFn: () => api.get<Customer[]>(`/api/customers?q=${encodeURIComponent(q)}&export=${other === 'export' ? 1 : 0}`),
+    queryKey: ['customers', 'book', q, other],
+    queryFn: () => api.get<Customer[]>(`/api/customers?all=1&q=${encodeURIComponent(q)}&export=${other === 'export' ? 1 : 0}`),
     enabled: !!type && customers.length === 0,
   });
 
   /*
-   * And how many are in the **master** but assigned to somebody else.
-   *
-   * Since 2026-10-07 the Customers page lists the whole book while this picker
-   * still offers only the customers assigned to you — a document may be raised
-   * for those alone, and the save refuses the rest. That gap is the one thing a
-   * person staring at an empty picker beside a page of 820 customers needs
-   * explaining, and it is a different sentence from the Type one: the customer
-   * is not mis-filed, it is somebody else's to quote.
-   *
-   * Asked only when both of the lists above came back empty, so the ordinary
-   * case costs nothing.
+   * There was a third empty state here between 2026-10-07 and the same evening
+   * — *"N are in the customer book, assigned to someone else"* — and it is gone
+   * rather than retired, because it described a refusal that no longer happens:
+   * a document may be raised for any customer on file, so there is no longer a
+   * customer this picker can see and not offer. The Type sentence above is the
+   * one explanation still needed, and it is the one that matters on this book,
+   * where every imported row came in Domestic.
    */
-  const { data: allCustomers = [] } = useQuery({
-    queryKey: ['customers', 'all', q],
-    queryFn: () => api.get<Customer[]>(`/api/customers?all=1&q=${encodeURIComponent(q)}`),
-    enabled: !!type && customers.length === 0 && otherCustomers.length === 0,
-  });
 
   const go = (customerId: number) => {
     navigate(`${basePath}/new?type=${type}&customer=${customerId}`);
@@ -142,32 +147,6 @@ export default function NewDocumentDialog({
                     className="mt-3 inline-block text-xs text-brand-600 underline underline-offset-2 hover:text-brand-700"
                   >
                     Open the {other} customers
-                  </Link>
-                </div>
-              ) : allCustomers.length > 0 ? (
-                /*
-                 * The customer is on file — it belongs to another salesperson.
-                 * Saying "add one" here would be the duplicate trap again, and
-                 * saying nothing leaves an empty picker beside a Customers page
-                 * full of names, which reads as the picker being broken.
-                 */
-                <div className="px-4 py-8 text-center text-sm text-slate-500">
-                  <p>
-                    None of your customers {q ? 'match that search' : 'are on file yet'} — but{' '}
-                    <span className="font-medium text-slate-700">
-                      {allCustomers.length} {allCustomers.length === 1 ? 'is' : 'are'} in the customer book
-                    </span>
-                    , assigned to someone else.
-                  </p>
-                  <p className="mt-1 text-xs">
-                    A document is raised for a customer assigned to you. Whoever manages the team can reassign one.
-                  </p>
-                  <Link
-                    to={`/customers${q ? `?q=${encodeURIComponent(q)}` : ''}`}
-                    onClick={onClose}
-                    className="mt-3 inline-block text-xs text-brand-600 underline underline-offset-2 hover:text-brand-700"
-                  >
-                    Open the customer book
                   </Link>
                 </div>
               ) : (

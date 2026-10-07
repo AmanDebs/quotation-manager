@@ -3,7 +3,7 @@ import { db, transaction } from '../db/connection.js';
 import { nextNumber } from '../services/numbering.js';
 import { round2 } from '../services/totals.js';
 import type { AuthedRequest } from '../middleware/auth.js';
-import { scopeClause, canAccessCustomer } from '../middleware/scope.js';
+import { scopeClause, canAccessCustomer, canRaiseFor } from '../middleware/scope.js';
 import { resolveCompanyId } from '../services/companies.js';
 import { listBody } from '../services/pagination.js';
 
@@ -119,7 +119,10 @@ packingListsRouter.get('/prefill/from-invoice/:invoiceId', (req: AuthedRequest, 
 packingListsRouter.post('/', (req: AuthedRequest, res) => {
   const body = req.body ?? {};
   if (!body.customer_id) return res.status(400).json({ error: 'Customer is required' });
-  if (!canAccessCustomer(req, Number(body.customer_id))) return res.status(403).json({ error: 'That customer is not assigned to you' });
+  // Any customer in the book may be quoted, ordered or invoiced for — see
+  // `canRaiseFor`. Ownership decides whose documents you *read*, and raising
+  // one puts that customer in your book, so you keep what you raised.
+  if (!canRaiseFor(req, Number(body.customer_id))) return res.status(400).json({ error: 'Customer not found' });
   // A standalone packing list follows its invoice's company when it has one.
   const linked = body.invoice_id
     ? (db.prepare('SELECT company_id FROM commercial_invoices WHERE id = ?').get(Number(body.invoice_id)) as { company_id: number } | undefined)

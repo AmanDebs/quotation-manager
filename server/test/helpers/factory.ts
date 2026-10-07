@@ -90,13 +90,20 @@ export function makeQuotation(o: {
    * test about what an unapproved document may do has to say `isExport: 1`.
    */
   isExport?: number;
+  /**
+   * Who raised it. Null by default, as the column is on a row nobody has
+   * claimed — and it matters to `middleware/scope.ts`, where a document you
+   * raised is what puts its customer in your book.
+   */
+  createdBy?: number | null;
 }): number {
   const info = db.prepare(
     `INSERT INTO quotations (number, revision, date, customer_id, company_id, currency, status,
-                             status_before_expired, validity_date, approval_status, superseded_by, is_export)
-     VALUES (?, 0, '2026-08-01', ?, 1, 'INR', ?, ?, ?, ?, ?, ?)`
+                             status_before_expired, validity_date, approval_status, superseded_by, is_export,
+                             created_by)
+     VALUES (?, 0, '2026-08-01', ?, 1, 'INR', ?, ?, ?, ?, ?, ?, ?)`
   ).run(`QT/${next()}`, o.customerId, o.status, o.before ?? '', o.validity ?? '',
-    o.approval ?? 'approved', o.supersededBy ?? null, o.isExport ?? 0);
+    o.approval ?? 'approved', o.supersededBy ?? null, o.isExport ?? 0, o.createdBy ?? null);
   return Number(info.lastInsertRowid);
 }
 

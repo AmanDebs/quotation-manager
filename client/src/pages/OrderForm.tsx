@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate, useParams, useSearchParams, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
-import type { Order, OrderItem, Customer, TaxType, ColumnConfig } from '../types';
+import type { Order, OrderItem, TaxType, ColumnConfig } from '../types';
 import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, Tabs, SettledDocumentType, FIELD_GRID, NOTES_ROWS } from '../components/ui';
 import { PdfLink } from '../components/PdfLink';
 import CompanySelect from '../components/CompanySelect';
@@ -18,6 +18,7 @@ import HistoryCard from '../components/HistoryCard';
 import ChecksStrip from '../components/ChecksStrip';
 import PaymentsCard from '../components/PaymentsCard';
 import { taxChoiceOf, taxPatchFor, newLineTaxPct } from '../lib/tax';
+import { useCustomerBook } from '../lib/useCustomerBook';
 
 interface Draft {
   number?: string;
@@ -83,7 +84,7 @@ export default function OrderFormPage() {
   // which travels in the payload so the server can link the two.
   const fromProforma = search.get('from_proforma');
 
-  const { data: customers = [] } = useQuery({ queryKey: ['customers', ''], queryFn: () => api.get<Customer[]>('/api/customers') });
+  const customers = useCustomerBook();
   const { data: existing, error: loadError } = useQuery({
     queryKey: ['order', id],
     queryFn: () => api.get<Order>(`/api/orders/${id}`),

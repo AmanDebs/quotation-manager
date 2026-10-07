@@ -2,13 +2,14 @@ import { useEffect, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
-import type { PackingList, PackingListItem, Customer } from '../types';
+import type { PackingList, PackingListItem } from '../types';
 import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, ReadOnlyFields, FIELD_GRID, TH_CLASS } from '../components/ui';
 import { PdfLink } from '../components/PdfLink';
 import { fmtQty, today } from '../lib/format';
 import { useUnsavedChanges } from '../lib/useUnsavedChanges';
 import { unitOptions } from './Products';
 import HistoryCard from '../components/HistoryCard';
+import { useCustomerBook } from '../lib/useCustomerBook';
 
 interface Draft {
   number?: string;
@@ -33,7 +34,7 @@ export default function PackingListFormPage() {
   const isNew = !id;
   const fromInvoice = search.get('from_invoice');
 
-  const { data: customers = [] } = useQuery({ queryKey: ['customers', ''], queryFn: () => api.get<Customer[]>('/api/customers') });
+  const customers = useCustomerBook();
   const { data: existing, error: loadError } = useQuery({
     queryKey: ['packing-list', id],
     queryFn: () => api.get<PackingList>(`/api/packing-lists/${id}`),

@@ -4,7 +4,7 @@ import { nextNumber, exportChangeError } from '../services/numbering.js';
 import { exportOnlyInvoice } from '../services/permissions.js';
 import { computeTotals, round2, type LineItemInput } from '../services/totals.js';
 import { allows, type AuthedRequest } from '../middleware/auth.js';
-import { scopeClause, canAccessCustomer, linkError, customerChangeError } from '../middleware/scope.js';
+import { scopeClause, canAccessCustomer, linkError, customerChangeError, canRaiseFor } from '../middleware/scope.js';
 import { resolveCompanyId, foreignBankError } from '../services/companies.js';
 import { syncOrderStatus } from '../services/orderStatus.js';
 import { submit, decide, resetApprovalOnEdit, blockUnapprovedTransition , mayApprove } from '../services/approval.js';
@@ -483,7 +483,10 @@ invoicesRouter.post('/', (req: AuthedRequest, res) => {
   if (!Number(body.is_export)) return res.status(409).json({ error: 'Domestic sales are invoiced in Tally, not here. Commercial invoices are raised for export shipments only.' });
   const side = invoiceSideError(req, body.is_export);
   if (side) return res.status(403).json({ error: side });
-  if (!canAccessCustomer(req, Number(body.customer_id))) return res.status(403).json({ error: 'That customer is not assigned to you' });
+  // Any customer in the book may be quoted, ordered or invoiced for — see
+  // `canRaiseFor`. Ownership decides whose documents you *read*, and raising
+  // one puts that customer in your book, so you keep what you raised.
+  if (!canRaiseFor(req, Number(body.customer_id))) return res.status(400).json({ error: 'Customer not found' });
   const h = headerValues(body);
   // The source documents are checked as carefully as the customer is: an
   // unchecked pi_id let another owner's advances be read and re-allocated.
@@ -534,8 +537,10 @@ invoicesRouter.put('/:id', (req: AuthedRequest, res) => {
   const existing = db.prepare('SELECT * FROM commercial_invoices WHERE id = ?').get(id) as Record<string, unknown> | undefined;
   if (!existing || !canAccessCustomer(req, Number(existing.customer_id))) return res.status(404).json({ error: 'Invoice not found' });
   const h = headerValues(body, existing);
-  const moved = customerChangeError(req, existing.customer_id as number, h.customer_id);
-  if (moved) return res.status(403).json({ error: moved });
+  const moved = customerChangeError(
+    req, existing.customer_id as number, h.customer_id, existing.created_by as number | null
+  );
+  if (moved) return res.status(400).json({ error: moved });
   // The number was drawn from the export or the domestic series and is never
   // reissued, so the flag cannot move after the fact without leaving the two
   // disagreeing. 409, not 403: it is a conflict with what is already on file.

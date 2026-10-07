@@ -75,9 +75,9 @@ export default function CustomersPage() {
       </div>
       {scoped && (
         <p className="mb-3 text-xs text-slate-500">
-          This is the whole customer book. A quotation, order or invoice is raised for a customer
-          <span className="font-medium"> assigned to you</span> — the Owner column says which, and those are the
-          ones the New Quotation picker offers.
+          This is the whole customer book, and <span className="font-medium">any of them can be quoted, ordered or
+          invoiced for</span>. The Owner column says who handles each — their existing documents stay with them, and
+          anything you raise yourself shows on your own lists.
         </p>
       )}
       <ErrorText error={remove.error} />

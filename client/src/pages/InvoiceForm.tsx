@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import { useCan, useUser } from '../App';
-import type { Invoice, Customer, LineItem, TaxType, Settings, ColumnConfig, PackingListItem, Product } from '../types';
+import type { Invoice, LineItem, TaxType, Settings, ColumnConfig, PackingListItem, Product } from '../types';
 import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, StatusBadge, SettledDocumentType, FIELD_GRID, TH_CLASS } from '../components/ui';
 import { PdfLink } from '../components/PdfLink';
 import CompanySelect from '../components/CompanySelect';
@@ -19,6 +19,7 @@ import { useUnsavedChanges } from '../lib/useUnsavedChanges';
 import { packingWeights, grossFor, boxesOn, shippingMarks, BOX_TARE_KG } from '../lib/packing';
 import { useCompanies } from '../components/CompanySelect';
 import HistoryCard from '../components/HistoryCard';
+import { useCustomerBook } from '../lib/useCustomerBook';
 
 interface Draft {
   number?: string;
@@ -100,7 +101,7 @@ export default function InvoiceFormPage() {
   // invoice, and the order is what an invoice is raised from.
   const fromOrder = search.get('from_order');
 
-  const { data: customers = [] } = useQuery({ queryKey: ['customers', ''], queryFn: () => api.get<Customer[]>('/api/customers') });
+  const customers = useCustomerBook();
   const { data: settings } = useQuery({ queryKey: ['settings'], queryFn: () => api.get<Settings>('/api/settings') });
   // The same query the line editor runs, for each line's weight per piece.
   const { data: products = [] } = useQuery({ queryKey: ['products', ''], queryFn: () => api.get<Product[]>('/api/products') });

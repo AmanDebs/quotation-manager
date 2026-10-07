@@ -12,7 +12,7 @@ import { withStock, orderLines, productDemand, countOrderLines, orderSearchClaus
   type ColumnFilters, type Filters, type OrderLine, type ProductDemand, statusClause } from '../services/orderLines.js';
 import { buildXlsx, attachmentName, type Column } from '../services/xlsx.js';
 import { allows, type AuthedRequest } from '../middleware/auth.js';
-import { scopeClause, canAccessCustomer, linkError, customerChangeError } from '../middleware/scope.js';
+import { scopeClause, canAccessCustomer, linkError, customerChangeError, canRaiseFor } from '../middleware/scope.js';
 import { syncOrderStatus } from '../services/orderStatus.js';
 import { returnedQtyByLine } from '../services/creditNotes.js';
 import { syncOrderJobs } from '../services/orderJobs.js';
@@ -799,7 +799,10 @@ ordersRouter.get('/prefill/from-proforma/:piId', (req: AuthedRequest, res) => {
 ordersRouter.post('/', (req: AuthedRequest, res) => {
   const body = req.body ?? {};
   if (!body.customer_id) return res.status(400).json({ error: 'Customer is required' });
-  if (!canAccessCustomer(req, Number(body.customer_id))) return res.status(403).json({ error: 'That customer is not assigned to you' });
+  // Any customer in the book may be quoted, ordered or invoiced for — see
+  // `canRaiseFor`. Ownership decides whose documents you *read*, and raising
+  // one puts that customer in your book, so you keep what you raised.
+  if (!canRaiseFor(req, Number(body.customer_id))) return res.status(400).json({ error: 'Customer not found' });
   const h = headerValues(body);
   const link = linkError(req, 'quotations', h.quotation_id, h.customer_id, 'Quotation');
   if (link) return res.status(404).json({ error: link });
@@ -872,8 +875,10 @@ ordersRouter.put('/:id', (req: AuthedRequest, res) => {
   const existing = db.prepare('SELECT * FROM orders WHERE id = ?').get(id) as Record<string, unknown> | undefined;
   if (!existing || !canAccessCustomer(req, Number(existing.customer_id))) return res.status(404).json({ error: 'Sales order not found' });
   const h = headerValues(body, existing);
-  const moved = customerChangeError(req, existing.customer_id as number, h.customer_id);
-  if (moved) return res.status(403).json({ error: moved });
+  const moved = customerChangeError(
+    req, existing.customer_id as number, h.customer_id, existing.created_by as number | null
+  );
+  if (moved) return res.status(400).json({ error: moved });
   // The number was drawn from the export or the domestic series and is never
   // reissued, so the flag cannot move after the fact without leaving the two
   // disagreeing. 409, not 403: it is a conflict with what is already on file.

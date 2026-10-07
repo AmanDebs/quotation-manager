@@ -3,7 +3,7 @@ import { db, transaction } from '../db/connection.js';
 import { quotationTypeChangeError, nextNumber } from '../services/numbering.js';
 import { computeTotals, type LineItemInput } from '../services/totals.js';
 import type { AuthedRequest } from '../middleware/auth.js';
-import { scopeClause, canAccessCustomer, customerChangeError } from '../middleware/scope.js';
+import { scopeClause, canAccessCustomer, customerChangeError, canRaiseFor } from '../middleware/scope.js';
 import { submit, decide, resetApprovalOnEdit, blockUnapprovedTransition, exemptApprovalError , mayApprove } from '../services/approval.js';
 import { incompleteError, checkDocument } from '../services/documentChecks.js';
 import { resolveCompanyId } from '../services/companies.js';
@@ -202,7 +202,10 @@ quotationsRouter.get('/:id', (req: AuthedRequest, res) => {
 quotationsRouter.post('/', (req: AuthedRequest, res) => {
   const body = req.body ?? {};
   if (!body.customer_id) return res.status(400).json({ error: 'Customer is required' });
-  if (!canAccessCustomer(req, Number(body.customer_id))) return res.status(403).json({ error: 'That customer is not assigned to you' });
+  // Any customer in the book may be quoted, ordered or invoiced for — see
+  // `canRaiseFor`. Ownership decides whose documents you *read*, and raising
+  // one puts that customer in your book, so you keep what you raised.
+  if (!canRaiseFor(req, Number(body.customer_id))) return res.status(400).json({ error: 'Customer not found' });
   const taxType = (body.tax_type ?? 'none') as 'none' | 'cgst_sgst' | 'igst';
   const isExport = body.is_export ? 1 : 0;
   // Which entity is selling. Fixed here and never changed afterwards: the
@@ -258,8 +261,14 @@ quotationsRouter.put('/:id', (req: AuthedRequest, res) => {
   const body = req.body ?? {};
   const existing = db.prepare('SELECT * FROM quotations WHERE id = ?').get(id) as Record<string, unknown> | undefined;
   if (!existing || !canAccessCustomer(req, Number(existing.customer_id))) return res.status(404).json({ error: 'Quotation not found' });
-  const moved = customerChangeError(req, existing.customer_id as number, Number(body.customer_id ?? existing.customer_id));
-  if (moved) return res.status(403).json({ error: moved });
+  const moved = customerChangeError(
+    req, existing.customer_id as number, Number(body.customer_id ?? existing.customer_id),
+    existing.created_by as number | null
+  );
+  // 400 rather than the 403 this answered while ownership decided who could be
+  // quoted for: neither refusal is about the caller's rights any more — the
+  // customer is not on file, or the move would hide the document from them.
+  if (moved) return res.status(400).json({ error: moved });
   // Converted into a proforma, so its figures are what that document was built
   // from. 409, not 403: a conflict with what already exists downstream.
   const locked = lockError('quotations', id);

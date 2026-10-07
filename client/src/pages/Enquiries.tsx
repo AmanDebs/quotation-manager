@@ -1,14 +1,15 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
-import type { Enquiry, EnquiryStatus, Customer } from '../types';
+import type { Enquiry, EnquiryStatus } from '../types';
 import {
   PageHeader, Card, Select, Input, Textarea, Field, Button, EmptyState, ErrorText, Modal, StatusBadge, Pagination, TH_CLASS,
 } from '../components/ui';
 import { fmtDate, today } from '../lib/format';
 import { useUrlFilter } from '../lib/useUrlFilter';
 import { usePagedList, PAGE_SIZE } from '../lib/usePagedList';
+import { useCustomerBook } from '../lib/useCustomerBook';
 
 /**
  * The front of the funnel: somebody asked before there was anything to quote.
@@ -49,10 +50,7 @@ export default function EnquiriesPage() {
     `/api/enquiries${statusFilter ? `?status=${statusFilter}` : ''}`,
   );
   const enquiries = list.rows;
-  const { data: customers = [] } = useQuery({
-    queryKey: ['customers', ''],
-    queryFn: () => api.get<Customer[]>('/api/customers'),
-  });
+  const customers = useCustomerBook();
 
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: ['enquiries'] });

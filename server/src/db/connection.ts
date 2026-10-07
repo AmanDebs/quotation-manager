@@ -321,6 +321,17 @@ for (const table of ['quotations', 'proforma_invoices', 'commercial_invoices']) 
 addColumnIfMissing('purchase_orders', 'column_config', "TEXT NOT NULL DEFAULT '{}'");
 addColumnIfMissing('packing_lists', 'created_by', 'INTEGER');
 addColumnIfMissing('packing_lists', 'column_config', "TEXT NOT NULL DEFAULT '{}'");
+/*
+ * `created_by` on every table `middleware/scope.ts` reads to decide whose book
+ * a customer is in. Three of these were only ever in `schema.sql`, so a
+ * database migrated from before they existed would not have them -- and since
+ * 2026-10-07 a missing one is not a degraded column but a throw on **every
+ * scoped query in the app**, which is the `batches.disposition` trap read one
+ * step further on. `enquiries` is genuinely new; the other two are belt.
+ */
+addColumnIfMissing('enquiries', 'created_by', 'INTEGER');
+addColumnIfMissing('orders', 'created_by', 'INTEGER');
+addColumnIfMissing('credit_notes', 'created_by', 'INTEGER');
 for (const table of ['quotation_items', 'pi_items', 'invoice_items', 'packing_list_items']) {
   addColumnIfMissing(table, 'custom1', "TEXT NOT NULL DEFAULT ''");
   addColumnIfMissing(table, 'custom2', "TEXT NOT NULL DEFAULT ''");
