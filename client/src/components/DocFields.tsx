@@ -416,39 +416,56 @@ export function PortOfLoadingInput({
 }
 
 /**
- * Who on the desk is handling an order, in the client's own list (2026-10-07:
- * *"SPOC to be through drop down option — Meisha, Tannistha, Rumela, Sanjib,
- * Ashwin, Prasun"*). It was a free text box, so the same person arrived on the
- * book as *Sanjib*, *Sanjib Das* and *sanjib* — and the Orders page filters on
- * that column by exact value, so three spellings is three filters and none of
- * them finds the whole of anybody's work.
+ * The sales desk, in the client's own list (2026-10-07: *"SPOC to be through
+ * drop down option — Meisha, Tannistha, Rumela, Sanjib, Ashwin, Prasun"*, then
+ * *"Add the same dropdown to Prepared By"*).
  *
- * **Free text behind the list, as every suggest field here is**, and that is
- * load-bearing rather than habit on this one. The column is live: 198 of the
- * imported orders carry a SPOC the import read off the client's own sheet, the
- * order prefill carries `prepared_by` across from the quotation or proforma it
- * was booked from, and `/auth/me` fills Prepared By in with whoever is signed
- * in. A hard `<select>` would draw every one of those as blank and clear it on
- * the next ordinary save — the `unitOptions` rule, that a value a saved row
- * holds stays on it even when the list stops offering it.
+ * It is **one list behind two fields**, which is the honest shape: *Handled By
+ * (SPOC)* on the sales order and *Prepared By* on the quotation, proforma,
+ * commercial invoice and credit note are the same fact under two names — the
+ * order prefill writes `spoc` from a quotation's `prepared_by`, and
+ * `prefill/from-order` writes `prepared_by` back from the order's `spoc`. Two
+ * lists of the same six people is how the two would come to disagree, and a
+ * name carried along the chain would land in a box whose list did not offer it.
+ *
+ * **Free text behind the list, and here that is load-bearing rather than
+ * habit.** All five columns are live: the backlog import read `spoc` off the
+ * client's own sheet, Prepared By fills itself in from whoever is signed in
+ * (`useDefaultOnce`), and both are carried across every conversion — so a hard
+ * `<select>` would draw all of those blank and clear them on the next ordinary
+ * save. That is the `unitOptions` rule, that a value a saved row holds stays on
+ * it even when the list stops offering it.
  *
  * Alphabetical would have been the obvious order and is not what is used: this
  * is the client's own list in the client's own order, which is the shape they
  * read it in.
  */
-export const SPOC_NAMES: Suggestion[] = ['Meisha', 'Tannistha', 'Rumela', 'Sanjib', 'Ashwin', 'Prasun']
+export const DESK_NAMES: Suggestion[] = ['Meisha', 'Tannistha', 'Rumela', 'Sanjib', 'Ashwin', 'Prasun']
   .map((s) => ({ value: s, label: s }));
 
-/** The order's Handled By (SPOC) field, offered from `SPOC_NAMES`. */
-export function SpocInput({ value, onChange, disabled }: { value: string; onChange: (v: string) => void; disabled?: boolean }) {
+/**
+ * Somebody on the desk, offered from `DESK_NAMES` — the order's *Handled By
+ * (SPOC)* and every document's *Prepared By*.
+ *
+ * One component rather than one per field: two copies of a control is how the
+ * two come to look different from each other, the call `SegmentedTabs` and
+ * `SuggestInput` itself already record. Only the placeholder differs, so only
+ * the placeholder is a prop.
+ */
+export function DeskPersonInput({ value, onChange, disabled, placeholder }: {
+  value: string;
+  onChange: (v: string) => void;
+  disabled?: boolean;
+  placeholder?: string;
+}) {
   return (
     <SuggestInput
-      options={SPOC_NAMES}
+      options={DESK_NAMES}
       value={value}
       onChange={onChange}
       disabled={disabled}
       label="Show the desk"
-      placeholder="Who took this order"
+      placeholder={placeholder ?? 'Pick a name, or type your own'}
     />
   );
 }
