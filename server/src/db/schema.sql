@@ -57,6 +57,21 @@ CREATE TABLE IF NOT EXISTS role_permissions (
   PRIMARY KEY (team_role, fn)
 );
 
+-- One person's own ticks, laid over their team's (2026-10-07).
+--
+-- The same shape and the same rule as the table above, one level further on:
+-- only the differences are stored, so a cell nobody re-ticked follows the
+-- team, correcting the Sales row still reaches every Sales account that has
+-- not been re-ticked itself, and "follows their team" is the absence of a row
+-- rather than a copy of one that can go stale.
+CREATE TABLE IF NOT EXISTS user_permissions (
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  fn TEXT NOT NULL,
+  level TEXT NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (user_id, fn)
+);
+
 -- The group's selling entities. Every document records the one that issued it,
 -- so a reprint years later still carries the right name, GSTIN and letterhead.
 -- Each company numbers its own documents: a GST-registered entity keeps one

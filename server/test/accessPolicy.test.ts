@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { db } from '../src/db/connection.js';
 import {
   can, capabilities, effectiveAccess, levelFor, overridesFor, reloadAccess, setRoleAccess,
+  setUserAccess, userAccessList, userOverridesFor,
 } from '../src/services/accessPolicy.js';
 import { DEFAULT_ACCESS, FUNCTIONS, TEAM_ROLES } from '../src/services/permissions.js';
 
@@ -25,7 +26,18 @@ import { DEFAULT_ACCESS, FUNCTIONS, TEAM_ROLES } from '../src/services/permissio
  * keeps a hand-written super admin row inert.
  */
 
+/**
+ * A session on a team and nothing of its own.
+ *
+ * `can`, `levelFor` and `capabilities` take the **person** since 2026-10-07,
+ * their own ticks over their team's — so every case below, which is about the
+ * team layer, says so by passing a subject with no id. The per-person layer has
+ * its own group at the foot of this file.
+ */
+const team = (role: unknown) => ({ team_role: role });
+
 beforeEach(() => {
+  db.prepare('DELETE FROM user_permissions').run();
   db.prepare('DELETE FROM role_permissions').run();
   reloadAccess();
 });
@@ -43,14 +55,14 @@ describe('with nothing re-ticked', () => {
 
   /** Moved here from `permissions.test.ts` when the map stopped being the default's. */
   test('the map handed to the client covers every function, so no screen has to guess', () => {
-    const caps = capabilities('production');
+    const caps = capabilities(team('production'));
     assert.deepEqual(Object.keys(caps).sort(), [...FUNCTIONS].sort());
     assert.equal(caps.work_order, 'full');
     assert.equal(caps.quotation, 'none');
   });
 
   test('and an unknown role gets a map of nothing rather than an empty object', () => {
-    const caps = capabilities('nobody');
+    const caps = capabilities(team('nobody'));
     assert.equal(Object.keys(caps).length, FUNCTIONS.length);
     assert.ok(Object.values(caps).every((l) => l === 'none'));
   });
@@ -58,21 +70,21 @@ describe('with nothing re-ticked', () => {
 
 describe('re-ticking a team', () => {
   test('changes what the guard answers, at once', () => {
-    assert.equal(can('production', 'quotation'), false);
+    assert.equal(can(team('production'), 'quotation'), false);
     setRoleAccess('production', { quotation: 'view' });
-    assert.equal(can('production', 'quotation'), true);
-    assert.equal(can('production', 'quotation', 'full'), false, 'view is not edit');
+    assert.equal(can(team('production'), 'quotation'), true);
+    assert.equal(can(team('production'), 'quotation', 'full'), false, 'view is not edit');
     setRoleAccess('production', { quotation: 'full' });
-    assert.equal(can('production', 'quotation', 'full'), true);
+    assert.equal(can(team('production'), 'quotation', 'full'), true);
     // And the map the client draws its screens from is the same answer.
-    assert.equal(capabilities('production').quotation, 'full');
+    assert.equal(capabilities(team('production')).quotation, 'full');
   });
 
   test('moves nobody else', () => {
     setRoleAccess('production', { quotation: 'full' });
     for (const role of TEAM_ROLES) {
       if (role === 'production') continue;
-      assert.equal(levelFor(role, 'quotation'), DEFAULT_ACCESS[role].quotation, `${role} moved too`);
+      assert.equal(levelFor(team(role), 'quotation'), DEFAULT_ACCESS[role].quotation, `${role} moved too`);
     }
   });
 
@@ -83,9 +95,9 @@ describe('re-ticking a team', () => {
   test('leaves every function the save did not mention exactly as it was', () => {
     setRoleAccess('quality', { quotation: 'view' });
     setRoleAccess('quality', { invoice: 'view' });
-    assert.equal(levelFor('quality', 'quotation'), 'view', 'the first save was undone');
-    assert.equal(levelFor('quality', 'invoice'), 'view');
-    assert.equal(levelFor('quality', 'qc'), 'full', 'an untouched cell moved');
+    assert.equal(levelFor(team('quality'), 'quotation'), 'view', 'the first save was undone');
+    assert.equal(levelFor(team('quality'), 'invoice'), 'view');
+    assert.equal(levelFor(team('quality'), 'qc'), 'full', 'an untouched cell moved');
   });
 
   test('reports the cells that moved, and a save that changes nothing writes nothing', () => {
@@ -124,7 +136,7 @@ describe('re-ticking a team', () => {
     const moved = setRoleAccess('quality', DEFAULT_ACCESS.quality);
     assert.deepEqual(moved.map((c) => c.fn).sort(), ['order', 'qc', 'quotation']);
     assert.equal(rows(), 0, 'the override rows were left behind');
-    for (const fn of FUNCTIONS) assert.equal(levelFor('quality', fn), DEFAULT_ACCESS.quality[fn], fn);
+    for (const fn of FUNCTIONS) assert.equal(levelFor(team('quality'), fn), DEFAULT_ACCESS.quality[fn], fn);
     assert.deepEqual(setRoleAccess('quality', DEFAULT_ACCESS.quality), [], 'resetting a team already on the matrix moves nothing');
   });
 
@@ -135,9 +147,9 @@ describe('re-ticking a team', () => {
    */
   test('a customised team still follows the matrix everywhere it was not re-ticked', () => {
     setRoleAccess('sales', { purchasing: 'full' });
-    assert.equal(levelFor('sales', 'purchasing'), 'full');
-    assert.equal(levelFor('sales', 'quotation'), DEFAULT_ACCESS.sales.quotation);
-    assert.equal(levelFor('sales', 'backup'), 'none');
+    assert.equal(levelFor(team('sales'), 'purchasing'), 'full');
+    assert.equal(levelFor(team('sales'), 'quotation'), DEFAULT_ACCESS.sales.quotation);
+    assert.equal(levelFor(team('sales'), 'backup'), 'none');
   });
 });
 
@@ -152,9 +164,9 @@ describe('what a stored row may not do', () => {
     db.prepare("INSERT INTO role_permissions (team_role, fn, level) VALUES ('super_admin', 'team', 'none')").run();
     db.prepare("INSERT INTO role_permissions (team_role, fn, level) VALUES ('super_admin', 'backup', 'none')").run();
     reloadAccess();
-    assert.equal(can('super_admin', 'team', 'full'), true);
-    assert.equal(can('super_admin', 'backup', 'full'), true);
-    for (const fn of FUNCTIONS) assert.equal(levelFor('super_admin', fn), 'full', fn);
+    assert.equal(can(team('super_admin'), 'team', 'full'), true);
+    assert.equal(can(team('super_admin'), 'backup', 'full'), true);
+    for (const fn of FUNCTIONS) assert.equal(levelFor(team('super_admin'), fn), 'full', fn);
     assert.deepEqual(overridesFor('super_admin'), {});
   });
 
@@ -178,7 +190,7 @@ describe('what a stored row may not do', () => {
   test('and an unknown role still may do nothing at all', () => {
     setRoleAccess('sales', { quotation: 'full' });
     for (const bad of ['', 'manager', 'employee', undefined, null]) {
-      for (const fn of FUNCTIONS) assert.equal(can(bad, fn), false, `${String(bad)} reached ${fn}`);
+      for (const fn of FUNCTIONS) assert.equal(can(team(bad), fn), false, `${String(bad)} reached ${fn}`);
     }
   });
 });
@@ -186,3 +198,123 @@ describe('what a stored row may not do', () => {
 function rows(): number {
   return (db.prepare('SELECT COUNT(*) AS c FROM role_permissions').get() as { c: number }).c;
 }
+
+/**
+ * One person's own ticks, over their team's (2026-10-07, the client: *"USER
+ * wise access rather than department wise access"*).
+ *
+ * The third layer, and it follows the same two properties as the second: only
+ * the differences are stored, and a stored row is data rather than vocabulary.
+ * Most of these are about what must **not** move — a person who has never been
+ * re-ticked has to go on following their team exactly, or this would have
+ * changed what every account on file may do on the day it shipped.
+ */
+describe('re-ticking one person', () => {
+  let seq = 0;
+  const makeAccount = (role: string, name: string) => {
+    seq += 1;
+    const info = db.prepare(
+      "INSERT INTO users (name, email, password_hash, role, team_role) VALUES (?, ?, 'x', 'employee', ?)"
+    ).run(name, `u${seq}@test.local`, role);
+    return Number(info.lastInsertRowid);
+  };
+
+  test('a person with no ticks of their own is exactly their team', () => {
+    const id = makeAccount('production', 'Follows the floor');
+    for (const fn of FUNCTIONS) {
+      assert.equal(levelFor({ id, team_role: 'production' }, fn), DEFAULT_ACCESS.production[fn], fn);
+    }
+    assert.deepEqual(userOverridesFor(id), {});
+  });
+
+  test('a tick of their own wins over the team', () => {
+    const id = makeAccount('production', 'Reads quotes');
+    assert.equal(can({ id, team_role: 'production' }, 'quotation'), false);
+    setUserAccess(id, 'production', { quotation: 'view' });
+    assert.equal(can({ id, team_role: 'production' }, 'quotation'), true);
+    assert.equal(can({ id, team_role: 'production' }, 'quotation', 'full'), false, 'view is not edit');
+    // And nobody else on that team moved with them, which is the whole point.
+    assert.equal(can(team('production'), 'quotation'), false);
+    const other = makeAccount('production', 'Another floor hand');
+    assert.equal(levelFor({ id: other, team_role: 'production' }, 'quotation'), 'none');
+  });
+
+  test('a level equal to the team is not an override and is not stored', () => {
+    const id = makeAccount('sales', 'Plain sales');
+    setUserAccess(id, 'sales', { quotation: DEFAULT_ACCESS.sales.quotation, backup: 'full' });
+    assert.deepEqual(userOverridesFor(id), { backup: 'full' }, 'only the one that differs');
+  });
+
+  test('so correcting the team still reaches everybody who was never moved off it', () => {
+    const id = makeAccount('quality', 'Follows quality');
+    setUserAccess(id, 'quality', { backup: 'full' });   // their own
+    setRoleAccess('quality', { quotation: 'view' });    // the team's
+    assert.equal(levelFor({ id, team_role: 'quality' }, 'quotation'), 'view', 'the team change reached them');
+    assert.equal(levelFor({ id, team_role: 'quality' }, 'backup'), 'full', 'and their own stands');
+  });
+
+  test('setting a cell back to what the team says deletes it, which is Reset', () => {
+    const id = makeAccount('logistics', 'Reset me');
+    setUserAccess(id, 'logistics', { quotation: 'full' });
+    assert.deepEqual(userOverridesFor(id), { quotation: 'full' });
+    setUserAccess(id, 'logistics', { quotation: DEFAULT_ACCESS.logistics.quotation });
+    assert.deepEqual(userOverridesFor(id), {}, 'no row at all, not a copy of the team');
+    const left = db.prepare('SELECT COUNT(*) AS c FROM user_permissions WHERE user_id = ?').get(id) as { c: number };
+    assert.equal(left.c, 0);
+  });
+
+  test('a function the body does not mention is left alone', () => {
+    const id = makeAccount('sales', 'Partial save');
+    setUserAccess(id, 'sales', { backup: 'full', purchasing: 'full' });
+    setUserAccess(id, 'sales', { backup: 'none' });
+    assert.equal(levelFor({ id, team_role: 'sales' }, 'purchasing'), 'full', 'untouched');
+    assert.equal(levelFor({ id, team_role: 'sales' }, 'backup'), 'none');
+  });
+
+  test('it reports the cells that moved, and a save that changes nothing writes nothing', () => {
+    const id = makeAccount('quality', 'Change report');
+    const first = setUserAccess(id, 'quality', { quotation: 'view' });
+    assert.deepEqual(first, [{ fn: 'quotation', from: 'none', to: 'view' }]);
+    assert.deepEqual(setUserAccess(id, 'quality', { quotation: 'view' }), []);
+  });
+
+  test('a super admin row is inert however it got written', () => {
+    const id = makeAccount('super_admin', 'Cannot be clipped');
+    // Straight into the table, the way a hand-edit or a restored backup would.
+    db.prepare("INSERT INTO user_permissions (user_id, fn, level) VALUES (?, 'team', 'none')").run(id);
+    reloadAccess();
+    assert.equal(can({ id, team_role: 'super_admin' }, 'team', 'full'), true, 'the rail held');
+    for (const fn of FUNCTIONS) assert.equal(levelFor({ id, team_role: 'super_admin' }, fn), 'full', fn);
+  });
+
+  test('an unknown function or level in the table is ignored rather than trusted', () => {
+    const id = makeAccount('sales', 'Junk rows');
+    db.prepare("INSERT INTO user_permissions (user_id, fn, level) VALUES (?, 'teleportation', 'full')").run(id);
+    db.prepare("INSERT INTO user_permissions (user_id, fn, level) VALUES (?, 'quotation', 'everything')").run(id);
+    reloadAccess();
+    assert.equal(levelFor({ id, team_role: 'sales' }, 'quotation'), DEFAULT_ACCESS.sales.quotation);
+    assert.deepEqual(userOverridesFor(id), {});
+  });
+
+  test('somebody on no team at all can still be ticked, one function at a time', () => {
+    // A row the backfill never reached reads as no access to anything — and
+    // that is exactly the person a per-user grant is for.
+    const id = makeAccount('', 'No team');
+    assert.equal(can({ id, team_role: '' }, 'quotation'), false);
+    setUserAccess(id, '', { quotation: 'view' });
+    assert.equal(can({ id, team_role: '' }, 'quotation'), true);
+    assert.equal(can({ id, team_role: '' }, 'invoice'), false, 'and nothing else came with it');
+  });
+
+  test('the list says who follows their team and who does not', () => {
+    const id = makeAccount('logistics', 'Listed');
+    setUserAccess(id, 'logistics', { quotation: 'full' });
+    const row = userAccessList().find((u) => u.id === id)!;
+    assert.equal(row.customised, 1);
+    assert.equal(row.access.quotation, 'full', 'what they may actually do');
+    assert.equal(row.team_access.quotation, DEFAULT_ACCESS.logistics.quotation, 'and what they departed from');
+    assert.equal(row.editable, true);
+    const admin = makeAccount('super_admin', 'The admin');
+    assert.equal(userAccessList().find((u) => u.id === admin)?.editable, false);
+  });
+});

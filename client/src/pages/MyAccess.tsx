@@ -6,7 +6,12 @@ import type { Level } from '../types';
 import { Card, EmptyState, PageHeader } from '../components/ui';
 
 /**
- * What your own team may do.
+ * What you yourself may do.
+ *
+ * Your team's row, with your own ticks over it where somebody has set any
+ * (2026-10-07) — and the two are drawn apart, because *"I have this because I
+ * am on Sales"* and *"somebody set this for me"* are different answers to the
+ * same question, and only the second has a person behind it to ask about it.
  *
  * The permissions page answers *who may do what* and is the administrator's;
  * this answers *what may I do*, which is the question somebody actually has —
@@ -38,6 +43,10 @@ interface Mine {
   functions: FunctionRow[];
   groups: string[];
   access: Record<string, Level>;
+  /** What the team alone says, so a cell set for this person can be marked. */
+  team_access: Record<string, Level>;
+  /** How many of them there are. */
+  own: number;
 }
 
 type Tone = 'full' | 'view' | 'none';
@@ -82,6 +91,14 @@ export default function MyAccessPage() {
 
   const tones = data.functions.map((f) => stateOf(f, data.access[f.fn] ?? 'none').tone);
   const count = (tone: Tone) => tones.filter((t) => t === tone).length;
+  const mine = (fn: string) => (data.access[fn] ?? 'none') !== (data.team_access?.[fn] ?? 'none');
+  /*
+   * A person on no team at all used to be the end of the page — there was
+   * nothing a team could grant them. There is now: somebody can tick a
+   * function for them directly, so the page is empty only when nothing at all
+   * is open, which is the honest condition and the one the pills already read.
+   */
+  const nothing = !data.label && data.own === 0;
 
   return (
     <div>
@@ -92,14 +109,16 @@ export default function MyAccessPage() {
           // account that is the person reading it. Who sets it is the footnote
           // below, which knows whether that is them.
           data.label
-            ? `What a ${data.label} account may open and change.`
-            : 'Your account has not been put on a team yet, so nothing is open to it.'
+            ? `What your account may open and change — a ${data.label} account, with ${
+              data.own === 0 ? 'nothing' : `${data.own} permission${data.own === 1 ? '' : 's'}`
+            } set for you personally.`
+            : 'Your account is on no team, so it holds only what has been set for it directly.'
         }
       />
 
-      {!data.label ? (
+      {nothing ? (
         <Card>
-          <EmptyState message="No team, and so no permissions. Whoever manages your accounts can put you on one." />
+          <EmptyState message="No team, and nothing set for you, so nothing is open yet. Whoever manages your accounts can put you on a team or tick what you need." />
         </Card>
       ) : (
         <>
@@ -135,6 +154,14 @@ export default function MyAccessPage() {
                           <div className="min-w-0">
                             <div className={`font-medium ${state.tone === 'none' ? 'text-slate-400' : 'text-slate-800'}`}>
                               {f.label}
+                              {mine(f.fn) && (
+                                <span
+                                  className="ml-1.5 align-middle text-[10px] font-normal uppercase tracking-wide text-amber-600"
+                                  title={`Set for you. ${data.label || 'Your team'} alone would be: ${stateOf(f, data.team_access?.[f.fn] ?? 'none').label.toLowerCase()}`}
+                                >
+                                  set for you
+                                </span>
+                              )}
                             </div>
                             <div className="text-xs text-slate-400">{f.hint}</div>
                           </div>

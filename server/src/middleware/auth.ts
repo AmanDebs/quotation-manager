@@ -140,7 +140,7 @@ export const isManager = (req: AuthedRequest) => req.user?.role === 'manager';
  */
 export function requirePermission(fn: Fn, level: Level = 'view') {
   return (req: AuthedRequest, res: Response, next: NextFunction) => {
-    if (!can(req.user?.team_role, fn, level === 'full' ? 'full' : 'view')) {
+    if (!can(req.user, fn, level === 'full' ? 'full' : 'view')) {
       return res.status(403).json({
         error: level === 'full'
           ? 'Your team does not have permission to change this'
@@ -172,4 +172,4 @@ export function requireFunction(fn: Fn) {
 
 /** Whether the signed-in user may do this — for routes that answer 404 instead. */
 export const allows = (req: AuthedRequest, fn: Fn, level: 'view' | 'full' = 'view') =>
-  can(req.user?.team_role, fn, level);
+  can(req.user, fn, level);

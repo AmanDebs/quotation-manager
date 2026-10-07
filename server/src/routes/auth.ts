@@ -112,7 +112,7 @@ authRouter.get('/me', requireAuth, (req: AuthedRequest, res) => {
    */
   res.json({
     ...req.user,
-    can: capabilities(req.user!.team_role),
+    can: capabilities(req.user!),
     dashboard_layout: readLayout(row?.dashboard_layout),
   });
 });

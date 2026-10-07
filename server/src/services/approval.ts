@@ -12,7 +12,8 @@ import { incompleteError } from './documentChecks.js';
  * second team silently gives that team the power to approve documents it never
  * opened. Named here so that is one decision rather than three.
  */
-export const mayApprove = (user: { team_role?: unknown } | undefined) => can(user?.team_role, 'approval', 'full');
+export const mayApprove = (user: { id?: unknown; team_role?: unknown } | undefined) =>
+  can(user, 'approval', 'full');
 
 export type DocTable = 'quotations' | 'proforma_invoices' | 'commercial_invoices' | 'credit_notes';
 
