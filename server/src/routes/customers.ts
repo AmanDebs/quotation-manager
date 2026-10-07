@@ -23,8 +23,28 @@ customersRouter.get('/', (req: AuthedRequest, res) => {
   const where: string[] = [];
   const params: unknown[] = [];
 
-  const scope = scopeClause(req, 'c.id');
-  if (scope.sql) { where.push(scope.sql); params.push(...scope.params); }
+  /*
+   * `?all=1` is the customer **master** — every customer, whoever owns them
+   * (2026-10-07, the client: *"every user should have access to all customers
+   * in customer master"*).
+   *
+   * The default stays scoped, and that is deliberate rather than timid: this
+   * one endpoint serves the master page **and** eleven pickers and filter
+   * dropdowns — the New Quotation dialog, the four document forms, the
+   * despatch, payment, follow-up and tracker filters. Those must stay scoped,
+   * because raising a document for a customer not assigned to you is refused
+   * 403 further down this very file, and a picker that offers what the save
+   * refuses is the worst way round for a guard to be wrong. Making the narrow
+   * answer the default means a caller added later is scoped by forgetting,
+   * which is the safe direction; only the master page asks to widen.
+   *
+   * Ownership keeps exactly one job after this: deciding whose **documents**
+   * you see. It no longer decides which customers exist for you.
+   */
+  if (req.query.all !== '1') {
+    const scope = scopeClause(req, 'c.id');
+    if (scope.sql) { where.push(scope.sql); params.push(...scope.params); }
+  }
   // The same helper the document lists use. The hand-written clause was
   // already bracketed — which matters, since `scopeClause` shares this WHERE
   // and an unbracketed OR would have been a way straight past data scoping —
@@ -146,9 +166,17 @@ customersRouter.post('/import', (req: AuthedRequest, res) => {
   res.json({ ...counts, skipped: result.summary.skip, sheet: result.sheet });
 });
 
+/*
+ * The record itself is master data and is readable by anyone holding the
+ * `customer` function — the master page lists every customer, so a row that
+ * opens on 404 would be a list of doors that do not lead anywhere.
+ *
+ * What stays private is the customer's **documents**: `customerSummary`
+ * carries the ownership check now, so an unowned customer opens showing the
+ * record and no sections at all.
+ */
 customersRouter.get('/:id', (req: AuthedRequest, res) => {
   const id = Number(req.params.id);
-  if (!canAccessCustomer(req, id)) return res.status(404).json({ error: 'Customer not found' });
   const row = db.prepare(`${listSql} WHERE c.id = ?`).get(id);
   if (!row) return res.status(404).json({ error: 'Customer not found' });
   res.json(row);
@@ -165,7 +193,8 @@ customersRouter.get('/:id', (req: AuthedRequest, res) => {
  */
 customersRouter.get('/:id/summary', (req: AuthedRequest, res) => {
   const id = Number(req.params.id);
-  if (!canAccessCustomer(req, id)) return res.status(404).json({ error: 'Customer not found' });
+  // No scope gate here any more: `customerSummary` holds it, and answers with
+  // no sections at all rather than a 404, so the record still opens.
   const exists = db.prepare('SELECT 1 FROM customers WHERE id = ?').get(id);
   if (!exists) return res.status(404).json({ error: 'Customer not found' });
   res.json(customerSummary(req, id));
@@ -194,10 +223,21 @@ customersRouter.post('/', (req: AuthedRequest, res) => {
   res.status(201).json(db.prepare(`${listSql} WHERE c.id = ?`).get(Number(info.lastInsertRowid)));
 });
 
+/*
+ * Editing follows the **permission cell**, not the owner: a shared master
+ * nobody may correct is a list of 820 rows with two editable ones, and the
+ * field somebody actually needs to fix on an imported customer — the Type
+ * that decides export or domestic — sits on exactly those rows.
+ *
+ * `customer: full` is what gates it (Sales and the super admin; the factory
+ * teams hold `view` and are refused 403 by the mount). **`owner_id` is still
+ * manager-only below**, which is what keeps this from being a way to take
+ * somebody's documents: an employee editing a shared customer leaves the
+ * owner exactly as they found it.
+ */
 customersRouter.put('/:id', (req: AuthedRequest, res) => {
   const id = Number(req.params.id);
   const body = req.body ?? {};
-  if (!canAccessCustomer(req, id)) return res.status(404).json({ error: 'Customer not found' });
   const existing = db.prepare('SELECT * FROM customers WHERE id = ?').get(id) as Record<string, unknown> | undefined;
   if (!existing) return res.status(404).json({ error: 'Customer not found' });
   if (!body.name) return res.status(400).json({ error: 'Customer name is required' });
@@ -214,6 +254,13 @@ customersRouter.put('/:id', (req: AuthedRequest, res) => {
   res.json(db.prepare(`${listSql} WHERE c.id = ?`).get(id));
 });
 
+/*
+ * Deleting stays with the owner, deliberately and alone among these routes.
+ * Sharing the master was asked for; handing every salesperson a delete over
+ * every other salesperson's customer was not, and it is the one act here that
+ * cannot be undone. The document guards below are unscoped counts, so a
+ * customer with any history is already refused whoever asks.
+ */
 customersRouter.delete('/:id', (req: AuthedRequest, res) => {
   const id = Number(req.params.id);
   if (!canAccessCustomer(req, id)) return res.status(404).json({ error: 'Customer not found' });

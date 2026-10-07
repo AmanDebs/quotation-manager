@@ -5,15 +5,30 @@ import { db } from '../src/db/connection.js';
 import type { AuthedRequest } from '../src/middleware/auth.js';
 import type { TeamRole } from '../src/services/permissions.js';
 import { customerSummary } from '../src/services/customerSummary.js';
-import { makeCustomer, makeProforma, makeInvoice, makePayment, makeQuotation } from './helpers/factory.js';
+import { makeCustomer, makeProforma, makeInvoice, makePayment, makeQuotation, makeUser } from './helpers/factory.js';
 
 /**
  * The customer page answers two kinds of question, and both can be silently
  * wrong: what this customer owes, and what this reader is allowed to see.
  */
 
-/** A session, which is all `allows()` reads. */
-const as = (role: TeamRole) => ({ user: { team_role: role } }) as unknown as AuthedRequest;
+/**
+ * A session.
+ *
+ * It carries an **id** as well as a team since 2026-10-07: `customerSummary`
+ * now asks `canAccessCustomer` before anything else, because the customer
+ * record became master data while the customer's documents stayed the owner's.
+ * Only Sales is scoped, so the id matters for that team alone — but it has to
+ * be there, or the ownership lookup binds `undefined` to SQLite.
+ *
+ * Every fixture customer below is owned by this id, which is what keeps these
+ * tests about the question they were written for: **who may read which
+ * section**, not who the customer belongs to. The ownership rule itself is
+ * asserted in its own group at the foot of this file.
+ */
+// A real row: `customers.owner_id` is a foreign key.
+const OWNER = makeUser('sales', 'Summary owner');
+const as = (role: TeamRole) => ({ user: { id: OWNER, team_role: role } }) as unknown as AuthedRequest;
 
 /** A date relative to today, so a test cannot start failing as the calendar moves. */
 const daysAgo = (n: number) =>
@@ -21,7 +36,7 @@ const daysAgo = (n: number) =>
 
 describe('what each team may read', () => {
   test('a section the caller may not read is absent, not empty', () => {
-    const c = makeCustomer();
+    const c = makeCustomer(undefined, OWNER);
     makeQuotation({ customerId: c, status: 'sent' });
     makeInvoice({ customerId: c, currency: 'INR', total: 1000 });
 
@@ -41,7 +56,7 @@ describe('what each team may read', () => {
   });
 
   test('quality sees its own tolerances and nothing commercial', () => {
-    const c = makeCustomer();
+    const c = makeCustomer(undefined, OWNER);
     makeInvoice({ customerId: c, currency: 'INR', total: 1000 });
     const s = customerSummary(as('quality'), c);
     assert.ok(s.qc);
@@ -51,7 +66,7 @@ describe('what each team may read', () => {
   });
 
   test('the super admin sees every section', () => {
-    const s = customerSummary(as('super_admin'), makeCustomer());
+    const s = customerSummary(as('super_admin'), makeCustomer(undefined, OWNER));
     for (const key of ['money', 'enquiries', 'quotations', 'proformas', 'orders',
       'invoices', 'followups', 'payments', 'qc'] as const) {
       assert.ok(s[key], `${key} is present`);
@@ -61,7 +76,7 @@ describe('what each team may read', () => {
 
 describe('the money table', () => {
   test('is per currency, and never sums across them', () => {
-    const c = makeCustomer();
+    const c = makeCustomer(undefined, OWNER);
     makeInvoice({ customerId: c, currency: 'INR', total: 5000 });
     makeInvoice({ customerId: c, currency: 'EUR', total: 800 });
 
@@ -71,7 +86,7 @@ describe('the money table', () => {
   });
 
   test('outstanding follows the receivables rule, advance included', () => {
-    const c = makeCustomer();
+    const c = makeCustomer(undefined, OWNER);
     const pi = makeProforma({ customerId: c, currency: 'EUR', total: 10_000 });
     makePayment({ customerId: c, piId: pi, amount: 4000, currency: 'EUR' });
     makeInvoice({ customerId: c, currency: 'EUR', total: 10_000, piId: pi });
@@ -82,7 +97,7 @@ describe('the money table', () => {
   });
 
   test('advance held is what no invoice has absorbed, and is not counted twice', () => {
-    const c = makeCustomer();
+    const c = makeCustomer(undefined, OWNER);
     const pi = makeProforma({ customerId: c, currency: 'EUR', total: 10_000 });
     makePayment({ customerId: c, piId: pi, amount: 10_000, currency: 'EUR' });
     // A part shipment: only €4,000 of the €10,000 has been billed so far.
@@ -98,7 +113,7 @@ describe('the money table', () => {
   });
 
   test('an advance against a proforma with no invoice yet is entirely held', () => {
-    const c = makeCustomer();
+    const c = makeCustomer(undefined, OWNER);
     const pi = makeProforma({ customerId: c, currency: 'USD', total: 7000 });
     makePayment({ customerId: c, piId: pi, amount: 2100, currency: 'USD' });
 
@@ -108,7 +123,7 @@ describe('the money table', () => {
   });
 
   test('overdue counts invoices unpaid past sixty days', () => {
-    const c = makeCustomer();
+    const c = makeCustomer(undefined, OWNER);
     makeInvoice({ customerId: c, currency: 'INR', total: 1000, date: daysAgo(90) });
     makeInvoice({ customerId: c, currency: 'INR', total: 1000, date: daysAgo(10) });
     // Old, but settled — an invoice that has been paid is not overdue.
@@ -123,7 +138,7 @@ describe('the money table', () => {
 
 describe('money in a currency the document is not billed in', () => {
   test('is reported rather than credited', () => {
-    const c = makeCustomer();
+    const c = makeCustomer(undefined, OWNER);
     const inv = makeInvoice({ customerId: c, currency: 'EUR', total: 5000 });
     makePayment({ customerId: c, invoiceId: inv, amount: 5000, currency: 'INR' });
 
@@ -140,7 +155,7 @@ describe('money in a currency the document is not billed in', () => {
    * counted once per invoice. Measured over the payments themselves, it cannot.
    */
   test('and is reported once, however many invoices hang off the proforma', () => {
-    const c = makeCustomer();
+    const c = makeCustomer(undefined, OWNER);
     const pi = makeProforma({ customerId: c, currency: 'EUR', total: 10_000 });
     makePayment({ customerId: c, piId: pi, amount: 3000, currency: 'INR' });
     makeInvoice({ customerId: c, currency: 'EUR', total: 4000, piId: pi });
@@ -154,7 +169,7 @@ describe('money in a currency the document is not billed in', () => {
 
 describe('the rest of the page', () => {
   test('a section shows the newest few and says how many there are', () => {
-    const c = makeCustomer();
+    const c = makeCustomer(undefined, OWNER);
     for (let i = 0; i < 9; i += 1) makeQuotation({ customerId: c, status: 'draft' });
     const s = customerSummary(as('sales'), c).quotations!;
     assert.equal(s.total, 9);
@@ -162,7 +177,7 @@ describe('the rest of the page', () => {
   });
 
   test('a superseded quotation is marked rather than hidden', () => {
-    const c = makeCustomer();
+    const c = makeCustomer(undefined, OWNER);
     const newer = makeQuotation({ customerId: c, status: 'sent' });
     makeQuotation({ customerId: c, status: 'sent', supersededBy: newer });
     const rows = customerSummary(as('sales'), c).quotations!.rows;
@@ -170,8 +185,8 @@ describe('the rest of the page', () => {
   });
 
   test('the tolerances listed are this customer’s own, not the product default', () => {
-    const c = makeCustomer();
-    const other = makeCustomer();
+    const c = makeCustomer(undefined, OWNER);
+    const other = makeCustomer(undefined, OWNER);
     const product = Number(db.prepare(
       "INSERT INTO products (name, unit) VALUES ('Preform 28mm', 'per 1000')"
     ).run().lastInsertRowid);
@@ -195,7 +210,7 @@ describe('the rest of the page', () => {
   });
 
   test('an overdue follow-up is flagged, and a closed one is not', () => {
-    const c = makeCustomer();
+    const c = makeCustomer(undefined, OWNER);
     const add = (due: string, done: number) => db.prepare(
       'INSERT INTO followups (doc_type, customer_id, due_date, note, done) VALUES (?, ?, ?, ?, ?)'
     ).run('general', c, due, 'Chase', done);
@@ -207,7 +222,7 @@ describe('the rest of the page', () => {
   });
 
   test('a payment says which document it was banked against', () => {
-    const c = makeCustomer();
+    const c = makeCustomer(undefined, OWNER);
     const pi = makeProforma({ customerId: c, currency: 'INR', total: 1000 });
     makePayment({ customerId: c, piId: pi, amount: 250, currency: 'INR' });
     const [row] = customerSummary(as('super_admin'), c).payments!.rows;
@@ -216,11 +231,64 @@ describe('the rest of the page', () => {
   });
 
   test('and one customer’s figures are never another’s', () => {
-    const mine = makeCustomer();
-    const theirs = makeCustomer();
+    const mine = makeCustomer(undefined, OWNER);
+    const theirs = makeCustomer(undefined, OWNER);
     makeInvoice({ customerId: theirs, currency: 'INR', total: 9999 });
     const s = customerSummary(as('super_admin'), mine);
     assert.deepEqual(s.money!.rows, []);
     assert.equal(s.invoices!.total, 0);
+  });
+});
+
+
+/**
+ * The customer **record** became master data on 2026-10-07 (*"every user should
+ * have access to all customers in customer master"*) while the customer's
+ * **documents** stayed the owner's. `customerSummary` is where that line is
+ * drawn, so this is the group that would notice it moving.
+ *
+ * The failure to guard against is a quiet one: the route used to answer 404 and
+ * now does not, so if this check were dropped a Sales login would read every
+ * other salesperson's quotations, orders, invoices and payments through a page
+ * that simply opens.
+ */
+describe('whose documents a shared customer shows', () => {
+  test('a customer Sales does not own has no sections at all', () => {
+    const someoneElse = makeUser('sales', 'Another salesperson');
+    const c = makeCustomer(undefined, someoneElse);
+    makeQuotation({ customerId: c, status: 'sent' });
+    makeInvoice({ customerId: c, currency: 'INR', total: 1000 });
+
+    const seen = customerSummary(as('sales'), c);
+    /*
+     * Not a thinner page — nothing. The record itself still opens, which is the
+     * point of sharing the master; what stops here is everything hanging off it.
+     */
+    assert.deepEqual(Object.keys(seen), [], 'no section of any kind');
+  });
+
+  test('and its own customer is unchanged', () => {
+    const c = makeCustomer(undefined, OWNER);
+    makeQuotation({ customerId: c, status: 'sent' });
+    const seen = customerSummary(as('sales'), c);
+    assert.equal(seen.quotations?.total, 1);
+  });
+
+  /*
+   * Ownership restricts Sales and nobody else — `visibleCustomerIds`' own rule,
+   * and the reason the factory teams read the order book at all. A change that
+   * started scoping them would break making and shipping, so it is asserted
+   * rather than assumed.
+   */
+  test('a team that is not scoped reads a customer it does not own', () => {
+    const someoneElse = makeUser('sales', 'A third salesperson');
+    const c = makeCustomer(undefined, someoneElse);
+    makeQuotation({ customerId: c, status: 'sent' });
+    makeInvoice({ customerId: c, currency: 'INR', total: 1000 });
+
+    assert.ok(customerSummary(as('super_admin'), c).quotations, 'the super admin reads it');
+    const production = customerSummary(as('production'), c);
+    assert.ok(production.orders, 'production still reads the orders it makes');
+    assert.equal(production.quotations, undefined, 'and still no price reaches the floor');
   });
 });

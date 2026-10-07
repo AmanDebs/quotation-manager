@@ -1,6 +1,7 @@
 import { db } from '../db/connection.js';
 import type { AuthedRequest } from '../middleware/auth.js';
 import { allows } from '../middleware/auth.js';
+import { canAccessCustomer } from '../middleware/scope.js';
 import { round2 } from './totals.js';
 import { invoiceReceivable, proformaAdvance, sameCurrency } from './receivables.js';
 
@@ -115,6 +116,21 @@ const DOC_COLUMNS = 'id, number, date, status, currency, grand_total';
 
 export function customerSummary(req: AuthedRequest, customerId: number): CustomerSummary {
   const out: CustomerSummary = {};
+  /*
+   * The customer **record** is master data and opens for anyone holding the
+   * function (2026-10-07); the customer's **documents** are not, and this is
+   * where that line is drawn.
+   *
+   * It has to be here rather than on the route. The route used to answer 404,
+   * which stopped being right the moment the master listed every customer — a
+   * row you can see and cannot open reads as a fault. Returning no sections is
+   * the same answer this file already gives a caller who does not hold
+   * `quotation`: absent, not empty, and decided on the server so the client
+   * never holds a second copy of the rule.
+   *
+   * Only Sales is scoped, so for every other team this changes nothing.
+   */
+  if (!canAccessCustomer(req, customerId)) return out;
   const today = (db.prepare("SELECT date('now') AS d").get() as { d: string }).d;
 
   /* ------------------------------------------------------------------ money */

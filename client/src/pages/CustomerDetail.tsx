@@ -3,7 +3,7 @@ import { Link, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Customer, CustomerSummary, CustomerDocRow } from '../types';
-import { useCan } from '../App';
+import { useCan, useUser } from '../App';
 import {
   Button, Card, PageHeader, EmptyState, StatusBadge, CAPTION_CLASS, TH_CLASS,
 } from '../components/ui';
@@ -101,6 +101,7 @@ function DocRows({ rows, path, extra }: {
 export default function CustomerDetailPage() {
   const { id } = useParams();
   const can = useCan();
+  const user = useUser();
   const [editing, setEditing] = useState(false);
 
   const { data: customer, isLoading, error } = useQuery({
@@ -122,6 +123,18 @@ export default function CustomerDetailPage() {
     );
   }
 
+  /*
+   * The record is master data and opens for anyone; the customer's documents
+   * are the owner's, so `customerSummary` answers an unowned customer with no
+   * sections at all. Without a line saying so the page reads as one that
+   * failed to load half of itself — the same reason a blank cell gets an
+   * em-dash rather than nothing.
+   *
+   * The condition is the server's own: only Sales is scoped.
+   */
+  const notMine = user?.team_role === 'sales'
+    && Number(customer.owner_id) !== Number(user?.id);
+
   const money = summary?.money;
   const contact = [customer.contact_person, customer.email, customer.phone].filter(Boolean).join(' · ');
   const where = [customer.city, customer.country].filter(Boolean).join(', ');
@@ -139,6 +152,15 @@ export default function CustomerDetailPage() {
           </div>
         }
       />
+
+      {notMine && (
+        <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-600">
+          <span className="font-medium text-slate-700">
+            {customer.owner_name ? `${customer.owner_name} handles this customer.` : 'This customer is assigned to somebody else.'}
+          </span>{' '}
+          Their quotations, orders, invoices and payments stay with them, so only the details below are shown here.
+        </div>
+      )}
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <Card title="Details">

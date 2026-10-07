@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Customer } from '../types';
-import { useCan } from '../App';
+import { useCan, useUser } from '../App';
 import { Button, Input, PageHeader, EmptyState, ErrorText, Card, ExportTabs, Pagination, TH_CLASS } from '../components/ui';
 import CustomerDialog, { emptyCustomer } from '../components/CustomerDialog';
 import CustomerImportModal from '../components/CustomerImportModal';
@@ -15,15 +15,34 @@ export default function CustomersPage() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const can = useCan();
-  const isManager = can('team');
+  const user = useUser();
+  /*
+   * Sales is the one team whose **documents** are scoped to the customers
+   * assigned to them, and since the master began listing everybody that is a
+   * difference worth saying out loud: this page shows 820 while the New
+   * Quotation picker shows the handful that are theirs, and an unexplained
+   * gap between two lists of the same thing reads as a fault.
+   */
+  const scoped = user?.team_role === 'sales';
+  const mine = (c: Customer) => !scoped || Number(c.owner_id) === Number(user?.id);
   // In the URL, so Top Customers on the dashboard can land on one name.
   const [q, setQ] = useUrlFilter('q');
   const [exportFilter, setExportFilter] = useUrlFilter('export');
   const [editing, setEditing] = useState<Customer | Omit<Customer, 'id'> | null>(null);
   const [importing, setImporting] = useState(false);
+  /*
+   * `all=1` — this page is the customer **master**, so it lists every customer
+   * whoever owns them (2026-10-07, the client: *"every user should have access
+   * to all customers in customer master"*).
+   *
+   * The endpoint's default is still scoped, because the same endpoint feeds
+   * the New Quotation picker and the document forms, and a document may only
+   * be raised for a customer assigned to you. This page is the one caller that
+   * asks to see past that, which is why the flag is here rather than there.
+   */
   const list = usePagedList<Customer>(
-    ['customers', q, exportFilter],
-    `/api/customers?q=${encodeURIComponent(q)}${exportFilter ? `&export=${exportFilter}` : ''}`,
+    ['customers', 'all', q, exportFilter],
+    `/api/customers?all=1&q=${encodeURIComponent(q)}${exportFilter ? `&export=${exportFilter}` : ''}`,
   );
   const customers = list.rows;
 
@@ -54,6 +73,13 @@ export default function CustomersPage() {
         <ExportTabs value={exportFilter} onChange={setExportFilter} />
         <Input placeholder="Search by name, contact or country…" value={q} onChange={(e) => setQ(e.target.value)} className="max-w-xs" />
       </div>
+      {scoped && (
+        <p className="mb-3 text-xs text-slate-500">
+          This is the whole customer book. A quotation, order or invoice is raised for a customer
+          <span className="font-medium"> assigned to you</span> — the Owner column says which, and those are the
+          ones the New Quotation picker offers.
+        </p>
+      )}
       <ErrorText error={remove.error} />
       <Card className="overflow-x-auto">
         {customers.length === 0 ? (
@@ -69,7 +95,7 @@ export default function CustomersPage() {
                 <th className="pb-2 pr-3">Country</th>
                 <th className="pb-2 pr-3">Type</th>
                 <th className="pb-2 pr-3">Currency</th>
-                {isManager && <th className="pb-2 pr-3">Owner</th>}
+                <th className="pb-2 pr-3">Owner</th>
                 <th className="pb-2" />
               </tr>
             </thead>
@@ -86,16 +112,21 @@ export default function CustomersPage() {
                   <td className="py-2 pr-3">{c.country}</td>
                   <td className="py-2 pr-3 text-xs">{c.is_export ? '🌍 Export' : '🇮🇳 Domestic'}</td>
                   <td className="py-2 pr-3">{c.currency}</td>
-                  {isManager && <td className="py-2 pr-3">{c.owner_name ?? '—'}</td>}
+                  <td className="py-2 pr-3">{c.owner_name ?? '—'}</td>
                   <td className="py-2 text-right whitespace-nowrap">
                     <Button variant="ghost" onClick={() => setEditing(c)}>Edit</Button>
-                    <Button
-                      variant="danger"
-                      className="ml-1 border-0"
-                      onClick={() => { if (confirm(`Delete customer "${c.name}"?`)) remove.mutate(c.id); }}
-                    >
-                      Delete
-                    </Button>
+                    {/* Editing follows the permission cell, so it is offered on
+                        every row; deleting stays with the owner, so it is drawn
+                        only where it would not answer 404. */}
+                    {mine(c) && (
+                      <Button
+                        variant="danger"
+                        className="ml-1 border-0"
+                        onClick={() => { if (confirm(`Delete customer "${c.name}"?`)) remove.mutate(c.id); }}
+                      >
+                        Delete
+                      </Button>
+                    )}
                   </td>
                 </tr>
               ))}

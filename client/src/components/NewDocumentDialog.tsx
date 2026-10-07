@@ -57,6 +57,25 @@ export default function NewDocumentDialog({
     enabled: !!type && customers.length === 0,
   });
 
+  /*
+   * And how many are in the **master** but assigned to somebody else.
+   *
+   * Since 2026-10-07 the Customers page lists the whole book while this picker
+   * still offers only the customers assigned to you — a document may be raised
+   * for those alone, and the save refuses the rest. That gap is the one thing a
+   * person staring at an empty picker beside a page of 820 customers needs
+   * explaining, and it is a different sentence from the Type one: the customer
+   * is not mis-filed, it is somebody else's to quote.
+   *
+   * Asked only when both of the lists above came back empty, so the ordinary
+   * case costs nothing.
+   */
+  const { data: allCustomers = [] } = useQuery({
+    queryKey: ['customers', 'all', q],
+    queryFn: () => api.get<Customer[]>(`/api/customers?all=1&q=${encodeURIComponent(q)}`),
+    enabled: !!type && customers.length === 0 && otherCustomers.length === 0,
+  });
+
   const go = (customerId: number) => {
     navigate(`${basePath}/new?type=${type}&customer=${customerId}`);
     onClose();
@@ -123,6 +142,32 @@ export default function NewDocumentDialog({
                     className="mt-3 inline-block text-xs text-brand-600 underline underline-offset-2 hover:text-brand-700"
                   >
                     Open the {other} customers
+                  </Link>
+                </div>
+              ) : allCustomers.length > 0 ? (
+                /*
+                 * The customer is on file — it belongs to another salesperson.
+                 * Saying "add one" here would be the duplicate trap again, and
+                 * saying nothing leaves an empty picker beside a Customers page
+                 * full of names, which reads as the picker being broken.
+                 */
+                <div className="px-4 py-8 text-center text-sm text-slate-500">
+                  <p>
+                    None of your customers {q ? 'match that search' : 'are on file yet'} — but{' '}
+                    <span className="font-medium text-slate-700">
+                      {allCustomers.length} {allCustomers.length === 1 ? 'is' : 'are'} in the customer book
+                    </span>
+                    , assigned to someone else.
+                  </p>
+                  <p className="mt-1 text-xs">
+                    A document is raised for a customer assigned to you. Whoever manages the team can reassign one.
+                  </p>
+                  <Link
+                    to={`/customers${q ? `?q=${encodeURIComponent(q)}` : ''}`}
+                    onClick={onClose}
+                    className="mt-3 inline-block text-xs text-brand-600 underline underline-offset-2 hover:text-brand-700"
+                  >
+                    Open the customer book
                   </Link>
                 </div>
               ) : (
