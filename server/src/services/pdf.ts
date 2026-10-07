@@ -1154,25 +1154,56 @@ export function buildOrderPdf(id: number): TDocumentDefinitions {
   const cur = o.currency;
   const showTax = o.tax_type !== 'none';
   const cfg = forceColumns(JSON.parse(String(o.column_config || '{}')) as ColumnConfig, ORDER_FORCED);
+  /*
+   * The widths were trimmed on 2026-09-29 for the reason `buildQuotationPdf`
+   * records one document up: pdfmake will not break a word, so a column
+   * narrower than its own longest unbreakable run grows the **whole table**
+   * past the right margin rather than wrapping, and the page then has an items
+   * table that finishes beyond the letterhead rule and the totals band.
+   *
+   * This one had the most columns in the app — eleven with Code, Supplier and
+   * per-line Promised all drawn — and came to 460pt of fixed width, which left
+   * Description **less than nothing**. Nobody had met it only because those
+   * three optional columns are rarely all in use at once.
+   *
+   * Each width is now above what it has to hold, measured at the size it
+   * prints: Code 48 over *PRF-28-SPEC* (47.4 — the old 45 was already too
+   * narrow, so this one went **up**), HSN 38 over *39235010* (36.0), Colour 44
+   * over *Transparent* (42.7), Quantity 44 over *1,20,00,000* (40.7, the unit
+   * wrapping after the space), Rate 40 over *1,234.567* (35.2), Supplier 44
+   * over *Engineering* (41.9), Promised 44 over *06-10-2026* (40.4), Tax % 22
+   * over *18%* (14.9), and Amount kept at 62 for *₹1,23,45,678.00* (55.9).
+   *
+   * That is 402pt against 460, and it makes every shape up to **ten** columns
+   * fit with room to spare — the everyday order leaves Description 180.8pt,
+   * one adding per-line Promised 128.3, one adding Code as well 71.8.
+   *
+   * What still does not fit, stated rather than discovered: **all eleven at
+   * once** leaves 19.3pt, and an export order carrying all three extras leaves
+   * 49.8 — enough for its longest word today but with no headroom. Eleven
+   * columns and a legible description do not both fit A4 portrait at any
+   * widths, and the order form's own Columns picker is the way out, Code,
+   * Supplier and Promised all being in its tick-list.
+   */
 
   const specs: ColumnSpec[] = [
-    { key: 'sl', label: 'SL', width: 18, align: 'center', always: true, value: (_it, i) => String(i + 1) },
+    { key: 'sl', label: 'SL', width: 16, align: 'center', always: true, value: (_it, i) => String(i + 1) },
     { key: 'description', label: 'Description of Goods', width: '*', always: true, value: (it) => it.description },
-    { key: 'code', label: 'Code', width: 45, align: 'center', value: (it) => it.code || '' },
-    { key: 'hsn', label: 'HSN', width: 45, align: 'center', value: (it) => it.hsn_code || '' },
-    { key: 'color', label: 'Colour', width: 50, align: 'center', value: (it) => it.color || '' },
+    { key: 'code', label: 'Code', width: 48, align: 'center', value: (it) => it.code || '' },
+    { key: 'hsn', label: 'HSN', width: 38, align: 'center', value: (it) => it.hsn_code || '' },
+    { key: 'color', label: 'Colour', width: 44, align: 'center', value: (it) => it.color || '' },
     // A charge line is a fee, not something to make: no quantity, no rate.
-    { key: 'qty', label: 'Quantity', width: 58, align: 'right', value: (it) => (!it.is_charge && it.qty != null ? `${fmtNum(it.qty)} ${it.unit}` : '') },
-    { key: 'unit_price', label: `Rate ${cur}`, width: 52, align: 'right', value: (it) => (it.is_charge ? '' : fmtRate(it.unit_price)) },
-    { key: 'supplier', label: 'Supplier', width: 48, align: 'center', value: (it) => it.supplier || '' },
+    { key: 'qty', label: 'Quantity', width: 44, align: 'right', value: (it) => (!it.is_charge && it.qty != null ? `${fmtNum(it.qty)} ${it.unit}` : '') },
+    { key: 'unit_price', label: `Rate ${cur}`, width: 40, align: 'right', value: (it) => (it.is_charge ? '' : fmtRate(it.unit_price)) },
+    { key: 'supplier', label: 'Supplier', width: 44, align: 'center', value: (it) => it.supplier || '' },
     // When this line in particular falls due, as against the order's own
     // Promised Delivery in the header. `itemsTable` drops a column with no
     // data anywhere, so an order that does not use per-line dates prints
     // exactly what it printed before. Despatched-on is deliberately not
     // here: this document is an instruction going out, not a record of
     // what came back, and the figure is derived rather than stored.
-    { key: 'scheduled_date', label: 'Promised', width: 52, align: 'center', value: (it) => fmtDate(it.scheduled_date) },
-    { key: 'tax', label: 'Tax %', width: 30, align: 'right', value: (it) => (showTax ? `${it.tax_pct ?? 0}%` : '') },
+    { key: 'scheduled_date', label: 'Promised', width: 44, align: 'center', value: (it) => fmtDate(it.scheduled_date) },
+    { key: 'tax', label: 'Tax %', width: 22, align: 'right', value: (it) => (showTax ? `${it.tax_pct ?? 0}%` : '') },
     { key: 'amount', label: `Amount (${cur})`, width: 62, align: 'right', always: true, value: (it) => fmtMoney(it.amount, cur) },
   ];
 

@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { buildQuotationPdf } from '../src/services/pdf.js';
 import { db } from '../src/db/connection.js';
 import { makeCustomer } from './helpers/factory.js';
+import { assertFits, itemsTable } from './helpers/pdfFit.js';
 
 /**
  * The delivery basis and the load print on the quotation, and print wherever
@@ -127,68 +128,16 @@ describe('the basis and the load on a quotation', () => {
 /**
  * The items table has to fit between the margins, and nothing renders here to
  * say whether it does — so this asserts the arithmetic that decides it
- * (2026-09-29, the client: *"alignment is not coming properly"*).
- *
- * pdfmake will not break a word. A column narrower than its own longest
- * unbreakable run therefore makes the **whole table** grow past the right
- * margin rather than wrap, and the page then has an items table finishing
- * 20pt beyond the letterhead rule and the totals band — which is what the
- * client was looking at. The nine fixed columns left Description a `'*'`
- * share of 34.8pt against the word *preform-700gm*, measured at 55.6pt.
- *
- * The guard is on the share left for Description, because that is the column
- * that must never be squeezed: every other one holds a number or a short
- * word. Adding a column here, or widening one, trips this with the reason on
- * it rather than shipping a table that hangs off the page.
+ * (2026-09-29, the client: *"alignment is not coming properly"*). The rule and
+ * the figures behind it live in `helpers/pdfFit.ts`, which `orderPdf.test.ts`
+ * is held to as well — two copies of that arithmetic is how the two would come
+ * to disagree about the same page.
  */
 describe('the items table fits the page', () => {
-  /** A4 less `baseDoc`'s 40pt margins. */
-  const CONTENT = 595.28 - 40 - 40;
-  /**
-   * What one column costs besides its declared width: `gridLayout` leaves
-   * pdfmake's default 4pt of padding a side, and each of the n+1 vertical
-   * rules is 0.5pt. Verified against a rendered quotation, whose cells came
-   * back at exactly `width + 8.5` apiece.
-   */
-  const PER_COLUMN = 8;
-  const RULE = 0.5;
-
-  /**
-   * The longest word the catalogue actually produces in this column is
-   * *preform-700gm* at 55.6pt; 60 keeps headroom without pretending to a
-   * precision a test cannot measure.
-   */
-  const MIN_DESCRIPTION = 60;
-
-  /** The items table is the one table on the page with a header row. */
-  function itemsTable(def: any): any {
-    let found: any;
-    const walk = (n: any) => {
-      if (!n || typeof n !== 'object' || found) return;
-      if (Array.isArray(n)) return n.forEach(walk);
-      if (n.table?.headerRows && Array.isArray(n.table.widths)) { found = n.table; return; }
-      for (const k of ['stack', 'columns', 'content', 'table', 'body']) if (n[k]) walk(n[k]);
-    };
-    walk(def.content);
-    assert.ok(found, 'no items table in the document');
-    return found;
-  }
-
-  /** What the `'*'` column is left with once every fixed width is paid for. */
-  function descriptionShare(def: any): number {
-    const widths: (number | string)[] = itemsTable(def).widths;
-    const stars = widths.filter((w) => w === '*').length;
-    assert.equal(stars, 1, 'Description is the only flexible column');
-    const fixed = widths.reduce((sum: number, w) => sum + (typeof w === 'number' ? w : 0), 0);
-    return CONTENT - fixed - widths.length * PER_COLUMN - (widths.length + 1) * RULE;
-  }
-
   test('a domestic quotation, which carries the most columns', () => {
-    const def = buildQuotationPdf(makeQuotation({ tax_type: 'igst', is_export: 0, currency: 'INR' })) as any;
-    const share = descriptionShare(def);
-    assert.ok(
-      share >= MIN_DESCRIPTION,
-      `Description is left ${share.toFixed(2)}pt, under the ${MIN_DESCRIPTION}pt it needs`
+    assertFits(
+      buildQuotationPdf(makeQuotation({ tax_type: 'igst', is_export: 0, currency: 'INR' })),
+      'domestic quotation'
     );
   });
 
@@ -196,14 +145,9 @@ describe('the items table fits the page', () => {
   test('an export quotation carrying line photos', () => {
     const id = makeQuotation({ tax_type: 'none', is_export: 1 });
     db.prepare('UPDATE quotation_items SET image = ? WHERE quotation_id = ?').run(PIXEL, id);
-    const def = buildQuotationPdf(id) as any;
-    const widths = itemsTable(def).widths;
-    assert.equal(widths.length, 10, 'the photo column is drawn');
-    const share = descriptionShare(def);
-    assert.ok(
-      share >= MIN_DESCRIPTION,
-      `Description is left ${share.toFixed(2)}pt, under the ${MIN_DESCRIPTION}pt it needs`
-    );
+    const def = buildQuotationPdf(id);
+    assert.equal(itemsTable(def).widths.length, 10, 'the photo column is drawn');
+    assertFits(def, 'export quotation with photos');
   });
 
   /**

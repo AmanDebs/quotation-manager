@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { buildOrderPdf } from '../src/services/pdf.js';
 import { db } from '../src/db/connection.js';
 import { makeCustomer } from './helpers/factory.js';
+import { assertFits, descriptionShare, itemsTable, MIN_DESCRIPTION } from './helpers/pdfFit.js';
 
 /**
  * A line on an order can fall due on its own date, and the order is the
@@ -90,5 +91,69 @@ describe('the per-line promised date on the order PDF', () => {
     // auto-hides on emptiness needs it to be.
     assert.ok(rows[0].includes(''), rows[0].join(' | '));
     assert.ok(rows[1].includes('01-12-2026'), rows[1].join(' | '));
+  });
+});
+
+/**
+ * The order carries the most columns in the app — eleven with Code, Supplier
+ * and per-line Promised all drawn — and its fixed widths came to 460pt, which
+ * left Description less than nothing (2026-09-29, found by running the
+ * quotation's own arithmetic across every builder after the client reported
+ * *"alignment is not coming properly"* on that document).
+ *
+ * The rule and the figures behind it live in `helpers/pdfFit.ts`, shared with
+ * `quotationPdf.test.ts`.
+ */
+describe('the items table fits the page', () => {
+  /** Fills in every optional column so the shape under test is the real one. */
+  function orderWith(over: Record<string, unknown>, taxPct = 18): number {
+    const customerId = makeCustomer(`Order fit ${++seq}`);
+    const id = Number(db.prepare(
+      `INSERT INTO orders (number, date, customer_id, company_id, currency, tax_type, is_export, status)
+       VALUES (?, '2026-09-01', ?, 1, 'INR', ?, 0, 'confirmed')`
+    ).run(`SO/FIT/${seq}`, customerId, taxPct ? 'igst' : 'none').lastInsertRowid);
+    const cols = ['order_id', 'description', 'qty', 'unit', 'unit_price', 'amount', 'tax_pct', 'sort_order'];
+    const vals: unknown[] = [id, '5 Gallon preform-700gm', 1000, 'per 1000', 139, 139000, taxPct, 0];
+    for (const [k, v] of Object.entries(over)) { cols.push(k); vals.push(v); }
+    db.prepare(
+      `INSERT INTO order_items (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`
+    ).run(...(vals as never[]));
+    return id;
+  }
+
+  /** What almost every order prints: HSN and colour beside the money. */
+  test('the everyday order', () => {
+    assertFits(buildOrderPdf(orderWith({ hsn_code: '39235010', color: 'Transparent' })), 'everyday order');
+  });
+
+  test('one using per-line promised dates as well', () => {
+    assertFits(
+      buildOrderPdf(orderWith({ hsn_code: '39235010', color: 'Transparent', scheduled_date: '2026-10-06' })),
+      'order with per-line dates'
+    );
+  });
+
+  /** Ten columns — the widest shape that still fits, and only just. */
+  test('and one adding the per-line code on top of that', () => {
+    const def = buildOrderPdf(orderWith({
+      hsn_code: '39235010', color: 'Transparent', scheduled_date: '2026-10-06', code: 'PRF-28-SPEC',
+    }));
+    assert.equal(itemsTable(def).widths.length, 10, 'every optional column but Supplier is drawn');
+    assertFits(def, 'order with code and dates');
+  });
+
+  /**
+   * Stated rather than left to be discovered: eleven columns and a legible
+   * description do not both fit A4 portrait at any widths, so this asserts the
+   * shortfall rather than pretending it is fixed. The order form's Columns
+   * picker offers Code, Supplier and Promised, which is the way out.
+   */
+  test('all eleven at once does not fit, and the picker is the way out', () => {
+    const def = buildOrderPdf(orderWith({
+      hsn_code: '39235010', color: 'Transparent', scheduled_date: '2026-10-06',
+      code: 'PRF-28-SPEC', supplier: 'Northern Engineering',
+    }));
+    assert.equal(itemsTable(def).widths.length, 11);
+    assert.ok(descriptionShare(def) < MIN_DESCRIPTION, 'if this ever passes, drop the caveat from the docs');
   });
 });
