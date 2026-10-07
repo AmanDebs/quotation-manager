@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Customer } from '../types';
@@ -31,6 +31,30 @@ export default function NewDocumentDialog({
     queryKey: ['customers', q, type],
     queryFn: () => api.get<Customer[]>(`/api/customers?q=${encodeURIComponent(q)}${type ? `&export=${type === 'export' ? 1 : 0}` : ''}`),
     enabled: !!type,
+  });
+
+  /**
+   * What the *other* type holds, asked only when this one is empty.
+   *
+   * This list follows the customer's own Type, and nothing on this screen said
+   * so — a buyer marked Domestic simply does not appear under Export, which
+   * reads as the customer being missing. The old empty state then said to add
+   * one on the Customers page, and following that literally creates a second
+   * record for a customer already on file: every document, payment and order
+   * hangs off the one row, so a duplicate is the expensive mistake here.
+   *
+   * It matters on this book in particular. The customer import reads Type from
+   * a **Country** column — stated and not India is an export buyer — and the
+   * client's own `Customers.xlsx` carries Customer, Address and GSTIN and no
+   * country at all, so every imported row came in Domestic. Aglo also sells
+   * abroad through Dubai and Mauritius intermediaries, who are ordinarily
+   * registered in India, so the country is a poor signal for them twice over.
+   */
+  const other = type === 'export' ? 'domestic' : 'export';
+  const { data: otherCustomers = [] } = useQuery({
+    queryKey: ['customers', q, other],
+    queryFn: () => api.get<Customer[]>(`/api/customers?q=${encodeURIComponent(q)}&export=${other === 'export' ? 1 : 0}`),
+    enabled: !!type && customers.length === 0,
   });
 
   const go = (customerId: number) => {
@@ -74,7 +98,36 @@ export default function NewDocumentDialog({
           <Input placeholder="Search customers…" value={q} onChange={(e) => setQ(e.target.value)} autoFocus />
           <div className="max-h-80 overflow-y-auto rounded-md border border-slate-200">
             {customers.length === 0 ? (
-              <EmptyState message={`No ${type} customers found. Add one on the Customers page first.`} />
+              otherCustomers.length > 0 ? (
+                /*
+                 * Says which fact is missing rather than inviting a duplicate:
+                 * the customer is on file, under the other Type, and Type is
+                 * what this list follows. The link lands on the Customers page
+                 * already filtered and searched, so the row is one click away.
+                 */
+                <div className="px-4 py-8 text-center text-sm text-slate-500">
+                  <p>
+                    No {type} customers{q ? ' match that search' : ''} — but{' '}
+                    <span className="font-medium text-slate-700">
+                      {otherCustomers.length} {otherCustomers.length === 1 ? 'is' : 'are'} marked {other}
+                    </span>
+                    .
+                  </p>
+                  <p className="mt-1 text-xs">
+                    This list follows the customer's own Type. Set it on the Customers page rather than
+                    adding a second record for a buyer already on file.
+                  </p>
+                  <Link
+                    to={`/customers?export=${other === 'export' ? 1 : 0}${q ? `&q=${encodeURIComponent(q)}` : ''}`}
+                    onClick={onClose}
+                    className="mt-3 inline-block text-xs text-brand-600 underline underline-offset-2 hover:text-brand-700"
+                  >
+                    Open the {other} customers
+                  </Link>
+                </div>
+              ) : (
+                <EmptyState message={`No ${type} customers found. Add one on the Customers page first.`} />
+              )
             ) : (
               customers.map((c) => (
                 <button
