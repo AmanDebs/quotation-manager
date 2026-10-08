@@ -312,6 +312,90 @@ purchaseOrdersRouter.put('/:id', (req, res) => {
   res.json(getFull(id));
 });
 
+/**
+ * Duplicate: the same order to the same supplier, under a **new** number.
+ *
+ * The quotation's and the proforma's duplicate, one document over, and the
+ * reason is the plainest of the three: this desk buys the same resin from the
+ * same supplier on the same terms month after month, and the alternative was
+ * retyping every line.
+ *
+ * What carries is everything about the *purchase* — supplier, plant,
+ * currency, tax type, TCS, the whole printed header (attn, vendor ref, both
+ * parties and their GSTINs, INCO terms, packing), the notes, the column
+ * choice, and every line with its packing, colour, photo and rate. The
+ * totals come across verbatim: they are the source's own server-computed
+ * figures and nothing about them changed.
+ *
+ * Four things deliberately do not.
+ *
+ * **The number**, drawn fresh from the same series the source used —
+ * `is_import` is copied, so an import duplicates into the import series.
+ *
+ * **The status**, which resets to `draft`. A copy of a `sent` order would
+ * claim it had been sent to the supplier, and one copied from a `received`
+ * order would claim goods had arrived against a document that did not exist
+ * this morning.
+ *
+ * **The receipts**, which are the whole reason this needs saying out loud.
+ * `po_receipts` is what arrived against *that* order, and every one of those
+ * rows has a `material_moves` row beside it — copying them would book the
+ * same delivery into stock twice and move the moving average with it. The
+ * new order starts with nothing received, which is what is true of it.
+ *
+ * **An expected date already past**, dropped rather than carried into an
+ * order that is late on the day it is raised — the quotation's rule about a
+ * validity date, which springs the same trap if it is copied as it stands.
+ *
+ * **A cancelled or fully received order duplicates like any other**, and that
+ * is the point rather than an oversight: re-placing an order that was
+ * cancelled, or repeating one that arrived, is exactly why somebody reaches
+ * for this. Nothing about the source changes either way.
+ *
+ * `partyError` is **not** asked here. An order raised before bill-to and
+ * ship-to were mandatory carries blanks, and refusing to copy a document that
+ * exists would be a trap; the duplicate is a draft, and the form prefills
+ * those four from the issuing company and the plant and will not save without
+ * them — exactly as it treats the source.
+ */
+purchaseOrdersRouter.post('/:id/duplicate', (req: AuthedRequest, res) => {
+  const id = Number(req.params.id);
+  const existing = db.prepare('SELECT * FROM purchase_orders WHERE id = ?').get(id) as Record<string, unknown> | undefined;
+  if (!existing) return res.status(404).json({ error: 'Purchase order not found' });
+  const today = new Date().toISOString().slice(0, 10);
+  const expected = String(existing.expected_date ?? '');
+  const newId = transaction(() => {
+    const number = nextNumber('purchase_order', {
+      companyId: Number(existing.company_id),
+      date: today,
+      isExport: Number(existing.is_import) === 1,
+    });
+    const info = db.prepare(
+      `INSERT INTO purchase_orders (number, date, expected_date, status, created_by,
+         company_id, supplier_id, location_id, currency, tax_type, payment_terms, notes, is_import,
+         attn, vendor_ref, ship_to, bill_to, bill_to_gstin, ship_to_gstin, inco_terms,
+         transport, ship_via, packing, tcs_pct, column_config,
+         subtotal, tax_total, tcs_amount, grand_total)
+       SELECT ?, ?, ?, 'draft', ?,
+         company_id, supplier_id, location_id, currency, tax_type, payment_terms, notes, is_import,
+         attn, vendor_ref, ship_to, bill_to, bill_to_gstin, ship_to_gstin, inco_terms,
+         transport, ship_via, packing, tcs_pct, column_config,
+         subtotal, tax_total, tcs_amount, grand_total
+       FROM purchase_orders WHERE id = ?`
+    ).run(number, today, expected >= today ? expected : '', req.user!.id, id);
+    const newId = Number(info.lastInsertRowid);
+    db.prepare(
+      `INSERT INTO po_items (po_id, material_id, product_id, description, color, image, qty, unit,
+                             packs, pcs_per_pack, total_pcs, rate, tax_pct, amount, sort_order)
+       SELECT ?, material_id, product_id, description, color, image, qty, unit,
+              packs, pcs_per_pack, total_pcs, rate, tax_pct, amount, sort_order
+       FROM po_items WHERE po_id = ? ORDER BY sort_order, id`
+    ).run(newId, id);
+    return newId;
+  });
+  res.status(201).json(getFull(newId));
+});
+
 purchaseOrdersRouter.post('/:id/status', (req, res) => {
   const id = Number(req.params.id);
   if (!db.prepare('SELECT id FROM purchase_orders WHERE id = ?').get(id)) {

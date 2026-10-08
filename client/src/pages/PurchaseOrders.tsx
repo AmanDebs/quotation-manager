@@ -64,6 +64,16 @@ export default function PurchaseOrdersPage() {
     mutationFn: (id: number) => api.del(`/api/purchase-orders/${id}`),
     onSuccess: refresh,
   });
+  /*
+   * The same order again, under its own number — this desk buys the same
+   * resin from the same supplier month after month. It opens the copy rather
+   * than leaving it in the list: it is a draft somebody is about to change,
+   * and the server has reset the status and left every receipt behind.
+   */
+  const duplicate = useMutation({
+    mutationFn: (id: number) => api.post<PurchaseOrder>(`/api/purchase-orders/${id}/duplicate`),
+    onSuccess: (po) => { refresh(); navigate(`/purchase-orders/${po.id}`); },
+  });
 
   /**
    * Turn one supplier's slice of the shortfall into a draft, then hand it to
@@ -119,7 +129,7 @@ export default function PurchaseOrdersPage() {
         </label>
       </div>
 
-      <ErrorText error={remove.error ?? setStatus.error} />
+      <ErrorText error={remove.error ?? setStatus.error ?? duplicate.error} />
 
       <Card className="overflow-x-auto">
         {pos.length === 0 ? (
@@ -170,6 +180,17 @@ export default function PurchaseOrdersPage() {
                       <Button variant="ghost">PDF</Button>
                     </a>
                     <Link to={`/purchase-orders/${po.id}`}><Button variant="ghost">Edit</Button></Link>
+                    {/* Offered on every row, a cancelled or received order
+                        included: re-placing a cancelled order and repeating a
+                        delivered one are the two commonest reasons to copy. */}
+                    <Button
+                      variant="ghost"
+                      onClick={() => duplicate.mutate(po.id)}
+                      disabled={duplicate.isPending}
+                      title={`Copy ${po.number} into a new purchase order with its own number`}
+                    >
+                      Duplicate
+                    </Button>
                     {po.status !== 'cancelled' && (
                       <Button variant="ghost" onClick={() => setStatus.mutate({ id: po.id, status: 'cancelled' })}>Cancel</Button>
                     )}

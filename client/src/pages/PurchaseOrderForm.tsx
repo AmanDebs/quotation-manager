@@ -240,6 +240,22 @@ export default function PurchaseOrderFormPage() {
       if (isNew) navigate(`/purchase-orders/${po.id}`, { replace: true });
     },
   });
+  /*
+   * The same order again, under its own number — the usual reason being that
+   * this desk buys the same resin from the same supplier month after month.
+   *
+   * It deliberately does **not** call `markSaved`: it copies the order as the
+   * *server* holds it, so edits typed and not saved really are about to be
+   * left behind, and the unsaved-changes dialog is right to ask. The same
+   * call the quotation's Revise and Duplicate make.
+   */
+  const duplicate = useMutation({
+    mutationFn: () => api.post<PurchaseOrder>(`/api/purchase-orders/${id}/duplicate`),
+    onSuccess: (po) => {
+      refresh();
+      navigate(`/purchase-orders/${po.id}`);
+    },
+  });
   const remove = useMutation({
     mutationFn: () => api.del(`/api/purchase-orders/${id}`),
     onSuccess: () => {
@@ -283,6 +299,16 @@ export default function PurchaseOrderFormPage() {
               <PdfLink href={`/api/pdf/purchase-order/${id}`} guard={pdf}>
                 <Button variant="secondary">📄 PDF</Button>
               </PdfLink>
+            )}
+            {!isNew && (
+              <Button
+                variant="secondary"
+                onClick={() => duplicate.mutate()}
+                disabled={duplicate.isPending}
+                title="Copy these lines into a new purchase order with its own number. The original is left alone, and nothing received against it comes across."
+              >
+                ⧉ Duplicate
+              </Button>
             )}
             <Button variant="secondary" onClick={() => navigate('/purchase-orders')}>Cancel</Button>
             <Button onClick={() => save.mutate(draft)} disabled={save.isPending || !canSave}>
@@ -536,7 +562,7 @@ export default function PurchaseOrderFormPage() {
           <Textarea rows={3} value={draft.notes ?? ''} onChange={(e) => set({ notes: e.target.value })} />
         </Card>
 
-        <ErrorText error={save.error ?? remove.error} />
+        <ErrorText error={save.error ?? duplicate.error ?? remove.error} />
 
         <div className="flex items-center justify-between">
           <div>
