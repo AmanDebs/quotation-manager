@@ -21,6 +21,8 @@ import type { PoDraft } from './PurchaseOrderForm';
  * The order itself is a page of its own since 2026-09-20 (`PurchaseOrderForm`);
  * this list keeps what a list does — the rows, receiving, cancelling,
  * deleting — and the shortfall picker, which hands its draft to the page.
+ * A row opens the order wherever it is clicked, as on every other document
+ * list here (2026-10-08, the client: *"The whole should be clickable"*).
  */
 
 // The order of the keys below is the ladder; `poStatusStyle` is the list itself,
@@ -137,8 +139,16 @@ export default function PurchaseOrdersPage() {
               </tr>
             </thead>
             <tbody>
+              {/* The whole row opens the order, the rule every other document
+                  list here follows. The number keeps its own link so the page
+                  can still be opened in a new tab, and every control in the
+                  actions cell stops the click from reaching the row. */}
               {pos.map((po) => (
-                <tr key={po.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50">
+                <tr
+                  key={po.id}
+                  className="cursor-pointer border-b border-slate-100 last:border-0 hover:bg-slate-50"
+                  onClick={() => navigate(`/purchase-orders/${po.id}`)}
+                >
                   <td className="py-2 pr-3 font-medium"><Link to={`/purchase-orders/${po.id}`} className="text-brand-700 hover:underline">{po.number}</Link></td>
                   <td className="py-2 pr-3">{fmtDate(po.date)}</td>
                   <td className="py-2 pr-3">{po.supplier_name}</td>
@@ -150,7 +160,7 @@ export default function PurchaseOrdersPage() {
                       {poStatusLabel(po.status)}
                     </span>
                   </td>
-                  <td className="whitespace-nowrap py-2 text-right">
+                  <td className="whitespace-nowrap py-2 text-right" onClick={(e) => e.stopPropagation()}>
                     {!['received', 'cancelled'].includes(po.status) && (
                       <Button variant="ghost" onClick={async () => setReceiving(await api.get<PurchaseOrder>(`/api/purchase-orders/${po.id}`))}>
                         Receive
