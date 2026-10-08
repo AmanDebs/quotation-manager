@@ -64,6 +64,12 @@ export interface CheckedDoc {
   items: CheckedItem[];
   /** The buyer, for the fields that live on them rather than on the document. */
   customer?: { gstin?: string | null } | null;
+  /**
+   * The **seller** — the entity that issued this document, for the fields that
+   * live in Settings rather than on the document. Its own registration is one
+   * of them, and it is not the buyer's.
+   */
+  company?: { gstin?: string | null; company_name?: string | null } | null;
 }
 
 const text = (v: unknown) => String(v ?? '').trim();
@@ -266,6 +272,33 @@ const RULES: Rule[] = [
     check: (d) => (text(d.customer?.gstin)
       ? null
       : 'The customer has no GSTIN recorded, which a GST invoice states.'),
+  },
+  {
+    /*
+     * And the **seller's own** registration, which is a different number from
+     * the one above and was checked nowhere (2026-10-08, the client with a
+     * domestic proforma in front of them: *"add GST number of Aglo – for
+     * domestic"*).
+     *
+     * `registrationLine` has printed it on the letterhead of every domestic
+     * document since 2026-09-03 and prints nothing when the company has none
+     * — which is exactly what that proforma showed, and the reason the page
+     * looked as though the feature were missing when the value was. Silence
+     * where a registration belongs is the one gap on these documents that
+     * nobody can see from the document.
+     *
+     * **A warning, not a block**, and deliberately: refusing to print would
+     * stop every domestic quotation, proforma and order for a company that has
+     * not filled Settings in — which on the day this ships is the company that
+     * asked for it. It names the entity and where to type it, because with
+     * more than one selling company "the GSTIN" is ambiguous and the field is
+     * two screens away from the document.
+     */
+    key: 'company_gstin', level: 'warn', tables: SELLING, when: isDomestic,
+    check: (d) => (text(d.company?.gstin)
+      ? null
+      : `${text(d.company?.company_name) || 'The issuing company'} has no GSTIN in Settings, `
+        + 'so none prints on this document. A domestic sale states the seller’s own GSTIN.'),
   },
   {
     /*
@@ -557,7 +590,11 @@ export function checkDocument(table: CheckedTable, id: number): Finding[] {
   ).all(id) as unknown as CheckedItem[];
   const customer = db.prepare('SELECT gstin FROM customers WHERE id = ?').get(Number(row.customer_id)) as
     { gstin: string } | undefined;
-  return evaluate({ table, row, items, customer });
+  // The issuing entity, not the default company: a group numbers and letterheads
+  // per company, so the registration this document prints is that one's.
+  const company = db.prepare('SELECT gstin, company_name FROM companies WHERE id = ?').get(Number(row.company_id)) as
+    { gstin: string; company_name: string } | undefined;
+  return evaluate({ table, row, items, customer, company });
 }
 
 /**

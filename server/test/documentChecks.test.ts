@@ -39,6 +39,10 @@ const doc = (table: CheckedDoc['table'], row: Record<string, unknown> = {}, item
   },
   items,
   customer: { gstin: '19AAAAA0000A1Z5' },
+  // The seller's own registration, for the reason the buyer's is here: a
+  // fixture has to be a finished document, so each test fails only in the
+  // respect it names.
+  company: { gstin: '19AABCD1234F1Z5', company_name: 'Demo Metals & Alloys Pvt. Ltd.' },
 });
 
 const keys = (d: CheckedDoc, level?: 'block' | 'warn') =>
@@ -116,6 +120,39 @@ describe('what deliberately does not stop one', () => {
     assert.deepEqual(keys(d, 'block'), ['hsn']);
     assert.deepEqual(keys(d, 'warn'), ['gstin']);
     assert.equal(evaluate(d).find((f) => f.key === 'hsn')?.message, 'Line 1 has no HSN code.');
+  });
+
+  /**
+   * The **seller's** registration, which is a different number from the buyer's
+   * and was checked nowhere until 2026-10-08. The client asked for it after a
+   * domestic proforma printed no GSTIN at all: the letterhead has printed one
+   * since 2026-09-03 and prints nothing when the company has none, so the page
+   * looked as though the feature were missing when the value was.
+   */
+  test('the seller’s own GSTIN warns on every domestic selling document', () => {
+    for (const table of ['quotations', 'proforma_invoices', 'commercial_invoices', 'orders'] as const) {
+      const d: CheckedDoc = { ...doc(table, { tax_type: 'igst' }), company: { gstin: '', company_name: 'Aglo Polymers Pvt Ltd' } };
+      assert.deepEqual(keys(d, 'warn').filter((k) => k === 'company_gstin'), ['company_gstin'], table);
+      // It names the entity, because a group has more than one and "the GSTIN"
+      // would not say whose, and it refuses nothing.
+      assert.match(evaluate(d).find((f) => f.key === 'company_gstin')!.message, /Aglo Polymers Pvt Ltd has no GSTIN in Settings/);
+      assert.ok(!keys(d, 'block').includes('company_gstin'), `${table} blocked on it`);
+    }
+  });
+
+  test('and never on an export document, where the number does not belong', () => {
+    const d: CheckedDoc = {
+      ...doc('proforma_invoices', { tax_type: 'none', is_export: 1, country_of_origin: 'India',
+        port_of_loading: 'Kolkata', port_of_discharge: 'Hamburg', final_destination: 'Germany' }),
+      company: { gstin: '', company_name: 'Aglo Polymers Pvt Ltd' },
+    };
+    assert.ok(!keys(d, 'warn').includes('company_gstin'));
+  });
+
+  test('a company that has one is not asked, and the credit note is not asked at all', () => {
+    assert.ok(!keys(doc('proforma_invoices', { tax_type: 'igst' }), 'warn').includes('company_gstin'));
+    const note: CheckedDoc = { ...doc('credit_notes', { tax_type: 'igst' }), company: { gstin: '', company_name: 'X' } };
+    assert.ok(!keys(note, 'warn').includes('company_gstin'), 'a credit note prints no letterhead registration of its own');
   });
 
   test('and an export invoice says nothing about GSTIN, but still wants the HSN', () => {
