@@ -1022,7 +1022,7 @@ export default function DashboardPage() {
                   leadCls="text-slate-700"
                   number={r.order_number}
                   who={`${r.product_name || r.description}${r.customer_name ? ` · ${r.customer_name}` : ''}`}
-                  right={r.jobs.length ? r.jobs.map((j) => j.number).join(', ') : r.bought_in ? 'bought in' : undefined}
+                  right={r.jobs.length ? r.jobs.map((j) => j.number).join(', ') : undefined}
                 />
               ))}
               {/* The card shows eight; the queue holds the rest. */}

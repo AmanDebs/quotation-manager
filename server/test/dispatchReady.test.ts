@@ -186,13 +186,41 @@ describe('what is ready to dispatch', () => {
     }
   });
 
-  test('a bought-in line is ready without a job, and says so', () => {
+  /*
+   * 2026-10-08, the client: *"leave them out"*. A bought-in line raises no job
+   * and the QC gate skips it, so it is shippable from the day the order is
+   * booked — which made it a permanent resident of a queue that exists to say
+   * what has just become ready. Asserted on a line that *could* otherwise
+   * qualify, so flipping the rule back trips this rather than passing quietly.
+   */
+  test('a bought-in line is left out entirely, however much of it was ordered', () => {
     const p = makeProduct({ madeHere: false });
     const o = makeOrder([{ productId: p, pcs: 20000 }]);
-    const row = forOrder(o)[0];
-    assert.equal(row.bought_in, true);
-    assert.equal(row.ready, 20000);
-    assert.deepEqual(row.jobs, []);
+    assert.deepEqual(forOrder(o), []);
+  });
+
+  test('and stays out even where somebody has booked output against it', () => {
+    const p = makeProduct({ madeHere: false });
+    const o = makeOrder([{ productId: p, pcs: 20000 }]);
+    book(makeJob(o, 0, p, 20000), 12000);
+    assert.deepEqual(forOrder(o), []);
+  });
+
+  /* A custom line names no product, so there is nothing to call bought in —
+     `COALESCE(p.made_here, 1)` reads it as made here, and it keeps its job. */
+  test('a custom line naming no product is not mistaken for a bought-in one', () => {
+    const o = makeOrder([{ productId: null, pcs: 20000 }]);
+    book(makeJob(o, 0, null, 20000), 12000);
+    const rows = forOrder(o);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].ready, 12000);
+  });
+
+  test('every row names at least one job — output implies a live job', () => {
+    const p = makeProduct();
+    const o = makeOrder([{ productId: p, pcs: 20000 }]);
+    book(makeJob(o, 0, p, 20000), 12000);
+    assert.ok(forOrder(o).every((r) => r.jobs.length > 0));
   });
 });
 

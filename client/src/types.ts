@@ -706,8 +706,7 @@ export interface ReadyLine {
   product_name: string | null;
   description: string;
   color: string;
-  /** Bought in rather than made here: no job, nothing produced to wait on. */
-  bought_in: boolean;
+  /** The live jobs that made it. Never empty: output implies a live job. */
   jobs: { id: number; number: string; status: string }[];
   /** All in pieces. */
   ordered: number;

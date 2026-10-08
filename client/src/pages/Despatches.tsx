@@ -133,7 +133,7 @@ function ReadyToDispatch() {
     <div className="space-y-4">
       <Card title={`Ready to load${live.length ? ` · ${live.length}` : ''}`}>
         {live.length === 0 ? (
-          <EmptyState message="Nothing is ready to dispatch. A line appears here once it has been made, has passed QC and the order's own payment terms have been met." />
+          <EmptyState message="Nothing is ready to dispatch. A line appears here once the floor has made some of it, it has passed QC and the order's own payment terms have been met. A bought-in item is not made here, so it never appears — record its trip from the register." />
         ) : (
           <ReadyTable rows={live} canLink={can('work_order')} onRecord={(id) => navigate(`/despatches/new?order=${id}`)} />
         )}
@@ -187,15 +187,15 @@ function ReadyTable({ rows, canLink, onRecord }: {
                   the rule the order book and the Work Orders list follow. */}
               <td className="max-w-[14rem] truncate py-2 pr-3" title={r.description || undefined}>
                 {r.product_name || r.description || '—'}
-                {r.bought_in && <span className="ml-1.5 text-xs text-slate-400">(bought in)</span>}
               </td>
               <td className="whitespace-nowrap py-2 pr-3">{r.color || <span className="text-slate-300">—</span>}</td>
               {/* The half the client asked to be connected. A job a login
                   cannot open is named rather than linked — a link that only
-                  ever answers 403 is worse than plain text. */}
+                  ever answers 403 is worse than plain text. The dash is
+                  defensive: output implies a live job, so every row has one. */}
               <td className="whitespace-nowrap py-2 pr-3">
                 {r.jobs.length === 0
-                  ? <span className="text-slate-300">{r.bought_in ? 'bought in' : '—'}</span>
+                  ? <span className="text-slate-300">—</span>
                   : r.jobs.map((j, i) => (
                     <span key={j.id}>
                       {i > 0 && <span className="text-slate-300">, </span>}

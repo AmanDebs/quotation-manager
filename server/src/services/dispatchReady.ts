@@ -45,8 +45,7 @@ export interface ReadyLine {
   product_name: string | null;
   description: string;
   color: string;
-  /** Bought in rather than made here: no job, nothing produced to wait on. */
-  bought_in: boolean;
+  /** The live jobs that made it. Never empty: output implies a live job. */
   jobs: ReadyJob[];
   /** All in pieces, by `piecesOrdered`'s one rule. */
   ordered: number;
@@ -69,6 +68,16 @@ export interface ReadyLine {
  *
  * Charge lines are excluded outright, as everywhere else. Cancelled and
  * completed orders are skipped: there is nothing left to load against either.
+ *
+ * **And so is a bought-in line** (`made_here = 0`; 2026-10-08, the client:
+ * *"leave them out"*). Such a line raises no job and `qcBlockError` skips it,
+ * so there is no production record to wait on — it is shippable from the day
+ * the order is booked and would sit here permanently until somebody shipped
+ * it. That made the queue a list of open order lines rather than a list of
+ * things that have just become ready, which is the one thing it is for. **The
+ * consequence, stated rather than discovered**: a traded item never appears
+ * here, and its trip is recorded from the register or the order book as
+ * before. This queue is what the *floor* has finished and not yet shipped.
  */
 const CANDIDATE_SQL = `
   WITH li AS (
@@ -99,6 +108,7 @@ const CANDIDATE_SQL = `
   JOIN orders o ON o.id = li.order_id
   LEFT JOIN customers c ON c.id = o.customer_id
   WHERE li.is_charge = 0
+    AND li.made_here = 1
     AND o.status NOT IN ('cancelled', 'completed')`;
 
 /** The live jobs on a line, for the half of this the client asked to be linked. */
@@ -159,15 +169,8 @@ export function readyLines(
       const ordered = round2(Number(r.ordered) || 0);
       const made = round2(Number(r.made) || 0);
       const sent = round2(Number(r.sent) || 0);
-      /*
-       * A bought-in line raises no job and `qcBlockError` skips it, so there
-       * is no production record to wait on — it is shippable from the day the
-       * order is booked. Counting it as "made" is the only honest reading;
-       * the row says *bought in* so nobody reads it as the floor's work.
-       */
-      const boughtIn = !Number(r.made_here);
-      const supply = boughtIn ? ordered : Math.min(made, ordered);
-      return { r, ordered, made, sent, boughtIn, ready: round2(Math.max(0, supply - sent)) };
+      const supply = Math.min(made, ordered);
+      return { r, ordered, made, sent, ready: round2(Math.max(0, supply - sent)) };
     })
     .filter((c) => c.ready > 0);
 
@@ -190,7 +193,6 @@ export function readyLines(
       product_name: c.r.product_name,
       description: c.r.description,
       color: c.r.color,
-      bought_in: c.boughtIn,
       jobs: jobs.get(`${c.r.order_id}:${c.r.line}`) ?? [],
       ordered: c.ordered,
       made: c.made,
