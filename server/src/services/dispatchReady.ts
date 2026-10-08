@@ -129,12 +129,19 @@ function jobsByLine(orderIds: number[]): Map<string, ReadyJob[]> {
  * `exportOnlyInvoice` is kept: the rule lives where the answer is decided, so
  * giving Sales that cell later narrows this with it.
  */
-export function readyLines(req: AuthedRequest): { rows: ReadyLine[]; ready: number; held: number } {
+export function readyLines(
+  req: AuthedRequest,
+  opts: { companyId?: number } = {},
+): { rows: ReadyLine[]; ready: number; held: number } {
   const scope = scopeClause(req, 'o.customer_id');
+  // The dashboard narrows every figure to one selling entity; the queue's own
+  // page asks about the whole group. Each company's rows partition the
+  // unfiltered whole, the invariant the rest of that page is held to.
+  const company = opts.companyId ? ' AND o.company_id = ?' : '';
   const rows = db.prepare(
-    `${CANDIDATE_SQL}${scope.sql ? ` AND (${scope.sql})` : ''}
+    `${CANDIDATE_SQL}${scope.sql ? ` AND (${scope.sql})` : ''}${company}
      ORDER BY o.date DESC, o.id DESC, li.line`
-  ).all(...scope.params) as {
+  ).all(...scope.params, ...(opts.companyId ? [opts.companyId] : [])) as {
     order_id: number; order_number: string; order_date: string; customer_name: string | null;
     line: number; product_id: number | null; product_name: string | null;
     description: string; color: string; made_here: number;

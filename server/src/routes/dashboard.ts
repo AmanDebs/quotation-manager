@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { db } from '../db/connection.js';
 import { allows, type AuthedRequest } from '../middleware/auth.js';
+import { readyLines } from '../services/dispatchReady.js';
 import { scopeClause } from '../middleware/scope.js';
 import { receivedByInvoice, advanceAppliedByInvoice, sameCurrency } from '../services/receivables.js';
 import { PIECES_ORDERED_SQL } from '../services/totals.js';
@@ -887,6 +888,37 @@ dashboardRouter.get('/', (req: AuthedRequest, res) => {
     )
     : undefined;
 
+  /**
+   * What can be loaded onto a lorry now — the *Ready to dispatch* queue, on
+   * the dashboard beside the morning's other lists (2026-10-08, the client
+   * having had the badge and the tab: *"Add a dashboard card for ready to
+   * dispatch too"*).
+   *
+   * **`readyLines` is asked rather than its rule repeated.** That service runs
+   * the same guards `POST /despatches` does, so the card, the badge, the tab
+   * and the save are one answer; a fourth copy of "can this ship" is exactly
+   * how a dashboard comes to disagree with the page it links to.
+   *
+   * Gated on **`dispatch: full`**, not on the function — the card is a list of
+   * things to go and do, and Sales holds `view` for tracking. Absent, not
+   * empty, for everyone else, the rule `despatchAttention` states: the client
+   * draws the card only when its key arrived.
+   *
+   * **The date range is deliberately ignored**, as it is for every other
+   * morning card: what can go today is a question about now, not about the
+   * period somebody happens to be looking at. The company filter *is*
+   * honoured, so each entity's rows still partition the group's.
+   *
+   * Capped at eight, the rule the Expiring Quotations card states: a card is
+   * a prompt, the list behind it is the page.
+   */
+  const readyToDispatch = allows(req, 'dispatch', 'full')
+    ? (() => {
+      const all = readyLines(req, { companyId: companyId || undefined });
+      return { rows: all.rows.filter((r) => !r.held).slice(0, 8), ready: all.ready, held: all.held };
+    })()
+    : undefined;
+
   res.json({
     counts, countsByCurrency, quotationsByStatus, ordersByStatus, businessSplit, quotedByMonth, invoicedByMonth,
     receivedByMonth,
@@ -899,5 +931,6 @@ dashboardRouter.get('/', (req: AuthedRequest, res) => {
     ...(shipments ? { shipments } : {}),
     ...(pipeline ? { pipeline } : {}),
     ...(unplannedDue ? { unplannedDue } : {}),
+    ...(readyToDispatch ? { readyToDispatch } : {}),
   });
 });

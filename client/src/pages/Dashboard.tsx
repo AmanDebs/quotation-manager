@@ -5,7 +5,7 @@ import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
 } from 'recharts';
 import { api } from '../api/client';
-import type { Followup, DashboardLayout } from '../types';
+import type { Followup, DashboardLayout, ReadyLine } from '../types';
 import { useCan, useUser, usePatchUser } from '../App';
 import { Button, Card, Input, Select, PageHeader, Modal, CAPTION_CLASS, TH_CLASS } from '../components/ui';
 import { Icon } from '../components/icons';
@@ -176,6 +176,12 @@ interface DashboardData {
     proformasNotBooked?: { id: number; number: string; customer_name: string; date: string; currency: string; grand_total: number; status: string }[];
     quotationsUnchased?: { id: number; number: string; revision: number; customer_name: string; date: string; currency: string; grand_total: number }[];
   };
+  /**
+   * What can be loaded onto a lorry now. Absent for a login without
+   * `dispatch: full` — the rule every morning card follows, decided on the
+   * server rather than by `useCan()` here.
+   */
+  readyToDispatch?: { rows: ReadyLine[]; ready: number; held: number };
   /** Jobs nobody has planned on orders due within a fortnight. */
   unplannedDue?: { id: number; number: string; order_id: number; order_number: string; customer_name: string; due: string; qty_planned: number }[];
   // Optional for the same reason: an older server simply has no factory card.
@@ -277,7 +283,7 @@ function readReviewOpen(): boolean {
  */
 const DEFAULT_ORDER = [
   'attention', 'money',
-  'deliveries', 'shipments',
+  'deliveries', 'ready-to-dispatch', 'shipments',
   'factory', 'commercial', 'expiring',
   'funnel', 'period',
   'top-customers', 'top-products', 'activity',
@@ -974,6 +980,64 @@ export default function DashboardPage() {
                 );
               })}
             </div>
+          )}
+        </Card>
+      ),
+    }] : []),
+    /*
+     * What can be loaded onto a lorry now (2026-10-08, the client having had
+     * the badge and the tab: *"Add a dashboard card for ready to dispatch
+     * too"*).
+     *
+     * **Every figure is the server's**, from `readyLines` — the same function
+     * behind the badge and the tab, which in turn asks the same guards
+     * `POST /despatches` runs. So a row here that says it can go can go.
+     *
+     * **Held lines are a line of text, not rows.** This card is the morning's
+     * *what to load*; why something cannot be loaded is a different question,
+     * and the queue's own page answers it with the sentence under each row.
+     * The count is still worth saying, because it is the difference between
+     * "nothing is ready" and "things are ready and stuck".
+     */
+    ...(data.readyToDispatch ? [{
+      id: 'ready-to-dispatch',
+      title: 'Ready to dispatch',
+      allClear: data.readyToDispatch.ready === 0 && data.readyToDispatch.held === 0
+        ? 'Nothing is waiting to be loaded'
+        : undefined,
+      body: (
+        <Card
+          title={`Ready to dispatch${data.readyToDispatch.ready ? ` (${data.readyToDispatch.ready})` : ''}`}
+          actions={<Link to="/despatches?view=ready" className="text-xs text-brand-600 hover:underline">Queue</Link>}
+        >
+          {data.readyToDispatch.ready === 0 ? (
+            <p className={EMPTY}>Nothing is ready to load.</p>
+          ) : (
+            <div className="space-y-1">
+              {data.readyToDispatch.rows.map((r) => (
+                <ListRow
+                  key={`${r.order_id}:${r.order_line}`}
+                  to="/despatches?view=ready"
+                  lead={fmtQty(r.ready)}
+                  leadCls="text-slate-700"
+                  number={r.order_number}
+                  who={`${r.product_name || r.description}${r.customer_name ? ` · ${r.customer_name}` : ''}`}
+                  right={r.jobs.length ? r.jobs.map((j) => j.number).join(', ') : r.bought_in ? 'bought in' : undefined}
+                />
+              ))}
+              {/* The card shows eight; the queue holds the rest. */}
+              {data.readyToDispatch.ready > data.readyToDispatch.rows.length && (
+                <p className="pt-1 text-xs text-slate-400">
+                  and {data.readyToDispatch.ready - data.readyToDispatch.rows.length} more
+                </p>
+              )}
+            </div>
+          )}
+          {data.readyToDispatch.held > 0 && (
+            <p className="pt-2 text-xs text-amber-700">
+              {data.readyToDispatch.held} more {data.readyToDispatch.held === 1 ? 'line is' : 'lines are'} made but held —
+              {' '}<Link to="/despatches?view=ready" className="underline">see why</Link>.
+            </p>
           )}
         </Card>
       ),
