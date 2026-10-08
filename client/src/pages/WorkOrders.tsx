@@ -391,6 +391,12 @@ export default function WorkOrdersPage() {
                   </th>
                 )}
                 <th className="pb-2 pr-3" rowSpan={2}>Job</th>
+                {/* Who it is for. The group header above each run names the
+                    order and the customer, and this repeats it per row at the
+                    client's word (2026-10-08) — which is what makes the table
+                    readable as a flat list once a filter has cut it down to a
+                    handful of jobs across several orders. */}
+                <th className="pb-2 pr-3" rowSpan={2}>Customer</th>
                 <th className="pb-2 pr-3" rowSpan={2}>Item</th>
                 <th className="pb-2 pr-3" rowSpan={2}>Colour</th>
                 {/*
@@ -465,7 +471,7 @@ export default function WorkOrdersPage() {
                           )}
                         </td>
                       )}
-                      <td className="whitespace-nowrap py-1.5 pr-3 font-semibold" colSpan={3}>
+                      <td className="whitespace-nowrap py-1.5 pr-3 font-semibold" colSpan={4}>
                         <Link to={`/orders/${w.order_id}`} className="text-brand-700 hover:underline">{w.order_number}</Link>
                         <span className="ml-2 font-normal text-slate-600">{w.customer_name}</span>
                       </td>
@@ -535,13 +541,37 @@ export default function WorkOrdersPage() {
                     <td className="whitespace-nowrap py-2 pl-4 pr-3 font-medium">
                       <Link to={`/work-orders/${w.id}`} className="text-brand-600 hover:underline">{w.number}</Link>
                     </td>
-                    {/* One line, with the whole wording on hover — the rule the
+                    {/* One line, with the whole name on hover — the rule the
                         order book's own lines view follows about its customer
                         column, and for the same reason: a name that wraps makes
                         every row in the table two lines tall to serve one. */}
+                    <td className="py-1.5 pr-3 text-slate-600">
+                      <div className="max-w-[9rem] truncate" title={w.customer_name || undefined}>
+                        {w.customer_name || '—'}
+                      </div>
+                    </td>
+                    {/*
+                      **The catalogue product, not the line's wording** (the
+                      client, 2026-10-08: *"it should show actual product name
+                      instead of description"*) — the call the order book's
+                      lines view already made about the same two fields on
+                      2026-09-16. The floor is making a catalogue item, and the
+                      line's description is one desk's sentence about it, which
+                      on this book runs to *"29/21 Press on / CTC Two Piece -
+                      Dual…"* where the product is one name.
+                      A **custom line names no product**, so it falls back to
+                      its own wording rather than printing a dash — that line
+                      has nothing else to say what it is. The description rides
+                      the hover wherever it differs, so nothing is lost.
+                    */}
                     <td className="py-1.5 pr-3">
-                      <div className="max-w-[15rem] truncate" title={w.description || w.product_name || undefined}>
-                        {w.description || w.product_name || '—'}
+                      <div
+                        className="max-w-[12rem] truncate"
+                        title={(w.product_name && w.description && w.description !== w.product_name
+                          ? w.description
+                          : w.product_name || w.description) || undefined}
+                      >
+                        {w.product_name || w.description || '—'}
                       </div>
                     </td>
                     {/* One word on this book, so it does not wrap; a blank
