@@ -46,6 +46,9 @@ authRouter.post('/register', loginRateLimit, (req, res) => {
   const created = {
     id, name: String(name), email: String(email),
     team_role: 'super_admin' as const, role: 'manager' as const,
+    // The first account is the owner's and is unlinked: a super admin may
+    // release any order whatever its SPOC, so there is nothing to set here.
+    desk_name: '',
   };
   record({ user: created, entity: 'users', entity_id: id, action: 'register', label: String(email) });
   res.json(created);
@@ -54,7 +57,7 @@ authRouter.post('/register', loginRateLimit, (req, res) => {
 authRouter.post('/login', loginRateLimit, (req, res) => {
   const { email, password } = req.body ?? {};
   const user = db.prepare('SELECT * FROM users WHERE email = ?').get(String(email ?? '').toLowerCase()) as
-    | { id: number; name: string; email: string; password_hash: string; role: string; team_role: string; active: number }
+    | { id: number; name: string; email: string; password_hash: string; role: string; team_role: string; desk_name: string; active: number }
     | undefined;
   // Sign-in is the one place the audit middleware deliberately does not reach,
   // because it is the one place a request body holds a secret. The entries are
@@ -76,6 +79,7 @@ authRouter.post('/login', loginRateLimit, (req, res) => {
     id: user.id, name: user.name, email: user.email,
     team_role: user.team_role as TeamRole | '',
     role: legacyRole(user.team_role),
+    desk_name: String(user.desk_name ?? ''),
   };
   record({ user: session, entity: 'auth', entity_id: user.id, action: 'login', label: attempted });
   res.json(session);

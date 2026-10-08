@@ -299,6 +299,11 @@ addColumnIfMissing('users', 'dashboard_layout', "TEXT NOT NULL DEFAULT ''");
 // signed without the claim; they read as version 0, which is what every
 // existing row starts at, so nobody is signed out by the migration itself.
 addColumnIfMissing('users', 'token_version', 'INTEGER NOT NULL DEFAULT 0');
+// Which desk name on the paperwork this account is (2026-10-08), for the
+// dispatch approval: `orders.spoc` is one of six free-text names and nothing
+// linked it to a login. Blank is every row on file and means unlinked — such
+// an account releases any order it can see, so the migration blocks nobody.
+addColumnIfMissing('users', 'desk_name', "TEXT NOT NULL DEFAULT ''");
 // Material costing (2026-08). Nullable on purpose: an existing receipt has no
 // rate recorded, and treating that as zero would value the shed at nothing.
 addColumnIfMissing('material_moves', 'rate', 'REAL');

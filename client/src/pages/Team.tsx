@@ -5,8 +5,9 @@ import type { User, TeamRole } from '../types';
 import { TEAM_ROLES, teamRoleLabel } from '../types';
 import { useUser } from '../App';
 import { Button, Input, Select, Field, PageHeader, EmptyState, ErrorText, Modal, Card, TH_CLASS } from '../components/ui';
+import { DeskPersonInput } from '../components/DocFields';
 
-interface Draft { id?: number; name: string; email: string; password: string; team_role: TeamRole }
+interface Draft { id?: number; name: string; email: string; password: string; team_role: TeamRole; desk_name: string }
 
 /** What the reset hands back — the password exists here and nowhere else. */
 interface ResetResult { name: string; email: string; active: boolean; password: string }
@@ -24,7 +25,7 @@ export default function TeamPage() {
   const save = useMutation({
     mutationFn: (d: Draft) =>
       d.id
-        ? api.put<User>(`/api/users/${d.id}`, { name: d.name, email: d.email, team_role: d.team_role, ...(d.password ? { password: d.password } : {}) })
+        ? api.put<User>(`/api/users/${d.id}`, { name: d.name, email: d.email, team_role: d.team_role, desk_name: d.desk_name, ...(d.password ? { password: d.password } : {}) })
         : api.post<User>('/api/users', d),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['users'] });
@@ -61,7 +62,7 @@ export default function TeamPage() {
         title="Team"
         subtitle="Employees see only the customers assigned to them; managers see everything and approve documents"
         actions={
-          <Button onClick={() => { save.reset(); setEditing({ name: '', email: '', password: '', team_role: 'sales' }); }}>
+          <Button onClick={() => { save.reset(); setEditing({ name: '', email: '', password: '', team_role: 'sales', desk_name: '' }); }}>
             + Add Employee
           </Button>
         }
@@ -77,6 +78,7 @@ export default function TeamPage() {
                 <th className="pb-2 pr-3">Name</th>
                 <th className="pb-2 pr-3">Email</th>
                 <th className="pb-2 pr-3">Role</th>
+                <th className="pb-2 pr-3">Desk name</th>
                 <th className="pb-2 pr-3 text-right">Customers</th>
                 <th className="pb-2 pr-3">Status</th>
                 <th className="pb-2" />
@@ -90,10 +92,14 @@ export default function TeamPage() {
                   </td>
                   <td className="py-2 pr-3">{u.email}</td>
                   <td className="py-2 pr-3">{teamRoleLabel(u.team_role)}</td>
+                  {/* Blank is the ordinary state and recedes to a dash rather
+                      than reading as a fault — an unlinked account releases
+                      any order it can see. */}
+                  <td className="py-2 pr-3">{u.desk_name || <span className="text-slate-300">&mdash;</span>}</td>
                   <td className="py-2 pr-3 text-right">{u.customer_count ?? 0}</td>
                   <td className="py-2 pr-3">{u.active ? 'Active' : 'Deactivated'}</td>
                   <td className="py-2 text-right whitespace-nowrap">
-                    <Button variant="ghost" onClick={() => { save.reset(); setEditing({ id: u.id, name: u.name, email: u.email, password: '', team_role: u.team_role ?? 'sales' }); }}>
+                    <Button variant="ghost" onClick={() => { save.reset(); setEditing({ id: u.id, name: u.name, email: u.email, password: '', team_role: u.team_role ?? 'sales', desk_name: u.desk_name ?? '' }); }}>
                       Edit
                     </Button>
                     {u.id !== me.id && (
@@ -213,6 +219,24 @@ export default function TeamPage() {
                 {TEAM_ROLES.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
               </Select>
             </Field>
+            {/*
+              * Which name on the paperwork this person is (2026-10-08, with the
+              * dispatch approval). The same picker the SPOC and Prepared By
+              * boxes use, so the two cannot be spelled differently — and free
+              * text behind it, the rule that control already follows.
+              */}
+            <Field label="Desk name">
+              <DeskPersonInput
+                value={editing.desk_name}
+                onChange={(v) => set({ desk_name: v })}
+                placeholder="Leave blank unless this person is named on documents"
+              />
+            </Field>
+            <p className="text-xs text-slate-400">
+              The desk name links this account to the <em>Handled By (SPOC)</em> name on sales
+              orders: set it and this person releases only their own orders for dispatch. Left
+              blank, they may release any order they can see.
+            </p>
             <p className="text-xs text-slate-400">Share the starting password privately; they can change it later from their own account.</p>
             <ErrorText error={save.error} />
             <div className="flex justify-end gap-2">

@@ -44,6 +44,11 @@ export const ACTION_LABEL: Record<string, string> = {
   'qc-checks': 'Quality check recorded',
   'qc-checks delete': 'Quality check removed',
   receipts: 'Goods received',
+  // The sales desk releasing finished goods to Logistics. The middleware has
+  // no row to diff — the order itself does not change — so the entry is the
+  // act, the order and who performed it; which line and how much is on the
+  // approval row and on the queue, where somebody would be looking anyway.
+  'dispatch-approval': 'Released for dispatch',
   materials: 'Recipe changed',
   'qc-params': 'Quality specification changed',
   sequence: 'Numbering counter moved',

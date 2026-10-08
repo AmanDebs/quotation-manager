@@ -28,6 +28,14 @@ CREATE TABLE IF NOT EXISTS users (
   -- password reset meant to end it: requireAuth caught a deactivated account
   -- but had nothing to check a reset against.
   token_version INTEGER NOT NULL DEFAULT 0,
+  -- Which of the six desk names on the documents is this person (Meisha,
+  -- Tannistha, …). `orders.spoc` and every document's *Prepared By* are free
+  -- text picked from that list, so nothing here linked an account to the
+  -- person named on the paperwork — which is what "the SPOC of that order
+  -- approves" needs. Blank means unlinked, which is every row on file: such an
+  -- account may release any order it can see, so nobody is blocked on the day
+  -- this ships, and filling it in is what makes the rule strict.
+  desk_name TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -1454,6 +1462,38 @@ CREATE TABLE IF NOT EXISTS despatch_batches (
 CREATE INDEX IF NOT EXISTS idx_despatch_batches_despatch ON despatch_batches(despatch_id);
 -- The reverse question — where did this lot go — is the one a recall asks.
 CREATE INDEX IF NOT EXISTS idx_despatch_batches_batch ON despatch_batches(batch_id);
+
+-- The sales desk releasing finished goods to Logistics (2026-10-08, the
+-- client: *"When a product is ready, it should be first be approved by the
+-- SPOC of that order, if he approves then it should go to ready to dispatch
+-- tab so that logistic person can record dispatch"*).
+--
+-- **An approval is an act, so it is stored** — the line `batches.coa_no`, the
+-- scrap decision and `fg_adjustments` all sit on. Everything else about the
+-- Ready to dispatch queue is derived and must stay so; this one row is the
+-- only part of it a person performs.
+--
+-- Keyed on (order, line), the position the whole chain is keyed on, so there
+-- is one row per line and re-approving rewrites it rather than accumulating.
+--
+-- `approved_qty` is **cumulative pieces cleared for dispatch**, not a flag. A
+-- flag would silently release everything made afterwards, which is the one
+-- thing the client's "when a product is made … first be approved" rules out:
+-- make more and the excess is awaiting the desk again, while what was already
+-- released stays released. Withdrawing is lowering it (to 0 deletes the row);
+-- goods already gone are unaffected, the arithmetic flooring at what was sent.
+CREATE TABLE IF NOT EXISTS dispatch_approvals (
+  order_id INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+  order_line INTEGER NOT NULL,
+  approved_qty REAL NOT NULL DEFAULT 0,
+  -- Who signed it off, and when. The account rather than the SPOC name: the
+  -- name on the order is one of six desk names and says whose order it is,
+  -- where this says who actually pressed the button.
+  approved_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  approved_at TEXT NOT NULL DEFAULT (datetime('now')),
+  note TEXT NOT NULL DEFAULT '',
+  PRIMARY KEY (order_id, order_line)
+);
 
 CREATE INDEX IF NOT EXISTS idx_material_moves_material ON material_moves(material_id, location_id);
 CREATE INDEX IF NOT EXISTS idx_material_moves_po ON material_moves(po_id);

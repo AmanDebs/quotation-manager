@@ -247,6 +247,21 @@ export default function Layout({ user, onLogout, children }: { user: User; onLog
     enabled: can('dispatch', 'full'),
     refetchInterval: 60_000,
   });
+  /*
+   * Goods the floor has made that the sales desk has not released yet
+   * (2026-10-08, the client: *"it should be first be approved by the SPOC of
+   * that order, if he approves then it should go to ready to dispatch tab"*).
+   * The desk's own count, so it is gated on `order: full` — the cell the
+   * release route carries — where the one above is gated on `dispatch: full`.
+   * `mine` is the subset this login may actually release, which is every row
+   * until somebody fills in a desk name on the Team page.
+   */
+  const { data: toRelease } = useQuery({
+    queryKey: ['orders', 'dispatch-approval-count'],
+    queryFn: () => api.get<{ awaiting: number; mine: number }>('/api/orders/dispatch-approval/count'),
+    enabled: can('order', 'full'),
+    refetchInterval: 60_000,
+  });
   /** What each entry's badge says, and how urgently: only the three that have one. */
   const badge = (to: string): { count: number; tone: string; title: string } | null => {
     if (to === '/approvals' && approvals?.pending) {
@@ -264,12 +279,30 @@ export default function Layout({ user, onLogout, children }: { user: User; onLog
      * queue they cannot act on. They are still listed on the page, with the
      * reason, which is where that belongs.
      */
-    if (to === '/despatches' && loadable?.ready) {
-      return {
-        count: loadable.ready,
-        tone: 'bg-amber-400 text-slate-900',
-        title: `${loadable.ready} ready to dispatch${loadable.held ? `, ${loadable.held} held` : ''}`,
-      };
+    if (to === '/despatches') {
+      /*
+       * One entry, two audiences, so the number shown is the one this login
+       * can act on. The desk's release comes **first** where both apply (a
+       * super admin): it is the upstream step, and the lines waiting on it are
+       * precisely the ones that are not yet in the other count. The title says
+       * both so the number is never ambiguous.
+       */
+      const mine = toRelease?.mine ?? 0;
+      if (mine) {
+        return {
+          count: mine,
+          tone: 'bg-amber-400 text-slate-900',
+          title: `${mine} line${mine === 1 ? '' : 's'} awaiting your release for dispatch`
+            + (loadable?.ready ? ` · ${loadable.ready} already ready to load` : ''),
+        };
+      }
+      if (loadable?.ready) {
+        return {
+          count: loadable.ready,
+          tone: 'bg-amber-400 text-slate-900',
+          title: `${loadable.ready} ready to dispatch${loadable.held ? `, ${loadable.held} held` : ''}`,
+        };
+      }
     }
     return null;
   };

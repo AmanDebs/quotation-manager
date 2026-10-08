@@ -3,6 +3,7 @@ import { round2, PIECES_ORDERED_SQL } from './totals.js';
 import { LIVE_OK } from './production.js';
 import { qcBlockError } from './qc.js';
 import { advanceBlockError } from './despatchLimits.js';
+import { approvalsForOrders, deskApprovalError } from './dispatchApproval.js';
 import { scopeClause } from '../middleware/scope.js';
 import type { AuthedRequest } from '../middleware/auth.js';
 
@@ -23,10 +24,27 @@ import type { AuthedRequest } from '../middleware/auth.js';
  * a badge comes to promise what the API refuses, which this codebase records
  * as the worst way round for a guard to be wrong.
  *
- * **Nothing is stored.** No flag, no `notifications` table: a line appears the
- * moment the last gate clears and leaves the moment the goods go, so the queue
- * cannot come to disagree with the record — the shape the Work Orders page's
- * *"N to confirm"* queue already has, and for the same reason.
+ * **Almost nothing is stored.** No flag, no `notifications` table: a line
+ * appears the moment the last gate clears and leaves the moment the goods go,
+ * so the queue cannot come to disagree with the record — the shape the Work
+ * Orders page's *"N to confirm"* queue already has, and for the same reason.
+ *
+ * The one exception is the **sales desk's release** (2026-10-08, the hour
+ * after this shipped: *"When a product is ready, it should be first be
+ * approved by the SPOC of that order, if he approves then it should go to
+ * ready to dispatch tab so that logistic person can record dispatch"*), which
+ * is an act rather than an observation and lives in `dispatchApproval.ts`. It
+ * splits the one queue into two audiences:
+ *
+ * - **awaiting** — made, and the desk has not released it. The SPOC's queue.
+ * - **ready** — released, and nothing else is in the way. Logistics' queue,
+ *   and the only thing the sidebar badge counts.
+ *
+ * A line the desk has not released is still **shown to Logistics, held, with
+ * the reason**, the rule a line held by an unpaid advance already follows: the
+ * goods are waiting on Sales rather than on the floor, and a queue that simply
+ * omitted them would leave them in the yard with nothing on any screen to say
+ * why.
  */
 
 /** A live job on the line, named so the queue can link to it. */
@@ -51,7 +69,18 @@ export interface ReadyLine {
   ordered: number;
   made: number;
   sent: number;
+  /** Released by the desk and loadable now. */
   ready: number;
+  /** Made, and waiting on the desk. A line can carry both at once. */
+  awaiting: number;
+  /** Cumulative pieces the desk has cleared on this line. */
+  approved: number;
+  approved_by_name: string;
+  approved_at: string;
+  /** Whose order it is, from `orders.spoc` — one of the six desk names. */
+  spoc: string;
+  /** Whether *this* caller may release it; see `deskApprovalError`. */
+  may_approve: boolean;
   /** The guard's own sentence, or null when the lorry may actually leave. */
   held: string | null;
 }
@@ -91,6 +120,7 @@ const CANDIDATE_SQL = `
     LEFT JOIN products p ON p.id = oi.product_id
   )
   SELECT o.id AS order_id, o.number AS order_number, o.date AS order_date,
+         o.spoc AS spoc,
          c.name AS customer_name,
          li.line, li.product_id, li.product_name, li.description, li.color, li.made_here,
          li.ordered,
@@ -131,7 +161,7 @@ function jobsByLine(orderIds: number[]): Map<string, ReadyJob[]> {
 }
 
 /**
- * The queue, and the two counts the badge reads.
+ * The queue, and the three counts the badges read.
  *
  * Scoped through `scopeClause` like every other read here. It binds on nobody
  * today — Logistics is unscoped and holds the only `dispatch: full` cell
@@ -142,7 +172,7 @@ function jobsByLine(orderIds: number[]): Map<string, ReadyJob[]> {
 export function readyLines(
   req: AuthedRequest,
   opts: { companyId?: number } = {},
-): { rows: ReadyLine[]; ready: number; held: number } {
+): { rows: ReadyLine[]; ready: number; held: number; awaiting: number } {
   const scope = scopeClause(req, 'o.customer_id');
   // The dashboard narrows every figure to one selling entity; the queue's own
   // page asks about the whole group. Each company's rows partition the
@@ -153,6 +183,7 @@ export function readyLines(
      ORDER BY o.date DESC, o.id DESC, li.line`
   ).all(...scope.params, ...(opts.companyId ? [opts.companyId] : [])) as {
     order_id: number; order_number: string; order_date: string; customer_name: string | null;
+    spoc: string | null;
     line: number; product_id: number | null; product_name: string | null;
     description: string; color: string; made_here: number;
     ordered: number; made: number; sent: number;
@@ -170,20 +201,59 @@ export function readyLines(
       const made = round2(Number(r.made) || 0);
       const sent = round2(Number(r.sent) || 0);
       const supply = Math.min(made, ordered);
-      return { r, ordered, made, sent, ready: round2(Math.max(0, supply - sent)) };
+      return { r, ordered, made, sent, supply, outstanding: round2(Math.max(0, supply - sent)) };
     })
-    .filter((c) => c.ready > 0);
+    .filter((c) => c.outstanding > 0);
 
   const orderIds = [...new Set(candidates.map((c) => c.r.order_id))];
   const jobs = jobsByLine(orderIds);
+  // What the sales desk has released, asked once for the whole queue.
+  const approvals = approvalsForOrders(orderIds);
   // Per order, not per line: the money gate is a fact about the whole order,
   // and asking it once per line would run it five times for one answer.
   const moneyHold = new Map<number, string | null>();
   for (const id of orderIds) moneyHold.set(id, advanceBlockError(id));
 
   const out: ReadyLine[] = candidates.map((c) => {
+    const spoc = String(c.r.spoc ?? '').trim();
+    const approval = approvals.get(`${c.r.order_id}:${c.r.line}`);
+    const approved = approval?.qty ?? 0;
+
+    /*
+     * Three figures over one line, and the arithmetic is what makes the two
+     * queues add up rather than overlap.
+     *
+     * `released` is what the desk has cleared, capped at what the floor has
+     * actually made — approving ahead of production releases nothing. `ready`
+     * is the part of that still here; `awaiting` is what is made and not
+     * released, floored at what has **gone**, so withdrawing an approval after
+     * a lorry has left does not put shipped goods back into anybody's queue.
+     *
+     * A line can carry both at once — twelve lakh released and five made
+     * since — which is correct: it is on Logistics' list and back on the
+     * desk's.
+     */
+    const released = Math.min(approved, c.supply);
+    const ready = round2(Math.max(0, released - c.sent));
+    const awaiting = round2(Math.max(0, c.supply - Math.max(released, c.sent)));
+
     // The order the save asks them in, so the reason shown is the reason given.
-    const held = qcBlockError(c.r.order_id, [{ order_line: c.r.line }]) ?? moneyHold.get(c.r.order_id) ?? null;
+    const blocked = qcBlockError(c.r.order_id, [{ order_line: c.r.line }])
+      ?? moneyHold.get(c.r.order_id) ?? null;
+    /*
+     * What Logistics is told. QC and the advance come first because they are
+     * the save's own guards and the sentence is the one the save would give —
+     * and because saying *"awaiting Meisha"* over a line that has failed its
+     * check would send somebody to chase the wrong person. The release is
+     * asked last, and only where nothing at all has been cleared: a line
+     * partly released is on the Ready list, where its remainder is the desk's
+     * business rather than a reason the lorry cannot go.
+     */
+    const held = blocked
+      ?? (ready === 0 && awaiting > 0
+        ? `Made, but not yet released for dispatch${spoc ? ` by ${spoc}` : ''}.`
+        : null);
+
     return {
       order_id: c.r.order_id,
       order_number: c.r.order_number,
@@ -197,14 +267,22 @@ export function readyLines(
       ordered: c.ordered,
       made: c.made,
       sent: c.sent,
-      ready: c.ready,
+      ready,
+      awaiting,
+      approved,
+      approved_by_name: approval?.by_name ?? '',
+      approved_at: approval?.at ?? '',
+      spoc,
+      may_approve: !deskApprovalError(req, spoc),
       held,
     };
   });
 
   return {
     rows: out,
-    ready: out.filter((r) => !r.held).length,
+    // What the badge promises, and so only what can actually be loaded.
+    ready: out.filter((r) => r.ready > 0 && !r.held).length,
     held: out.filter((r) => r.held).length,
+    awaiting: out.filter((r) => r.awaiting > 0).length,
   };
 }

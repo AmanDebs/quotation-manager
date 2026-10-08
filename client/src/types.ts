@@ -38,6 +38,13 @@ export interface DashboardLayout { hidden: string[]; order: string[] }
 export interface User {
   id: number; name: string; email: string; role: Role;
   team_role?: TeamRole;
+  /**
+   * Which of the six desk names on the paperwork this account is, or blank.
+   * Blank means unlinked, which is every row until somebody fills it in: such
+   * an account may release any order it can see for dispatch. See
+   * `deskApprovalError` on the server.
+   */
+  desk_name?: string;
   /** Only sent by /api/auth/me. */
   can?: Capabilities;
   active?: number; customer_count?: number; created_at?: string;
@@ -712,7 +719,18 @@ export interface ReadyLine {
   ordered: number;
   made: number;
   sent: number;
+  /** Released by the sales desk and loadable now. */
   ready: number;
+  /** Made, and waiting on the desk. A line can carry both at once. */
+  awaiting: number;
+  /** Cumulative pieces the desk has cleared on this line. */
+  approved: number;
+  approved_by_name: string;
+  approved_at: string;
+  /** Whose order it is — `orders.spoc`, one of the six desk names. */
+  spoc: string;
+  /** Whether this login may release it. The server's answer, not a copy. */
+  may_approve: boolean;
   held: string | null;
 }
 

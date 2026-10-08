@@ -11,7 +11,7 @@ import { withStock, orderLines, productDemand, countOrderLines, orderSearchClaus
   lineFacet, isFilterColumn, FILTERABLE, FILTER_COLUMNS,
   type ColumnFilters, type Filters, type OrderLine, type ProductDemand, statusClause } from '../services/orderLines.js';
 import { buildXlsx, attachmentName, type Column } from '../services/xlsx.js';
-import { allows, type AuthedRequest } from '../middleware/auth.js';
+import { allows, requirePermission, type AuthedRequest } from '../middleware/auth.js';
 import { scopeClause, canAccessCustomer, linkError, customerChangeError, canRaiseFor } from '../middleware/scope.js';
 import { syncOrderStatus } from '../services/orderStatus.js';
 import { returnedQtyByLine } from '../services/creditNotes.js';
@@ -21,6 +21,8 @@ import { listBody, pageRequest } from '../services/pagination.js';
 import { syncProformaOrdered, syncProformaUnordered, alreadyOrderedError } from '../services/documentChain.js';
 import { blockUnapprovedConversion } from '../services/approval.js';
 import { batchesForOrder } from '../services/batch.js';
+import { readyLines } from '../services/dispatchReady.js';
+import { deskApprovalError, setApproval } from '../services/dispatchApproval.js';
 import { ORDER_IMPORT_FIELDS, buildOrderImport, type Lookups, type OrderBuildOptions } from '../services/orderImport.js';
 import { decodeUpload } from '../services/productImport.js';
 
@@ -708,6 +710,133 @@ ordersRouter.post('/import', (req: AuthedRequest, res) => {
     skipped: result.summary.skip,
     numbers: numbers.written.slice(0, 50),
     sheet: result.sheet,
+  });
+});
+
+/**
+ * What the sales desk has still to release for dispatch.
+ *
+ * Asked for 2026-10-08: *"When a product is ready, it should be first be
+ * approved by the SPOC of that order, if he approves then it should go to
+ * ready to dispatch tab so that logistic person can record dispatch."* This is
+ * the SPOC's half of that; Logistics' half is `GET /despatches/ready`, and
+ * **both call `readyLines`**, so the two queues are one answer read by two
+ * audiences rather than two definitions of what is made.
+ *
+ * **Declared above `/:id`**, or Express reads "dispatch-approval" as an order
+ * id — the trap `/export` already sits above that route for.
+ *
+ * Guarded **`order: full` explicitly rather than leaning on the mount**, which
+ * lets any GET through on `view`: Logistics and Production both hold `view` on
+ * the order book, and this is the desk's own worklist. They still see what is
+ * waiting, with the reason, on the Ready to dispatch tab — the rule a line
+ * held by an unpaid advance already follows.
+ */
+ordersRouter.get('/dispatch-approval', requirePermission('order', 'full'), (req: AuthedRequest, res) => {
+  const { rows, awaiting } = readyLines(req);
+  res.json({ rows: rows.filter((r) => r.awaiting > 0), awaiting });
+});
+
+/**
+ * The same answer, counted — what the sidebar badge reads each minute.
+ *
+ * The same function rather than a second, cheaper SQL: two definitions of
+ * "awaiting release" is how a badge comes to disagree with the list it opens.
+ */
+ordersRouter.get('/dispatch-approval/count', requirePermission('order', 'full'), (req: AuthedRequest, res) => {
+  const { rows, awaiting } = readyLines(req);
+  res.json({ awaiting, mine: rows.filter((r) => r.awaiting > 0 && r.may_approve).length });
+});
+
+/**
+ * Release finished goods on one order's lines, or withdraw a release.
+ *
+ * `{ lines: [{ order_line, qty? }], note? }`. **`qty` omitted means everything
+ * currently made and not yet sent**, which is what the button on the queue
+ * sends and means nobody has to type a figure; an explicit `qty` releases part
+ * of it, and **`0` withdraws**, which has to stay possible — an approval has
+ * no artefact out in the world and one that could not be taken back would be
+ * the trap-with-no-way-out this codebase has built exactly once.
+ *
+ * **One transaction for the whole press**, because an order's lines are signed
+ * off together: half an order released, with nothing to say which half, is
+ * worse than none.
+ *
+ * `order: full` through the mount — a write needs it — and then
+ * `deskApprovalError` on top, which is where the client's *"the SPOC of that
+ * order"* actually bites.
+ */
+ordersRouter.post('/:id/dispatch-approval', (req: AuthedRequest, res) => {
+  const id = Number(req.params.id);
+  const order = db.prepare('SELECT id, number, customer_id, spoc FROM orders WHERE id = ?').get(id) as
+    { id: number; number: string; customer_id: number; spoc: string } | undefined;
+  if (!order || !canAccessCustomer(req, Number(order.customer_id))) {
+    return res.status(404).json({ error: 'Sales order not found' });
+  }
+
+  // Whose order it is. 403 rather than 409: this is about the caller, not
+  // about the record not supporting the claim.
+  const deskError = deskApprovalError(req, String(order.spoc ?? ''));
+  if (deskError) return res.status(403).json({ error: deskError });
+
+  const input = Array.isArray(req.body?.lines) ? req.body.lines : null;
+  if (!input || input.length === 0) {
+    return res.status(400).json({ error: 'Name at least one order line to release.' });
+  }
+  const note = String(req.body?.note ?? '').trim();
+
+  // What is actually outstanding on this order, from the queue's own rule —
+  // so "release everything made" cannot mean a different figure here from the
+  // one the person was looking at.
+  const queue = new Map(
+    readyLines(req).rows.filter((r) => r.order_id === id).map((r) => [r.order_line, r]),
+  );
+
+  const writes: { line: number; qty: number }[] = [];
+  for (const raw of input) {
+    const line = Number(raw?.order_line);
+    if (!Number.isInteger(line) || line < 0) {
+      return res.status(400).json({ error: `Not an order line: ${JSON.stringify(raw?.order_line)}` });
+    }
+    if (writes.some((w) => w.line === line)) {
+      return res.status(400).json({ error: `Line ${line + 1} is named twice.` });
+    }
+    const row = queue.get(line);
+    const withdrawing = raw?.qty !== undefined && Number(raw.qty) <= 0;
+    if (!row) {
+      // Withdrawing is still allowed on a line that has left the queue — goods
+      // may have gone since — but there is nothing to release on one.
+      if (!withdrawing) {
+        return res.status(409).json({ error: `Nothing is waiting to be released on line ${line + 1}.` });
+      }
+      writes.push({ line, qty: 0 });
+      continue;
+    }
+    if (withdrawing) { writes.push({ line, qty: 0 }); continue; }
+    /*
+     * Clamped to what the floor has actually made. A figure beyond that would
+     * release pieces that do not exist — `readyLines` caps it on the way out
+     * anyway, so storing a larger number would only be a figure nobody can
+     * read back.
+     */
+    const supply = Math.min(row.made, row.ordered);
+    const asked = raw?.qty === undefined ? supply : Number(raw.qty);
+    if (!Number.isFinite(asked)) {
+      return res.status(400).json({ error: `Not a quantity: ${JSON.stringify(raw?.qty)}` });
+    }
+    writes.push({ line, qty: Math.min(round2(asked), supply) });
+  }
+
+  transaction(() => {
+    for (const w of writes) setApproval(id, w.line, w.qty, req.user?.id ?? null, note);
+  });
+
+  const after = readyLines(req).rows.filter((r) => r.order_id === id);
+  res.json({
+    order_id: id,
+    number: order.number,
+    lines: writes.map((w) => ({ order_line: w.line, approved_qty: w.qty })),
+    rows: after,
   });
 });
 

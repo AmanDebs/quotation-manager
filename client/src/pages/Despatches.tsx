@@ -111,20 +111,25 @@ function DocsCell({ d }: { d: Despatch }) {
  * can go — and a held row carries the sentence the save itself would give
  * rather than a copy of it.
  *
+ * Since the same day it also waits on the **sales desk's release** (the
+ * client: *"if he approves then it should go to ready to dispatch tab"*), so a
+ * line reaches *Ready to load* only once the SPOC has signed it off.
+ *
  * Held rows are drawn **under** the live ones rather than hidden: goods
- * waiting on an unpaid advance are waiting on Sales, not on the floor, and a
- * queue that simply omitted them would leave finished goods sitting in the
- * yard with nothing on any screen to say why.
+ * waiting on an unpaid advance — or on the desk's release — are waiting on
+ * Sales rather than on the floor, and a queue that simply omitted them would
+ * leave finished goods sitting in the yard with nothing on any screen to say
+ * why.
  */
 function ReadyToDispatch() {
   const can = useCan();
   const navigate = useNavigate();
   const { data, isPending } = useQuery({
     queryKey: ['despatches', 'ready'],
-    queryFn: () => api.get<{ rows: ReadyLine[]; ready: number; held: number }>('/api/despatches/ready'),
+    queryFn: () => api.get<{ rows: ReadyLine[]; ready: number; held: number; awaiting: number }>('/api/despatches/ready'),
   });
   const rows = data?.rows ?? [];
-  const live = rows.filter((r) => !r.held);
+  const live = rows.filter((r) => r.ready > 0 && !r.held);
   const held = rows.filter((r) => r.held);
 
   if (isPending) return <Card><p className="text-sm text-slate-400">Working out what can go…</p></Card>;
@@ -133,7 +138,7 @@ function ReadyToDispatch() {
     <div className="space-y-4">
       <Card title={`Ready to load${live.length ? ` · ${live.length}` : ''}`}>
         {live.length === 0 ? (
-          <EmptyState message="Nothing is ready to dispatch. A line appears here once the floor has made some of it, it has passed QC and the order's own payment terms have been met. A bought-in item is not made here, so it never appears — record its trip from the register." />
+          <EmptyState message="Nothing is ready to dispatch. A line appears here once the floor has made some of it, it has passed QC, the order's own payment terms have been met and the order's SPOC has released it. A bought-in item is not made here, so it never appears — record its trip from the register." />
         ) : (
           <ReadyTable rows={live} canLink={can('work_order')} onRecord={(id) => navigate(`/despatches/new?order=${id}`)} />
         )}
@@ -152,12 +157,118 @@ function ReadyToDispatch() {
   );
 }
 
-/** One row per order line. `onRecord` absent means the row is held. */
-function ReadyTable({ rows, canLink, onRecord }: {
+/**
+ * *Awaiting approval* — the sales desk's half of the same queue.
+ *
+ * Asked for 2026-10-08: *"When a product is ready, it should be first be
+ * approved by the SPOC of that order, if he approves then it should go to
+ * ready to dispatch tab so that logistic person can record dispatch."*
+ *
+ * **Nobody types a figure.** The button releases exactly what the floor has
+ * made and not yet sent, which is the figure the row is already showing — so
+ * the ordinary press is one click, and making more later brings the excess
+ * back here rather than going out on an approval nobody gave it.
+ *
+ * A line this login may not release is drawn with the reason in place of the
+ * button. `may_approve` is the server's own answer rather than a copy of the
+ * rule — two readings of who the SPOC is would be two policies.
+ */
+function AwaitingApproval() {
+  const can = useCan();
+  const queryClient = useQueryClient();
+  const { data, isPending } = useQuery({
+    queryKey: ['orders', 'dispatch-approval'],
+    queryFn: () => api.get<{ rows: ReadyLine[]; awaiting: number }>('/api/orders/dispatch-approval'),
+  });
+  const release = useMutation({
+    mutationFn: (v: { orderId: number; lines: { order_line: number }[] }) =>
+      api.post(`/api/orders/${v.orderId}/dispatch-approval`, { lines: v.lines }),
+    onSuccess: () => {
+      /* Both queues and both badges move together: this is one answer read by
+         two audiences, so releasing on one side must not leave the other
+         saying something else. */
+      queryClient.invalidateQueries({ queryKey: ['orders'] });
+      queryClient.invalidateQueries({ queryKey: ['despatches'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+    },
+  });
+  const rows = data?.rows ?? [];
+  /* One button per order as well as per line, because that is how a desk signs
+     off — one customer, one shipment, every line of it at once. Only drawn
+     where there is more than one line to save a press on. */
+  const orders = [...new Set(rows.filter((r) => r.may_approve).map((r) => r.order_id))];
+
+  if (isPending) return <Card><p className="text-sm text-slate-400">Working out what is waiting…</p></Card>;
+
+  return (
+    <div className="space-y-4">
+      <ErrorText error={release.error} />
+      <Card title={`Awaiting release${rows.length ? ` · ${rows.length}` : ''}`}>
+        {rows.length === 0 ? (
+          <EmptyState message="Nothing is waiting. A line appears here as soon as the floor has made some of it, and leaves when it is released for dispatch or the goods go." />
+        ) : (
+          <>
+            <p className="mb-2 text-xs text-slate-500">
+              The floor has made these and Logistics cannot load them yet. Releasing a line sends
+              exactly what has been made to the Ready to dispatch queue; make more afterwards and
+              the rest comes back here.
+            </p>
+            <ReadyTable
+              rows={rows}
+              canLink={can('work_order')}
+              busy={release.isPending}
+              onRelease={(orderId, line) => release.mutate({ orderId, lines: [{ order_line: line }] })}
+            />
+            <div className="mt-3 flex flex-wrap gap-2">
+              {orders.map((orderId) => {
+                const mine = rows.filter((r) => r.order_id === orderId && r.may_approve);
+                if (mine.length < 2) return null;
+                return (
+                  <Button
+                    key={orderId}
+                    variant="secondary"
+                    disabled={release.isPending}
+                    onClick={() => release.mutate({ orderId, lines: mine.map((r) => ({ order_line: r.order_line })) })}
+                  >
+                    {`Release all ${mine.length} lines on ${mine[0].order_number}`}
+                  </Button>
+                );
+              })}
+            </div>
+          </>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+/**
+ * One row per order line, read by both queues.
+ *
+ * One table rather than two, the call `AccessGrid` records about its own two
+ * views: the figures and their meaning are identical and only the action at
+ * the end of the row differs — `onRecord` for Logistics, `onRelease` for the
+ * desk, and neither on a row that is merely being explained.
+ */
+function ReadyTable({ rows, canLink, onRecord, onRelease, busy }: {
   rows: ReadyLine[];
   canLink: boolean;
   onRecord?: (orderId: number) => void;
+  onRelease?: (orderId: number, line: number) => void;
+  busy?: boolean;
 }) {
+  /*
+   * Each of the three is drawn only where the rows actually have one, the
+   * *Dest Port* rule: on the desk's tab *Ready* would otherwise be a column of
+   * dashes, and on Logistics' *Awaiting* would be — while a row carrying both
+   * is exactly the one worth seeing on either (twelve lakh released, five made
+   * since). SPOC likewise: on a book where nobody filled the field in it would
+   * be a column of dashes for ever.
+   */
+  const showReady = rows.some((r) => r.ready > 0);
+  const showAwaiting = rows.some((r) => r.awaiting > 0);
+  const showSpoc = rows.some((r) => r.spoc);
+  const cols = 7 + (showReady ? 1 : 0) + (showAwaiting ? 1 : 0) + (showSpoc ? 1 : 0);
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
@@ -165,10 +276,12 @@ function ReadyTable({ rows, canLink, onRecord }: {
           <tr className={TH_CLASS}>
             <th className="pb-2 pr-3">Sales Order</th>
             <th className="pb-2 pr-3">Customer</th>
+            {showSpoc && <th className="pb-2 pr-3">SPOC</th>}
             <th className="pb-2 pr-3">Item</th>
             <th className="pb-2 pr-3">Colour</th>
             <th className="pb-2 pr-3">Work Order</th>
-            <th className="pb-2 pr-3 text-right">Ready</th>
+            {showReady && <th className="pb-2 pr-3 text-right">Ready</th>}
+            {showAwaiting && <th className="pb-2 pr-3 text-right">Awaiting</th>}
             <th className="pb-2 pr-3 text-right">Ordered</th>
             <th className="pb-2 pr-3 text-right">Sent</th>
             <th className="pb-2" />
@@ -183,6 +296,11 @@ function ReadyTable({ rows, canLink, onRecord }: {
                 <Link to={`/orders/${r.order_id}`} className="text-brand-700 hover:underline">{r.order_number}</Link>
               </td>
               <td className="max-w-[12rem] truncate py-2 pr-3" title={r.customer_name}>{r.customer_name}</td>
+              {/* Whose order it is — the name on the paperwork, which is who
+                  releases it. Six desk names, so the cell never wraps. */}
+              {showSpoc && (
+                <td className="whitespace-nowrap py-2 pr-3">{r.spoc || <span className="text-slate-300">—</span>}</td>
+              )}
               {/* The catalogue product, with the line's own wording on hover —
                   the rule the order book and the Work Orders list follow. */}
               <td className="max-w-[14rem] truncate py-2 pr-3" title={r.description || undefined}>
@@ -205,23 +323,47 @@ function ReadyTable({ rows, canLink, onRecord }: {
                     </span>
                   ))}
               </td>
-              <td className="py-2 pr-3 text-right font-semibold tabular-nums">{fmtQty(r.ready)}</td>
+              {/* Who released it rides on hover rather than taking a column:
+                  it is the answer to a question somebody asks about one row,
+                  not something read down the table. */}
+              {showReady && (
+                <td
+                  className="py-2 pr-3 text-right font-semibold tabular-nums"
+                  title={r.approved_by_name ? `Released by ${r.approved_by_name} on ${fmtDate(r.approved_at.slice(0, 10))}` : undefined}
+                >
+                  {r.ready ? fmtQty(r.ready) : <span className="font-normal text-slate-300">—</span>}
+                </td>
+              )}
+              {showAwaiting && (
+                <td className="py-2 pr-3 text-right font-semibold tabular-nums text-amber-700">
+                  {r.awaiting ? fmtQty(r.awaiting) : <span className="font-normal text-slate-300">—</span>}
+                </td>
+              )}
               <td className="py-2 pr-3 text-right tabular-nums text-slate-500">{fmtQty(r.ordered)}</td>
               <td className="py-2 pr-3 text-right tabular-nums text-slate-500">
                 {r.sent ? fmtQty(r.sent) : <span className="text-slate-300">—</span>}
               </td>
-              <td className="py-2 text-right">
-                {onRecord
-                  ? <Button variant="ghost" onClick={() => onRecord(r.order_id)}>Record dispatch</Button>
-                  : <span className="text-xs font-medium text-amber-700">Held</span>}
+              <td className="whitespace-nowrap py-2 text-right">
+                {onRelease
+                  ? (r.may_approve
+                    ? <Button variant="ghost" disabled={busy} onClick={() => onRelease(r.order_id, r.order_line)}>Release</Button>
+                    : <span className="text-xs text-slate-400">Not yours</span>)
+                  : onRecord
+                    ? <Button variant="ghost" onClick={() => onRecord(r.order_id)}>Record dispatch</Button>
+                    : <span className="text-xs font-medium text-amber-700">Held</span>}
               </td>
             </tr>
             {/* The guard's own sentence, not a copy: this is what the save
                 would refuse with, so the queue explains the rule rather than
-                keeping a second version of it. */}
-            {r.held && (
+                keeping a second version of it. On the desk's tab the row is
+                instead explained by what the release would do. */}
+            {(r.held || (onRelease && !r.may_approve)) && (
               <tr>
-                <td colSpan={9} className="pb-2 pr-3 text-xs text-amber-700">{r.held}</td>
+                <td colSpan={cols} className="pb-2 pr-3 text-xs text-amber-700">
+                  {onRelease && !r.may_approve
+                    ? `This sales order is handled by ${r.spoc}, so ${r.spoc} releases it for dispatch.`
+                    : r.held}
+                </td>
               </tr>
             )}
           </tbody>
@@ -254,7 +396,18 @@ export default function DespatchesPage() {
    * after an update reads as a page that broke.
    */
   const [view, setView] = useUrlFilter('view');
-  const ready = view === 'ready';
+  /*
+   * Three now, and each is drawn for whoever it is *for* rather than for
+   * everybody who can open the page. The desk releases finished goods
+   * (`order: full` — Sales and the super admin) and Logistics loads them
+   * (`dispatch: full`), so a Sales login sees Register and Awaiting approval
+   * while Logistics sees Register and Ready to dispatch; each route refuses
+   * the other's, so offering a tab that only 403s would be the
+   * form-offers-what-the-API-refuses trap.
+   */
+  const canRelease = can('order', 'full');
+  const ready = view === 'ready' && canWrite;
+  const approving = view === 'approve' && canRelease;
   const [location, setLocation] = useUrlFilter('location_id');
   const [customer, setCustomer] = useUrlFilter('customer_id');
   const [from, setFrom] = useUrlFilter('from');
@@ -299,29 +452,30 @@ export default function DespatchesPage() {
           <div className="flex items-center gap-2">
             {/* The register's own download — hidden on the other tab, where it
                 would not match the screen it sits above. */}
-            {!ready && <DownloadButton href={`/api/despatches/export${query.toString() ? `?${query}` : ''}`} />}
+            {!ready && !approving && <DownloadButton href={`/api/despatches/export${query.toString() ? `?${query}` : ''}`} />}
             {canWrite && <Button onClick={() => setPicking(true)}>+ Record dispatch</Button>}
           </div>
         )}
       />
       <ErrorText error={remove.error} />
 
-      {/* Only drawn for a login that can actually load a lorry: Sales holds
-          `dispatch: view` for tracking and the queue's route refuses it. */}
-      {canWrite && (
+      {/* The register alone is no choice to offer, so the control appears only
+          once there is a second reading this login can actually open. */}
+      {(canWrite || canRelease) && (
         <div className="mb-3">
           <SegmentedTabs
-            value={ready ? 'ready' : 'register'}
-            onChange={(v) => setView(v === 'ready' ? 'ready' : '')}
+            value={ready ? 'ready' : approving ? 'approve' : 'register'}
+            onChange={(v) => setView(v === 'register' ? '' : v)}
             tabs={[
               { key: 'register', label: 'Register' },
-              { key: 'ready', label: 'Ready to dispatch' },
+              ...(canRelease ? [{ key: 'approve', label: 'Awaiting approval' }] : []),
+              ...(canWrite ? [{ key: 'ready', label: 'Ready to dispatch' }] : []),
             ]}
           />
         </div>
       )}
 
-      {ready && canWrite ? <ReadyToDispatch /> : (
+      {approving ? <AwaitingApproval /> : ready ? <ReadyToDispatch /> : (
       <>
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <Input

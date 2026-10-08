@@ -53,6 +53,15 @@ export interface SessionUser {
   role: 'manager' | 'employee';
   /** Which team this person is on. Blank on a row the backfill has not reached. */
   team_role: TeamRole | '';
+  /**
+   * Which of the six desk names on the paperwork this account is, or blank.
+   *
+   * Read here rather than looked up per call because the dispatch approval
+   * asks it on every row of its queue — see `deskApprovalError` in
+   * services/dispatchApproval.ts. Blank is unlinked, which is every row on
+   * file.
+   */
+  desk_name: string;
 }
 
 export interface AuthedRequest extends Request {
@@ -96,9 +105,9 @@ export function requireAuth(req: AuthedRequest, res: Response, next: NextFunctio
     // team_role is on this SELECT and must stay on it: without it every
     // capability check denies, and the whole app locks out at once.
     const user = db
-      .prepare('SELECT id, name, email, team_role, active, token_version FROM users WHERE id = ?')
+      .prepare('SELECT id, name, email, team_role, desk_name, active, token_version FROM users WHERE id = ?')
       .get(payload.userId) as
-      | { id: number; name: string; email: string; team_role: TeamRole | ''; active: number; token_version: number }
+      | { id: number; name: string; email: string; team_role: TeamRole | ''; desk_name: string; active: number; token_version: number }
       | undefined;
     if (!user) return res.status(401).json({ error: 'User not found' });
     if (!user.active) return res.status(403).json({ error: 'This account has been deactivated' });
@@ -111,6 +120,7 @@ export function requireAuth(req: AuthedRequest, res: Response, next: NextFunctio
     req.user = {
       id: user.id, name: user.name, email: user.email,
       team_role: user.team_role,
+      desk_name: String(user.desk_name ?? ''),
       role: legacyRole(user.team_role),
     };
     next();

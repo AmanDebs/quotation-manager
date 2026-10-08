@@ -7,7 +7,7 @@ import { resetUserPassword } from '../services/passwordReset.js';
 
 export const usersRouter = Router();
 
-const publicFields = 'id, name, email, role, team_role, active, created_at';
+const publicFields = 'id, name, email, role, team_role, desk_name, active, created_at';
 
 /**
  * The team role is what a person is; `role` is derived from it and kept only
@@ -43,9 +43,18 @@ usersRouter.post('/', (req, res) => {
   // Sales is the default because it is what an employee has always been: owning
   // customers is a sales job, and that is the only thing that distinguished one.
   const teamRole = isTeamRole(req.body?.team_role) ? req.body.team_role : 'sales';
+  /*
+   * Which desk name on the paperwork this account is, and deliberately **not
+   * validated against a list**. The six names live on the client (`DESK_NAMES`)
+   * and the SPOC box itself is free text behind that list, for the reason
+   * `unitOptions` records: a value a saved row holds has to stay on it even
+   * when the list stops offering it. Blank is the ordinary state and means
+   * unlinked — see `deskApprovalError`.
+   */
+  const deskName = String(req.body?.desk_name ?? '').trim();
   const info = db
-    .prepare('INSERT INTO users (name, email, password_hash, role, team_role) VALUES (?, ?, ?, ?, ?)')
-    .run(String(name), String(email).toLowerCase(), bcrypt.hashSync(String(password), 10), legacyRole(teamRole), teamRole);
+    .prepare('INSERT INTO users (name, email, password_hash, role, team_role, desk_name) VALUES (?, ?, ?, ?, ?, ?)')
+    .run(String(name), String(email).toLowerCase(), bcrypt.hashSync(String(password), 10), legacyRole(teamRole), teamRole, deskName);
   res.status(201).json(db.prepare(`SELECT ${publicFields} FROM users WHERE id = ?`).get(Number(info.lastInsertRowid)));
 });
 
@@ -83,7 +92,7 @@ usersRouter.put('/:id', (req: AuthedRequest, res) => {
   // One transaction, so the profile and the password land together or not at all.
   transaction(() => {
     const teamRole = isTeamRole(body.team_role) ? body.team_role : String(user.team_role);
-    db.prepare('UPDATE users SET name = ?, email = ?, role = ?, team_role = ?, active = ? WHERE id = ?').run(
+    db.prepare('UPDATE users SET name = ?, email = ?, role = ?, team_role = ?, desk_name = ?, active = ? WHERE id = ?').run(
       String(body.name ?? user.name),
       String(body.email ?? user.email).toLowerCase(),
       // Written in step with the team role rather than from the body: it is
@@ -91,6 +100,9 @@ usersRouter.put('/:id', (req: AuthedRequest, res) => {
       // whose Team page says one thing and whose access says another.
       legacyRole(teamRole),
       teamRole,
+      // Omitted leaves it alone; sent blank clears the link, which is the only
+      // way to put an account back to "may release any order it can see".
+      body.desk_name === undefined ? String(user.desk_name ?? '') : String(body.desk_name).trim(),
       body.active === undefined ? Number(user.active) : body.active ? 1 : 0,
       id
     );
