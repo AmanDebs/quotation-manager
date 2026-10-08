@@ -170,6 +170,11 @@ export default function PurchaseOrdersPage() {
                       {poStatusLabel(po.status)}
                     </span>
                   </td>
+                  {/* Each of these is its own action, and the click must not
+                      also open the order behind it. There is deliberately no
+                      *Edit* among them any more: the row opens the order
+                      wherever it is clicked, so a button saying so was the
+                      same door twice. */}
                   <td className="whitespace-nowrap py-2 text-right" onClick={(e) => e.stopPropagation()}>
                     {!['received', 'cancelled'].includes(po.status) && (
                       <Button variant="ghost" onClick={async () => setReceiving(await api.get<PurchaseOrder>(`/api/purchase-orders/${po.id}`))}>
@@ -179,7 +184,6 @@ export default function PurchaseOrdersPage() {
                     <a href={`/api/pdf/purchase-order/${po.id}`} target="_blank" rel="noreferrer">
                       <Button variant="ghost">PDF</Button>
                     </a>
-                    <Link to={`/purchase-orders/${po.id}`}><Button variant="ghost">Edit</Button></Link>
                     {/* Offered on every row, a cancelled or received order
                         included: re-placing a cancelled order and repeating a
                         delivered one are the two commonest reasons to copy. */}
