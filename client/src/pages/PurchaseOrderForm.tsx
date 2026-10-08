@@ -432,7 +432,25 @@ export default function PurchaseOrderFormPage() {
                       capped (2026-09-20, the client: "Decrease the width of
                       material") — the figures had been squeezed to 80px boxes
                       beside a picker most of the card wide. */}
-                  <th className="w-[28%] min-w-48 pb-2 pr-2">Material or product</th>
+                  <th className="w-[24%] min-w-44 pb-2 pr-2">Material or product</th>
+                  {/*
+                    What the line actually says (2026-10-08, the client with a
+                    custom line in front of them: *"In PO lines add Description
+                    Column"*).
+                    `po_items.description` has existed since the document was
+                    written and the PDF has printed it as its own DESCRIPTION
+                    column all along — picking a material or a product writes
+                    that name into it, so an ordinary line was already right and
+                    **a custom line had no way to say what it was**, printing a
+                    blank where the goods belong. Only the box was missing.
+                    Drawn **always**, never in the Columns picker: the PDF's
+                    column is `always: true`, and an order that does not say
+                    what is being bought is no instruction anybody can act on —
+                    the reason Quantity and Total are in `PURCHASE_FORCED`.
+                    Beside the picker and before Photo, which is the order the
+                    document prints in.
+                  */}
+                  <th className="w-[24%] min-w-44 pb-2 pr-2">Description</th>
                   {/* A photo per line (2026-09-20, the client: "add a column
                       to insert image") — the line editor's own cell, the
                       catalogue's photo on a pick, replaced or cleared here. */}
@@ -461,6 +479,17 @@ export default function PurchaseOrderFormPage() {
                         value={itemKey(it)}
                         options={buyOptions}
                         onChange={(v) => pickItem(i, v)}
+                      />
+                    </td>
+                    {/* A pick overwrites it with the catalogue's name, which is
+                        right — a different product is a different line — and
+                        typing over it afterwards is how the supplier's own
+                        wording gets onto the order. */}
+                    <td className="py-2 pr-2">
+                      <Input
+                        value={it.description ?? ''}
+                        onChange={(e) => setItem(i, { description: e.target.value })}
+                        placeholder="What the supplier calls it"
                       />
                     </td>
                     {show('image') && <td className="py-2 pr-2"><PhotoCell value={it.image ?? ''} onChange={(v) => setItem(i, { image: v })} /></td>}
