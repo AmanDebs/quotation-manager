@@ -35,11 +35,28 @@ const locations: MasterSpec<Location> = {
   empty: { name: '', code: '', address: '', notes: '', active: 1 },
 };
 
-const suppliers: MasterSpec<Supplier> = {
+/**
+ * Who raw material is bought from.
+ *
+ * **Exported, and drawn on `pages/Suppliers.tsx` rather than here** since
+ * 2026-10-08 (the client: *"Add PO supplier master creation in Records like
+ * Customers and Products"*). A supplier is a **party**, like a customer, where
+ * the lists left in this page are plant configuration — so it moved to Records
+ * and took its own entry in the sidebar. The spec is exported rather than
+ * copied, and `MasterList` still renders it, so there is one list with one
+ * look however it is reached; the tab here is gone rather than kept beside it,
+ * two doors under two headings being how people come to ask which is
+ * authoritative. Nothing about the data, the route or the permission moved.
+ */
+export const suppliersSpec: MasterSpec<Supplier> = {
   path: 'suppliers',
   title: 'Suppliers',
   singular: 'Supplier',
-  blurb: 'Who raw material is bought from. Purchase orders point here.',
+  // No `blurb`: this one has a page heading of its own now, and the render
+  // caught the sentence being printed twice — once as the page's subtitle and
+  // once under the count. `MasterList` draws it only when a spec sets one, so
+  // the six lists still inside this page are untouched.
+
   columns: [
     { key: 'name', label: 'Name', render: (r) => <span className="font-medium">{r.name}</span> },
     { key: 'contact_person', label: 'Contact', render: (r) => dash(r.contact_person) },
@@ -159,7 +176,7 @@ const processes: MasterSpec<Process> = {
 };
 
 type TabKey =
-  | 'locations' | 'suppliers' | 'transporters' | 'materials' | 'machines' | 'moulds' | 'processes';
+  | 'locations' | 'transporters' | 'materials' | 'machines' | 'moulds' | 'processes';
 
 export default function MastersPage() {
   const [tab, setTab] = useState<TabKey>('locations');
@@ -216,7 +233,6 @@ export default function MastersPage() {
           { key: 'machines', label: 'Machines' },
           { key: 'moulds', label: 'Moulds' },
           { key: 'processes', label: 'Processes' },
-          { key: 'suppliers', label: 'Suppliers' },
           { key: 'transporters', label: 'Transporters' },
         ]}
       />
@@ -225,7 +241,6 @@ export default function MastersPage() {
       {tab === 'machines' && <MasterList spec={machines} canEdit={isManager} />}
       {tab === 'moulds' && <MasterList spec={moulds} canEdit={isManager} />}
       {tab === 'processes' && <MasterList spec={processes} canEdit={isManager} />}
-      {tab === 'suppliers' && <MasterList spec={suppliers} canEdit={isManager} />}
       {tab === 'transporters' && <MasterList spec={transporters} canEdit={isManager} />}
     </div>
   );

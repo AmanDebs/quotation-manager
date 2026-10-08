@@ -95,6 +95,11 @@ const NAV: { heading: string; items: NavItem[] }[] = [
     items: [
       { to: '/customers', label: 'Customers', icon: 'building', needs: 'customer' },
       { to: '/products', label: 'Products', icon: 'tag', needs: 'product' },
+      // A supplier is a party like a customer, which is why it sits here
+      // rather than among the plant's own lists (2026-10-08). It keeps the
+      // `master` cell it had as a tab on Production Masters, so every team
+      // sees the page and the controls are what differ.
+      { to: '/suppliers', label: 'Suppliers', icon: 'building', needs: 'master' },
       { to: '/container-planner', label: 'Container Planner', icon: 'ship', needs: 'product' },
     ],
   },

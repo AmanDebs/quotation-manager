@@ -10,6 +10,7 @@ import CustomersPage from './pages/Customers';
 import CustomerDetailPage from './pages/CustomerDetail';
 import PaymentsPage from './pages/Payments';
 import ProductsPage from './pages/Products';
+import SuppliersPage from './pages/Suppliers';
 import ContainerPlannerPage from './pages/ContainerPlanner';
 import EnquiriesPage from './pages/Enquiries';
 import QuotationsPage from './pages/Quotations';
@@ -193,6 +194,9 @@ export const routes: RouteObject[] = [
       { path: '/customers', element: <Needs fn="customer"><CustomersPage /></Needs> },
       { path: '/customers/:id', element: <Needs fn="customer"><CustomerDetailPage /></Needs> },
       { path: '/products', element: <Needs fn="product"><ProductsPage /></Needs> },
+      // The supplier book, moved out of the Production Masters tabs on
+      // 2026-10-08. Same list, same `master` cell — see pages/Suppliers.
+      { path: '/suppliers', element: <Needs fn="master"><SuppliersPage /></Needs> },
       { path: '/container-planner', element: <Needs fn="product"><ContainerPlannerPage /></Needs> },
       { path: '/enquiries', element: <Needs fn="enquiry"><EnquiriesPage /></Needs> },
       { path: '/quotations', element: <Needs fn="quotation"><QuotationsPage /></Needs> },

@@ -69,16 +69,54 @@ export default function MasterList<T extends Row>({ spec, canEdit }: { spec: Mas
 
   const set = (patch: Partial<T>) => setEditing((prev) => (prev ? { ...prev, ...patch } : prev));
 
+  /*
+   * A search, over the rows already fetched.
+   *
+   * **Client-side, and that is correct here rather than lazy**: a master is
+   * deliberately not paged — it feeds every picker in the app, and a picker
+   * handed the first fifty of anything is worse than no paging at all — so
+   * there is no page in hand to search only part of, which is the reason the
+   * document lists have to go to the server for theirs.
+   *
+   * **Drawn only on a list long enough to need one**, and measured against the
+   * *unfiltered* count, or the box would disappear underneath whoever was
+   * typing in it as the matches fell away. Three suppliers get the row of
+   * controls they had; two hundred materials get somewhere to start.
+   *
+   * It matches the row's **own** text — name, contact, GSTIN, terms, notes —
+   * rather than what each column renders: a column may draw a looked-up word
+   * (a machine's plant) that the row does not carry, and reaching it would
+   * mean running every `render` on every keystroke to read a ReactNode back
+   * out. Searching a field that is not on screen is the generous direction;
+   * the one that is not covered is a lookup, and there is one of those.
+   */
+  const [q, setQ] = useState('');
+  const needle = q.trim().toLowerCase();
+  const hay = (row: T) => Object.values(row)
+    .map((v) => (typeof v === 'string' || typeof v === 'number' ? String(v) : ''))
+    .join(' ')
+    .toLowerCase();
+  const shown = needle ? rows.filter((r) => hay(r).includes(needle)) : rows;
+
   return (
     <div>
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div>
           <span className="text-sm text-slate-500">
-            {rows.length} {rows.length === 1 ? spec.singular.toLowerCase() : spec.title.toLowerCase()}
+            {needle ? `${shown.length} of ${rows.length} ` : `${rows.length} `}
+            {rows.length === 1 ? spec.singular.toLowerCase() : spec.title.toLowerCase()}
           </span>
           {spec.blurb && <p className="mt-0.5 text-xs text-slate-400">{spec.blurb}</p>}
         </div>
         <div className="flex items-center gap-3">
+          {rows.length > 8 && (
+            <Input
+              className="w-56"
+              placeholder={`Search ${spec.title.toLowerCase()}…`}
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+            />
+          )}
           <label className="flex items-center gap-1.5 text-xs text-slate-500">
             <input type="checkbox" checked={showRetired} onChange={(e) => setShowRetired(e.target.checked)} />
             Show retired
@@ -94,8 +132,12 @@ export default function MasterList<T extends Row>({ spec, canEdit }: { spec: Mas
       <ErrorText error={remove.error} />
 
       <Card className="overflow-x-auto">
-        {rows.length === 0 ? (
-          <EmptyState message={`No ${spec.title.toLowerCase()} yet.`} />
+        {shown.length === 0 ? (
+          // An empty list and a search that found nothing are different facts,
+          // the rule the customers and products lists already follow.
+          <EmptyState message={needle
+            ? `Nothing matches that search.`
+            : `No ${spec.title.toLowerCase()} yet.`} />
         ) : (
           <table className="w-full text-sm">
             <thead>
@@ -107,7 +149,7 @@ export default function MasterList<T extends Row>({ spec, canEdit }: { spec: Mas
               </tr>
             </thead>
             <tbody>
-              {rows.map((row) => (
+              {shown.map((row) => (
                 <tr key={row.id} className={`border-b border-slate-100 last:border-0 hover:bg-slate-50 ${row.active ? '' : 'text-slate-400'}`}>
                   {spec.columns.map((c) => (
                     <td key={c.key} className={`py-2 pr-3 ${c.align === 'right' ? 'text-right tabular-nums' : ''}`}>
