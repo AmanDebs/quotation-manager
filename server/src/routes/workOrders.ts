@@ -4,6 +4,7 @@ import { nextNumber } from '../services/numbering.js';
 import { batchesFor, batchById, coaBlockError, renameError, dispositionError, isDisposition, DISPOSITIONS }
   from '../services/batch.js';
 import { progressFor, progressForMany, LIVE_OK } from '../services/production.js';
+import { despatchedByOrder, lastTripForLine } from '../services/despatch.js';
 import { materialCostByWorkOrder } from '../services/costing.js';
 import { paramsFor, checksForWorkOrder, summaryForWorkOrder, specOwner, RESULT_FAILED_SQL } from '../services/qc.js';
 import { requirementForJob, snapshotRecipe, recipeDiffers } from '../services/recipe.js';
@@ -122,6 +123,23 @@ function getFull(req: AuthedRequest, id: number, costs?: Map<number, number>) {
      WHERE e.work_order_id = ? ORDER BY e.date, e.id`
   ).all(id);
   wo.progress = progressFor(id, Number(wo.qty_planned) || 0);
+  /*
+   * What has physically gone against this job's order line — the reverse of
+   * the *Ready to dispatch* queue, and the other half of what the client meant
+   * by connecting the two (2026-10-08).
+   *
+   * **Read, never stored, and deliberately not a Dispatch tab.** `despatches`
+   * has no `work_order_id` and a lorry carries lines from several jobs at
+   * once, which is the reason this page has never had one; what it can honestly
+   * say is how much of *this line* has left and under which paper. Keyed on the
+   * order line, the chain's own index rule, so a split run's two jobs both
+   * report the line's shipment rather than inventing a split of it.
+   */
+  const line = Number(wo.order_line);
+  const sent = despatchedByOrder(Number(wo.order_id)).get(line);
+  wo.dispatched = sent
+    ? { ...sent, last_trip: lastTripForLine(Number(wo.order_id), line) }
+    : { qty: 0, packs: 0, trips: 0, last_date: '', last_trip: null };
   // The lots this job has made, each with what was booked into it, its final
   // check and its certificate. Derived on read like the progress above it.
   wo.batches = batchesFor(id);

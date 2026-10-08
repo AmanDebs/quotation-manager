@@ -122,7 +122,7 @@ describe('the access table', () => {
       ['logistics', 'dispatch', 'full'], ['logistics', 'packing_list', 'full'],
       ['logistics', 'order', 'view'], ['logistics', 'qc', 'view'],
       ['logistics', 'invoice', 'view'], ['logistics', 'quotation', 'none'],
-      ['logistics', 'work_order', 'none'], ['logistics', 'dashboard', 'view'],
+      ['logistics', 'work_order', 'view'], ['logistics', 'dashboard', 'view'],
       // Production Supervisor — Full on Production, the order but not the price.
       ['production', 'work_order', 'full'], ['production', 'output', 'full'],
       ['production', 'material', 'full'], ['production', 'order', 'view'],

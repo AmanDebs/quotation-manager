@@ -274,7 +274,12 @@ export const DEFAULT_ACCESS: AccessTable = {
    */
   logistics: {
     enquiry: 'none', quotation: 'none', proforma: 'none', order: 'view', dashboard: 'view',
-    work_order: 'none', output: 'none', material: 'none',
+    // Read only, and granted 2026-10-08 with the ready-to-dispatch queue: that
+    // queue names the job that made the goods, and a link the person being
+    // notified is refused is worse than no link. The floor's own acts stay
+    // Production's — output and material are still none, and planning or
+    // editing a job needs `full`, which this is not.
+    work_order: 'view', output: 'none', material: 'none',
     qc: 'view',        // Read Only (Verify COA Clearance) — the spec's pre-dispatch step
     dispatch: 'full',  // Full (Pick, Pack, Gate Pass, Logistics)
     fg: 'full',        // View FG Inventory — and the stock count, which is a stores act

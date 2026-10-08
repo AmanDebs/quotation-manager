@@ -2,8 +2,8 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
-import type { Despatch, Location, Customer, Order } from '../types';
-import { PageHeader, Card, Select, Input, Button, Modal, EmptyState, ErrorText, Pagination, DownloadButton, SearchSelect, TH_CLASS } from '../components/ui';
+import type { Despatch, Location, Customer, Order, ReadyLine } from '../types';
+import { PageHeader, Card, Select, Input, Button, Modal, EmptyState, ErrorText, Pagination, DownloadButton, SearchSelect, SegmentedTabs, TH_CLASS } from '../components/ui';
 import { useCan } from '../App';
 import { fmtQty, fmtDate } from '../lib/format';
 import { useUrlFilter } from '../lib/useUrlFilter';
@@ -102,6 +102,135 @@ function DocsCell({ d }: { d: Despatch }) {
     : <span className="text-rose-700">Not sent</span>;
 }
 
+/**
+ * *Ready to dispatch* — what can be loaded onto a lorry now.
+ *
+ * Asked for 2026-10-08: the floor books a shift, the job finishes itself, and
+ * until this nothing told Logistics. **Every figure here is the server's**,
+ * from the same guards `POST /despatches` runs, so a row that says it can go
+ * can go — and a held row carries the sentence the save itself would give
+ * rather than a copy of it.
+ *
+ * Held rows are drawn **under** the live ones rather than hidden: goods
+ * waiting on an unpaid advance are waiting on Sales, not on the floor, and a
+ * queue that simply omitted them would leave finished goods sitting in the
+ * yard with nothing on any screen to say why.
+ */
+function ReadyToDispatch() {
+  const can = useCan();
+  const navigate = useNavigate();
+  const { data, isPending } = useQuery({
+    queryKey: ['despatches', 'ready'],
+    queryFn: () => api.get<{ rows: ReadyLine[]; ready: number; held: number }>('/api/despatches/ready'),
+  });
+  const rows = data?.rows ?? [];
+  const live = rows.filter((r) => !r.held);
+  const held = rows.filter((r) => r.held);
+
+  if (isPending) return <Card><p className="text-sm text-slate-400">Working out what can go…</p></Card>;
+
+  return (
+    <div className="space-y-4">
+      <Card title={`Ready to load${live.length ? ` · ${live.length}` : ''}`}>
+        {live.length === 0 ? (
+          <EmptyState message="Nothing is ready to dispatch. A line appears here once it has been made, has passed QC and the order's own payment terms have been met." />
+        ) : (
+          <ReadyTable rows={live} canLink={can('work_order')} onRecord={(id) => navigate(`/despatches/new?order=${id}`)} />
+        )}
+      </Card>
+
+      {held.length > 0 && (
+        <Card title={`Held · ${held.length}`}>
+          <p className="mb-2 text-xs text-slate-500">
+            Made, but something is still in the way. These are not counted on the sidebar — the badge
+            only ever says what can actually be loaded.
+          </p>
+          <ReadyTable rows={held} canLink={can('work_order')} />
+        </Card>
+      )}
+    </div>
+  );
+}
+
+/** One row per order line. `onRecord` absent means the row is held. */
+function ReadyTable({ rows, canLink, onRecord }: {
+  rows: ReadyLine[];
+  canLink: boolean;
+  onRecord?: (orderId: number) => void;
+}) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className={TH_CLASS}>
+            <th className="pb-2 pr-3">Sales Order</th>
+            <th className="pb-2 pr-3">Customer</th>
+            <th className="pb-2 pr-3">Item</th>
+            <th className="pb-2 pr-3">Colour</th>
+            <th className="pb-2 pr-3">Work Order</th>
+            <th className="pb-2 pr-3 text-right">Ready</th>
+            <th className="pb-2 pr-3 text-right">Ordered</th>
+            <th className="pb-2 pr-3 text-right">Sent</th>
+            <th className="pb-2" />
+          </tr>
+        </thead>
+        {rows.map((r) => (
+          /* One tbody per line so a held row can carry its reason on a second
+             row of its own, under the figures it explains. */
+          <tbody key={`${r.order_id}:${r.order_line}`} className="border-b border-slate-100 last:border-0">
+            <tr className={`align-top ${r.held ? 'text-slate-400' : ''}`}>
+              <td className="whitespace-nowrap py-2 pr-3 font-medium">
+                <Link to={`/orders/${r.order_id}`} className="text-brand-700 hover:underline">{r.order_number}</Link>
+              </td>
+              <td className="max-w-[12rem] truncate py-2 pr-3" title={r.customer_name}>{r.customer_name}</td>
+              {/* The catalogue product, with the line's own wording on hover —
+                  the rule the order book and the Work Orders list follow. */}
+              <td className="max-w-[14rem] truncate py-2 pr-3" title={r.description || undefined}>
+                {r.product_name || r.description || '—'}
+                {r.bought_in && <span className="ml-1.5 text-xs text-slate-400">(bought in)</span>}
+              </td>
+              <td className="whitespace-nowrap py-2 pr-3">{r.color || <span className="text-slate-300">—</span>}</td>
+              {/* The half the client asked to be connected. A job a login
+                  cannot open is named rather than linked — a link that only
+                  ever answers 403 is worse than plain text. */}
+              <td className="whitespace-nowrap py-2 pr-3">
+                {r.jobs.length === 0
+                  ? <span className="text-slate-300">{r.bought_in ? 'bought in' : '—'}</span>
+                  : r.jobs.map((j, i) => (
+                    <span key={j.id}>
+                      {i > 0 && <span className="text-slate-300">, </span>}
+                      {canLink
+                        ? <Link to={`/work-orders/${j.id}`} className="text-brand-700 hover:underline">{j.number}</Link>
+                        : j.number}
+                    </span>
+                  ))}
+              </td>
+              <td className="py-2 pr-3 text-right font-semibold tabular-nums">{fmtQty(r.ready)}</td>
+              <td className="py-2 pr-3 text-right tabular-nums text-slate-500">{fmtQty(r.ordered)}</td>
+              <td className="py-2 pr-3 text-right tabular-nums text-slate-500">
+                {r.sent ? fmtQty(r.sent) : <span className="text-slate-300">—</span>}
+              </td>
+              <td className="py-2 text-right">
+                {onRecord
+                  ? <Button variant="ghost" onClick={() => onRecord(r.order_id)}>Record dispatch</Button>
+                  : <span className="text-xs font-medium text-amber-700">Held</span>}
+              </td>
+            </tr>
+            {/* The guard's own sentence, not a copy: this is what the save
+                would refuse with, so the queue explains the rule rather than
+                keeping a second version of it. */}
+            {r.held && (
+              <tr>
+                <td colSpan={9} className="pb-2 pr-3 text-xs text-amber-700">{r.held}</td>
+              </tr>
+            )}
+          </tbody>
+        ))}
+      </table>
+    </div>
+  );
+}
+
 export default function DespatchesPage() {
   const can = useCan();
   const canWrite = can('dispatch', 'full');
@@ -118,6 +247,14 @@ export default function DespatchesPage() {
       queryClient.invalidateQueries({ queryKey: ['dashboard'] });
     },
   });
+  /*
+   * Two readings of one page, in the URL like the order book's three — the
+   * register, and what is waiting to be loaded. Default is the register: that
+   * is what this page has always been, and a page that opens somewhere else
+   * after an update reads as a page that broke.
+   */
+  const [view, setView] = useUrlFilter('view');
+  const ready = view === 'ready';
   const [location, setLocation] = useUrlFilter('location_id');
   const [customer, setCustomer] = useUrlFilter('customer_id');
   const [from, setFrom] = useUrlFilter('from');
@@ -160,13 +297,32 @@ export default function DespatchesPage() {
         // so the download cannot disagree with the table above it.
         actions={(
           <div className="flex items-center gap-2">
-            <DownloadButton href={`/api/despatches/export${query.toString() ? `?${query}` : ''}`} />
+            {/* The register's own download — hidden on the other tab, where it
+                would not match the screen it sits above. */}
+            {!ready && <DownloadButton href={`/api/despatches/export${query.toString() ? `?${query}` : ''}`} />}
             {canWrite && <Button onClick={() => setPicking(true)}>+ Record dispatch</Button>}
           </div>
         )}
       />
       <ErrorText error={remove.error} />
 
+      {/* Only drawn for a login that can actually load a lorry: Sales holds
+          `dispatch: view` for tracking and the queue's route refuses it. */}
+      {canWrite && (
+        <div className="mb-3">
+          <SegmentedTabs
+            value={ready ? 'ready' : 'register'}
+            onChange={(v) => setView(v === 'ready' ? 'ready' : '')}
+            tabs={[
+              { key: 'register', label: 'Register' },
+              { key: 'ready', label: 'Ready to dispatch' },
+            ]}
+          />
+        </div>
+      )}
+
+      {ready && canWrite ? <ReadyToDispatch /> : (
+      <>
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <Input
           className="w-64"
@@ -324,6 +480,8 @@ export default function DespatchesPage() {
           onPage={list.setPage} noun="dispatches"
         />
       </Card>
+      </>
+      )}
 
       {picking && (
         <PickOrder onClose={() => setPicking(false)} onPick={(orderId) => { setPicking(false); navigate(`/despatches/new?order=${orderId}`); }} />

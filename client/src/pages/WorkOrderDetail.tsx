@@ -387,6 +387,33 @@ export default function WorkOrderDetailPage() {
             <div className="h-full rounded-full bg-brand-600" style={{ width: `${Math.min(100, pct)}%` }} />
           </div>
 
+          {/*
+            * What has left the gate against this job's order line — the other
+            * half of connecting dispatch to the work order (2026-10-08).
+            *
+            * Read-only and one line rather than a tab: a lorry leaves against
+            * an *order* carrying lines from several jobs, so this page has
+            * never had a Dispatch tab and still should not. Drawn only once
+            * something has gone, the em-dash rule read the other way — on a
+            * job nothing has shipped from, an empty box would say nothing.
+            */}
+          {!!job.dispatched?.qty && (
+            <p className="mb-4 text-sm text-slate-600">
+              <span className="font-semibold tabular-nums text-slate-800">{fmtQty(job.dispatched.qty)}</span>
+              {' dispatched on this order line'}
+              {job.dispatched.trips > 1 && ` over ${job.dispatched.trips} trips`}
+              {job.dispatched.last_trip?.reference && (
+                <>
+                  {' · last on '}
+                  <Link to={`/despatches?q=${encodeURIComponent(job.dispatched.last_trip.reference)}`} className="text-brand-700 hover:underline">
+                    {job.dispatched.last_trip.reference}
+                  </Link>
+                  {` ${fmtDate(job.dispatched.last_trip.date)}`}
+                </>
+              )}
+            </p>
+          )}
+
           {(job.entries ?? []).length === 0 ? (
             <EmptyState message="Nothing booked yet. Shift output recorded against this job shows here, and the figures above are sums over it." />
           ) : (

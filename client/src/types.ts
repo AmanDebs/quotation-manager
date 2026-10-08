@@ -344,6 +344,18 @@ export interface BatchTrip {
 }
 
 export interface WorkOrder {
+  /**
+   * What has physically gone against this job's **order line** — read from the
+   * dispatch register, never stored. A split run's two jobs both report the
+   * line's shipment: a lorry leaves against an order, not a job.
+   */
+  dispatched?: {
+    qty: number;
+    packs: number;
+    trips: number;
+    last_date: string;
+    last_trip: { date: string; reference: string } | null;
+  };
   id: number; number: string; company_id?: number;
   order_id: number;
   /** Position of the order line this job is against. */
@@ -678,6 +690,31 @@ export interface DespatchItem {
   qty: number | null;
   packs: number | null;
   notes?: string;
+}
+
+/**
+ * A line of the *Ready to dispatch* queue — what can be loaded onto a lorry
+ * now. Derived on the server from the same guards `POST /despatches` runs, so
+ * `held` is the sentence the save itself would give rather than a copy of it.
+ */
+export interface ReadyLine {
+  order_id: number;
+  order_number: string;
+  order_date: string;
+  customer_name: string;
+  order_line: number;
+  product_name: string | null;
+  description: string;
+  color: string;
+  /** Bought in rather than made here: no job, nothing produced to wait on. */
+  bought_in: boolean;
+  jobs: { id: number; number: string; status: string }[];
+  /** All in pieces. */
+  ordered: number;
+  made: number;
+  sent: number;
+  ready: number;
+  held: string | null;
 }
 
 export interface Despatch {

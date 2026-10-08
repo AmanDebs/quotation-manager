@@ -4,7 +4,7 @@ import { checkDocument } from '../services/documentChecks.js';
 import { nextNumber, exportChangeError } from '../services/numbering.js';
 import { computeTotals, round2, type LineItemInput } from '../services/totals.js';
 import { productionByOrder } from '../services/production.js';
-import { despatchedByOrder } from './despatches.js';
+import { despatchedByOrder } from '../services/despatch.js';
 import { orderMaterialCost } from '../services/costing.js';
 import { orderAdvance, advanceForProforma, preDispatchDue } from '../services/receivables.js';
 import { withStock, orderLines, productDemand, countOrderLines, orderSearchClause,

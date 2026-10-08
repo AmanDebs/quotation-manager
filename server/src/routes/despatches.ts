@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { db, transaction } from '../db/connection.js';
-import { round2 } from '../services/totals.js';
 import type { AuthedRequest } from '../middleware/auth.js';
+import { requirePermission } from '../middleware/auth.js';
 import { scopeClause, canAccessCustomer } from '../middleware/scope.js';
 import { qcBlockError } from '../services/qc.js';
 import { despatchLimitError, despatchDateError, advanceBlockError } from '../services/despatchLimits.js';
@@ -10,6 +10,7 @@ import { listBody } from '../services/pagination.js';
 import { searchClause } from '../services/search.js';
 import { nextNumber } from '../services/numbering.js';
 import { SEA_LEG, DOCS_OUTSTANDING_D } from '../services/despatch.js';
+import { readyLines } from '../services/dispatchReady.js';
 import { batchesOnDespatch, setDespatchBatches, despatchBatchError } from '../services/batch.js';
 import { buildXlsx, attachmentName, type Column } from '../services/xlsx.js';
 
@@ -94,30 +95,6 @@ function saveItems(despatchId: number, items: ItemInput[]) {
       ins.run(despatchId, Number(it.order_line) || 0, String(it.description ?? ''),
         numOrNull(it.qty), numOrNull(it.packs), String(it.notes ?? ''), i));
 }
-
-/** Pieces physically sent per order line — the counterpart to the invoice walk. */
-export function despatchedByOrder(orderId: number):
-  Map<number, { qty: number; packs: number; trips: number; last_date: string }> {
-  const rows = db.prepare(
-    `SELECT di.order_line,
-            COALESCE(SUM(di.qty), 0) AS qty,
-            COALESCE(SUM(di.packs), 0) AS packs,
-            COUNT(DISTINCT d.id) AS trips,
-            -- When this line last moved. MAX rather than MIN: a line shipped
-            -- over three trips is best described by the most recent one, which
-            -- is what "has this gone yet" is actually asking.
-            MAX(d.date) AS last_date
-     FROM despatch_items di
-     JOIN despatches d ON d.id = di.despatch_id
-     WHERE d.order_id = ?
-     GROUP BY di.order_line`
-  ).all(orderId) as
-    { order_line: number; qty: number; packs: number; trips: number; last_date: string | null }[];
-  return new Map(rows.map((r) => [r.order_line, {
-    qty: round2(r.qty), packs: round2(r.packs), trips: r.trips, last_date: r.last_date ?? '',
-  }]));
-}
-
 
 /**
  * Pieces, boxes and unbilled trips over every despatch matching the filters —
@@ -304,6 +281,35 @@ despatchesRouter.get('/', (req: AuthedRequest, res) => {
   // unbilled. Adding up one page of rows would answer a different question in
   // the same words, so the figures come from the whole filtered set.
   res.json(Array.isArray(body) ? body : { ...body, summary: despatchSummary(sql, params) });
+});
+
+/**
+ * What can be loaded onto a lorry now.
+ *
+ * **Declared above `/:id`**, or Express reads "ready" as a despatch id — the
+ * trap `/export` already sits above that route for.
+ *
+ * Guarded `dispatch: full` **explicitly rather than leaning on the mount**,
+ * which lets any GET through on `view`: this queue is for whoever can actually
+ * load a lorry, and Sales holds `dispatch: view` for tracking. A read mounted
+ * without its own guard is how a whole list escapes through a route nobody
+ * thinks of as part of the module — the trap `routes/pdf.ts` records.
+ */
+despatchesRouter.get('/ready', requirePermission('dispatch', 'full'), (req: AuthedRequest, res) => {
+  res.json(readyLines(req));
+});
+
+/**
+ * The same answer, counted — what the sidebar badge reads each minute.
+ *
+ * It calls the same function rather than a second, cheaper SQL: two
+ * definitions of "ready" is exactly how a badge comes to disagree with the
+ * list it opens, and a badge saying 3 over a queue of 1 is worse than no
+ * badge. The cost is bounded by open orders, not by trading volume.
+ */
+despatchesRouter.get('/ready/count', requirePermission('dispatch', 'full'), (req: AuthedRequest, res) => {
+  const { ready, held } = readyLines(req);
+  res.json({ ready, held });
 });
 
 despatchesRouter.get('/:id', (req: AuthedRequest, res) => {

@@ -229,7 +229,25 @@ export default function Layout({ user, onLogout, children }: { user: User; onLog
     enabled: can('followup'),
     refetchInterval: 60_000,
   });
-  /** What each entry's badge says, and how urgently: only the two that have one. */
+  /*
+   * Goods that can be loaded onto a lorry now (2026-10-08, the client: "when a
+   * product is made and is ready for dispatch, the logistics person should get
+   * a notification"). There is no mail server here and deliberately never has
+   * been, so the honest notification is this: a count that is right whenever
+   * the app is open, refreshed each minute like the two above.
+   *
+   * Gated on `dispatch: full` rather than on the function, because the queue is
+   * for whoever can actually record the trip — Sales holds `view` for tracking
+   * and would only ever get a 403 from the route. Keyed under `['despatches',
+   * …]` so recording one refreshes the badge by prefix.
+   */
+  const { data: loadable } = useQuery({
+    queryKey: ['despatches', 'ready-count'],
+    queryFn: () => api.get<{ ready: number; held: number }>('/api/despatches/ready/count'),
+    enabled: can('dispatch', 'full'),
+    refetchInterval: 60_000,
+  });
+  /** What each entry's badge says, and how urgently: only the three that have one. */
   const badge = (to: string): { count: number; tone: string; title: string } | null => {
     if (to === '/approvals' && approvals?.pending) {
       return { count: approvals.pending, tone: 'bg-amber-400 text-slate-900', title: `${approvals.pending} awaiting approval` };
@@ -239,9 +257,24 @@ export default function Layout({ user, onLogout, children }: { user: User; onLog
         ? { count: chases.due, tone: 'bg-red-500 text-white', title: `${chases.due} follow-ups due, ${chases.overdue} overdue` }
         : { count: chases.due, tone: 'bg-amber-400 text-slate-900', title: `${chases.due} follow-ups due today` };
     }
+    /*
+     * Amber, not red: goods waiting to go are work, not a fault. **Held lines
+     * are deliberately not counted** — the badge must only ever promise what
+     * the save will accept, or it becomes the thing that sends somebody to a
+     * queue they cannot act on. They are still listed on the page, with the
+     * reason, which is where that belongs.
+     */
+    if (to === '/despatches' && loadable?.ready) {
+      return {
+        count: loadable.ready,
+        tone: 'bg-amber-400 text-slate-900',
+        title: `${loadable.ready} ready to dispatch${loadable.held ? `, ${loadable.held} held` : ''}`,
+      };
+    }
     return null;
   };
-  const headerBadges = [badge('/approvals'), badge('/followups')].filter((b): b is NonNullable<typeof b> => !!b);
+  const headerBadges = [badge('/approvals'), badge('/followups'), badge('/despatches')]
+    .filter((b): b is NonNullable<typeof b> => !!b);
 
   const logout = async () => {
     await api.post('/api/auth/logout');
