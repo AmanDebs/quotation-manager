@@ -637,9 +637,20 @@ export function productDemand(f: Filters = {}): ProductDemand[] {
     g.to_ship = round2(g.to_ship + Math.max(0, line.ordered - out));
     g.orderIds.add(line.order_id);
 
-    // Only unshipped lines can still be due; an empty date never wins.
-    if (line.state !== 'fully_dispatched' && line.promised_date) {
-      if (!g.next_due || line.promised_date < g.next_due) g.next_due = line.promised_date;
+    /*
+     * Only unshipped lines can still be due; an empty date never wins.
+     *
+     * `ORDER_DUE`'s precedence read per line: the order's revised date, else
+     * its promised one, else **this line's own latest job finish** — which is
+     * already on the row and is the more precise answer, a five-line order
+     * being able to have one line due this week and another next month. Two
+     * corrections at once: this read `promised_date` alone, so a revision was
+     * ignored, and since the form stopped offering either column there was
+     * nothing to read on a new order.
+     */
+    const due = line.revised_date || line.promised_date || line.job_end || '';
+    if (line.state !== 'fully_dispatched' && due) {
+      if (!g.next_due || due < g.next_due) g.next_due = due;
     }
   }
 

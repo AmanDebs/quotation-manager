@@ -74,6 +74,53 @@ export const LIVE_REJECT = (e: string) =>
 export const JOB_START = (w: string) => `COALESCE(NULLIF(${w}.revised_start, ''), ${w}.planned_start)`;
 export const JOB_END = (w: string) => `COALESCE(NULLIF(${w}.revised_end, ''), ${w}.planned_end)`;
 
+/*
+ * When a **sales order** is due, as SQL — and the fallback is the point.
+ *
+ * `orders.promised_date` and `orders.revised_date` came off the order form on
+ * 2026-09-25, when the book's date columns moved onto the jobs: the floor
+ * answers *when is this being made* now, and two more boxes asking it on the
+ * sales order would be two more places for one fact to disagree with itself.
+ * What that left behind was six readers keyed on columns **no screen can
+ * fill** — the dashboard's overdue chip and its Deliveries card, the Reports
+ * page's two production sheets, the order book's Promised column and the
+ * by-product view's *Next due* — so every one of them went quiet on orders
+ * raised from that day on. This is the repair that entry named.
+ *
+ * **A stated date beats a derived one**, which is why this is a fallback and
+ * not a replacement: `promised_date` is what was promised to the buyer, where
+ * a job date is the plant's own plan, and on the imported backlog the stated
+ * column is what 600-odd orders carry. So an order that states a date keeps
+ * answering with it — overdue really does mean *past what we promised* — and
+ * only an order that states none falls through to the floor.
+ *
+ * **The latest finish across the order's live jobs**, by `JOB_END`'s own rule,
+ * so a plan that was moved is read on the date somebody is working to. Latest
+ * rather than earliest because the question is when the order is *done*; a
+ * cancelled job answers nothing, and a job stating no finish is skipped rather
+ * than read as the start of time — which is also what lets the COALESCE fall
+ * through to NULL, since `MAX()` over no rows is NULL where `MAX('')` is `''`.
+ *
+ * **NULL, not `''`, when nothing anywhere knows**: two callers ask `IS NULL`
+ * to count the orders nobody has dated, and silence is not a date. A caller
+ * wanting a blank wraps it.
+ *
+ * `o` is the query's own alias for `orders`.
+ */
+export const ORDER_JOB_END = (o: string) => `(
+  SELECT MAX(${JOB_END('wd')}) FROM work_orders wd
+  WHERE wd.order_id = ${o}.id AND wd.status <> 'cancelled' AND ${JOB_END('wd')} <> ''
+)`;
+
+/** The order's own date where it states one, else the floor's. */
+export const ORDER_DUE = (o: string) =>
+  `COALESCE(NULLIF(${o}.revised_date, ''), NULLIF(${o}.promised_date, ''), ${ORDER_JOB_END(o)})`;
+
+/** Whether `ORDER_DUE` fell through to the jobs — a plan, not a promise. */
+export const ORDER_DUE_FROM_JOBS = (o: string) =>
+  `CASE WHEN ${o}.revised_date = '' AND ${o}.promised_date = '' AND ${ORDER_JOB_END(o)} IS NOT NULL
+        THEN 1 ELSE 0 END`;
+
 export interface Progress {
   produced: number;
   rejected: number;

@@ -160,7 +160,7 @@ interface DashboardData {
   deliveries?: {
     rows: {
       id: number; number: string; customer_name: string; currency: string; grand_total: number; status: string;
-      due: string; revised: number; pieces_ordered: number; pieces_sent: number;
+      due: string; revised: number; from_jobs: number; pieces_ordered: number; pieces_sent: number;
     }[];
     /** Open orders carrying no date at all — counted, since silence is not a date. */
     undated: number;
@@ -915,8 +915,16 @@ export default function DashboardPage() {
                     const left = Math.max(0, o.pieces_ordered - o.pieces_sent);
                     return (
                       <DrillRow key={o.id} to={`/orders/${o.id}`}>
-                        <td className={`py-1.5 pr-3 whitespace-nowrap text-xs font-semibold ${w.cls}`} title={`${fmtDate(o.due)}${o.revised ? ' (revised)' : ''}`}>
-                          {w.text}{o.revised ? <span className="ml-1 font-normal text-slate-400">rev.</span> : null}
+                        {/* `plan` where the date came from the order's own
+                            jobs rather than from anything promised — the
+                            server's `ORDER_DUE_FROM_JOBS`, marked for the
+                            reason `rev.` beside it is: a figure whose source
+                            differs has to say so, or the floor's plan reads as
+                            a commitment to the buyer. */}
+                        <td className={`py-1.5 pr-3 whitespace-nowrap text-xs font-semibold ${w.cls}`} title={`${fmtDate(o.due)}${o.revised ? ' (revised)' : o.from_jobs ? ' (planned on the work orders — nothing promised)' : ''}`}>
+                          {w.text}
+                          {o.revised ? <span className="ml-1 font-normal text-slate-400">rev.</span> : null}
+                          {!o.revised && o.from_jobs ? <span className="ml-1 font-normal text-amber-700">plan</span> : null}
                         </td>
                         <td className="py-1.5 pr-3 whitespace-nowrap font-medium text-brand-700">{o.number}</td>
                         <td className="max-w-[16rem] truncate py-1.5 pr-3 text-slate-700" title={o.customer_name}>{o.customer_name}</td>
@@ -938,7 +946,7 @@ export default function DashboardPage() {
               <Link to={listUrl('/orders')} className="text-brand-600 hover:underline">
                 {data.deliveries.undated} open order{data.deliveries.undated === 1 ? '' : 's'}
               </Link>{' '}
-              {data.deliveries.undated === 1 ? 'carries' : 'carry'} no promised or revised date, so {data.deliveries.undated === 1 ? 'it is' : 'they are'} not counted here.
+              {data.deliveries.undated === 1 ? 'carries' : 'carry'} no date anywhere — nothing promised, and no job dated — so {data.deliveries.undated === 1 ? 'it is' : 'they are'} not counted here.
             </p>
           )}
         </Card>

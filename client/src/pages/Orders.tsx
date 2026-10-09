@@ -313,8 +313,15 @@ export default function OrdersPage() {
   });
 
   const t = today();
+  /*
+   * Judged on the date that stands, which the server derives (`ORDER_DUE`):
+   * the order's revised date, else its promised one, else the latest finish
+   * across its own jobs. It read `promised_date` alone, so a revision was
+   * ignored — and since the form stopped offering either column there was
+   * nothing to read on a new order, which is what left this column blank.
+   */
   const isOverdue = (o: Order) =>
-    !!o.promised_date && o.promised_date < t && !['completed', 'cancelled'].includes(o.status);
+    !!o.due_date && o.due_date < t && !['completed', 'cancelled'].includes(o.status);
 
   return (
     <div>
@@ -445,8 +452,23 @@ export default function OrdersPage() {
                       <td className="py-2 pr-3 text-xs text-slate-500">{o.company_name ?? '—'}</td>
                     )}
                     <td className="py-2 pr-3">{o.po_number || '—'}</td>
+                    {/* The heading stays *Promised*, which is what the
+                        overwhelming majority of this book genuinely carries —
+                        renaming the column would mislabel 600 imported orders
+                        to describe the few. A date that came from the floor's
+                        own jobs is marked instead, the way the lines view
+                        marks a revision: *plan* in amber, with the reason on
+                        hover, so a plant date is never read as a commitment to
+                        the buyer. */}
                     <td className={`whitespace-nowrap py-2 pr-3 ${isOverdue(o) ? 'font-semibold text-red-600' : ''}`}>
-                      {fmtDate(o.promised_date)}{isOverdue(o) && ' ⚠'}
+                      {o.due_date ? fmtDate(o.due_date) : <span className="text-slate-300">—</span>}
+                      {isOverdue(o) && ' ⚠'}
+                      {!!o.due_from_jobs && (
+                        <span
+                          className="ml-1 text-xs font-normal text-amber-700"
+                          title="Nothing was promised on this order, so this is the latest finish its work orders are planned to — the floor's own plan rather than a date given to the customer."
+                        >plan</span>
+                      )}
                     </td>
                     <td className="py-2 pr-3 text-right tabular-nums">{fmtMoney(o.grand_total, o.currency)}</td>
                     <td className="py-2 pr-3 text-right tabular-nums">

@@ -1072,6 +1072,16 @@ export interface Order {
   column_config?: ColumnConfig;
   items?: OrderItem[];
   dispatched_value?: number; pending_value?: number;
+  /**
+   * When this order is due: its revised date, else its promised one, else the
+   * latest finish across its own live jobs. Derived on the server (`ORDER_DUE`)
+   * because the order form has offered neither column since 2026-09-25 and
+   * five other readers answer from the same expression. Null where nothing
+   * anywhere states a date.
+   */
+  due_date?: string | null;
+  /** 1 where `due_date` came from the jobs — the floor's plan, not a promise. */
+  due_from_jobs?: number;
   fully_dispatched?: boolean; any_dispatched?: boolean;
   /**
    * The lots made against this order, for the dispatch form's picker.

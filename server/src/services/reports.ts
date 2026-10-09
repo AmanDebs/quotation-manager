@@ -1,4 +1,5 @@
 import { db } from '../db/connection.js';
+import { ORDER_JOB_END } from './production.js';
 import { round2 } from './totals.js';
 import { STATUS_SQL } from './proformaStatus.js';
 import { trackerRows, type InvoiceHead, type TrackerRow } from './invoiceTracker.js';
@@ -104,10 +105,18 @@ function scoped(f: ReportFilter, alias: string, extra: string[], params: unknown
 /**
  * The date a sales order is planned for: the **revised** production date,
  * falling back to the originally scheduled one, then the promised one — the
- * sheet's own *Revised* column, which is why the order form got the field
- * back the day this landed. Blank in all three is blank, never today.
+ * sheet's own *Revised* column — and since the order form stopped offering
+ * any of the three (2026-09-25), finally to the latest finish across the
+ * order's own live jobs. Blank in all four is blank, never today.
+ *
+ * The fallback is what keeps these two sheets answering at all. Both read this
+ * one expression — *Planned for production* is the orders it can date and
+ * *Yet to be scheduled* is the rest — so they stay **exact complements** over
+ * the booked proformas however many steps it grows, which is what the
+ * complement test asserts. Without it every order raised since that date fell
+ * to the second sheet for ever, whatever the floor had planned.
  */
-const PROD_DATE_SQL = `COALESCE(NULLIF(o.revised_date, ''), NULLIF(o.scheduled_date, ''), NULLIF(o.promised_date, ''), '')`;
+const PROD_DATE_SQL = `COALESCE(NULLIF(o.revised_date, ''), NULLIF(o.scheduled_date, ''), NULLIF(o.promised_date, ''), ${ORDER_JOB_END('o')}, '')`;
 const OPEN_ORDER_SQL = `o.status NOT IN ('completed', 'cancelled')`;
 
 const PIVOT_SELECT = `p.customer_id, c.name AS customer_name, p.prepared_by AS spoc, p.currency`;

@@ -10,7 +10,7 @@ import { creditedByInvoice } from '../services/creditNotes.js';
 import { defaultCompanyId } from '../services/companies.js';
 import { shortfall, onHandAll } from '../services/stock.js';
 import { DOCS_OUTSTANDING_D, SEA_LEG_D } from '../services/despatch.js';
-import { LIVE_OK, LIVE_REJECT, JOB_START, JOB_END } from '../services/production.js';
+import { LIVE_OK, LIVE_REJECT, JOB_START, JOB_END, ORDER_DUE, ORDER_DUE_FROM_JOBS } from '../services/production.js';
 import { dueReport } from '../services/reports.js';
 
 export const dashboardRouter = Router();
@@ -433,10 +433,19 @@ dashboardRouter.get('/', (req: AuthedRequest, res) => {
     .map((r) => ({ ...r, outstanding: Math.round(r.outstanding * 100) / 100 }))
     .sort((a, b) => a.currency.localeCompare(b.currency) || AGE_BUCKETS.indexOf(a.bucket as never) - AGE_BUCKETS.indexOf(b.bucket as never));
 
-  // Order book: value still to ship, per currency, plus anything past its
-  // promised date. Pending value is order value minus what's been invoiced.
-  const openOrders = q<{ id: number; currency: string; grand_total: number; promised_date: string; status: string }>(
-    `SELECT id, currency, grand_total, promised_date, status FROM orders
+  /*
+   * Order book: value still to ship, per currency, plus anything past its due
+   * date. Pending value is order value minus what's been invoiced.
+   *
+   * `ORDER_DUE` rather than `promised_date` alone, which is two corrections in
+   * one expression: this chip never read the **revised** date, so an order
+   * whose plan had moved was flagged late on a date nobody was working to; and
+   * since the form stopped offering either column it had nothing at all to
+   * read on a new order. The floor's own finish now answers where the order
+   * states nothing.
+   */
+  const openOrders = q<{ id: number; currency: string; grand_total: number; due: string | null; status: string }>(
+    `SELECT id, currency, grand_total, ${ORDER_DUE('orders')} AS due, status FROM orders
      WHERE status NOT IN ('completed','cancelled')${and}`,
     ...p
   );
@@ -452,7 +461,7 @@ dashboardRouter.get('/', (req: AuthedRequest, res) => {
     row.pending_value += Math.max(0, o.grand_total - invoiced);
     row.count += 1;
     orderBookMap.set(o.currency, row);
-    if (o.promised_date && o.promised_date < today) overdueOrders += 1;
+    if (o.due && o.due < today) overdueOrders += 1;
   }
   const orderBook = [...orderBookMap.values()].map((r) => ({
     ...r,
@@ -774,21 +783,26 @@ dashboardRouter.get('/', (req: AuthedRequest, res) => {
 
   /**
    * Deliveries due: open orders by the date that stands — the revised
-   * production date where set, else the promised one, the order book's own
-   * rule — overdue first, then the next fortnight, with the pieces still to
-   * send by the dispatch record. An open order with **no date at all** is
-   * counted rather than listed: silence is not a date, and a plan nobody
-   * has dated is worth a line saying so. Gated on `order`.
+   * production date where set, else the promised one, else the latest finish
+   * across the order's own jobs (`ORDER_DUE`, so the card can still answer on
+   * an order raised since the form stopped asking) — overdue first, then the
+   * next fortnight, with the pieces still to send by the dispatch record. An
+   * open order with **no date anywhere** is counted rather than listed:
+   * silence is not a date, and a plan nobody has dated is worth a line saying
+   * so. `from_jobs` marks a row whose date is the floor's plan rather than a
+   * promise to the buyer, the way `revised` marks one that moved. Gated on
+   * `order`.
    */
   const deliveries = allows(req, 'order')
     ? (() => {
-      const dueExpr = "COALESCE(NULLIF(o.revised_date, ''), NULLIF(o.promised_date, ''))";
+      const dueExpr = ORDER_DUE('o');
       const rows = q<{
         id: number; number: string; customer_name: string; currency: string; grand_total: number; status: string;
-        due: string; revised: number; pieces_ordered: number; pieces_sent: number;
+        due: string; revised: number; from_jobs: number; pieces_ordered: number; pieces_sent: number;
       }>(
         `SELECT o.id, o.number, COALESCE(c.name, '') AS customer_name, o.currency, o.grand_total, o.status,
                 ${dueExpr} AS due, CASE WHEN o.revised_date <> '' THEN 1 ELSE 0 END AS revised,
+                ${ORDER_DUE_FROM_JOBS('o')} AS from_jobs,
                 (SELECT COALESCE(SUM(${PIECES_ORDERED_SQL('oi')}), 0) FROM order_items oi
                   WHERE oi.order_id = o.id AND oi.is_charge = 0) AS pieces_ordered,
                 (SELECT COALESCE(SUM(di.qty), 0) FROM despatch_items di
@@ -875,14 +889,22 @@ dashboardRouter.get('/', (req: AuthedRequest, res) => {
    * Jobs nobody has planned on orders due within a fortnight — the floor's
    * own blocker, read against the delivery date rather than the whole not-
    * planned queue the Work Orders page counts. Gated on `work_order`.
+   *
+   * **The one card `ORDER_DUE` only half rescues, stated rather than left to
+   * be noticed**: an order that states no date of its own and whose jobs are
+   * *all* unplanned has no date anywhere, so it cannot be listed here — which
+   * is the honest answer, nothing having said when it is due. The mixed order,
+   * where two jobs are dated and a third is not, is the realistic case and is
+   * exactly what this now catches. The whole not-planned queue is on the Work
+   * Orders page, which counts it without needing a date.
    */
   const unplannedDue = allows(req, 'work_order')
     ? q<{ id: number; number: string; order_id: number; order_number: string; customer_name: string; due: string; qty_planned: number }>(
       `SELECT w.id, w.number, o.id AS order_id, o.number AS order_number, COALESCE(c.name, '') AS customer_name,
-              COALESCE(NULLIF(o.revised_date, ''), NULLIF(o.promised_date, '')) AS due, w.qty_planned
+              ${ORDER_DUE('o')} AS due, w.qty_planned
        FROM work_orders w JOIN orders o ON o.id = w.order_id LEFT JOIN customers c ON c.id = o.customer_id
        WHERE w.status = 'planned' AND ${JOB_START('w')} = '' AND o.status NOT IN ('completed', 'cancelled')
-         AND COALESCE(NULLIF(o.revised_date, ''), NULLIF(o.promised_date, '')) <= date(?, '+14 days')${floorFilter}
+         AND ${ORDER_DUE('o')} <= date(?, '+14 days')${floorFilter}
        ORDER BY due, w.id LIMIT 8`,
       today, ...floorParams
     )

@@ -3,7 +3,7 @@ import { db, transaction } from '../db/connection.js';
 import { checkDocument } from '../services/documentChecks.js';
 import { nextNumber, exportChangeError } from '../services/numbering.js';
 import { computeTotals, round2, type LineItemInput } from '../services/totals.js';
-import { productionByOrder } from '../services/production.js';
+import { productionByOrder, ORDER_DUE, ORDER_DUE_FROM_JOBS } from '../services/production.js';
 import { despatchedByOrder } from '../services/despatch.js';
 import { orderMaterialCost } from '../services/costing.js';
 import { orderAdvance, advanceForProforma, preDispatchDue } from '../services/receivables.js';
@@ -32,6 +32,11 @@ export const ordersRouter = Router();
 const listSql = `
   SELECT o.*, c.name AS customer_name, c.country AS customer_country,
          co.company_name AS company_name,
+         -- The date that stands, and whether it is the floor's rather than a
+         -- promise: ORDER_DUE's own rule, decided here so the Promised column
+         -- cannot hold a second reading of it. Rides this statement, so the
+         -- list, accessible() and getFull all answer the same.
+         ${ORDER_DUE('o')} AS due_date, ${ORDER_DUE_FROM_JOBS('o')} AS due_from_jobs,
          q.number AS quotation_number, u.name AS created_by_name
   FROM orders o
   JOIN customers c ON c.id = o.customer_id
