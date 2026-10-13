@@ -46,7 +46,7 @@ export function isFiltered(v: ColumnFilterValue | undefined): boolean {
 }
 
 export function ColumnFilter({
-  column, kind, label, value, onChange, query,
+  column, kind, label, value, onChange, query, path, labels,
 }: {
   column: string;
   kind: FilterKind;
@@ -56,6 +56,15 @@ export function ColumnFilter({
   onChange: (v: ColumnFilterValue) => void;
   /** Every other filter on the page, so the list offers reachable values only. */
   query: string;
+  /** Where this list's tick lists come from — one endpoint per list. */
+  path: string;
+  /**
+   * What a stored value is called on screen, where the two differ. A status is
+   * stored `planned` and drawn *Not planned*, which are opposites read aloud —
+   * a tick list showing the stored word would be a control contradicting the
+   * rows it filters. Absent for a column whose values are their own words.
+   */
+  labels?: Record<string, string>;
 }) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
@@ -68,10 +77,10 @@ export function ColumnFilter({
 
   // Only while the panel is open, and keyed on the search term, so typing
   // narrows against the book rather than against the first 300 rows of it.
-  const facetUrl = `/api/orders/lines/facet?column=${encodeURIComponent(column)}`
+  const facetUrl = `${path}?column=${encodeURIComponent(column)}`
     + `${query ? `&${query}` : ''}${search.trim() ? `&search=${encodeURIComponent(search.trim())}` : ''}`;
   const { data: facet, isPending } = useQuery({
-    queryKey: ['line-facet', column, query, search.trim()],
+    queryKey: ['column-facet', path, column, query, search.trim()],
     queryFn: () => api.get<Facet>(facetUrl),
     enabled: open && kind === 'values',
     // The book does not change while a dropdown is open, and reopening the
@@ -136,6 +145,8 @@ export function ColumnFilter({
   };
 
   const shown = facet?.values ?? [];
+  /** What this value is called on the rows — never the stored word where the two differ. */
+  const read = (v: string) => (v === '' ? BLANK_LABEL : labels?.[v] ?? v);
   const allShown = shown.length > 0 && shown.every((o) => ticked.has(o.value));
 
   return (
@@ -223,8 +234,8 @@ export function ColumnFilter({
                         checked={ticked.has(o.value)}
                         onChange={() => toggle(o.value)}
                       />
-                      <span className={`min-w-0 flex-1 truncate ${o.value === '' ? 'italic text-slate-400' : ''}`} title={o.value || BLANK_LABEL}>
-                        {o.value === '' ? BLANK_LABEL : o.value}
+                      <span className={`min-w-0 flex-1 truncate ${o.value === '' ? 'italic text-slate-400' : ''}`} title={read(o.value)}>
+                        {read(o.value)}
                       </span>
                       <span className="shrink-0 text-xs tabular-nums text-slate-400">{o.count}</span>
                     </label>
@@ -264,7 +275,7 @@ export function ColumnFilter({
               </label>
               {kind === 'dates' && (
                 <p className="col-span-2 text-[11px] text-slate-400">
-                  Both ends count. A line with no date in this column is in no range.
+                  Both ends count. A row with no date in this column is in no range.
                 </p>
               )}
             </div>
@@ -278,5 +289,40 @@ export function ColumnFilter({
         document.body,
       )}
     </>
+  );
+}
+
+/**
+ * Which columns are filtered, said above the table rather than left to be read
+ * off a row of headings — and on the order book it is drawn on every view,
+ * because the per-product fold and the download obey these filters too, and a
+ * figure narrowed by a filter whose control is on another tab is exactly the
+ * kind of wrong somebody finds in a meeting.
+ */
+export function FilteredByStrip({ columns, onClear, onClearAll }: {
+  columns: { key: string; label: string }[];
+  onClear: (key: string) => void;
+  onClearAll: () => void;
+}) {
+  if (columns.length === 0) return null;
+  return (
+    <div className="mb-2 flex flex-wrap items-center gap-2 text-xs">
+      <span className="text-slate-500">Filtered by</span>
+      {columns.map((c) => (
+        <button
+          key={c.key}
+          type="button"
+          onClick={() => onClear(c.key)}
+          title={`Clear the ${c.label} filter`}
+          className="inline-flex items-center gap-1 rounded-full bg-brand-50 px-2 py-0.5 font-medium text-brand-700 ring-1 ring-inset ring-brand-600/20 hover:bg-brand-100"
+        >
+          {c.label}
+          <span aria-hidden="true" className="text-brand-600/60">×</span>
+        </button>
+      ))}
+      <button type="button" onClick={onClearAll} className="text-slate-500 underline hover:text-brand-600">
+        Clear all
+      </button>
+    </div>
   );
 }

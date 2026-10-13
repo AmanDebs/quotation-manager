@@ -3,7 +3,9 @@ import { Link } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { WorkOrder, WorkOrderStatus } from '../types';
-import { PageHeader, Card, Select, Button, EmptyState, ErrorText, Input, Pagination, CAPTION_CLASS, TH_CLASS } from '../components/ui';
+import { PageHeader, Card, Button, EmptyState, ErrorText, Input, Pagination, CAPTION_CLASS, TH_CLASS } from '../components/ui';
+import { ColumnFilter, FilteredByStrip } from '../components/ColumnFilter';
+import { useColumnFilters, type ColumnFilterSpec } from '../lib/useColumnFilters';
 import PlanJobsModal from '../components/PlanJobsModal';
 import { useCan } from '../App';
 import { fmtQty, fmtDate } from '../lib/format';
@@ -61,6 +63,48 @@ export const workOrderStatusStyle: Record<WorkOrderStatus, string> = {
   done: 'bg-green-100 text-green-700',
   cancelled: 'bg-red-100 text-red-700',
 };
+
+/**
+ * A filter in every heading (2026-10-13, the client with the list in front of
+ * them: *"add filter to all columns in work order similar to sales order"*).
+ *
+ * One entry per column the table draws, in the order it draws them, so the
+ * strip above reads left to right like the headings do. Every list is filled
+ * from the server against the whole filtered set — see `ColumnFilter`, which
+ * records why that cannot be a walk over the rows in hand.
+ *
+ * **Status keeps the key it has always had.** The dashboard's factory chips
+ * link here with `?status=`, so that is the key this column reads and writes
+ * rather than `f.status`; reading it as the column's own tick list is what lets
+ * the dropdown clear it, where a second key beside it would be a filter the
+ * control could neither see nor undo. It is also why the standalone *All
+ * statuses* select above the table is gone: two controls over one fact is how
+ * the two come to disagree.
+ *
+ * Its values are **labelled**, which no other column needs: a job is stored
+ * `planned` and drawn *Not planned*, and those are opposites read aloud.
+ */
+const JOB_FILTERS: ColumnFilterSpec[] = [
+  { key: 'job', label: 'Job', kind: 'values' },
+  { key: 'customer', label: 'Customer', kind: 'values' },
+  { key: 'item', label: 'Item', kind: 'values' },
+  { key: 'color', label: 'Colour', kind: 'values' },
+  { key: 'planned_start', label: 'Planned Start', kind: 'dates' },
+  { key: 'planned_end', label: 'Planned Finish', kind: 'dates' },
+  { key: 'revised_start', label: 'Revised Start', kind: 'dates' },
+  { key: 'revised_end', label: 'Revised Finish', kind: 'dates' },
+  { key: 'qty', label: 'Pcs', kind: 'numbers' },
+  { key: 'made', label: 'Made', kind: 'numbers' },
+  {
+    key: 'status',
+    label: 'Status',
+    kind: 'values',
+    param: 'status',
+    labels: WORK_ORDER_STATUS_LABELS,
+  },
+];
+
+const JOB_FILTER_KIND = new Map(JOB_FILTERS.map((c) => [c.key, c.kind]));
 
 const todayIso = new Date().toISOString().slice(0, 10);
 
@@ -144,8 +188,11 @@ function DateCell({ value, editable, pending, open, onOpen, onClose, onChange, t
 }
 
 export default function WorkOrdersPage() {
-  // Status in the URL so the dashboard's factory card can link to one stage.
-  const [status, setStatus] = useUrlFilter('status');
+  // The header filters, held in the URL — the same hook the order book reads
+  // its own through. Status is one of them, under the `?status=` key the
+  // dashboard's factory card has always linked with.
+  const columns = useColumnFilters(JOB_FILTERS);
+  const statusTicked = columns.get('status')?.values ?? [];
   // The floor's own queue, in the URL like every other filter so it can be
   // kept open on a second screen.
   const [awaiting, setAwaiting] = useUrlFilter('awaiting');
@@ -196,9 +243,11 @@ export default function WorkOrdersPage() {
   });
 
   const query = new URLSearchParams();
-  if (status) query.set('status', status);
   if (awaiting) query.set('awaiting', awaiting);
-  if (openOnly && !status) query.set('open', '1');
+  // The default view of a shop floor, and a default rather than a rule: naming
+  // a status says what is wanted, so the tick list wins over it.
+  if (openOnly && statusTicked.length === 0) query.set('open', '1');
+  for (const [k, v] of columns.params) query.set(k, v);
 
   const list = usePagedList<WorkOrder, { jobs: number; unplanned?: number; awaiting?: number; planned: number; made: number }>(['work-orders', 'all', query.toString()], `/api/work-orders?${query.toString()}`);
   const jobs = list.rows;
@@ -298,6 +347,29 @@ export default function WorkOrdersPage() {
     },
   });
 
+  /**
+   * One heading, with its filter beside it.
+   *
+   * The flex and `whitespace-nowrap` are not decoration: the funnel is an
+   * inline element inside a heading narrow enough to wrap, and a heading broken
+   * under its own control reads as a fault rather than as a control.
+   */
+  const filterFor = (key: string, label?: string) => {
+    const spec = JOB_FILTERS.find((c) => c.key === key);
+    return (
+      <ColumnFilter
+        column={key}
+        kind={JOB_FILTER_KIND.get(key) ?? 'values'}
+        label={label ?? spec?.label ?? key}
+        labels={spec?.labels}
+        value={columns.get(key)}
+        onChange={(v) => columns.set(key, v)}
+        query={columns.params.toString()}
+        path="/api/work-orders/facet"
+      />
+    );
+  };
+
   return (
     <div>
       <PageHeader
@@ -306,15 +378,11 @@ export default function WorkOrdersPage() {
       />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
-        <Select className="w-40" value={status} onChange={(e) => setStatus(e.target.value)}>
-          <option value="">All statuses</option>
-          {WORK_ORDER_STATUSES.map((s) => <option key={s} value={s}>{workOrderStatusLabel(s)}</option>)}
-        </Select>
         <label className="flex items-center gap-1.5 text-sm text-slate-600">
           <input
             type="checkbox"
             checked={openOnly}
-            disabled={!!status}
+            disabled={statusTicked.length > 0}
             onChange={(e) => setOpenOnly(e.target.checked)}
           />
           Open jobs only
@@ -324,10 +392,10 @@ export default function WorkOrdersPage() {
         </span>
         {/* The queue: jobs the order raised that nobody has planned yet. A
             filter, not a count of its own — it links to exactly what it says. */}
-        {!status && unplanned > 0 && (
+        {statusTicked.length === 0 && unplanned > 0 && (
           <button
             className="rounded-md bg-amber-50 px-2 py-1 text-xs text-amber-800 ring-1 ring-amber-200 hover:bg-amber-100"
-            onClick={() => setStatus('planned')}
+            onClick={() => columns.set('status', { values: ['planned'] })}
             title="Show only the jobs still to plan"
           >
             {unplanned} not planned
@@ -369,6 +437,12 @@ export default function WorkOrdersPage() {
         />
       )}
 
+      <FilteredByStrip
+        columns={columns.filtered}
+        onClear={(key) => columns.set(key, {})}
+        onClearAll={columns.clearAll}
+      />
+
       <Card className="overflow-x-auto">
         {jobs.length === 0 ? (
           <EmptyState message="No work orders match. A sales order raises its jobs when it is booked." />
@@ -390,15 +464,23 @@ export default function WorkOrdersPage() {
                     />
                   </th>
                 )}
-                <th className="pb-2 pr-3" rowSpan={2}>Job</th>
+                <th className="whitespace-nowrap pb-2 pr-3" rowSpan={2}>
+                  <span className="flex items-center gap-0.5">Job{filterFor('job')}</span>
+                </th>
                 {/* Who it is for. The group header above each run names the
                     order and the customer, and this repeats it per row at the
                     client's word (2026-10-08) — which is what makes the table
                     readable as a flat list once a filter has cut it down to a
                     handful of jobs across several orders. */}
-                <th className="pb-2 pr-3" rowSpan={2}>Customer</th>
-                <th className="pb-2 pr-3" rowSpan={2}>Item</th>
-                <th className="pb-2 pr-3" rowSpan={2}>Colour</th>
+                <th className="whitespace-nowrap pb-2 pr-3" rowSpan={2}>
+                  <span className="flex items-center gap-0.5">Customer{filterFor('customer')}</span>
+                </th>
+                <th className="whitespace-nowrap pb-2 pr-3" rowSpan={2}>
+                  <span className="flex items-center gap-0.5">Item{filterFor('item')}</span>
+                </th>
+                <th className="whitespace-nowrap pb-2 pr-3" rowSpan={2}>
+                  <span className="flex items-center gap-0.5">Colour{filterFor('color')}</span>
+                </th>
                 {/*
                   Both pairs are drawn (2026-09-29, the client with one pair and
                   a `rev.` marker in front of them: *"This page should show both
@@ -410,9 +492,15 @@ export default function WorkOrdersPage() {
                 */}
                 <th className={`${GROUP_EDGE} pb-1 pl-3 pr-3`} colSpan={2}>Planned</th>
                 <th className={`${GROUP_EDGE} pb-1 pl-3 pr-3`} colSpan={2}>Revised</th>
-                <th className={`${GROUP_EDGE} pb-2 pl-3 pr-3 text-right`} rowSpan={2}>Pcs</th>
-                <th className="pb-2 pr-3 text-right" rowSpan={2}>Made</th>
-                <th className="pb-2 pr-3" rowSpan={2}>Status</th>
+                <th className={`${GROUP_EDGE} whitespace-nowrap pb-2 pl-3 pr-3 text-right`} rowSpan={2}>
+                  <span className="flex items-center justify-end gap-0.5">Pcs{filterFor('qty')}</span>
+                </th>
+                <th className="whitespace-nowrap pb-2 pr-3 text-right" rowSpan={2}>
+                  <span className="flex items-center justify-end gap-0.5">Made{filterFor('made')}</span>
+                </th>
+                <th className="whitespace-nowrap pb-2 pr-3" rowSpan={2}>
+                  <span className="flex items-center gap-0.5">Status{filterFor('status')}</span>
+                </th>
               </tr>
               {/*
                 The sub-row carries the rule and the banner above it carries
@@ -421,10 +509,18 @@ export default function WorkOrdersPage() {
                 centred over its pair floats away from the column it names.
               */}
               <tr className={`${CAPTION_CLASS} border-b border-slate-200 text-left font-normal text-slate-400`}>
-                <th className={`${GROUP_EDGE} pb-2 pl-5 pr-3`}>Start</th>
-                <th className="pb-2 pl-2.5 pr-3">Finish</th>
-                <th className={`${GROUP_EDGE} pb-2 pl-5 pr-3`}>Start</th>
-                <th className="pb-2 pl-2.5 pr-3">Finish</th>
+                <th className={`${GROUP_EDGE} whitespace-nowrap pb-2 pl-5 pr-3`}>
+                  <span className="flex items-center gap-0.5">Start{filterFor('planned_start')}</span>
+                </th>
+                <th className="whitespace-nowrap pb-2 pl-2.5 pr-3">
+                  <span className="flex items-center gap-0.5">Finish{filterFor('planned_end')}</span>
+                </th>
+                <th className={`${GROUP_EDGE} whitespace-nowrap pb-2 pl-5 pr-3`}>
+                  <span className="flex items-center gap-0.5">Start{filterFor('revised_start')}</span>
+                </th>
+                <th className="whitespace-nowrap pb-2 pl-2.5 pr-3">
+                  <span className="flex items-center gap-0.5">Finish{filterFor('revised_end')}</span>
+                </th>
               </tr>
             </thead>
             <tbody>

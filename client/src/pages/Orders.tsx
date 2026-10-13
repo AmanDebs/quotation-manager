@@ -10,7 +10,8 @@ import { usePagedList, PAGE_SIZE, type PagedList } from '../lib/usePagedList';
 import { useCan } from '../App';
 import { Icon } from '../components/icons';
 import OrderImportModal from '../components/OrderImportModal';
-import { ColumnFilter, isFiltered, type ColumnFilterValue, type FilterKind } from '../components/ColumnFilter';
+import { ColumnFilter, FilteredByStrip, type ColumnFilterValue } from '../components/ColumnFilter';
+import { useColumnFilters, type ColumnFilterSpec } from '../lib/useColumnFilters';
 
 /**
  * The columns of the *Sales order lines* view that carry a header filter, and
@@ -27,7 +28,7 @@ import { ColumnFilter, isFiltered, type ColumnFilterValue, type FilterKind } fro
  * descriptions off the client's own book, and *Bisleri International Pvt.
  * Ltd., Kolkata* is one value containing a comma.
  */
-const LINE_FILTERS: { key: string; label: string; kind: FilterKind }[] = [
+const LINE_FILTERS: ColumnFilterSpec[] = [
   { key: 'order_number', label: 'Sales Order', kind: 'values' },
   { key: 'date', label: 'Date', kind: 'dates' },
   { key: 'customer', label: 'Customer', kind: 'values' },
@@ -42,17 +43,6 @@ const LINE_FILTERS: { key: string; label: string; kind: FilterKind }[] = [
   { key: 'spoc', label: 'SPOC', kind: 'values' },
   { key: 'state', label: 'State', kind: 'values' },
 ];
-
-const FILTER_KIND = new Map(LINE_FILTERS.map((c) => [c.key, c.kind]));
-
-/** The URL keys one column owns, so clearing it clears all of them. */
-function filterKeys(key: string): string[] {
-  return FILTER_KIND.get(key) === 'values'
-    ? [`f.${key}`]
-    : FILTER_KIND.get(key) === 'dates'
-      ? [`f.${key}_from`, `f.${key}_to`]
-      : [`f.${key}_min`, `f.${key}_max`];
-}
 
 /**
  * A dispatch is recorded from the book (asked for 2026-09-14: "a button to
@@ -221,47 +211,9 @@ export default function OrdersPage() {
   const can = useCan();
   const canDispatch = can('dispatch', 'full');
 
-  /*
-   * The header filters, read off the URL.
-   *
-   * A tick list is **present-and-empty when the blank value alone is ticked**
-   * — `f.color=` means *the lines with no colour*, and no key at all means no
-   * filter. `URLSearchParams.get` tells the two apart (`''` against `null`),
-   * which is why `setParam` above cannot be reused to write them: it drops an
-   * empty value, and that would silently throw the blank tick away on the
-   * round trip somebody makes by copying the link.
-   */
-  const columnFilter = (key: string): ColumnFilterValue | undefined => {
-    const kind = FILTER_KIND.get(key);
-    if (kind === 'values') {
-      const raw = search.get(`f.${key}`);
-      return raw === null ? undefined : { values: raw.split('\n') };
-    }
-    const [lo, hi] = filterKeys(key);
-    const from = search.get(lo) ?? '';
-    const to = search.get(hi) ?? '';
-    return from || to ? { from, to } : undefined;
-  };
-
-  const setColumnFilter = (key: string, v: ColumnFilterValue) => {
-    const next = new URLSearchParams(search);
-    for (const k of filterKeys(key)) next.delete(k);
-    if (FILTER_KIND.get(key) === 'values') {
-      if (v.values?.length) next.set(`f.${key}`, v.values.join('\n'));
-    } else {
-      const [lo, hi] = filterKeys(key);
-      if (v.from) next.set(lo, v.from);
-      if (v.to) next.set(hi, v.to);
-    }
-    setSearch(next, { replace: true });
-  };
-
-  const filteredColumns = LINE_FILTERS.filter((c) => isFiltered(columnFilter(c.key)));
-  const clearColumnFilters = () => {
-    const next = new URLSearchParams(search);
-    for (const c of LINE_FILTERS) for (const k of filterKeys(c.key)) next.delete(k);
-    setSearch(next, { replace: true });
-  };
+  // The header filters, held in the URL — see `useColumnFilters`, which both
+  // this page and the Work Orders list read them through.
+  const columns = useColumnFilters(LINE_FILTERS);
 
   const params = new URLSearchParams();
   if (statusFilter) params.set('status', statusFilter);
@@ -272,16 +224,7 @@ export default function OrdersPage() {
   // Carried on every view and on the download, so the spreadsheet holds what
   // the screen held — `lineFilters` on the server reads one set of keys for
   // the lines, the per-product fold and the export alike.
-  for (const c of LINE_FILTERS) {
-    const v = columnFilter(c.key);
-    if (!v) continue;
-    if (c.kind === 'values') { if (v.values) params.set(`f.${c.key}`, v.values.join('\n')); }
-    else {
-      const [lo, hi] = filterKeys(c.key);
-      if (v.from) params.set(lo, v.from);
-      if (v.to) params.set(hi, v.to);
-    }
-  }
+  for (const [k, v] of columns.params) params.set(k, v);
   const query = params.toString();
 
   // `view` rides in each key so that switching views starts at page 1 — page 3
@@ -379,36 +322,14 @@ export default function OrdersPage() {
 
       <ErrorText error={setStatus.error} />
 
-      {/*
-        Which columns are filtered, said above the table rather than left to be
-        read off thirteen headings — and it is drawn on every view, because the
-        per-product fold and the download obey these filters too, and a figure
-        narrowed by a filter whose control is on another tab is exactly the
-        kind of wrong somebody finds in a meeting.
-      */}
-      {filteredColumns.length > 0 && (
-        <div className="mb-2 flex flex-wrap items-center gap-2 text-xs">
-          <span className="text-slate-500">Filtered by</span>
-          {filteredColumns.map((c) => (
-            <button
-              key={c.key}
-              type="button"
-              onClick={() => setColumnFilter(c.key, {})}
-              title={`Clear the ${c.label} filter`}
-              className="inline-flex items-center gap-1 rounded-full bg-brand-50 px-2 py-0.5 font-medium text-brand-700 ring-1 ring-inset ring-brand-600/20 hover:bg-brand-100"
-            >
-              {c.label}
-              <span aria-hidden="true" className="text-brand-600/60">×</span>
-            </button>
-          ))}
-          <button type="button" onClick={clearColumnFilters} className="text-slate-500 underline hover:text-brand-600">
-            Clear all
-          </button>
-        </div>
-      )}
+      <FilteredByStrip
+        columns={columns.filtered}
+        onClear={(key) => columns.set(key, {})}
+        onClearAll={columns.clearAll}
+      />
 
       {view === 'lines' && (
-        <LinesTable lines={lines} pager={lineList} filters={{ get: columnFilter, set: setColumnFilter, query }} />
+        <LinesTable lines={lines} pager={lineList} filters={{ get: columns.get, set: columns.set, query }} />
       )}
       {view === 'products' && (
         <DemandTable
@@ -620,11 +541,12 @@ function LinesTable({ lines, pager, filters }: {
         {label}
         <ColumnFilter
           column={key}
-          kind={FILTER_KIND.get(key) ?? 'values'}
+          kind={LINE_FILTERS.find((c) => c.key === key)?.kind ?? 'values'}
           label={title ?? label}
           value={filters.get(key)}
           onChange={(v) => filters.set(key, v)}
           query={filters.query}
+          path="/api/orders/lines/facet"
         />
       </span>
     </th>

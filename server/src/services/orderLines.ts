@@ -5,6 +5,10 @@ import { searchClause } from './search.js';
 import { countOf } from './pagination.js';
 import { round2 } from './totals.js';
 import { LIVE_OK, JOB_START, JOB_END } from './production.js';
+import {
+  columnWhere, readColumnFilters, facetOver, isColumnOf,
+  type ColumnFilterSet, type ColumnSpecs, type Facet, type FacetValue,
+} from './columnFilters.js';
 
 /**
  * The order book read one item at a time.
@@ -134,16 +138,13 @@ export interface Filters {
  * and a second hand-built WHERE in any one of them is how the download comes
  * to hold rows the screen did not.
  */
-export interface ColumnFilters {
-  /** Tick lists, keyed by the column's own name in `FILTERABLE`. */
-  values?: Partial<Record<FilterColumn, string[]>>;
-  /** `YYYY-MM-DD` bounds, keyed by column. Either end may stand alone. */
-  from?: Partial<Record<FilterColumn, string>>;
-  to?: Partial<Record<FilterColumn, string>>;
-  /** Numeric bounds, keyed by column. */
-  min?: Partial<Record<FilterColumn, number>>;
-  max?: Partial<Record<FilterColumn, number>>;
-}
+export type ColumnFilters = ColumnFilterSet<FilterColumn>;
+
+/** What the route reads off the query string, in this list's vocabulary. */
+export const readLineFilters = (query: Record<string, unknown>): ColumnFilters =>
+  readColumnFilters(query, FILTERABLE);
+
+export type { Facet, FacetValue };
 
 /**
  * One statement. The three progress figures are correlated subqueries rather
@@ -383,61 +384,7 @@ export type FilterColumn = keyof typeof FILTERABLE;
 export const FILTER_COLUMNS = Object.keys(FILTERABLE) as FilterColumn[];
 
 export function isFilterColumn(v: unknown): v is FilterColumn {
-  return typeof v === 'string' && v in FILTERABLE;
-}
-
-/**
- * The column filters as SQL.
- *
- * `except` leaves one column's own filter out, which is what a tick list has
- * to be built against: Excel's dropdown offers the values still reachable
- * given every *other* filter, so that unticking something can put it back.
- * Counting a column against itself would leave each list showing only what
- * was already chosen.
- */
-function columnWhere(c: ColumnFilters | undefined, except?: FilterColumn): { sql: string[]; params: unknown[] } {
-  const sql: string[] = [];
-  const params: unknown[] = [];
-  if (!c) return { sql, params };
-
-  for (const col of FILTER_COLUMNS) {
-    if (col === except) continue;
-    const { sql: expr, kind } = FILTERABLE[col];
-
-    if (kind === 'values') {
-      const picked = c.values?.[col];
-      if (picked?.length) {
-        // A blank cell is a real answer — *no colour*, *nobody recorded* — and
-        // is offered in the list as such, so it has to be tickable. `IN` never
-        // matches NULL, hence the explicit arm.
-        const blanks = picked.some((v) => v === '');
-        const named = picked.filter((v) => v !== '');
-        const arms: string[] = [];
-        if (named.length) { arms.push(`(${expr}) IN (${named.map(() => '?').join(', ')})`); params.push(...named); }
-        if (blanks) arms.push(`COALESCE(${expr}, '') = ''`);
-        sql.push(`(${arms.join(' OR ')})`);
-      }
-      continue;
-    }
-
-    const from = kind === 'dates' ? c.from?.[col] : c.min?.[col];
-    const to = kind === 'dates' ? c.to?.[col] : c.max?.[col];
-    const bounded = (from !== undefined && from !== '') || (to !== undefined && to !== '');
-
-    /*
-     * A blank date falls in no range at all, and it has to be said rather than
-     * assumed: a date is stored as text, so SQLite compares `''` as a string
-     * and `'' <= '2026-09-25'` is **true** — an upper bound alone would have
-     * returned every order with no revised date at all, which on the live book
-     * is most of them. Found by the test that was written to assert the
-     * opposite. A blank number is already excluded without help, NULL failing
-     * every comparison, so the guard is the dates' own.
-     */
-    if (bounded && kind === 'dates') sql.push(`COALESCE(${expr}, '') <> ''`);
-    if (from !== undefined && from !== '') { sql.push(`(${expr}) >= ?`); params.push(from); }
-    if (to !== undefined && to !== '') { sql.push(`(${expr}) <= ?`); params.push(to); }
-  }
-  return { sql, params };
+  return isColumnOf(FILTERABLE, v);
 }
 
 /**
@@ -465,7 +412,7 @@ function lineWhere(f: Filters, except?: FilterColumn): { sql: string; params: un
   // The base query already carries a WHERE (charge lines are excluded there).
   const inner = `${SQL}${where.length ? ` AND ${where.join(' AND ')}` : ''}`;
 
-  const cols = columnWhere(f.columns, except);
+  const cols = columnWhere(FILTERABLE, f.columns, except);
   params.push(...cols.params);
   return {
     sql: `SELECT * FROM (${inner}) t${cols.sql.length ? ` WHERE ${cols.sql.join(' AND ')}` : ''}`,
@@ -518,18 +465,6 @@ export function countOrderLines(f: Filters = {}): number {
   return countOf(sql, params);
 }
 
-export interface FacetValue {
-  value: string;
-  /** How many lines carry it, under every filter but this column's own. */
-  count: number;
-}
-
-export interface Facet {
-  values: FacetValue[];
-  /** Distinct values there were before the cap; the panel says so when more. */
-  total: number;
-}
-
 /**
  * What one column's tick list should offer.
  *
@@ -554,30 +489,7 @@ export function lineFacet(
   opts: { search?: string; limit?: number } = {},
 ): Facet {
   const { sql, params } = lineWhere(f, column);
-  const expr = FILTERABLE[column].sql;
-  const args = [...params];
-
-  let having = '';
-  const search = String(opts.search ?? '').trim();
-  if (search) {
-    // `%` and `_` are LIKE's own wildcards — escaped for the reason
-    // `searchClause` records, so typing one finds the character.
-    having = ' WHERE value LIKE ? ESCAPE \'\\\'';
-    args.push(`%${search.replace(/[\\%_]/g, (ch) => `\\${ch}`)}%`);
-  }
-
-  const base = `SELECT COALESCE(${expr}, '') AS value, COUNT(*) AS n FROM (${sql}) v GROUP BY value`;
-  const counted = `SELECT value, n FROM (${base})${having}`;
-
-  const total = countOf(counted, args);
-  const limit = opts.limit ?? 300;
-  const rows = db.prepare(
-    // Commonest first, so a capped list is the useful end of it; then by name,
-    // which is a total ordering and so a stable one.
-    `${counted} ORDER BY n DESC, value LIMIT ?`
-  ).all(...([...args, limit] as never[])) as { value: string; n: number }[];
-
-  return { values: rows.map((r) => ({ value: String(r.value), count: Number(r.n) })), total };
+  return facetOver(sql, params, FILTERABLE[column].sql, opts);
 }
 
 export interface ProductDemand {

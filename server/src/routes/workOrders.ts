@@ -15,6 +15,10 @@ import { requirePermission, type AuthedRequest } from '../middleware/auth.js';
 import { scopeClause, canAccessCustomer } from '../middleware/scope.js';
 import { resolveCompanyId } from '../services/companies.js';
 import { listBody } from '../services/pagination.js';
+import {
+  listSql, jobListWhere, jobSummary, jobFacet, readJobFilters, isJobFilterColumn,
+  JOB_ORDER, JOB_FILTERABLE, type JobFilters,
+} from '../services/workOrderList.js';
 import { buildXlsx, attachmentName, type Column } from '../services/xlsx.js';
 
 export const workOrdersRouter = Router();
@@ -31,64 +35,6 @@ export const workOrdersRouter = Router();
  * ourselves, not an offer to a customer, which is the same reason orders carry
  * none and their PDFs are never watermarked.
  */
-
-/*
- * The colour of the line a job is against (2026-09-29, the client: *"Add colour
- * column"*).
- *
- * A work order has no colour of its own and should not grow one: what is being
- * made is the order line, and its colour is the one on the quotation, the
- * proforma, the order and the invoice — mandatory on all four since
- * 2026-09-17. Reached by **position**, the chain's own index rule that
- * `work_orders.order_line` already is, and by the same `ROW_NUMBER()` walk
- * `orderLines.ts` uses rather than by reading `sort_order` directly, so
- * positions count charge lines exactly as they do everywhere else.
- *
- * It falls through to the catalogue's own colour where the line states none —
- * a product is identified by name **and** colour, so the catalogue is the
- * honest second answer; a custom line naming no product has only the line's,
- * which is why the line is asked first.
- */
-const LINE_AT_POSITION = `
-  LEFT JOIN (
-    SELECT order_id, color,
-           ROW_NUMBER() OVER (PARTITION BY order_id ORDER BY sort_order, id) - 1 AS pos
-      FROM order_items
-  ) oi ON oi.order_id = w.order_id AND oi.pos = w.order_line`;
-
-/**
- * `order_remarks` is what the desk wrote on the sales order, carried to the
- * floor (2026-09-29, the client: *"Work order does not catch packing
- * instruction / notes captured in sales order — this guide factory team on how
- * to pack, printed or non-printed box, whether box needs to be wrapped etc"*).
- *
- * **Read, never copied.** Stamping it onto the job when the job is raised
- * would be a second copy, stale the moment somebody corrects the order — and
- * `syncOrderJobs` only touches a job nothing has happened on, so the
- * correction would reach some jobs and not others, which is worse than not
- * carrying it at all. Joined here, a remark edited this morning is on the
- * floor's screen this morning, and `work_orders.notes` stays what the floor
- * writes for itself.
- */
-const listSql = `
-  SELECT w.*, o.number AS order_number, o.customer_id,
-         o.remarks AS order_remarks,
-         c.name AS customer_name,
-         p.name AS product_name,
-         COALESCE(NULLIF(oi.color, ''), p.color, '') AS color,
-         ${DUE_TO_START('w')} AS due_to_start,
-         l.name AS location_name, m.name AS machine_name, md.name AS mould_name, pr.name AS process_name,
-         u.name AS created_by_name
-  FROM work_orders w
-  JOIN orders o ON o.id = w.order_id
-  JOIN customers c ON c.id = o.customer_id
-  LEFT JOIN products p ON p.id = w.product_id
-  LEFT JOIN locations l ON l.id = w.location_id
-  LEFT JOIN machines m ON m.id = w.machine_id
-  LEFT JOIN moulds md ON md.id = w.mould_id
-  LEFT JOIN processes pr ON pr.id = w.process_id
-  LEFT JOIN users u ON u.id = w.created_by
-  ${LINE_AT_POSITION}`;
 
 const fields = [
   'order_id', 'order_line', 'product_id', 'description', 'qty_planned',
@@ -187,52 +133,25 @@ function getFull(req: AuthedRequest, id: number, costs?: Map<number, number>) {
   return wo;
 }
 
-/**
- * Jobs, planned pieces and pieces made across every job matching the filters.
- * Derived from `production_entries` here exactly as `progressForMany` derives
- * it per job — nothing about progress is stored, at either scale.
- */
-function jobSummary(sql: string, params: unknown[]) {
-  return db.prepare(
-    `WITH f AS (${sql})
-     SELECT (SELECT COUNT(*) FROM f) AS jobs,
-            -- Still to plan, over the whole filtered set: the chip that names
-            -- the queue must not count the page in hand.
-            (SELECT COUNT(*) FROM f WHERE status = 'planned') AS unplanned,
-            -- Due to start with no answer yet. Over the whole filtered set for
-            -- the reason the queue above it is: a count of the page in hand
-            -- shrinks as you page through it.
-            (SELECT COUNT(*) FROM f WHERE due_to_start = 1) AS awaiting,
-            COALESCE((SELECT SUM(qty_planned) FROM f), 0) AS planned,
-            COALESCE((SELECT SUM(${LIVE_OK('e')}) FROM production_entries e
-                       WHERE e.work_order_id IN (SELECT id FROM f)), 0) AS made`
-  ).get(...(params as never[])) as { jobs: number; unplanned: number; planned: number; made: number };
+/** The list's filters as the request states them. */
+function jobFilters(req: AuthedRequest): JobFilters {
+  const scope = scopeClause(req, 'o.customer_id');
+  return {
+    scopeSql: scope.sql || undefined,
+    scopeParams: scope.params,
+    orderId: Number(req.query.order_id) > 0 ? Number(req.query.order_id) : undefined,
+    machineId: Number(req.query.machine_id) > 0 ? Number(req.query.machine_id) : undefined,
+    locationId: Number(req.query.location_id) > 0 ? Number(req.query.location_id) : undefined,
+    awaiting: req.query.awaiting === '1',
+    openOnly: req.query.open === '1',
+    columns: readJobFilters(req.query as Record<string, unknown>),
+  };
 }
 
 workOrdersRouter.get('/', requirePermission('work_order'), (req: AuthedRequest, res) => {
-  const scope = scopeClause(req, 'o.customer_id');
-  const where: string[] = [];
-  const params: unknown[] = [];
-  if (scope.sql) { where.push(scope.sql); params.push(...scope.params); }
-  if (req.query.order_id) { where.push('w.order_id = ?'); params.push(Number(req.query.order_id)); }
-  if (req.query.status) { where.push('w.status = ?'); params.push(String(req.query.status)); }
-  // The floor's own queue: due to start, and nobody has said whether it did.
-  if (req.query.awaiting === '1') where.push(DUE_TO_START('w'));
-  if (req.query.machine_id) { where.push('w.machine_id = ?'); params.push(Number(req.query.machine_id)); }
-  if (req.query.location_id) { where.push('w.location_id = ?'); params.push(Number(req.query.location_id)); }
-  // "Open" is everything still to finish — the default view of a shop floor.
-  if (req.query.open === '1') where.push("w.status NOT IN ('done','cancelled')");
-
-  const sql = `${listSql} ${where.length ? `WHERE ${where.join(' AND ')}` : ''}`;
-  const body = listBody<Record<string, unknown>>(req.query, {
-    sql,
-    // Clubbed by sales order (2026-09-15, at the client's word): the newest
-    // order first, its jobs in line order under it. A total ordering, so an
-    // order's jobs never split across a page boundary by chance — only by
-    // the page being full.
-    order: 'ORDER BY o.date DESC, w.order_id DESC, w.order_line, w.id',
-    params,
-  }, (rows) => {
+  const f = jobFilters(req);
+  const { sql, params } = jobListWhere(f);
+  const body = listBody<Record<string, unknown>>(req.query, { sql, order: JOB_ORDER, params }, (rows) => {
     const progress = progressForMany(
       rows.map((r) => ({ id: Number(r.id), qty_planned: Number(r.qty_planned) || 0 }))
     );
@@ -240,7 +159,27 @@ workOrdersRouter.get('/', requirePermission('work_order'), (req: AuthedRequest, 
   });
   // "N jobs, X of Y pcs made" is a statement about the floor, not about the
   // page, so it is measured over every job matching the filters.
-  res.json(Array.isArray(body) ? body : { ...body, summary: jobSummary(sql, params) });
+  res.json(Array.isArray(body) ? body : { ...body, summary: jobSummary(f) });
+});
+
+/**
+ * What one column's tick list should offer, over the whole filtered list.
+ *
+ * Declared **above `/:id`**, the rule every sibling here follows, or Express
+ * reads "facet" as a work order id. Scoped by `jobListWhere` like the list it
+ * describes, so a dropdown names the customers that login can already see — a
+ * facet is a list of real values off real rows, and an unscoped one would be a
+ * customer book handed out through a filter control.
+ */
+workOrdersRouter.get('/facet', requirePermission('work_order'), (req: AuthedRequest, res) => {
+  const column = String(req.query.column ?? '');
+  if (!isJobFilterColumn(column)) {
+    return res.status(400).json({ error: `Not a filterable column: ${column}` });
+  }
+  if (JOB_FILTERABLE[column].kind !== 'values') {
+    return res.status(400).json({ error: `${column} is filtered by range, not by a list of values` });
+  }
+  res.json(jobFacet(jobFilters(req), column, { search: String(req.query.search ?? '') }));
 });
 
 /* ------------------------------------------------------------------ *
