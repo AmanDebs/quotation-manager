@@ -242,7 +242,30 @@ export default function LineItemsEditor({
      */
     const named = new Set(namedIds ? namedIds.split(',').map(Number) : []);
     return [
-      { value: '', label: '— custom —', sticky: true },
+      /*
+       * There was a `— custom —` option here until 2026-10-15, when the client
+       * asked for it to go (*"Remove custom option from lines everywhere"*). A
+       * goods line names a catalogue product now, which is what fills in its
+       * description, HSN, unit, price, colour and packing — a custom line had
+       * to have every one of those typed, and it was the option a new line
+       * opened on, so the commonest row in the editor was the one that knew
+       * least about itself.
+       *
+       * **Nothing already on file changes, and nothing needed to.** A custom
+       * line is `product_id: null`, which is what this picker now shows as
+       * *nothing chosen* — the screen says what the data says, where a
+       * disabled product's blank box would have contradicted it. The line's
+       * own Description, Colour, Qty and Price cells are all beside it and all
+       * still editable, the save keeps `product_id` null because nothing calls
+       * `pickProduct`, and the imported backlog (whose unmatched items are
+       * booked as custom lines by `services/orderImport.ts`) reads and saves
+       * exactly as it did. There is deliberately **no server guard** to match:
+       * refusing a goods line with no product would refuse every one of those
+       * orders on its next ordinary save.
+       *
+       * `charge` stays, and is a different answer — freight, insurance and
+       * tooling are not goods and have no catalogue row to name.
+       */
       { value: CHARGE, label: '— charge (freight, etc.) —', sticky: true },
       ...products.filter((p) => p.active !== 0 || named.has(p.id)).map((p) => ({
         value: String(p.id),
@@ -311,6 +334,10 @@ export default function LineItemsEditor({
       });
       return;
     }
+    // Unreachable from the picker since the custom option went (2026-10-15):
+    // nothing it offers carries an empty value. Kept because it is the correct
+    // handling of one, and because a line that already has no product reaches
+    // every other branch of this function the same way.
     if (!productId) {
       set(i, { product_id: null, is_charge: 0 });
       return;
@@ -471,7 +498,9 @@ export default function LineItemsEditor({
                     <div className="flex items-center gap-1.5">
                       <SearchSelect
                         value={charge ? CHARGE : String(it.product_id ?? '')}
-                        title={charge ? 'A charge, not goods' : product?.name ?? 'Custom line'}
+                        title={charge
+                          ? 'A charge, not goods'
+                          : product?.name ?? 'No catalogue product — this line prints its own description'}
                         placeholder="Type to search…"
                         className="w-full"
                         options={productOptions}
