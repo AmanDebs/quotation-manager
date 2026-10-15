@@ -10,6 +10,39 @@ export function fmtMoney(n: number | null | undefined, currency: string): string
 }
 
 /**
+ * A **rate**, which is not the same thing as money and does not format like it.
+ *
+ * Two decimals minimum and three maximum, the rule `fmtRate` in
+ * `services/pdf.ts` states and for its reason, read from the other side: a
+ * column of prices is compared down its own length, so a ragged decimal point
+ * makes five rates read as five different kinds of number — and forcing
+ * exactly two would round a genuine three-decimal rate, which this book has
+ * (`@3.017/PC` is the client's own), so the figure would stop reproducing the
+ * amount computed from it.
+ *
+ * The **basis** is not returned with it, but every caller must print it — see
+ * `rateBasis` below. On this catalogue almost every line is quoted `per 1000`,
+ * and 1.20 read per piece is a thousandfold different from 1.20 per thousand,
+ * with neither reading guessable from the number. It is separate so a cell can
+ * draw it as the qualifier it is rather than as part of the figure.
+ */
+export function fmtRate(n: number | null | undefined, currency: string): string {
+  if (n == null) return '—';
+  const locale = currency === 'INR' ? 'en-IN' : 'en-US';
+  return `${symbols[currency] ?? currency + ' '}${new Intl.NumberFormat(locale, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 3,
+  }).format(n)}`;
+}
+
+/**
+ * How a billing unit reads after a rate. `per 1000` is the one that would be
+ * wrong spelled out (`/per 1000`); everything else is printed as the line
+ * states it, so the cell can never claim a basis the line does not have.
+ */
+export const rateBasis = (unit: string): string => (unit === 'per 1000' ? '/1000' : `/${unit}`);
+
+/**
  * Money to the whole unit — for a pivot of totals, where the paise on forty
  * cells is noise and the desk's own sheets print none. Never for a document.
  */

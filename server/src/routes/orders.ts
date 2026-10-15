@@ -439,6 +439,9 @@ const lineColumns: Column<OrderLine>[] = [
   { header: 'Original Production Date', value: (r) => r.promised_date, type: 'date' },
   { header: 'Revised Production Date', value: (r) => r.revised_date, type: 'date' },
   { header: 'State', value: (r) => STATE_LABEL[r.state] ?? r.state },
+  // Beside Amount and the Unit column above, which is the basis it is quoted
+  // in — a rate without one is a thousandfold ambiguous on this book.
+  { header: 'Rate', value: (r) => r.unit_price, type: 'money' },
   { header: 'Amount', value: (r) => r.amount, type: 'money' },
   { header: 'Currency', value: (r) => r.currency },
   { header: 'Type', value: (r) => (r.is_export ? 'Export' : 'Domestic') },

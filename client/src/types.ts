@@ -824,6 +824,11 @@ export interface OrderLine {
   /** The catalogue product's own name; null on a custom line naming none. */
   product_name: string | null;
   ordered: number; amount: number;
+  /**
+   * The rate, in the basis `unit` names — so 1.20 on a `per 1000` line is
+   * ₹1.20 per thousand pieces. Any reader must print the basis with it.
+   */
+  unit_price: number;
   made: number; sent: number; billed: number;
   state: LineState;
   /**

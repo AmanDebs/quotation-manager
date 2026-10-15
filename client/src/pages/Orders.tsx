@@ -5,7 +5,7 @@ import { api } from '../api/client';
 import type { Order, OrderStatus, OrderLine, ProductDemand, LineState } from '../types';
 import { Button, Select, Input, PageHeader, EmptyState, Card, ExportTabs, ErrorText, Pagination, DownloadButton, SegmentedTabs, TH_CLASS, MultiSelectFilter } from '../components/ui';
 import { useCompanies } from '../components/CompanySelect';
-import { fmtDate, fmtMoney, fmtQty, today, daysBetween } from '../lib/format';
+import { fmtDate, fmtMoney, fmtQty, fmtRate, rateBasis, today, daysBetween } from '../lib/format';
 import { usePagedList, PAGE_SIZE, type PagedList } from '../lib/usePagedList';
 import { useCan } from '../App';
 import { Icon } from '../components/icons';
@@ -38,6 +38,7 @@ const LINE_FILTERS: ColumnFilterSpec[] = [
   { key: 'qty', label: 'Qty', kind: 'numbers' },
   { key: 'sent', label: 'Sent', kind: 'numbers' },
   { key: 'balance', label: 'Balance', kind: 'numbers' },
+  { key: 'rate', label: 'Rate', kind: 'numbers' },
   { key: 'start', label: 'Start Date', kind: 'dates' },
   { key: 'end', label: 'End Date', kind: 'dates' },
   { key: 'spoc', label: 'SPOC', kind: 'values' },
@@ -592,6 +593,14 @@ function LinesTable({ lines, pager, filters }: {
                 {/* What is still to go: ordered less what has gone on a lorry
                     (2026-09-16, at the client's word). */}
                 {head('balance', 'Balance', 'right')}
+                {/*
+                  * What the line is priced at (2026-10-15, the client: *"Add
+                  * Rate Column"*). It closes the quantity group rather than
+                  * splitting it: Qty, Sent and Balance are read against one
+                  * another — Balance *is* Qty less Sent — so nothing goes
+                  * between them.
+                  */}
+                {head('rate', 'Rate', 'right')}
                 {/* The floor's own dates, per line, from the jobs raised
                     against it (2026-09-25, at the client's word, in place of
                     the order header's two production dates). */}
@@ -659,6 +668,22 @@ function LinesTable({ lines, pager, filters }: {
                     </td>
                     <td className={`py-2 pr-3 text-right tabular-nums ${balance === 0 ? 'text-slate-400' : 'font-medium'}`}>
                       {balance == null ? dash : fmtQty(balance)}
+                    </td>
+                    {/*
+                      * The rate, with the basis it is quoted in — `1.20` means
+                      * a thousandfold different thing per piece and per 1000,
+                      * and this book is almost entirely the latter, so the
+                      * suffix is not decoration.
+                      *
+                      * A line priced at nothing recedes rather than being
+                      * dashed out: 0 is a figure the line really holds (a free
+                      * sample, a line nobody has priced yet), and printing an
+                      * em-dash over it would claim the column had nothing to
+                      * say where it has.
+                      */}
+                    <td className={`whitespace-nowrap py-2 pr-3 text-right tabular-nums ${l.unit_price ? '' : 'text-slate-400'}`}>
+                      {fmtRate(l.unit_price, l.currency)}
+                      {l.unit && <span className="ml-1 text-xs text-slate-400">{rateBasis(l.unit)}</span>}
                     </td>
                     {/* Per line, not per order: these are the line's own jobs. */}
                     <td className="whitespace-nowrap py-2 pr-3">

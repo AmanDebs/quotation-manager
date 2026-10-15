@@ -96,6 +96,13 @@ export interface OrderLine {
   unit: string;
   /** What was ordered, in pieces where the line states them. */
   ordered: number;
+  /**
+   * The rate, in whatever basis `unit` names — so a line quoted `per 1000`
+   * carries 1.20 for ₹1.20 per thousand pieces, which is a thousandfold
+   * different from the same figure read per piece. Any reader must print the
+   * basis beside it; the screen and the export both do.
+   */
+  unit_price: number;
   amount: number;
   currency: string;
   made: number;
@@ -172,6 +179,13 @@ const SQL = `
     COALESCE(NULLIF(p.name, ''), l.description) AS item_label,
     ${PIECES_ORDERED_SQL('l')} AS ordered,
     l.qty AS billing_qty,
+    -- The rate, asked for 2026-10-15. Deliberately NOT converted to a
+    -- per-piece or per-1000 figure here: amount is computed from this exact
+    -- number against billing_qty, so a rate restated in another basis would
+    -- stop reproducing the money beside it. The basis is the unit column
+    -- selected above, and every reader prints it. (No backticks in here --
+    -- this whole statement is a template literal.)
+    l.unit_price,
     l.amount,
     COALESCE((
       SELECT SUM(${LIVE_OK('e')}) FROM production_entries e
@@ -373,6 +387,10 @@ export const FILTERABLE = {
   qty: { sql: 'ordered', kind: 'numbers' },
   sent: { sql: 'sent', kind: 'numbers' },
   balance: { sql: 'CASE WHEN ordered > 0 THEN MAX(ordered - sent, 0) END', kind: 'numbers' },
+  // The rate as the cell prints it, in the line's own basis — a range here
+  // means "between these two numbers of whatever each line is quoted in",
+  // which is what somebody reading a mixed book can mean by it.
+  rate: { sql: 'unit_price', kind: 'numbers' },
   start: { sql: 'job_start', kind: 'dates' },
   end: { sql: 'job_end', kind: 'dates' },
   spoc: { sql: 'spoc', kind: 'values' },

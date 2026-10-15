@@ -42,11 +42,16 @@ function makeOrder(o: {
     userId, o.spoc ?? 'Rumela Roy') as { id: number }).id);
 }
 
-function addLine(orderId: number, l: { desc: string; color?: string; pcs: number; pos: number; productId?: number }): void {
+function addLine(orderId: number, l: {
+  desc: string; color?: string; pcs: number; pos: number; productId?: number;
+  /** The rate, per 1000 — 10 unless a case is about the Rate column itself. */
+  rate?: number;
+}): void {
+  const rate = l.rate ?? 10;
   db.prepare(
     `INSERT INTO order_items (order_id, product_id, description, color, qty, unit, unit_price, amount, total_pcs, is_charge, sort_order)
-     VALUES (?, ?, ?, ?, ?, 'per 1000', 10, 100, ?, 0, ?)`
-  ).run(orderId, l.productId ?? null, l.desc, l.color ?? '', l.pcs / 1000, l.pcs, l.pos);
+     VALUES (?, ?, ?, ?, ?, 'per 1000', ?, ?, ?, 0, ?)`
+  ).run(orderId, l.productId ?? null, l.desc, l.color ?? '', l.pcs / 1000, rate, (l.pcs / 1000) * rate, l.pcs, l.pos);
 }
 
 function ship(orderId: number, line: number, qty: number): void {
@@ -78,24 +83,24 @@ const productId = Number((db.prepare(
 // Four orders, shaped so every filter has something to bite on and something
 // to leave out.
 const a = makeOrder({ number: 'SO/26-27/001', date: '2026-09-24', customer: customerId, promised: '2026-09-27', revised: '2026-09-25', port: 'Nhava Sheva' });
-addLine(a, { desc: '48mm Handle', color: 'Bisleri Green', pcs: 20000, pos: 0 });
+addLine(a, { desc: '48mm Handle', color: 'Bisleri Green', pcs: 20000, pos: 0, rate: 26 });
 // A split run: two jobs on one line, one of them moved. The line's dates are
 // the earliest start and the latest finish across both.
 plan(a, 0, { start: '2026-10-01', end: '2026-10-05' });
 plan(a, 0, { start: '2026-10-03', end: '2026-10-08', revisedStart: '2026-09-28' });
 
 const b = makeOrder({ number: 'SO/26-27/002', date: '2026-09-23', customer: otherId, promised: '2026-09-28' });
-addLine(b, { desc: 'ignored, the product names it', color: 'Bisleri', pcs: 51000, pos: 0, productId });
-addLine(b, { desc: '48mm Seal Cap', color: '', pcs: 50000, pos: 1 });
+addLine(b, { desc: 'ignored, the product names it', color: 'Bisleri', pcs: 51000, pos: 0, productId, rate: 4.8 });
+addLine(b, { desc: '48mm Seal Cap', color: '', pcs: 50000, pos: 1, rate: 3.017 });
 // Line 0 is planned and then finishes later than planned; line 1 has no job.
 plan(b, 0, { start: '2026-10-10', end: '2026-10-12', revisedEnd: '2026-10-20' });
 
 const c = makeOrder({ number: 'SO/26-27/003', date: '2026-09-20', customer: customerId, port: 'Nhava Sheva', spoc: '' });
-addLine(c, { desc: '2Ltr Deluxe Handle', color: 'Bisleri', pcs: 300000, pos: 0 });
+addLine(c, { desc: '2Ltr Deluxe Handle', color: 'Bisleri', pcs: 300000, pos: 0, rate: 55.1 });
 ship(c, 0, 120000);
 
 const d = makeOrder({ number: 'SO/26-27/004', date: '2026-09-18', customer: otherId });
-addLine(d, { desc: '48mm Handle', color: 'Red-White', pcs: 5000, pos: 0 });
+addLine(d, { desc: '48mm Handle', color: 'Red-White', pcs: 5000, pos: 0, rate: 0 });
 ship(d, 0, 5000);
 // A start and no finish, beside a cancelled job that must count for nothing.
 plan(d, 0, { start: '2026-09-18' });
@@ -370,6 +375,49 @@ describe('the tick list a column offers', () => {
     assert.equal(capped.values.length, 1);
     assert.equal(capped.total, lineFacet({}, 'item').values.length);
     assert.ok(capped.total > capped.values.length, 'the panel has to be able to say it is showing part');
+  });
+});
+
+/**
+ * The rate (2026-10-15, the client: *"Add Rate Column"*).
+ *
+ * The column is `unit_price` as stored — in whatever basis the line's `unit`
+ * names — rather than a figure converted to anything, and that is the whole of
+ * what is worth asserting: `amount` is computed from this exact number, so a
+ * rate restated per piece or per 1000 would stop reproducing the money the
+ * document prints.
+ */
+describe('the rate a line is priced at', () => {
+  test('the row carries it exactly as the document holds it', () => {
+    const rates = new Map(ALL.map((l) => [`${l.order_number}:${l.order_line}`, l.unit_price]));
+    assert.equal(rates.get('SO/26-27/001:0'), 26);
+    // A genuine third decimal survives, which is why the screen's formatter
+    // allows three and the money formatter beside it would not.
+    assert.equal(rates.get('SO/26-27/002:1'), 3.017);
+    assert.equal(rates.get('SO/26-27/003:0'), 55.1);
+  });
+
+  test('and it reproduces the amount against the billing quantity', () => {
+    // 50,000 pieces quoted per 1000 is 50 billing units at 3.017.
+    const line = ALL.find((l) => l.order_number === 'SO/26-27/002' && l.order_line === 1)!;
+    assert.equal(line.amount, 50 * 3.017);
+  });
+
+  test('a line priced at nothing reads 0 rather than going missing', () => {
+    // 0 is a figure the line really holds — a free sample, or one nobody has
+    // priced yet. The screen greys it; it is not an absence.
+    const line = ALL.find((l) => l.order_number === 'SO/26-27/004')!;
+    assert.equal(line.unit_price, 0);
+  });
+
+  test('the filter takes a min and a max, like the quantities beside it', () => {
+    assert.deepEqual(numbersIn({ min: { rate: 20 } }), ['SO/26-27/001', 'SO/26-27/003']);
+    assert.deepEqual(numbersIn({ max: { rate: 5 } }), ['SO/26-27/002', 'SO/26-27/004']);
+    assert.deepEqual(numbersIn({ min: { rate: 3 }, max: { rate: 26 } }), ['SO/26-27/001', 'SO/26-27/002']);
+  });
+
+  test('a zero rate is in a range that reaches it, not swept out of every one', () => {
+    assert.deepEqual(numbersIn({ max: { rate: 0 } }), ['SO/26-27/004']);
   });
 });
 
