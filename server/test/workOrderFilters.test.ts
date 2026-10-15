@@ -25,12 +25,15 @@ import { makeCustomer } from './helpers/factory.js';
 let seq = 0;
 
 /** A customer with a sales order, since a job is only visible through one. */
-function order(o: Partial<{ date: string; number: string; customer: number }> = {}) {
+function order(o: Partial<{
+  date: string; number: string; customer: number; isExport: number; poNumber: string;
+}> = {}) {
   const customerId = o.customer ?? makeCustomer(`Buyer ${++seq}`);
   const id = Number((db.prepare(
-    `INSERT INTO orders (number, date, customer_id, company_id, currency, tax_type, status)
-     VALUES (?, ?, ?, 1, 'INR', 'igst', 'pending') RETURNING id`
-  ).get(o.number ?? `SO/F-${++seq}`, o.date ?? '2026-09-01', customerId) as { id: number }).id);
+    `INSERT INTO orders (number, date, customer_id, company_id, currency, tax_type, status, is_export, po_number)
+     VALUES (?, ?, ?, 1, 'INR', 'igst', 'pending', ?, ?) RETURNING id`
+  ).get(o.number ?? `SO/F-${++seq}`, o.date ?? '2026-09-01', customerId,
+    o.isExport ?? 0, o.poNumber ?? '') as { id: number }).id);
   return { id, customerId };
 }
 
@@ -362,5 +365,116 @@ describe('the vocabulary is the code', () => {
       // mechanism covering a join, a COALESCE and a correlated subquery alike.
       assert.ok(spec.sql in row, `${col} filters on ${spec.sql}, which the query does not select`);
     }
+  });
+});
+
+/**
+ * The sales order book's own three, brought over (2026-10-15, the client with
+ * both pages in front of them: *"Add the filter options that are available in
+ * sales order in work order too"*).
+ *
+ * What is worth asserting is what is **particular** to a list of jobs: that
+ * export and company are facts about the **order** behind the job rather than
+ * about the job, that the search reaches the five things somebody standing at
+ * this list actually has in hand, and — the one that matters most — that the
+ * search cannot be a way past data scoping. `searchClause` brackets its own
+ * OR, and the case below is what would notice if it ever stopped.
+ */
+describe("the sales order book's filters, read over jobs", () => {
+  test("export and domestic are the order's flag, not the job's", () => {
+    const dom = order({ isExport: 0 });
+    const exp = order({ isExport: 1 });
+    line(dom.id); line(exp.id);
+    const a = job(dom.id, { description: 'Domestic run' });
+    const b = job(exp.id, { description: 'Export run' });
+    const ids = [dom.id, exp.id];
+
+    assert.deepEqual(numbers({ ...from(ids), isExport: 1 }), [b.number]);
+    assert.deepEqual(numbers({ ...from(ids), isExport: 0 }), [a.number]);
+    // Absent is not 0 — leaving the tabs on *All* must not mean domestic.
+    assert.equal(numbers(from(ids)).length, 2);
+  });
+
+  test('the company narrows to one selling entity', () => {
+    const o = order();
+    line(o.id);
+    const a = job(o.id);
+    assert.deepEqual(numbers({ ...from([o.id]), companyId: 1 }), [a.number]);
+    assert.deepEqual(numbers({ ...from([o.id]), companyId: 2 }), []);
+  });
+
+  test('the search reaches all five columns', () => {
+    const cust = makeCustomer('Olam Palm Gabon SA');
+    const o = order({ customer: cust, number: 'SO-EX/F-OLAM', poNumber: 'OLAM-PO-4471' });
+    line(o.id);
+    const pid = product('29/21 CTC Preforms');
+    const a = job(o.id, { productId: pid, description: "the job's own wording" });
+    const ids = [o.id];
+
+    assert.deepEqual(numbers({ ...from(ids), q: a.number }), [a.number], 'the job number');
+    assert.deepEqual(numbers({ ...from(ids), q: 'SO-EX/F-OLAM' }), [a.number], 'the sales order');
+    assert.deepEqual(numbers({ ...from(ids), q: 'OLAM-PO-4471' }), [a.number], "the buyer's PO");
+    assert.deepEqual(numbers({ ...from(ids), q: 'gabon' }), [a.number], 'the customer');
+    assert.deepEqual(numbers({ ...from(ids), q: 'preforms' }), [a.number], 'the product');
+    assert.deepEqual(numbers({ ...from(ids), q: 'nothing like it' }), []);
+  });
+
+  test('a percent sign is a character, not a wildcard', () => {
+    const o = order({ customer: makeCustomer('50% Recycled Handles Ltd') });
+    const other = order({ customer: makeCustomer('Ordinary Buyer Ltd') });
+    line(o.id); line(other.id);
+    const a = job(o.id);
+    job(other.id);
+    const ids = [o.id, other.id];
+    // Unescaped, LIKE '%%%' matches every row — which is the whole book
+    // answering a search for one character.
+    assert.deepEqual(numbers({ ...from(ids), q: '50%' }), [a.number]);
+  });
+
+  /**
+   * The one that would be a hole rather than a nuisance. `scopeClause` shares
+   * this WHERE, so an unbracketed `scope AND x LIKE ? OR y LIKE ?` binds as
+   * `(scope AND x) OR y` and the search becomes a way straight past data
+   * scoping — the trap `services/search.ts` records and brackets against.
+   */
+  test('and it cannot reach past the scope it is ANDed with', () => {
+    const mine = order({ customer: makeCustomer('Searchable Mine Ltd') });
+    const theirs = order({ customer: makeCustomer('Searchable Theirs Ltd') });
+    line(mine.id); line(theirs.id);
+    const a = job(mine.id);
+    job(theirs.id);
+    // Scoped to one order, searching a term both customers match.
+    assert.deepEqual(numbers({ ...from([mine.id]), q: 'Searchable' }), [a.number]);
+  });
+
+  test('the three compose with each other and with a heading filter', () => {
+    const o = order({ isExport: 1, customer: makeCustomer('Composable Buyer Ltd') });
+    line(o.id, { color: 'Sky Blue' });
+    const a = job(o.id, { description: 'Composable job' });
+    const f = from([o.id], { 'f.color': 'Sky Blue' });
+
+    assert.deepEqual(numbers({ ...f, isExport: 1, companyId: 1, q: 'composable' }), [a.number]);
+    // Each one alone is enough to exclude it, which is what makes it an AND.
+    assert.deepEqual(numbers({ ...f, isExport: 0, q: 'composable' }), []);
+    assert.deepEqual(numbers({ ...f, isExport: 1, q: 'nothing like it' }), []);
+    assert.deepEqual(numbers({ ...f, isExport: 1, companyId: 2, q: 'composable' }), []);
+  });
+
+  test('and the summary and the tick lists narrow with the rows', () => {
+    const dom = order({ isExport: 0, customer: makeCustomer('Summary Domestic Ltd') });
+    const exp = order({ isExport: 1, customer: makeCustomer('Summary Export Ltd') });
+    line(dom.id); line(exp.id);
+    job(dom.id, { qty: 1000 });
+    job(exp.id, { qty: 7000 });
+    const ids = [dom.id, exp.id];
+
+    assert.equal(jobSummary({ ...from(ids), isExport: 1 }).planned, 7000);
+    assert.equal(jobSummary({ ...from(ids), isExport: 1 }).jobs, 1);
+    // A tick list is built from the same statement, so it narrows for free —
+    // which is the whole point of the list being described in one place.
+    assert.deepEqual(
+      jobFacet({ ...from(ids), isExport: 1 }, 'customer').values.map((v) => v.value),
+      ['Summary Export Ltd']
+    );
   });
 });

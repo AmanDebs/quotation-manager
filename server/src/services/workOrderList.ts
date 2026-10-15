@@ -1,6 +1,7 @@
 import { db } from '../db/connection.js';
 import { LIVE_OK } from './production.js';
 import { DUE_TO_START } from './jobStatus.js';
+import { searchClause } from './search.js';
 import {
   columnWhere, readColumnFilters, facetOver, isColumnOf,
   type ColumnFilterSet, type ColumnSpecs, type Facet,
@@ -128,6 +129,31 @@ export const JOB_FILTERABLE = {
 export type JobFilterColumn = keyof typeof JOB_FILTERABLE;
 
 /**
+ * The search box over the floor's list (2026-10-15, the client: *"Add the
+ * filter options that are available in sales order in work order too"*).
+ *
+ * Five columns, and they are what somebody standing in front of this list
+ * actually has in hand: a **job number** off a docket, the **sales order**
+ * number or the buyer's own **PO number** off a chase, the **customer**, or
+ * the **product**. It mirrors `orderSearchClause` one document along —
+ * deliberately the same six facts less the colour and the code, both of which
+ * are already answerable from a column funnel here.
+ *
+ * Through `searchClause` like every other search in this app, which is what
+ * escapes `%` and `_` (LIKE's own wildcards, so typing either matched every
+ * row) and **brackets the clause** — this WHERE is shared with `scopeClause`,
+ * and an unbracketed `OR` would be a way straight past data scoping.
+ *
+ * It lives in the **inner** WHERE, over real columns rather than the select's
+ * aliases: `o.po_number` is reachable there and nowhere else, and the two
+ * aliases it gives up (`item_label`, `color`) each have a heading filter of
+ * their own.
+ */
+export function jobSearchClause(q: string | undefined): { sql: string; params: unknown[] } {
+  return searchClause(['w.number', 'o.number', 'o.po_number', 'c.name', 'p.name'], String(q ?? '').trim());
+}
+
+/**
  * Every job matching the filters, as one statement.
  *
  * Two layers, and the split is not cosmetic: the **inner** WHERE narrows rows
@@ -149,6 +175,17 @@ export interface JobFilters {
   orderId?: number;
   machineId?: number;
   locationId?: number;
+  /**
+   * The three the sales order book has had all along and this list had none of
+   * (2026-10-15). Each is a fact about the **order** behind the job rather
+   * than about the job: a work order is export or domestic, and belongs to a
+   * selling entity, only because its order does — except the company, which
+   * the job carries itself, being the series that numbered it.
+   */
+  isExport?: number;
+  companyId?: number;
+  /** Free text — see `jobSearchClause` for the five columns it covers. */
+  q?: string;
   /** Due to start, with nobody having said whether it did. */
   awaiting?: boolean;
   /** Everything still to finish — the default view of a shop floor. */
@@ -173,6 +210,15 @@ export function jobListWhere(f: JobFilters, except?: JobFilterColumn): { sql: st
   if (f.awaiting) where.push(DUE_TO_START('w'));
   if (f.machineId) { where.push('w.machine_id = ?'); params.push(f.machineId); }
   if (f.locationId) { where.push('w.location_id = ?'); params.push(f.locationId); }
+  // Export or domestic is the **order's** flag: a job has none of its own, and
+  // giving it one would be a second copy able to disagree with the document.
+  if (f.isExport !== undefined) { where.push('o.is_export = ?'); params.push(f.isExport); }
+  // The job's own company, not the order's — they agree by construction
+  // (`insertJob` takes it from the order) and this is the one the number was
+  // drawn from, which is what somebody filtering by entity is looking at.
+  if (f.companyId) { where.push('w.company_id = ?'); params.push(f.companyId); }
+  const search = jobSearchClause(f.q);
+  if (search.sql) { where.push(search.sql); params.push(...search.params); }
   if (f.openOnly) where.push("w.status NOT IN ('done','cancelled')");
   const inner = `${listSql} ${where.length ? `WHERE ${where.join(' AND ')}` : ''}`;
 

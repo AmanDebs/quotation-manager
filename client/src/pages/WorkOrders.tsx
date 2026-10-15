@@ -3,7 +3,8 @@ import { Link } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { WorkOrder, WorkOrderStatus } from '../types';
-import { PageHeader, Card, Button, EmptyState, ErrorText, Input, Pagination, CAPTION_CLASS, TH_CLASS } from '../components/ui';
+import { PageHeader, Card, Button, EmptyState, ErrorText, ExportTabs, Input, Pagination, Select, CAPTION_CLASS, TH_CLASS } from '../components/ui';
+import { useCompanies } from '../components/CompanySelect';
 import { ColumnFilter, FilteredByStrip } from '../components/ColumnFilter';
 import { useColumnFilters, type ColumnFilterSpec } from '../lib/useColumnFilters';
 import PlanJobsModal from '../components/PlanJobsModal';
@@ -197,6 +198,29 @@ export default function WorkOrdersPage() {
   // kept open on a second screen.
   const [awaiting, setAwaiting] = useUrlFilter('awaiting');
   const [openOnly, setOpenOnly] = useState(true);
+  /*
+   * The three the sales order book has had all along and this list had none of
+   * (2026-10-15, the client with both pages in front of them: *"Add the filter
+   * options that are available in sales order in work order too"*).
+   *
+   * All three in the **URL**, which is where every other filter on this page
+   * already lives — the column funnels and the *to confirm* queue — so a
+   * narrowed list can be bookmarked, reloaded and left open on a screen beside
+   * the machines. (The order book keeps its own two in component state; this
+   * is the better half of the two shapes rather than a copy of the weaker.)
+   *
+   * They go to the server under the same keys that list uses, so a habit
+   * learned on one works on the other — and **server-side**, because this list
+   * is paged: a search run over the rows already fetched would be searching
+   * one page of a book somebody is looking through.
+   */
+  const [exportFilter, setExportFilter] = useUrlFilter('export');
+  const [companyFilter, setCompanyFilter] = useUrlFilter('company');
+  const [q, setQ] = useUrlFilter('q');
+  const companies = useCompanies();
+  // Drawn only for a group that has more than one selling entity — a filter
+  // offering one value is a control that can only ever do nothing.
+  const showCompany = companies.length > 1;
   const can = useCan();
   /*
    * The planning step: tick jobs, press Plan. Selection is by id and lives
@@ -244,6 +268,9 @@ export default function WorkOrdersPage() {
 
   const query = new URLSearchParams();
   if (awaiting) query.set('awaiting', awaiting);
+  if (exportFilter) query.set('export', exportFilter);
+  if (companyFilter) query.set('company', companyFilter);
+  if (q) query.set('q', q);
   // The default view of a shop floor, and a default rather than a rule: naming
   // a status says what is wanted, so the tick list wins over it.
   if (openOnly && statusTicked.length === 0) query.set('open', '1');
@@ -377,7 +404,22 @@ export default function WorkOrdersPage() {
         subtitle="What the floor is making, across every order"
       />
 
-      <div className="mb-3 flex flex-wrap items-center gap-2">
+      <div className="mb-3 flex flex-wrap items-center gap-3">
+        <ExportTabs value={exportFilter} onChange={setExportFilter} />
+        {showCompany && (
+          <Select value={companyFilter} onChange={(e) => setCompanyFilter(e.target.value)} className="max-w-56">
+            <option value="">All companies</option>
+            {companies.map((c) => (
+              <option key={c.id} value={c.id}>{c.company_name || `Company ${c.id}`}</option>
+            ))}
+          </Select>
+        )}
+        <Input
+          className="w-72"
+          placeholder="Search job no., sales order, PO no., customer…"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+        />
         <label className="flex items-center gap-1.5 text-sm text-slate-600">
           <input
             type="checkbox"

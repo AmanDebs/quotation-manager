@@ -144,6 +144,12 @@ function jobFilters(req: AuthedRequest): JobFilters {
     locationId: Number(req.query.location_id) > 0 ? Number(req.query.location_id) : undefined,
     awaiting: req.query.awaiting === '1',
     openOnly: req.query.open === '1',
+    // The sales order book's own three, read under the same keys — `export`,
+    // `company` and `q` — so a habit learned on one list works on the other
+    // and a link copied between them means the same thing.
+    isExport: req.query.export === '1' ? 1 : req.query.export === '0' ? 0 : undefined,
+    companyId: Number(req.query.company) > 0 ? Number(req.query.company) : undefined,
+    q: String(req.query.q ?? '').trim() || undefined,
     columns: readJobFilters(req.query as Record<string, unknown>),
   };
 }
