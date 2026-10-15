@@ -6,7 +6,9 @@ import type { Quotation, Customer, LineItem, TaxType, ColumnConfig } from '../ty
 import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, StatusBadge, ReadOnlyFields, labelClass, FIELD_GRID, FIELD_GRID_PLAIN, SettledDocumentType, NOTES_ROWS } from '../components/ui';
 import { PdfLink } from '../components/PdfLink';
 import CompanySelect from '../components/CompanySelect';
-import { DocNumber, IncoTermsInput, PaymentTermsInput, DeliveryTimelineInput, ContainersInput, HeaderCharges, DeskPersonInput } from '../components/DocFields';
+import {
+  CustomerSelect, DocNumber, IncoTermsInput, PaymentTermsInput, DeliveryTimelineInput, ContainersInput, HeaderCharges, DeskPersonInput,
+} from '../components/DocFields';
 import LineItemsEditor from '../components/LineItemsEditor';
 import FollowupButton from '../components/FollowupButton';
 import ApprovalStrip from '../components/ApprovalStrip';
@@ -423,10 +425,7 @@ export default function QuotationFormPage() {
               </Field>
             )}
             <Field label="Customer *">
-              <Select value={draft.customer_id} disabled={readOnly} onChange={(e) => onCustomerChange(e.target.value ? Number(e.target.value) : '')}>
-                <option value="">Select customer…</option>
-                {customers.map((c) => <option key={c.id} value={c.id}>{c.name} ({c.country})</option>)}
-              </Select>
+              <CustomerSelect customers={customers} value={draft.customer_id} disabled={readOnly} onChange={onCustomerChange} />
             </Field>
             <Field label="Issued By">
               <CompanySelect

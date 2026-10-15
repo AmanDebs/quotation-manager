@@ -56,11 +56,55 @@ customersRouter.get('/', (req: AuthedRequest, res) => {
     where.push('c.is_export = ?');
     params.push(Number(exportFilter));
   }
-  res.json(listBody(req.query, {
+  /*
+   * `?active=1|0` narrows to the customers in use, or to the disabled ones —
+   * absent means both, exactly as `?export=` reads above it.
+   *
+   * **The default is deliberately inclusive**, which is the opposite of the
+   * masters' `?all=1`, and the call sites are what decided it. Six dropdowns
+   * *filter* documents by customer, and one that silently stopped offering a
+   * disabled customer could never find that customer's orders again; and the
+   * picker on every document form has to contain the customer a saved document
+   * already names, or opening one would show a blank select. So the default
+   * hides nothing that exists, and the two callers that must not offer a
+   * disabled customer — the New Document dialog and this page's own list —
+   * ask for `active=1` and say why.
+   */
+  /*
+   * The active filter is held apart from the rest of the WHERE, because the
+   * count below has to **ignore it**: "how many are disabled" measured inside
+   * `active = 1` is always 0, which is the facet rule the column filters
+   * already follow about a dropdown ignoring its own column.
+   */
+  const baseWhere = [...where];
+  const baseParams = [...params];
+  const activeFilter = req.query.active;
+  if (activeFilter === '1' || activeFilter === '0') {
+    where.push('c.active = ?');
+    params.push(Number(activeFilter));
+  }
+  const body = listBody(req.query, {
     sql: `${listSql}${where.length ? ' WHERE ' + where.join(' AND ') : ''}`,
     order: 'ORDER BY c.name, c.id',
     params,
-  }));
+  });
+  /*
+   * An unpaged request keeps answering with a bare array: `/api/customers`
+   * with no page is the picker on every document form, and one handed an
+   * object instead of a list would show nothing. The rule `routes/products.ts`
+   * states about its own summary.
+   */
+  if (Array.isArray(body)) return res.json(body);
+  /*
+   * How many of these have been disabled — so the page can say so, and offer
+   * to show them, rather than leaving somebody to tick a box to find out there
+   * is nothing behind it. Over the whole filtered set rather than the page,
+   * the rule every summary here follows.
+   */
+  const off = db.prepare(
+    `SELECT COUNT(*) AS c FROM customers c WHERE ${[...baseWhere, 'c.active = 0'].join(' AND ')}`
+  ).get(...(baseParams as never[])) as { c: number };
+  res.json({ ...body, summary: { disabled: Number(off.c) } });
 });
 
 /* ---------------------------------------------------------------- *
@@ -251,6 +295,41 @@ customersRouter.put('/:id', (req: AuthedRequest, res) => {
     'company_id' in body ? companyId(body.company_id) : (existing.company_id as number | null),
     id
   );
+  res.json(db.prepare(`${listSql} WHERE c.id = ?`).get(id));
+});
+
+/*
+ * Taking a customer out of use, and putting them back (2026-10-15, the client:
+ * *"Add an option to disable products and customers so that they cannot be
+ * used in future"*).
+ *
+ * **A PATCH of its own, and the only writer of the column.** The PUT above
+ * enumerates the columns it sets and `active` is not among them, so an
+ * ordinary save — or an edit from the dialog, or an import — cannot move this
+ * flag by accident, and there is exactly one control that can. The shape
+ * `PATCH /invoices/:id/due-date` and `PATCH /orders/:id/production-dates`
+ * already use.
+ *
+ * `customer: full` by the mount, like editing — not owner-gated the way the
+ * delete below is, because the master is shared and editing follows the
+ * permission cell rather than the owner (2026-10-07). It is also reversible in
+ * one click and says so on the row, where a delete is neither.
+ *
+ * What it does **not** do is reach backwards: every quotation, order, invoice,
+ * payment and follow-up already naming this customer is untouched and reads
+ * exactly as it did. What stops is new documents — `raiseForError` refuses a
+ * create and the pickers stop offering them.
+ */
+customersRouter.patch('/:id/active', (req: AuthedRequest, res) => {
+  const id = Number(req.params.id);
+  if (!db.prepare('SELECT 1 FROM customers WHERE id = ?').get(id)) {
+    return res.status(404).json({ error: 'Customer not found' });
+  }
+  const raw = (req.body ?? {}).active;
+  if (raw !== 0 && raw !== 1 && raw !== '0' && raw !== '1' && raw !== true && raw !== false) {
+    return res.status(400).json({ error: 'Send active: 1 to enable this customer or active: 0 to disable them' });
+  }
+  db.prepare('UPDATE customers SET active = ? WHERE id = ?').run(Number(raw === true ? 1 : raw === false ? 0 : raw), id);
   res.json(db.prepare(`${listSql} WHERE c.id = ?`).get(id));
 });
 

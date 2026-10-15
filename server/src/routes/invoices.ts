@@ -4,7 +4,7 @@ import { nextNumber, exportChangeError } from '../services/numbering.js';
 import { exportOnlyInvoice } from '../services/permissions.js';
 import { computeTotals, round2, type LineItemInput } from '../services/totals.js';
 import { allows, type AuthedRequest } from '../middleware/auth.js';
-import { scopeClause, canAccessCustomer, linkError, customerChangeError, canRaiseFor } from '../middleware/scope.js';
+import { scopeClause, canAccessCustomer, linkError, customerChangeError, raiseForError } from '../middleware/scope.js';
 import { resolveCompanyId, foreignBankError } from '../services/companies.js';
 import { syncOrderStatus } from '../services/orderStatus.js';
 import { submit, decide, resetApprovalOnEdit, blockUnapprovedTransition , mayApprove } from '../services/approval.js';
@@ -484,9 +484,11 @@ invoicesRouter.post('/', (req: AuthedRequest, res) => {
   const side = invoiceSideError(req, body.is_export);
   if (side) return res.status(403).json({ error: side });
   // Any customer in the book may be quoted, ordered or invoiced for — see
-  // `canRaiseFor`. Ownership decides whose documents you *read*, and raising
-  // one puts that customer in your book, so you keep what you raised.
-  if (!canRaiseFor(req, Number(body.customer_id))) return res.status(400).json({ error: 'Customer not found' });
+  // `raiseForError`. Ownership decides whose documents you *read*, and raising
+  // one puts that customer in your book, so you keep what you raised. A
+  // **disabled** customer is refused there, in its own words.
+  const noCustomer = raiseForError(req, Number(body.customer_id));
+  if (noCustomer) return res.status(400).json({ error: noCustomer });
   const h = headerValues(body);
   // The source documents are checked as carefully as the customer is: an
   // unchecked pi_id let another owner's advances be read and re-allocated.

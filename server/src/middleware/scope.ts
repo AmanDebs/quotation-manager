@@ -111,24 +111,50 @@ export function canAccessCustomer(req: AuthedRequest, customerId: number | null 
 }
 
 /**
- * True when the caller may **raise** a document for this customer, which since
+ * Whether the caller may **raise** a document for this customer — which since
  * 2026-10-07 is a different question from whether its documents are theirs.
  *
- * The customer master is shared (2026-10-07), so this asks only that the
- * customer is on file — the picker on every document form offers the whole book
- * and this is what the save accepts, which is the invariant the scoped picker
- * existed to protect, now satisfied from the other side. The row is looked up
- * rather than assumed so a body naming a customer that does not exist is
- * refused by name instead of reaching SQLite as a foreign-key 500.
+ * The customer master is shared (2026-10-07), so ownership is not asked: the
+ * picker on every document form offers the whole book and this is what the
+ * save accepts, which is the invariant the scoped picker existed to protect,
+ * now satisfied from the other side. The row is looked up rather than assumed
+ * so a body naming a customer that does not exist is refused by name instead
+ * of reaching SQLite as a foreign-key 500.
+ *
+ * **A disabled customer is refused, and that is the whole of what makes
+ * "cannot be used in future" true rather than "is not offered"** (2026-10-15).
+ * Every create route in the app already comes through here and every edit
+ * comes through `customerChangeError` below, which asks this — so one rule
+ * covers both, and because that function returns early when the customer has
+ * not changed, **a document that already names a disabled customer still
+ * saves**. Trapping those would be the trap this codebase has built once
+ * already.
+ *
+ * Returns the sentence to refuse with, or null when the write is allowed — the
+ * shape `lockError`, `incompleteError` and `foreignBankError` use, and the
+ * reason this stopped being a boolean: "Customer not found" is a lie about a
+ * customer somebody disabled five minutes ago, and an error the user can act
+ * on must not read as a fault.
  *
  * It takes `req` because the rule lives where the answer is decided: narrowing
  * who may raise for whom later is a change here and nowhere else — the reason
  * `exportOnlyInvoice` is kept.
  */
-export function canRaiseFor(req: AuthedRequest, customerId: number | null | undefined): boolean {
-  if (!req.user) return false;
-  if (customerId == null) return false;
-  return !!db.prepare('SELECT 1 FROM customers WHERE id = ?').get(Number(customerId));
+export function raiseForError(req: AuthedRequest, customerId: number | null | undefined): string | null {
+  const absent = 'Customer not found';
+  if (!req.user) return absent;
+  if (customerId == null) return absent;
+  const row = db.prepare('SELECT name, active FROM customers WHERE id = ?').get(Number(customerId)) as
+    { name: string; active?: number } | undefined;
+  if (!row) return absent;
+  // `active` is read with a fallback for the same reason it is nullable-ish on
+  // the client: a database migrated a moment before the column arrived has it,
+  // and absent must read as in use.
+  if (Number(row.active ?? 1) === 0) {
+    return `${row.name} has been disabled, so no new document can be raised for them. `
+      + 'Re-enable them on the Customers page first.';
+  }
+  return null;
 }
 
 /** The document tables one document may point at as its source. */
@@ -203,7 +229,11 @@ export function customerChangeError(
   createdBy?: number | null
 ): string | null {
   if (Number(existingCustomerId) === Number(incomingCustomerId)) return null;
-  if (!canRaiseFor(req, incomingCustomerId)) return 'Customer not found';
+  // Asked rather than restated, so a move onto a disabled customer is refused
+  // in that customer's own words — and so an ordinary save of a document that
+  // already names one is never refused, this line being past the guard above.
+  const cannot = raiseForError(req, incomingCustomerId);
+  if (cannot) return cannot;
   if (canAccessCustomer(req, incomingCustomerId)) return null;
   if (createdBy != null && Number(createdBy) === Number(req.user?.id)) return null;
   return 'That customer is assigned to somebody else and this document was raised by somebody else, '

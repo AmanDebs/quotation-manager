@@ -167,6 +167,13 @@ export interface Customer {
   owner_id?: number | null; owner_name?: string | null; is_export?: number;
   /** Which group entity usually invoices them; null = the group default. */
   company_id?: number | null;
+  /**
+   * 1 = in use; 0 = disabled, so no **new** document may name them. Optional,
+   * and absent reads as in use — a server not yet redeployed omits it, which
+   * is the `made_here` rule, and reading silence as disabled would hide the
+   * whole book.
+   */
+  active?: number;
 }
 
 export interface Product {
@@ -189,6 +196,11 @@ export interface Product {
    * recorded, which is a different claim from 0 g.
    */
   weight_grams: number | null;
+  /**
+   * 1 = in the catalogue; 0 = taken out of it, so the pickers stop offering
+   * it. Optional and absent reads as in use, like `made_here` above.
+   */
+  active?: number;
 }
 
 /* ---------------- Production masters ---------------- */

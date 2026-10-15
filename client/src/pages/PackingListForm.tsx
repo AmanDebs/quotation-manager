@@ -10,6 +10,7 @@ import { useUnsavedChanges } from '../lib/useUnsavedChanges';
 import { unitOptions } from './Products';
 import HistoryCard from '../components/HistoryCard';
 import { useCustomerBook } from '../lib/useCustomerBook';
+import { CustomerSelect } from '../components/DocFields';
 
 interface Draft {
   number?: string;
@@ -146,10 +147,7 @@ export default function PackingListFormPage() {
               </Field>
             )}
             <Field label="Customer *">
-              <Select value={draft.customer_id} onChange={(e) => set({ customer_id: e.target.value ? Number(e.target.value) : '' })}>
-                <option value="">Select customer…</option>
-                {customers.map((c) => <option key={c.id} value={c.id}>{c.name} ({c.country})</option>)}
-              </Select>
+              <CustomerSelect customers={customers} value={draft.customer_id} onChange={(id) => set({ customer_id: id })} />
             </Field>
             <Field label="Date"><Input type="date" value={draft.date} onChange={(e) => set({ date: e.target.value })} /></Field>
             <Field label="Lot No."><Input value={draft.lot_no} onChange={(e) => set({ lot_no: e.target.value })} placeholder="e.g. 90/2025" /></Field>

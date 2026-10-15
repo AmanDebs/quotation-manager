@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { db } from '../db/connection.js';
 import type { AuthedRequest } from '../middleware/auth.js';
-import { scopeClause, canAccessCustomer, canRaiseFor, customerChangeError } from '../middleware/scope.js';
+import { scopeClause, canAccessCustomer, raiseForError, customerChangeError } from '../middleware/scope.js';
 import { listBody } from '../services/pagination.js';
 
 /**
@@ -70,10 +70,10 @@ enquiriesRouter.post('/', (req: AuthedRequest, res) => {
   if (!customer_id) return res.status(400).json({ error: 'Customer is required' });
   // Open to the whole customer book (2026-10-07) — and `created_by` is what
   // keeps it readable afterwards, an enquiry being the first thing raised for a
-  // customer who is not yours. See `canRaiseFor`.
-  if (!canRaiseFor(req, Number(customer_id))) {
-    return res.status(400).json({ error: 'Customer not found' });
-  }
+  // customer who is not yours. See `raiseForError`, which also refuses a
+  // customer somebody has disabled.
+  const noCustomer = raiseForError(req, Number(customer_id));
+  if (noCustomer) return res.status(400).json({ error: noCustomer });
   const info = db
     .prepare('INSERT INTO enquiries (customer_id, date, notes, created_by) VALUES (?, ?, ?, ?)')
     .run(

@@ -226,7 +226,20 @@ function CountModal({ start, locations, onClose, onSaved }: {
         <Field label="Product">
           <Select value={productId} onChange={(e) => setProductId(e.target.value ? Number(e.target.value) : '')}>
             <option value="">Select product…</option>
-            {products.map((p) => <option key={p.id} value={p.id}>{p.name}{p.color ? ` · ${p.color}` : ''}</option>)}
+            {/*
+              * A disabled product is not offered — a count is a new record
+              * about the catalogue — except the one this dialog was opened on,
+              * which is how a row already on the shelf gets corrected. The way
+              * to count a disabled product that nothing has reported is to
+              * re-enable it, which is one click on the Products page.
+              */}
+            {products
+              .filter((p) => p.active !== 0 || Number(p.id) === Number(start.product_id))
+              .map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}{p.color ? ` · ${p.color}` : ''}{p.active === 0 ? ' — disabled' : ''}
+                </option>
+              ))}
           </Select>
         </Field>
         <Field label="Plant">

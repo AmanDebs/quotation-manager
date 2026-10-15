@@ -6,7 +6,9 @@ import type { Proforma, LineItem, TaxType, ColumnConfig } from '../types';
 import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, StatusBadge, SettledDocumentType, ReadOnlyFields, FIELD_GRID, FIELD_GRID_PLAIN, NOTES_ROWS } from '../components/ui';
 import { PdfLink } from '../components/PdfLink';
 import CompanySelect, { useCompanies } from '../components/CompanySelect';
-import { DocNumber, IncoTermsInput, PaymentTermsInput, ContainersInput, PortOfLoadingInput, HeaderCharges, ShipToFields, DeskPersonInput } from '../components/DocFields';
+import {
+  CustomerSelect, DocNumber, IncoTermsInput, PaymentTermsInput, ContainersInput, PortOfLoadingInput, HeaderCharges, ShipToFields, DeskPersonInput,
+} from '../components/DocFields';
 import LineItemsEditor from '../components/LineItemsEditor';
 import ReadOnlyItems from '../components/ReadOnlyItems';
 import ContainerFitment from '../components/ContainerFitment';
@@ -423,10 +425,7 @@ export default function ProformaFormPage() {
               </Field>
             )}
             <Field label="Buyer (Customer) *">
-              <Select disabled={readOnly} value={draft.customer_id} onChange={(e) => onCustomerChange(e.target.value ? Number(e.target.value) : '')}>
-                <option value="">Select customer…</option>
-                {customers.map((c) => <option key={c.id} value={c.id}>{c.name} ({c.country})</option>)}
-              </Select>
+              <CustomerSelect customers={customers} value={draft.customer_id} disabled={readOnly} onChange={onCustomerChange} />
             </Field>
             <Field label="Issued By">
               <CompanySelect

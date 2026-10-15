@@ -450,6 +450,21 @@ for (const table of ['quotations', 'orders', 'proforma_invoices', 'commercial_in
 addColumnIfMissing('customers', 'company_id', 'INTEGER');
 
 /*
+ * Taking a customer or a product out of use, asked for 2026-10-15 (*"Add an
+ * option to disable products and customers so that they cannot be used in
+ * future"*).
+ *
+ * Defaults to 1, so every row on file is in use -- nobody's catalogue or
+ * customer book moves on the day this lands. There is deliberately **no
+ * index**: both tables are hundreds of rows rather than hundreds of
+ * thousands, and an index in schema.sql naming a column added here is the
+ * trap `batches.disposition` records, where the boot died on a database
+ * migrated from an earlier version.
+ */
+addColumnIfMissing('customers', 'active', 'INTEGER NOT NULL DEFAULT 1');
+addColumnIfMissing('products', 'active', 'INTEGER NOT NULL DEFAULT 1');
+
+/*
  * Sales activity, asked for 2026-09-05.
  *
  * A follow-up recorded who it was *about* and never who did it, so "how many

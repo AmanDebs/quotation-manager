@@ -294,6 +294,27 @@ productsRouter.get('/', (req, res) => {
     params.push(type);
   }
   if (missing === 'weight') where.push('weight_grams IS NULL');
+  /*
+   * `?active=1|0` narrows to the catalogue in use, or to what has been taken
+   * out of it — absent means both, which is the default and is deliberate:
+   * the line-item picker has to contain the product a saved line already
+   * names, or opening that document would show an empty box where its product
+   * is, and the Quality register's product filter has to be able to find the
+   * checks recorded against a product since retired. The same filter in
+   * `routes/customers.ts` states the reasoning in full.
+   */
+  /*
+   * Held apart from the rest of the WHERE, because the disabled count below
+   * has to **ignore it**: measured inside `active = 1` it is always 0, the
+   * facet rule about a filter ignoring its own column.
+   */
+  const baseWhere = [...where];
+  const baseParams = [...params];
+  const activeFilter = req.query.active;
+  if (activeFilter === '1' || activeFilter === '0') {
+    where.push('active = ?');
+    params.push(Number(activeFilter));
+  }
   const sql = `SELECT * FROM products${where.length ? ` WHERE ${where.join(' AND ')}` : ''}`;
 
   const body = listBody(req.query, { sql, order: 'ORDER BY name, id', params });
@@ -310,7 +331,13 @@ productsRouter.get('/', (req, res) => {
   const gaps = db.prepare(
     `SELECT COUNT(*) AS c FROM (${sql}) WHERE weight_grams IS NULL`
   ).get(...(params as never[])) as { c: number };
-  res.json({ ...body, summary: { missing_weight: Number(gaps.c) } });
+  // How many have been taken out of the catalogue, so the page can say so and
+  // offer to show them. The search and type filters still apply; the active
+  // filter does not, for the reason above.
+  const off = db.prepare(
+    `SELECT COUNT(*) AS c FROM products WHERE ${[...baseWhere, 'active = 0'].join(' AND ')}`
+  ).get(...(baseParams as never[])) as { c: number };
+  res.json({ ...body, summary: { missing_weight: Number(gaps.c), disabled: Number(off.c) } });
 });
 
 productsRouter.post('/', (req, res) => {
@@ -369,6 +396,40 @@ productsRouter.put('/:id', requirePermission('product', 'full'), (req, res) => {
     ...(packingFields.map((f) => numOrNull(body[f])) as never[]),
     id
   );
+  res.json(db.prepare('SELECT * FROM products WHERE id = ?').get(id));
+});
+
+/*
+ * Taking a product out of the catalogue, and putting it back (2026-10-15, the
+ * client: *"Add an option to disable products and customers so that they
+ * cannot be used in future"*).
+ *
+ * **The only writer of the column**, like the customer's own PATCH beside it:
+ * the PUT above enumerates the columns it sets and `active` is not among them,
+ * so an ordinary save — and, which matters more here, a **spreadsheet
+ * import** — cannot un-retire a product. A price list carries no such column,
+ * and an import that re-enabled half the catalogue would be the `made_here`
+ * and photo rule broken the other way round.
+ *
+ * `product: full`, like editing and deleting: creating a product is open,
+ * because an employee meeting a new one mid-quotation must not have to wait,
+ * but taking one out of a shared catalogue changes what everybody can pick.
+ *
+ * Nothing already on file moves: a line naming this product keeps it, with the
+ * description, price, colour and packing it copied at pick time, and the
+ * product keeps its recipe, its specification and its stock. What stops is
+ * being offered on anything new.
+ */
+productsRouter.patch('/:id/active', requirePermission('product', 'full'), (req, res) => {
+  const id = Number(req.params.id);
+  if (!db.prepare('SELECT 1 FROM products WHERE id = ?').get(id)) {
+    return res.status(404).json({ error: 'Product not found' });
+  }
+  const raw = (req.body ?? {}).active;
+  if (raw !== 0 && raw !== 1 && raw !== '0' && raw !== '1' && raw !== true && raw !== false) {
+    return res.status(400).json({ error: 'Send active: 1 to enable this product or active: 0 to disable it' });
+  }
+  db.prepare('UPDATE products SET active = ? WHERE id = ?').run(Number(raw === true ? 1 : raw === false ? 0 : raw), id);
   res.json(db.prepare('SELECT * FROM products WHERE id = ?').get(id));
 });
 

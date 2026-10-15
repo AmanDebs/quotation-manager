@@ -91,6 +91,13 @@ export default function ProductsPage() {
   const [q, setQ] = useUrlFilter('q');
   const [type, setType] = useUrlFilter('type');
   const [missing, setMissing] = useUrlFilter('missing');
+  /*
+   * Whether products taken out of the catalogue are shown (2026-10-15, the
+   * client: *"Add an option to disable products and customers so that they
+   * cannot be used in future"*). In the URL like every other filter here, so
+   * the view is bookmarkable.
+   */
+  const [showDisabled, setShowDisabled] = useUrlFilter('disabled');
   const [editing, setEditing] = useState<Product | Omit<Product, 'id'> | null>(null);
   const [recipeFor, setRecipeFor] = useState<Product | null>(null);
   const [qcFor, setQcFor] = useState<Product | null>(null);
@@ -100,12 +107,16 @@ export default function ProductsPage() {
   const can = useCan();
   // the import and edit controls
   const isManager = can('product','full');
-  const list = usePagedList<Product, { missing_weight: number }>(
-    ['products', q, type, missing],
-    `/api/products?q=${encodeURIComponent(q)}&type=${encodeURIComponent(type)}&missing=${encodeURIComponent(missing)}`
+  const list = usePagedList<Product, { missing_weight: number; disabled: number }>(
+    ['products', q, type, missing, showDisabled],
+    // `active=1` unless the tick is on. Server-side because this list is
+    // paged: a tick that dropped rows from the page in hand would filter one
+    // page of the catalogue rather than the catalogue.
+    `/api/products?q=${encodeURIComponent(q)}&type=${encodeURIComponent(type)}&missing=${encodeURIComponent(missing)}${showDisabled ? '' : '&active=1'}`
   );
   const products = list.rows;
   const noWeight = list.summary?.missing_weight ?? 0;
+  const offCount = list.summary?.disabled ?? 0;
   const filtered = !!q || !!type || !!missing;
 
   const save = useMutation({
@@ -119,6 +130,20 @@ export default function ProductsPage() {
 
   const remove = useMutation({
     mutationFn: (id: number) => api.del(`/api/products/${id}`),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['products'] }),
+  });
+
+  /*
+   * Taking a product out of the catalogue, and putting it back.
+   *
+   * Its own PATCH, and the only writer of the column: the PUT enumerates what
+   * it sets and a spreadsheet import carries no such column, so neither can
+   * un-retire a product by accident. Invalidated by prefix, so the picker on
+   * every open document form follows immediately.
+   */
+  const setActive = useMutation({
+    mutationFn: ({ id, active }: { id: number; active: number }) =>
+      api.patch<Product>(`/api/products/${id}/active`, { active }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['products'] }),
   });
 
@@ -166,8 +191,20 @@ export default function ProductsPage() {
             {noWeight} with no weight
           </button>
         )}
+        {/* Offered where there is something behind it, or where it is already
+            on: a tick that only ever reveals nothing reads as a fault. */}
+        {(offCount > 0 || showDisabled) && (
+          <label className="flex items-center gap-1.5 text-xs text-slate-500">
+            <input
+              type="checkbox"
+              checked={!!showDisabled}
+              onChange={(e) => setShowDisabled(e.target.checked ? '1' : '')}
+            />
+            Show {offCount} disabled
+          </label>
+        )}
       </div>
-      <ErrorText error={remove.error} />
+      <ErrorText error={remove.error ?? setActive.error} />
       <Card className="overflow-x-auto">
         {products.length === 0 ? (
           <EmptyState message={filtered
@@ -193,13 +230,19 @@ export default function ProductsPage() {
             </thead>
             <tbody>
               {products.map((p) => (
-                <tr key={p.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50">
+                <tr
+                  key={p.id}
+                  className={`border-b border-slate-100 last:border-0 hover:bg-slate-50 ${p.active === 0 ? 'text-slate-400' : ''}`}
+                >
                   <td className="py-2 pr-3">
                     {p.image
                       ? <img src={p.image} alt="" className="h-10 w-10 rounded-lg border border-slate-200 object-cover" />
                       : <div className="h-10 w-10 rounded-lg border border-dashed border-slate-200" />}
                   </td>
-                  <td className="py-2 pr-3 font-medium">{p.name}</td>
+                  <td className="py-2 pr-3 font-medium">
+                    {p.name}
+                    {p.active === 0 && <span className="ml-2 text-xs font-normal">(disabled)</span>}
+                  </td>
                   <td className="py-2 pr-3 text-slate-500">
                     {productTypeLabel(p.product_type)}
                     {p.made_here === 0 && <span className="ml-1 text-xs text-amber-700" title="Bought in and sold on: no work order is raised for it">bought in</span>}
@@ -222,6 +265,18 @@ export default function ProductsPage() {
                         {/* And what makes one good — a different question again. */}
                         <Button variant="ghost" onClick={() => setQcFor(p)}>QC</Button>
                         <Button variant="ghost" onClick={() => { save.reset(); setEditing(p); }}>Edit</Button>
+                        {/* The pickers stop offering it; its recipe, its
+                            specification, its stock and every line already
+                            carrying it are untouched. */}
+                        <Button
+                          variant="ghost"
+                          onClick={() => setActive.mutate({ id: p.id, active: p.active === 0 ? 1 : 0 })}
+                          title={p.active === 0
+                            ? 'Put it back in the catalogue, so it can be picked again'
+                            : 'Stop it being picked on anything new; nothing already on file changes'}
+                        >
+                          {p.active === 0 ? 'Enable' : 'Disable'}
+                        </Button>
                         <Button
                           variant="danger"
                           className="ml-1 border-0"

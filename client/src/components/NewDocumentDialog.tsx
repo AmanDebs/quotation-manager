@@ -42,8 +42,8 @@ export default function NewDocumentDialog({
    * document is *for*. `lib/useCustomerBook.ts` states the split.
    */
   const { data: customers = [] } = useQuery({
-    queryKey: ['customers', 'book', q, type],
-    queryFn: () => api.get<Customer[]>(`/api/customers?all=1&q=${encodeURIComponent(q)}${type ? `&export=${type === 'export' ? 1 : 0}` : ''}`),
+    queryKey: ['customers', 'book', q, type, 'active'],
+    queryFn: () => api.get<Customer[]>(`/api/customers?all=1&active=1&q=${encodeURIComponent(q)}${type ? `&export=${type === 'export' ? 1 : 0}` : ''}`),
     enabled: !!type,
   });
 
@@ -66,9 +66,27 @@ export default function NewDocumentDialog({
    */
   const other = type === 'export' ? 'domestic' : 'export';
   const { data: otherCustomers = [] } = useQuery({
-    queryKey: ['customers', 'book', q, other],
-    queryFn: () => api.get<Customer[]>(`/api/customers?all=1&q=${encodeURIComponent(q)}&export=${other === 'export' ? 1 : 0}`),
+    queryKey: ['customers', 'book', q, other, 'active'],
+    queryFn: () => api.get<Customer[]>(`/api/customers?all=1&active=1&q=${encodeURIComponent(q)}&export=${other === 'export' ? 1 : 0}`),
     enabled: !!type && customers.length === 0,
+  });
+
+  /**
+   * And what has been **disabled**, asked only when neither type has anything
+   * (2026-10-15, with the option to disable a customer).
+   *
+   * `&active=1` above is what makes this screen honest about the new flag: a
+   * customer taken out of use is not offered, which is the whole point. But a
+   * list that then says only *"no customers found"* sends somebody to add one
+   * — and following that creates a second record for a buyer already on file,
+   * which is the expensive mistake on this book and the reason the Type
+   * sentence above it exists at all. So the disabled rows are asked for by
+   * name, either Type, and reported in the same shape.
+   */
+  const { data: disabled = [] } = useQuery({
+    queryKey: ['customers', 'book', q, 'disabled'],
+    queryFn: () => api.get<Customer[]>(`/api/customers?all=1&active=0&q=${encodeURIComponent(q)}`),
+    enabled: !!type && customers.length === 0 && otherCustomers.length === 0,
   });
 
   /*
@@ -147,6 +165,32 @@ export default function NewDocumentDialog({
                     className="mt-3 inline-block text-xs text-brand-600 underline underline-offset-2 hover:text-brand-700"
                   >
                     Open the {other} customers
+                  </Link>
+                </div>
+              ) : disabled.length > 0 ? (
+                /*
+                 * Most specific last of the three, and the one that otherwise
+                 * reads as the customer having vanished: they are on file,
+                 * somebody took them out of use, and one click puts them back.
+                 */
+                <div className="px-4 py-8 text-center text-sm text-slate-500">
+                  <p>
+                    No {type} customers{q ? ' match that search' : ''} — but{' '}
+                    <span className="font-medium text-slate-700">
+                      {disabled.length} {disabled.length === 1 ? 'has' : 'have'} been disabled
+                    </span>
+                    .
+                  </p>
+                  <p className="mt-1 text-xs">
+                    A disabled customer cannot be put on a new document. Re-enable them on the Customers page
+                    rather than adding a second record for a buyer already on file.
+                  </p>
+                  <Link
+                    to={`/customers?disabled=1${q ? `&q=${encodeURIComponent(q)}` : ''}`}
+                    onClick={onClose}
+                    className="mt-3 inline-block text-xs text-brand-600 underline underline-offset-2 hover:text-brand-700"
+                  >
+                    Open the disabled customers
                   </Link>
                 </div>
               ) : (

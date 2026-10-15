@@ -212,20 +212,50 @@ export default function LineItemsEditor({
    * rows are indistinguishable. The HSN rides along as a keyword, since it is
    * the other thing people look a product up by.
    */
-  const productOptions = useMemo<SearchOption[]>(() => [
-    { value: '', label: '— custom —', sticky: true },
-    { value: CHARGE, label: '— charge (freight, etc.) —', sticky: true },
-    ...products.map((p) => ({
-      value: String(p.id),
-      label: p.name,
-      hint: [p.color, p.pcs_per_pack ? `${p.pcs_per_pack}/box` : '', p.weight_grams ? `${p.weight_grams} g` : '']
-        .filter(Boolean).join(' · '),
-      // The type is matched but never drawn, like the HSN: nobody reads
-      // "Preform" off a row they already recognise, but plenty will type it to
-      // see the preforms.
-      keywords: [p.hsn_code, productTypeLabel(p.product_type)].filter(Boolean).join(' '),
-    })),
-  ], [products]);
+  /*
+   * Which products this document already names, as a stable string.
+   *
+   * It exists so the memo below can depend on it rather than on `items`, which
+   * changes on every keystroke — rebuilding a thousand options each time
+   * somebody types a quantity.
+   */
+  const namedIds = useMemo(
+    () => [...new Set(items.map((it) => it.product_id).filter((v): v is number => !!v))].sort().join(','),
+    [items]
+  );
+
+  const productOptions = useMemo<SearchOption[]>(() => {
+    /*
+     * A **disabled** product is not offered, except one a line on this
+     * document already carries (2026-10-15, the client: *"Add an option to
+     * disable products and customers so that they cannot be used in future"*).
+     *
+     * Both halves are needed. Dropped outright, a saved line naming a since-
+     * retired product would show an empty picker box with its placeholder in
+     * it — the line would read as a custom line although it still carries the
+     * product id — and the fix would look like re-picking something the
+     * catalogue no longer offers. Offered freely, the whole point is lost. So
+     * it stays listed where it is already in use and says *(disabled)*, which
+     * is the `order.batches` call about an uncertified lot: a picker that
+     * silently omits the row somebody is looking for reads as a fault, where
+     * one saying why says what to do.
+     */
+    const named = new Set(namedIds ? namedIds.split(',').map(Number) : []);
+    return [
+      { value: '', label: '— custom —', sticky: true },
+      { value: CHARGE, label: '— charge (freight, etc.) —', sticky: true },
+      ...products.filter((p) => p.active !== 0 || named.has(p.id)).map((p) => ({
+        value: String(p.id),
+        label: p.active === 0 ? `${p.name} (disabled)` : p.name,
+        hint: [p.color, p.pcs_per_pack ? `${p.pcs_per_pack}/box` : '', p.weight_grams ? `${p.weight_grams} g` : '']
+          .filter(Boolean).join(' · '),
+        // The type is matched but never drawn, like the HSN: nobody reads
+        // "Preform" off a row they already recognise, but plenty will type it to
+        // see the preforms.
+        keywords: [p.hsn_code, productTypeLabel(p.product_type)].filter(Boolean).join(' '),
+      })),
+    ];
+  }, [products, namedIds]);
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
 
   const hidden = new Set([...(config.hidden ?? []), ...(omit ?? [])]);

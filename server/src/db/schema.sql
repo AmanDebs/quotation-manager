@@ -213,6 +213,13 @@ CREATE TABLE IF NOT EXISTS customers (
   -- Which group entity normally invoices this customer; NULL = the default.
   company_id INTEGER REFERENCES companies(id),
   is_export INTEGER NOT NULL DEFAULT 0,
+  -- In use, or taken out of use. 0 means no **new** document may name them:
+  -- the pickers stop offering them and `raiseForError` refuses a create,
+  -- while every quotation, order, invoice and payment already on file reads
+  -- exactly as it did. Retiring rather than deleting is the normal way out
+  -- here, the rule routes/masters.ts states -- a customer with any history
+  -- cannot be deleted at all, so before this there was no way out.
+  active INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -245,6 +252,11 @@ CREATE TABLE IF NOT EXISTS products (
   -- neither applies -- there is no job to inspect. Defaults to 1 because that
   -- is what every product on file was treated as before the flag existed.
   made_here INTEGER NOT NULL DEFAULT 1,
+  -- In the catalogue, or taken out of it. 0 means the line-item and purchase
+  -- pickers stop offering it, so it cannot be put on anything new; every line
+  -- already carrying it is untouched, and it keeps its recipe, its
+  -- specification and its stock. See customers.active beside it.
+  active INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 

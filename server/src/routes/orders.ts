@@ -12,7 +12,7 @@ import { withStock, orderLines, productDemand, countOrderLines, orderSearchClaus
   type Filters, type OrderLine, type ProductDemand, statusClause } from '../services/orderLines.js';
 import { buildXlsx, attachmentName, type Column } from '../services/xlsx.js';
 import { allows, requirePermission, type AuthedRequest } from '../middleware/auth.js';
-import { scopeClause, canAccessCustomer, linkError, customerChangeError, canRaiseFor } from '../middleware/scope.js';
+import { scopeClause, canAccessCustomer, linkError, customerChangeError, raiseForError } from '../middleware/scope.js';
 import { syncOrderStatus } from '../services/orderStatus.js';
 import { returnedQtyByLine } from '../services/creditNotes.js';
 import { syncOrderJobs } from '../services/orderJobs.js';
@@ -881,9 +881,11 @@ ordersRouter.post('/', (req: AuthedRequest, res) => {
   const body = req.body ?? {};
   if (!body.customer_id) return res.status(400).json({ error: 'Customer is required' });
   // Any customer in the book may be quoted, ordered or invoiced for — see
-  // `canRaiseFor`. Ownership decides whose documents you *read*, and raising
-  // one puts that customer in your book, so you keep what you raised.
-  if (!canRaiseFor(req, Number(body.customer_id))) return res.status(400).json({ error: 'Customer not found' });
+  // `raiseForError`. Ownership decides whose documents you *read*, and raising
+  // one puts that customer in your book, so you keep what you raised. A
+  // **disabled** customer is refused there, in its own words.
+  const noCustomer = raiseForError(req, Number(body.customer_id));
+  if (noCustomer) return res.status(400).json({ error: noCustomer });
   const h = headerValues(body);
   const link = linkError(req, 'quotations', h.quotation_id, h.customer_id, 'Quotation');
   if (link) return res.status(404).json({ error: link });

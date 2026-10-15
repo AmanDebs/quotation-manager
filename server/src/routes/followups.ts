@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { db } from '../db/connection.js';
 import type { AuthedRequest } from '../middleware/auth.js';
-import { scopeClause, canAccessCustomer, canRaiseFor } from '../middleware/scope.js';
+import { scopeClause, canAccessCustomer, raiseForError } from '../middleware/scope.js';
 import { listBody } from '../services/pagination.js';
 
 export const followupsRouter = Router();
@@ -58,9 +58,10 @@ followupsRouter.post('/', (req: AuthedRequest, res) => {
   // Open to the whole customer book (2026-10-07), like every other thing raised
   // for a customer — and a chase carries its own `created_by`, so the customer
   // it names is in the chaser's book and the reminder reaches them.
-  if (body.customer_id != null && !canRaiseFor(req, Number(body.customer_id))) {
-    return res.status(404).json({ error: 'Customer not found' });
-  }
+  const noCustomer = body.customer_id != null ? raiseForError(req, Number(body.customer_id)) : null;
+  // 404 rather than 400 here, as it always was: a chase names a customer the
+  // way a detail route does, and an out-of-scope id must not be probeable.
+  if (noCustomer) return res.status(404).json({ error: noCustomer });
   const info = db.prepare(
     `INSERT INTO followups (doc_type, doc_id, customer_id, due_date, note, created_by)
      VALUES (?, ?, ?, ?, ?, ?)`

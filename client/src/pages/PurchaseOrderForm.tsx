@@ -66,7 +66,18 @@ export default function PurchaseOrderFormPage() {
     enabled: !isNew,
   });
   const { data: suppliers = [] } = useQuery({ queryKey: ['master', 'suppliers', false], queryFn: () => api.get<Supplier[]>('/api/suppliers') });
-  const { data: materials = [] } = useQuery({ queryKey: ['master', 'materials', false], queryFn: () => api.get<Material[]>('/api/materials') });
+  /*
+   * The whole materials master, retired rows included — `?all=1`, and the
+   * picker below drops them again unless a line already names one.
+   *
+   * It asked for the default list until 2026-10-15, which was the disabled-
+   * product bug one master over and was already there: retiring a material has
+   * been the normal way out since `routes/masters.ts` was written, and a saved
+   * purchase order line naming one drew an empty picker box with its
+   * placeholder in it. Found while building the product half rather than
+   * reported.
+   */
+  const { data: materials = [] } = useQuery({ queryKey: ['master', 'materials', true], queryFn: () => api.get<Material[]>('/api/materials?all=1') });
   const { data: locations = [] } = useQuery({ queryKey: ['master', 'locations', false], queryFn: () => api.get<Location[]>('/api/locations') });
   // Aglo buys finished and semi-finished goods in as well as resin, so the
   // catalogue is on the picker beside the materials.
@@ -183,21 +194,46 @@ export default function PurchaseOrderFormPage() {
    * which one first — the question is "what am I buying", not "which table is
    * it in". Materials lead, because most purchase orders are for resin.
    */
-  const buyOptions = useMemo<SearchOption[]>(() => [
-    { value: '', label: '— custom —', sticky: true },
-    ...materials.map((m) => ({
-      value: `m:${m.id}`,
-      label: m.name,
-      hint: ['Material', m.category, m.unit].filter(Boolean).join(' · '),
-      keywords: `material ${m.category ?? ''} ${m.hsn_code ?? ''}`,
-    })),
-    ...products.map((p) => ({
-      value: `p:${p.id}`,
-      label: p.name,
-      hint: ['Product', productTypeLabel(p.product_type), p.unit].filter(Boolean).join(' · '),
-      keywords: `product ${productTypeLabel(p.product_type)} ${p.hsn_code ?? ''}`,
-    })),
-  ], [materials, products]);
+  /*
+   * What this order already names, so the picker can keep offering it.
+   *
+   * A row **taken out of use** — a disabled product, a retired material — is
+   * not offered, except where a line here already carries it: dropped
+   * outright, that line's picker would show its placeholder and read as a
+   * custom line although it still carries the id. The same rule as the
+   * line-item editor on the selling side, which states it in full.
+   *
+   * Keyed off a stable string rather than `draft.items`, which changes on
+   * every keystroke.
+   */
+  const named = useMemo(() => {
+    const ids = draft.items.flatMap((it) => [
+      it.material_id ? `m:${it.material_id}` : '',
+      it.product_id ? `p:${it.product_id}` : '',
+    ].filter(Boolean));
+    return [...new Set(ids)].sort().join('|');
+  }, [draft.items]);
+
+  const buyOptions = useMemo<SearchOption[]>(() => {
+    const keep = new Set(named ? named.split('|') : []);
+    const live = (value: string, active?: number) => active !== 0 || keep.has(value);
+    const retired = (label: string, active?: number) => (active === 0 ? `${label} (disabled)` : label);
+    return [
+      { value: '', label: '— custom —', sticky: true },
+      ...materials.filter((m) => live(`m:${m.id}`, m.active)).map((m) => ({
+        value: `m:${m.id}`,
+        label: retired(m.name, m.active),
+        hint: ['Material', m.category, m.unit].filter(Boolean).join(' · '),
+        keywords: `material ${m.category ?? ''} ${m.hsn_code ?? ''}`,
+      })),
+      ...products.filter((p) => live(`p:${p.id}`, p.active)).map((p) => ({
+        value: `p:${p.id}`,
+        label: retired(p.name, p.active),
+        hint: ['Product', productTypeLabel(p.product_type), p.unit].filter(Boolean).join(' · '),
+        keywords: `product ${productTypeLabel(p.product_type)} ${p.hsn_code ?? ''}`,
+      })),
+    ];
+  }, [materials, products, named]);
 
   /** Picking either master fills the unit from **that master's** own column. */
   const pickItem = (i: number, value: string) => {

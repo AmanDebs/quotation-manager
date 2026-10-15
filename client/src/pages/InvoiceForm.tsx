@@ -7,7 +7,9 @@ import type { Invoice, LineItem, TaxType, Settings, ColumnConfig, PackingListIte
 import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, StatusBadge, SettledDocumentType, FIELD_GRID, TH_CLASS } from '../components/ui';
 import { PdfLink } from '../components/PdfLink';
 import CompanySelect from '../components/CompanySelect';
-import { DocNumber, IncoTermsInput, PaymentTermsInput, PortOfLoadingInput, HeaderCharges, ShipToFields, DeskPersonInput } from '../components/DocFields';
+import {
+  CustomerSelect, DocNumber, IncoTermsInput, PaymentTermsInput, PortOfLoadingInput, HeaderCharges, ShipToFields, DeskPersonInput,
+} from '../components/DocFields';
 import LineItemsEditor from '../components/LineItemsEditor';
 import FollowupButton from '../components/FollowupButton';
 import PaymentsCard from '../components/PaymentsCard';
@@ -459,10 +461,7 @@ export default function InvoiceFormPage() {
               </Field>
             )}
             <Field label="Buyer (Customer) *">
-              <Select value={draft.customer_id} onChange={(e) => set({ customer_id: e.target.value ? Number(e.target.value) : '' })}>
-                <option value="">Select customer…</option>
-                {customers.map((c) => <option key={c.id} value={c.id}>{c.name} ({c.country})</option>)}
-              </Select>
+              <CustomerSelect customers={customers} value={draft.customer_id} onChange={(id) => set({ customer_id: id })} />
             </Field>
             <Field label="Issued By">
               <CompanySelect

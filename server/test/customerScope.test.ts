@@ -5,7 +5,7 @@ import { db } from '../src/db/connection.js';
 import type { AuthedRequest } from '../src/middleware/auth.js';
 import type { TeamRole } from '../src/services/permissions.js';
 import {
-  visibleCustomerIds, canAccessCustomer, canRaiseFor, scopeClause, customerChangeError,
+  visibleCustomerIds, canAccessCustomer, raiseForError, scopeClause, customerChangeError,
 } from '../src/middleware/scope.js';
 import { makeCustomer, makeQuotation, makeUser } from './helpers/factory.js';
 
@@ -103,17 +103,17 @@ describe('raising a document is a different question from reading one', () => {
   test('any customer on file may be raised for', () => {
     const c = makeCustomer(undefined, THEIRS);
     assert.equal(canAccessCustomer(as(MINE), c), false, 'their documents are not yours');
-    assert.equal(canRaiseFor(as(MINE), c), true, 'but you may quote them');
+    assert.equal(raiseForError(as(MINE), c), null, 'but you may quote them');
   });
 
   test('a customer that does not exist is refused by name rather than by SQLite', () => {
-    assert.equal(canRaiseFor(as(MINE), 999999), false);
-    assert.equal(canRaiseFor(as(MINE), null), false);
+    assert.equal(raiseForError(as(MINE), 999999), 'Customer not found');
+    assert.equal(raiseForError(as(MINE), null), 'Customer not found');
   });
 
   test('and no session raises nothing', () => {
     const c = makeCustomer(undefined, null);
-    assert.equal(canRaiseFor({} as AuthedRequest, c), false);
+    assert.equal(raiseForError({} as AuthedRequest, c), 'Customer not found');
   });
 });
 

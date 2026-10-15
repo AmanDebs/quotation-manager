@@ -3,7 +3,7 @@ import { db, transaction } from '../db/connection.js';
 import { quotationTypeChangeError, nextNumber } from '../services/numbering.js';
 import { computeTotals, type LineItemInput } from '../services/totals.js';
 import type { AuthedRequest } from '../middleware/auth.js';
-import { scopeClause, canAccessCustomer, customerChangeError, canRaiseFor } from '../middleware/scope.js';
+import { scopeClause, canAccessCustomer, customerChangeError, raiseForError } from '../middleware/scope.js';
 import { submit, decide, resetApprovalOnEdit, blockUnapprovedTransition, exemptApprovalError , mayApprove } from '../services/approval.js';
 import { incompleteError, checkDocument } from '../services/documentChecks.js';
 import { resolveCompanyId } from '../services/companies.js';
@@ -203,9 +203,11 @@ quotationsRouter.post('/', (req: AuthedRequest, res) => {
   const body = req.body ?? {};
   if (!body.customer_id) return res.status(400).json({ error: 'Customer is required' });
   // Any customer in the book may be quoted, ordered or invoiced for — see
-  // `canRaiseFor`. Ownership decides whose documents you *read*, and raising
-  // one puts that customer in your book, so you keep what you raised.
-  if (!canRaiseFor(req, Number(body.customer_id))) return res.status(400).json({ error: 'Customer not found' });
+  // `raiseForError`. Ownership decides whose documents you *read*, and raising
+  // one puts that customer in your book, so you keep what you raised. A
+  // **disabled** customer is refused there, in its own words.
+  const noCustomer = raiseForError(req, Number(body.customer_id));
+  if (noCustomer) return res.status(400).json({ error: noCustomer });
   const taxType = (body.tax_type ?? 'none') as 'none' | 'cgst_sgst' | 'igst';
   const isExport = body.is_export ? 1 : 0;
   // Which entity is selling. Fixed here and never changed afterwards: the

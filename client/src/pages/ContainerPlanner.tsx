@@ -30,7 +30,9 @@ export default function ContainerPlannerPage() {
   });
 
   const loadable = useMemo(
-    () => products.filter((p) => p.qty_20ft != null || p.qty_40ft != null),
+    // A disabled product is left out: this screen plans what to load next, and
+    // nothing here is a record that could lose its product by being filtered.
+    () => products.filter((p) => p.active !== 0 && (p.qty_20ft != null || p.qty_40ft != null)),
     [products]
   );
 

@@ -6,7 +6,9 @@ import type { Order, OrderItem, TaxType, ColumnConfig } from '../types';
 import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, Tabs, SettledDocumentType, FIELD_GRID, NOTES_ROWS } from '../components/ui';
 import { PdfLink } from '../components/PdfLink';
 import CompanySelect from '../components/CompanySelect';
-import { DocNumber, IncoTermsInput, PaymentTermsInput, ContainersInput, HeaderCharges, DeskPersonInput } from '../components/DocFields';
+import {
+  CustomerSelect, DocNumber, IncoTermsInput, PaymentTermsInput, ContainersInput, HeaderCharges, DeskPersonInput,
+} from '../components/DocFields';
 import DispatchTab from '../components/DispatchTab';
 import LineItemsEditor from '../components/LineItemsEditor';
 import ColumnsControl, { newColumnConfig, hasColumnPrefs, orderColumns, ORDER_FORCED } from '../components/ColumnsControl';
@@ -343,10 +345,7 @@ export default function OrderFormPage() {
               </Field>
             )}
             <Field label="Customer *">
-              <Select value={draft.customer_id} onChange={(e) => onCustomerChange(e.target.value ? Number(e.target.value) : '')}>
-                <option value="">Select customer…</option>
-                {customers.map((c) => <option key={c.id} value={c.id}>{c.name} ({c.country})</option>)}
-              </Select>
+              <CustomerSelect customers={customers} value={draft.customer_id} onChange={onCustomerChange} />
             </Field>
             <Field label="Issued By">
               <CompanySelect

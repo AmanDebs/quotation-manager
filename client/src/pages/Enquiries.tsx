@@ -10,6 +10,7 @@ import { fmtDate, today } from '../lib/format';
 import { useUrlFilter } from '../lib/useUrlFilter';
 import { usePagedList, PAGE_SIZE } from '../lib/usePagedList';
 import { useCustomerBook } from '../lib/useCustomerBook';
+import { CustomerSelect } from '../components/DocFields';
 
 /**
  * The front of the funnel: somebody asked before there was anything to quote.
@@ -69,7 +70,11 @@ export default function EnquiriesPage() {
 
   const openNew = () => {
     save.reset();
-    setEditing({ customer_id: customers[0]?.id, date: today(), notes: '', status: 'open' });
+    // The first customer **in use**, not simply the first: a dialog opening on
+    // a disabled one would offer a customer the save then refuses, which is the
+    // fallback the person picker on the Permissions page already corrects for
+    // its own first row.
+    setEditing({ customer_id: customers.find((c) => c.active !== 0)?.id, date: today(), notes: '', status: 'open' });
   };
 
   // Shown under the customer picker while logging one, so a missing phone
@@ -206,12 +211,11 @@ export default function EnquiriesPage() {
         >
           <div className="space-y-3">
             <Field label="Customer">
-              <Select
+              <CustomerSelect
+                customers={customers}
                 value={editing.customer_id ?? ''}
-                onChange={(e) => setEditing({ ...editing, customer_id: Number(e.target.value) })}
-              >
-                {customers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </Select>
+                onChange={(id) => setEditing({ ...editing, customer_id: id === '' ? undefined : id })}
+              />
             </Field>
             {editingCustomer && (
               <div className="-mt-1 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600 ring-1 ring-inset ring-slate-200">

@@ -4,7 +4,7 @@ import { STATUS_SQL } from '../services/proformaStatus.js';
 import { nextNumber, exportChangeError } from '../services/numbering.js';
 import { computeTotals, round2, type LineItemInput } from '../services/totals.js';
 import type { AuthedRequest } from '../middleware/auth.js';
-import { scopeClause, canAccessCustomer, linkError, customerChangeError, canRaiseFor } from '../middleware/scope.js';
+import { scopeClause, canAccessCustomer, linkError, customerChangeError, raiseForError } from '../middleware/scope.js';
 import { resolveCompanyId, foreignBankError } from '../services/companies.js';
 import { submit, decide, resetApprovalOnEdit, blockUnapprovedTransition, exemptApprovalError, blockUnapprovedConversion , mayApprove } from '../services/approval.js';
 import { incompleteError, checkDocument } from '../services/documentChecks.js';
@@ -434,9 +434,11 @@ proformasRouter.post('/', (req: AuthedRequest, res) => {
   const body = req.body ?? {};
   if (!body.customer_id) return res.status(400).json({ error: 'Customer is required' });
   // Any customer in the book may be quoted, ordered or invoiced for — see
-  // `canRaiseFor`. Ownership decides whose documents you *read*, and raising
-  // one puts that customer in your book, so you keep what you raised.
-  if (!canRaiseFor(req, Number(body.customer_id))) return res.status(400).json({ error: 'Customer not found' });
+  // `raiseForError`. Ownership decides whose documents you *read*, and raising
+  // one puts that customer in your book, so you keep what you raised. A
+  // **disabled** customer is refused there, in its own words.
+  const noCustomer = raiseForError(req, Number(body.customer_id));
+  if (noCustomer) return res.status(400).json({ error: noCustomer });
   const h = headerValues(body);
   // An order_id pointing at another owner's order would fold this proforma's
   // invoices into that order's dispatch figures — checked, like the customer.

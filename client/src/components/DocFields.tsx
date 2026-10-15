@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { LineItem } from '../types';
-import { Button, Input, Textarea, Field, StaticValue, useReadOnlyFields } from './ui';
+import { Button, Input, Select, Textarea, Field, StaticValue, useReadOnlyFields } from './ui';
 import { fmtMoney } from '../lib/format';
 
 /**
@@ -751,5 +751,49 @@ export function ShipToFields({
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * Who the document is **for**.
+ *
+ * One control rather than six copies of `customers.map(...)`, which is what it
+ * was until 2026-10-15 — and the reason it had to become one is the rule
+ * below, which has to be the same on all six or the forms would come to
+ * disagree about which customers can be picked.
+ *
+ * **A disabled customer is not offered, except the one this document already
+ * names.** Those are the two halves of what the client asked for: a customer
+ * taken out of use cannot be put on anything new, while a document that
+ * already names one still opens showing who it is for and still saves — the
+ * `unitOptions` rule, that a value a saved row holds stays on it even after
+ * the list stops offering it. Filtered out instead, the select would fall back
+ * to its placeholder, which reads as a document that has lost its customer;
+ * the server agrees, `customerChangeError` refusing a *move* onto a disabled
+ * customer and never an unchanged save.
+ *
+ * It is marked rather than silently included, so somebody wondering why that
+ * name is no longer in the list has the answer on the row — the `order.batches`
+ * call about an uncertified lot, which is drawn disabled with the reason rather
+ * than left out.
+ */
+export function CustomerSelect({ value, onChange, disabled, customers, placeholder = 'Select customer…' }: {
+  value: number | '';
+  onChange: (id: number | '') => void;
+  disabled?: boolean;
+  /** The whole book, including disabled rows — `lib/useCustomerBook.ts`. */
+  customers: { id: number; name: string; country: string; active?: number }[];
+  placeholder?: string;
+}) {
+  const offered = customers.filter((c) => c.active !== 0 || Number(c.id) === Number(value));
+  return (
+    <Select value={value} disabled={disabled} onChange={(e) => onChange(e.target.value ? Number(e.target.value) : '')}>
+      <option value="">{placeholder}</option>
+      {offered.map((c) => (
+        <option key={c.id} value={c.id}>
+          {c.name} ({c.country}){c.active === 0 ? ' — disabled' : ''}
+        </option>
+      ))}
+    </Select>
   );
 }
