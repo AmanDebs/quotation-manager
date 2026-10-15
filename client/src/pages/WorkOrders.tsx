@@ -124,9 +124,29 @@ type DatePatch = Partial<Record<JobDateField, string>>;
  * background: the column reads as one run of dates, and the only thing the
  * border says is *this one you can change*.
  */
-const DATE_BOX = 'inline-flex h-[30px] w-[7.5rem] items-center px-2.5 tabular-nums';
+/*
+ * 108px, and the figure is measured rather than chosen (2026-10-15, the client:
+ * *"Reduce the width of these columns in work order"*). It was 120.
+ *
+ * **What has to fit is the date input, not the date.** The settled text
+ * `13/10/2026` needs 85px, but the box is the same width as the box the input
+ * occupies — which is the whole point of `DATE_BOX`, so a column does not jump
+ * as a cell opens — and a native `<input type="date">` has to hold
+ * `dd-mm-yyyy` *and* Chrome's own calendar glyph. Rendered at 88, 96, 104, 112
+ * and 120 and looked at: **at 88 the year is cut off and at 96 its last digit
+ * is**, 104 reads in full with the glyph clear of it, and 112 has slack. 108 is
+ * the floor plus four pixels, which is what the focus ring and a slightly
+ * different rendering want.
+ *
+ * Four columns at 12px each is 48 of the 556 these four were taking — a third
+ * of the whole table for four dates. The table is `w-full`, so at a width
+ * where it already fits the card that room goes to Item and Customer, which
+ * are the columns that were being clipped; where it does not, the card scrolls
+ * less.
+ */
+const DATE_BOX = 'inline-flex h-[30px] w-[6.75rem] items-center px-2.5 tabular-nums';
 /** The native picker glyph at full strength is the loudest thing in the row. */
-const DATE_INPUT = 'w-[7.5rem] tabular-nums [&::-webkit-calendar-picker-indicator]:opacity-40 [&::-webkit-calendar-picker-indicator]:hover:opacity-70';
+const DATE_INPUT = 'w-[6.75rem] tabular-nums [&::-webkit-calendar-picker-indicator]:opacity-40 [&::-webkit-calendar-picker-indicator]:hover:opacity-70';
 /** A group of two date columns opens on a rule; the pair inside shares it. */
 const GROUP_EDGE = 'border-l border-slate-200';
 
@@ -551,16 +571,16 @@ export default function WorkOrdersPage() {
                 centred over its pair floats away from the column it names.
               */}
               <tr className={`${CAPTION_CLASS} border-b border-slate-200 text-left font-normal text-slate-400`}>
-                <th className={`${GROUP_EDGE} whitespace-nowrap pb-2 pl-5 pr-3`}>
+                <th className={`${GROUP_EDGE} whitespace-nowrap pb-2 pl-5 pr-2`}>
                   <span className="flex items-center gap-0.5">Start{filterFor('planned_start')}</span>
                 </th>
-                <th className="whitespace-nowrap pb-2 pl-2.5 pr-3">
+                <th className="whitespace-nowrap pb-2 pl-2.5 pr-2">
                   <span className="flex items-center gap-0.5">Finish{filterFor('planned_end')}</span>
                 </th>
-                <th className={`${GROUP_EDGE} whitespace-nowrap pb-2 pl-5 pr-3`}>
+                <th className={`${GROUP_EDGE} whitespace-nowrap pb-2 pl-5 pr-2`}>
                   <span className="flex items-center gap-0.5">Start{filterFor('revised_start')}</span>
                 </th>
-                <th className="whitespace-nowrap pb-2 pl-2.5 pr-3">
+                <th className="whitespace-nowrap pb-2 pl-2.5 pr-2">
                   <span className="flex items-center gap-0.5">Finish{filterFor('revised_end')}</span>
                 </th>
               </tr>
@@ -754,7 +774,7 @@ export default function WorkOrdersPage() {
                       return (
                         <td
                           key={field}
-                          className={`whitespace-nowrap py-1.5 pr-3 text-xs ${
+                          className={`whitespace-nowrap py-1.5 pr-2 text-xs ${
                             flag ? 'font-medium text-red-600'
                             // The date that **stands** is the one being asked about, which is
                             // not the same cell as the one that takes the answer: a job with no
