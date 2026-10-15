@@ -8,6 +8,7 @@ import { useCompanies } from '../components/CompanySelect';
 import { ColumnFilter, FilteredByStrip } from '../components/ColumnFilter';
 import { useColumnFilters, type ColumnFilterSpec } from '../lib/useColumnFilters';
 import PlanJobsModal from '../components/PlanJobsModal';
+import { LogOutput } from '../components/LogOutputModal';
 import { useCan } from '../App';
 import { fmtQty, fmtDate } from '../lib/format';
 import { useUrlFilter } from '../lib/useUrlFilter';
@@ -280,6 +281,29 @@ export default function WorkOrdersPage() {
   const queryClient = useQueryClient();
   const mayPlan = can('work_order', 'full');
   const plannable = (w: WorkOrder) => !['done', 'cancelled'].includes(w.status);
+  /*
+   * Booking a shift from the list (2026-10-15, the client: *"Add a option to
+   * log output for production"*).
+   *
+   * It has always been possible on the job's own page, which means finding the
+   * job here, opening it, booking, and coming back — and this is the screen the
+   * floor has open, for the reason the date grid was put on it: the list is
+   * where the day's work is, and an action that belongs to a row belongs on the
+   * row. The **same `LogOutput`** the job page opens, so there is one form that
+   * knows what a shift is rather than two that will come to differ.
+   *
+   * `output: full`, which is its own function and not `work_order` — the floor
+   * books what it made without being able to re-plan the job, which is exactly
+   * the split the matrix draws. A **cancelled** job is not offered it: its
+   * output counts towards nothing anywhere (`LIVE_OK`, the roll-ups and the
+   * order ladder all skip it), so booking against one would be recording a
+   * figure that then appears in no total. A **completed** job *is* offered it,
+   * unlike the date cells: an over-run is ordinary and the column beside it
+   * already colours *% over*.
+   */
+  const mayLog = can('output', 'full');
+  const loggable = (w: WorkOrder) => mayLog && w.status !== 'cancelled';
+  const [logging, setLogging] = useState<WorkOrder | null>(null);
   const toggle = (id: number, on: boolean) => setTicked((t) => {
     const next = new Set(t);
     if (on) next.add(id); else next.delete(id);
@@ -496,6 +520,25 @@ export default function WorkOrdersPage() {
           jobs={jobs.filter((w) => ticked.has(w.id))}
           onClose={() => setPlanning(false)}
           onPlanned={() => { setPlanning(false); setTicked(new Set()); }}
+        />
+      )}
+      {/*
+        * Booking a shift moves the row's Made figure, the summary over the
+        * table and — through `syncJobStatus` — the job's own status pill, so
+        * the list is invalidated by prefix rather than the one row patched.
+        * The modal stays open afterwards, which is deliberate: a shift book is
+        * two or three entries more often than one, and it shows what has been
+        * booked as it goes.
+        *
+        * Pending date edits are untouched by the refetch — they are keyed by
+        * job id in state of their own, which is what lets them survive paging
+        * and filtering too.
+        */}
+      {logging && (
+        <LogOutput
+          job={logging}
+          onClose={() => setLogging(null)}
+          onSaved={() => queryClient.invalidateQueries({ queryKey: ['work-orders'] })}
         />
       )}
 
@@ -808,16 +851,47 @@ export default function WorkOrdersPage() {
                     {/* The percentage sits beside the figure rather than under
                         it: stacked, it made every one of eighty rows two lines
                         tall to say something one word wide. */}
+                    {/*
+                      * The figure, and the control that moves it. Putting the
+                      * button *on* the made figure rather than in a column of
+                      * its own costs no width on a table that has eleven — and
+                      * it is the date cells' own shape one column over: the
+                      * cell reads as its value and answers the pointer where
+                      * there is something to do.
+                      */}
                     <td className="whitespace-nowrap py-1.5 pr-3 text-right tabular-nums">
-                      {fmtQty(w.progress?.produced ?? 0)}
-                      {w.qty_planned > 0 && (() => {
-                        const pct = Math.round(((w.progress?.produced ?? 0) / w.qty_planned) * 100);
-                        // Past the plan is a fact worth a colour: the figure is
-                        // right, and it is the plan that is now wrong.
+                      {(() => {
+                        const made = fmtQty(w.progress?.produced ?? 0);
+                        const pct = w.qty_planned > 0
+                          ? Math.round(((w.progress?.produced ?? 0) / w.qty_planned) * 100)
+                          : null;
+                        const figure = (
+                          <>
+                            {made}
+                            {pct != null && (
+                              // Past the plan is a fact worth a colour: the figure
+                              // is right, and it is the plan that is now wrong.
+                              <span className={`ml-1.5 text-xs ${pct > 100 ? 'font-medium text-amber-700' : 'text-slate-400'}`} title={pct > 100 ? 'More made than planned — the plan is behind the floor' : undefined}>
+                                {pct}%{pct > 100 ? ' over' : ''}
+                              </span>
+                            )}
+                          </>
+                        );
+                        if (!loggable(w)) return figure;
                         return (
-                          <span className={`ml-1.5 text-xs ${pct > 100 ? 'font-medium text-amber-700' : 'text-slate-400'}`} title={pct > 100 ? 'More made than planned — the plan is behind the floor' : undefined}>
-                            {pct}%{pct > 100 ? ' over' : ''}
-                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setLogging(w)}
+                            title={`Book a shift against ${w.number}`}
+                            className="group/log -mr-1 inline-flex items-center gap-1 rounded px-1 transition-colors hover:bg-brand-50 hover:text-brand-700"
+                          >
+                            {figure}
+                            {/* Faint until the row is under the pointer: a
+                                plus on all eighty rows at full strength is the
+                                loudest thing on the page, and invisible until
+                                hover is a control nobody finds. */}
+                            <span aria-hidden className="text-xs text-slate-300 group-hover/log:text-brand-600">+</span>
+                          </button>
                         );
                       })()}
                     </td>
