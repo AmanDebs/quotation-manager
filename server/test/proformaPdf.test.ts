@@ -145,3 +145,34 @@ describe('the advance on a proforma', () => {
     assert.ok(cellText(grand[grand.length - 1]).includes('91,420'), 'the grand total is not in the last column');
   });
 });
+
+/**
+ * The delivery basis on the band that closes the document (2026-10-16, the
+ * client with a proforma in front of them: *"FOB – still taking destination
+ * port name (linked with port of discharge), it should not take"*).
+ *
+ * `incoBasis` owns the rule and `incoBasis.test.ts` covers its cases; what
+ * these two assert is that this builder asks it — which is the half that was
+ * wrong, the composition having been written out here and in three other
+ * places.
+ */
+describe('the delivery basis on the total band', () => {
+  const withPorts = (inco: string, loading: string, discharge: string): string[] => {
+    const pi = proformaWith(91420, 0);
+    db.prepare('UPDATE proforma_invoices SET inco_terms = ?, port_of_loading = ?, port_of_discharge = ? WHERE id = ?')
+      .run(inco, loading, discharge, pi);
+    return textsOf(buildProformaPdf(pi));
+  };
+
+  test('a basis that names its own port does not also take the destination', () => {
+    const texts = withPorts('FOB Kolkata Port', 'Kolkata Port', 'Howrah');
+    const band = texts.find((t) => t.startsWith('TOTAL PRICE'));
+    assert.equal(band, 'TOTAL PRICE INR FOB Kolkata Port');
+    assert.ok(!/HOWRAH/.test(band ?? ''), `the destination is still on the band: ${band}`);
+  });
+
+  test('and CIF still takes it, that being the port CIF names', () => {
+    const texts = withPorts('CIF', 'Nhava Sheva Port', 'Nacala, Mozambique');
+    assert.equal(texts.find((t) => t.startsWith('TOTAL PRICE')), 'TOTAL PRICE INR CIF NACALA');
+  });
+});

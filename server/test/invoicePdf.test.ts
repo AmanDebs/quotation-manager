@@ -70,7 +70,7 @@ const cust = makeCustomer('PDF Customer');
 
 function exportInvoice(): number {
   const id = makeInvoice({ customerId: cust, currency: 'USD', total: 78500 });
-  db.prepare("UPDATE commercial_invoices SET freight = 3600, is_export = 1, inco_terms = 'FOB', port_of_discharge = 'XYZ', subtotal = 74900, tax_total = 0 WHERE id = ?").run(id);
+  db.prepare("UPDATE commercial_invoices SET freight = 3600, is_export = 1, inco_terms = 'FOB', port_of_loading = 'Nhava Sheva Port', port_of_discharge = 'XYZ', subtotal = 74900, tax_total = 0 WHERE id = ?").run(id);
   addItem(id, { description: '20 LTR Threaded Cap', qty: 300000, unit: 'per 1000', unit_price: 10, amount: 3000, packs: 300, total_pcs: 300000 });
   addItem(id, { description: '28mm PCO 1810', qty: 1650000, unit: 'per 1000', unit_price: 6, amount: 9900, packs: 300, total_pcs: 1650000, sort_order: 1 });
   return id;
@@ -166,7 +166,7 @@ describe('the money sits in the items table', () => {
     const id = exportInvoice();
     const rows = itemsTableRows(id).map((r) => r.join(' | '));
     const joined = rows.join('\n');
-    for (const label of ['TOTAL PRICE', 'Add Freight', 'AMOUNT IN FOB XYZ']) {
+    for (const label of ['TOTAL PRICE', 'Add Freight', 'AMOUNT IN FOB NHAVA SHEVA PORT']) {
       assert.ok(joined.includes(label), `"${label}" should be a table row:\n${joined}`);
     }
   });
@@ -446,5 +446,40 @@ describe('the invoice states pieces and a per-1000 rate, as the proforma does', 
     // `2.00`, not `2`: a rate carries two decimals whatever the figure is
     // (2026-09-24), so a column of them lines up on the decimal point.
     assert.match(rows, /600 kg \| 2\.00 \/kg/, rows);
+  });
+});
+
+/**
+ * The delivery basis on the band and in the footer (2026-10-16, the client:
+ * *"FOB – still taking destination port name (linked with port of discharge),
+ * it should not take"*). `incoBasis` owns the rule; these assert that this
+ * builder asks it, in **both** of the places that were composing it by hand.
+ */
+describe('the delivery basis on the commercial invoice', () => {
+  const withBasis = (inco: string, loading: string, discharge: string): string[] => {
+    const id = exportInvoice();
+    db.prepare('UPDATE commercial_invoices SET inco_terms = ?, port_of_loading = ?, port_of_discharge = ? WHERE id = ?')
+      .run(inco, loading, discharge, id);
+    return JSON.stringify(buildInvoicePdf(id).content).split('"');
+  };
+
+  test('FOB names the port of shipment, on the band and in the footer', () => {
+    const parts = withBasis('FOB', 'Nhava Sheva Port', 'Nacala, Mozambique');
+    assert.ok(parts.includes('AMOUNT IN FOB NHAVA SHEVA PORT'), 'the band does not name the loading port');
+    assert.ok(parts.includes('Incoterms® 2020: FOB NHAVA SHEVA PORT'), 'the footer does not either');
+    assert.ok(!parts.some((t) => /FOB.*NACALA/.test(t)), 'the destination is still on an FOB document');
+  });
+
+  test('a basis that already names a place keeps it, on both', () => {
+    const parts = withBasis('FOB Kolkata Port', 'Kolkata Port', 'Howrah');
+    assert.ok(parts.includes('AMOUNT IN FOB Kolkata Port'));
+    assert.ok(parts.includes('Incoterms® 2020: FOB Kolkata Port'));
+    assert.ok(!parts.some((t) => /HOWRAH/.test(t)), 'the destination is still being appended');
+  });
+
+  test('and CIF still takes the destination, that being the port it names', () => {
+    const parts = withBasis('CIF', 'Nhava Sheva Port', 'Nacala, Mozambique');
+    assert.ok(parts.includes('AMOUNT IN CIF NACALA'));
+    assert.ok(parts.includes('Incoterms® 2020: CIF NACALA'));
   });
 });

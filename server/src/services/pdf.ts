@@ -99,6 +99,68 @@ function fmtDate(iso: string): string {
 const IMAGE_DATA_URL = /^data:image\/(png|jpe?g);base64,([A-Za-z0-9+/=\s]+)$/;
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
+/* ------------------------------------------------------------------ */
+/* The delivery basis, with the place it actually names                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Terms whose named place is the **destination** — the port or point the
+ * goods are delivered to.
+ */
+const DESTINATION_TERMS = new Set(['CIF', 'CFR', 'CNF', 'CPT', 'CIP', 'DAP', 'DDP', 'DPU', 'DAT']);
+
+/**
+ * Terms whose named place is the **port of shipment**. FCA and EXW are
+ * deliberately absent: their named place is a seller's premises or any agreed
+ * point, not a port, so standing the port of loading in for it would state
+ * something the document does not say.
+ */
+const ORIGIN_TERMS = new Set(['FOB', 'FAS']);
+
+/**
+ * How the delivery basis should read on a document (2026-10-16, the client
+ * with a proforma in front of them: *"FOB – still taking destination port name
+ * (linked with port of discharge), it should not take"*).
+ *
+ * Four builders were each composing `${inco_terms} ${port_of_discharge}`, which
+ * printed **TOTAL PRICE USD FOB Kolkata Port HOWRAH** — and that is a
+ * commercial error rather than a cosmetic one. Under Incoterms the place after
+ * **FOB** is the port the goods are *shipped from*; the destination belongs to
+ * CIF, CFR and the D-terms. So the line named a loading port and a discharge
+ * port at once, and a buyer reading it would take the second as the basis.
+ *
+ * Two rules, and the second is what the first cut would still have got wrong:
+ *
+ * - The place follows the **term's own family** — the discharge port for a
+ *   destination term, the loading port for FOB or FAS, and nothing at all for
+ *   a term this list does not know (EX-Works, FOR, anything hand-typed), since
+ *   guessing which place such a term names is how the error happened.
+ * - **A basis that already names a place is printed as it stands.** The
+ *   client's own list offers *FOB Kolkata Port* and *FOB Nhava Sheva Port*,
+ *   and real Aglo documents carry *CIF Mozambique* — appending to those gives
+ *   *CIF Mozambique NACALA*, which is the same fault one term over.
+ *
+ * The first comma-separated segment of the place is used, the rule the
+ * shipping marks already follow: *Nacala, Mozambique* is a port called Nacala.
+ */
+export function incoBasis(
+  incoTerms: unknown,
+  ports: { loading?: unknown; discharge?: unknown } = {},
+): string {
+  const term = String(incoTerms ?? '').trim();
+  if (!term) return '';
+  // Already qualified: the basis names its own place, so nothing is appended.
+  const [code, ...rest] = term.split(/\s+/);
+  if (rest.length > 0) return term;
+
+  const key = code.toUpperCase();
+  const place = DESTINATION_TERMS.has(key) ? ports.discharge
+    : ORIGIN_TERMS.has(key) ? ports.loading
+      : '';
+  const named = String(place ?? '').split(',')[0].trim();
+  return named ? `${term} ${named.toUpperCase()}` : term;
+}
+
 function pngDecodes(buf: Buffer): boolean {
   if (buf.length < 8 || !buf.subarray(0, 8).equals(PNG_SIGNATURE)) return false;
   const idat: Buffer[] = [];
@@ -1511,7 +1573,7 @@ export function buildProformaPdf(id: number): TDocumentDefinitions {
   ];
 
   const grandLabel = pi.inco_terms && pi.port_of_discharge
-    ? `TOTAL PRICE ${cur} ${pi.inco_terms} ${pi.port_of_discharge.split(',')[0].toUpperCase()}`
+    ? `TOTAL PRICE ${cur} ${incoBasis(pi.inco_terms, { loading: pi.port_of_loading, discharge: pi.port_of_discharge })}`
     : 'GRAND TOTAL';
 
   /*
@@ -1822,7 +1884,7 @@ export function buildInvoicePdf(id: number): TDocumentDefinitions {
   ];
 
   const grandLabel = inv.inco_terms && inv.port_of_discharge
-    ? `AMOUNT IN ${inv.inco_terms} ${inv.port_of_discharge.split(',')[0].toUpperCase()}`
+    ? `AMOUNT IN ${incoBasis(inv.inco_terms, { loading: inv.port_of_loading, discharge: inv.port_of_discharge })}`
     : 'GRAND TOTAL';
 
   /**
@@ -1881,7 +1943,7 @@ export function buildInvoicePdf(id: number): TDocumentDefinitions {
         {
           stack: [
             { text: `We certify that the merchandise is of ${(inv.country_of_origin || s.country || 'Indian').replace(/ia$/i, 'ian')} Origin`, fontSize: 8, bold: true },
-            ...(inv.inco_terms ? [{ text: `Incoterms® 2020: ${inv.inco_terms}${inv.port_of_discharge ? ` ${inv.port_of_discharge.split(',')[0].toUpperCase()}` : ''}`, fontSize: 8, margin: [0, 2, 0, 0] as any }] : []),
+            ...(inv.inco_terms ? [{ text: `Incoterms® 2020: ${incoBasis(inv.inco_terms, { loading: inv.port_of_loading, discharge: inv.port_of_discharge })}`, fontSize: 8, margin: [0, 2, 0, 0] as any }] : []),
             // The consignment's own LUT/ARN, falling back to the company's while
             // an older invoice has none of its own — so nothing already raised
             // changes what it prints.
@@ -2196,7 +2258,7 @@ export function buildPackingListPdf(id: number): TDocumentDefinitions {
         {
           stack: [
             { text: `We certify that the merchandise is of ${(inv?.country_of_origin || s.country || 'Indian').replace(/ia$/i, 'ian')} Origin`, fontSize: 8, bold: true },
-            ...(inv?.inco_terms ? [{ text: `Incoterms® 2020: ${inv.inco_terms}${inv.port_of_discharge ? ` ${String(inv.port_of_discharge).split(',')[0].toUpperCase()}` : ''}`, fontSize: 8, margin: [0, 2, 0, 0] as any }] : []),
+            ...(inv?.inco_terms ? [{ text: `Incoterms® 2020: ${incoBasis(inv.inco_terms, { loading: inv.port_of_loading, discharge: inv.port_of_discharge })}`, fontSize: 8, margin: [0, 2, 0, 0] as any }] : []),
             // Same reference as the invoice this list travels with.
             ...(Number(inv?.is_export) && (inv?.arn_ref || s.arn_ref)
               ? [{ text: `Application Reference No. (ARN): ${inv?.arn_ref || s.arn_ref}`, fontSize: 8, margin: [0, 2, 0, 0] as any }]
