@@ -1204,6 +1204,12 @@ CREATE TABLE IF NOT EXISTS batches (
   coa_no TEXT NOT NULL DEFAULT '',
   coa_date TEXT NOT NULL DEFAULT '',
   coa_issued_by INTEGER REFERENCES users(id),
+  -- The second signatory. Both of Aglo's certificates carry *Prepared by* and
+  -- *Approved by*, and this is the one header fact that cannot be derived from
+  -- anything else on file -- the first is the account that issued it, which
+  -- `coa_issued_by` already records. A name rather than a user, because the
+  -- person who signs need not have a login.
+  coa_approved_by TEXT NOT NULL DEFAULT '',
   -- What was decided about a lot that failed its final check: '' (nothing yet),
   -- 'rework' or 'scrapped'. The specification's own two words -- *"initiating
   -- rework or scrap procedures"* -- and no third, because the state a third

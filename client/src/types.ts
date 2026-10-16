@@ -286,6 +286,8 @@ export interface Batch {
   coa_no: string;
   coa_date: string;
   coa_issued_by_name?: string | null;
+  /** The second signatory, as the certificate prints it. */
+  coa_approved_by?: string;
   made: number;
   rejected: number;
   entries: number;

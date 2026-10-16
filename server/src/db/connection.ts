@@ -471,6 +471,7 @@ addColumnIfMissing('customers', 'company_id', 'INTEGER');
  * reading, `na = 0` is an answer that was given, and `value_max` NULL is no
  * upper observation. No index on any of them.
  */
+addColumnIfMissing('batches', 'coa_approved_by', "TEXT NOT NULL DEFAULT ''");
 addColumnIfMissing('product_qc_params', 'ranged', 'INTEGER NOT NULL DEFAULT 0');
 addColumnIfMissing('qc_results', 'ranged', 'INTEGER NOT NULL DEFAULT 0');
 addColumnIfMissing('qc_results', 'value_max', 'REAL');

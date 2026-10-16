@@ -3169,6 +3169,24 @@ export function buildCoaPdf(batchId: number): TDocumentDefinitions {
   if (!b) throw new Error('Batch not found');
   if (!b.cleared) throw new Error('No certificate has been issued for this batch');
 
+  /*
+   * **Every lot the certificate covers, not only the one it was opened from**
+   * (2026-10-16). Aglo issue one COA over a run of lots — *Batch No:
+   * 05032026A+B TO 09032026A+B* — so the number, not the batch, is what the
+   * document is about. Gathered by number **within the company**, numbers
+   * being per company like every other series here, and ordered by the lot's
+   * own number so the range reads the way the paper writes it.
+   */
+  const group = (db.prepare(
+    `SELECT b.id FROM batches b
+       JOIN work_orders w ON w.id = b.work_order_id
+      WHERE b.coa_no = ? AND w.company_id = (SELECT company_id FROM work_orders WHERE id = ?)
+      ORDER BY b.number, b.id`
+  ).all(b.coa_no, b.work_order_id) as { id: number }[])
+    .map((r) => batchById(Number(r.id)))
+    .filter((x): x is NonNullable<typeof x> => !!x);
+  const lots = group.length ? group : [b];
+
   const wo = db.prepare(
     `SELECT w.*, o.number AS order_number, o.customer_id, o.company_id, o.po_number,
             p.name AS product_name, p.unit AS product_unit
@@ -3180,12 +3198,53 @@ export function buildCoaPdf(batchId: number): TDocumentDefinitions {
   const s = companyProfile(wo.company_id);
   const c = db.prepare('SELECT * FROM customers WHERE id = ?').get(wo.customer_id) as Row;
 
-  // The check the certificate is issued on: the latest one that reached a
-  // verdict. An earlier failed check is part of the lot's history and is not
-  // what was certified, so it is not what is printed.
-  const decided = b.final_checks.filter((ch) => ch.passed !== null);
-  const check = decided[decided.length - 1];
-  const results = (check?.results ?? []) as unknown as Row[];
+  /*
+   * The check each lot was certified on: its latest one that reached a
+   * verdict. An earlier failed check is part of that lot's history and is not
+   * what was certified, so it is not what is printed.
+   *
+   * Over a group every lot contributes its own, and the **Batch** column below
+   * says which — a certificate covering five days that printed one anonymous
+   * set of readings would not say what was measured when.
+   */
+  const perLot = lots.map((lot) => {
+    const decided = lot.final_checks.filter((ch) => ch.passed !== null);
+    return { lot, check: decided[decided.length - 1] };
+  });
+  const check = perLot[0]?.check;
+  const results: Row[] = perLot.flatMap(({ lot, check: ch }) =>
+    ((ch?.results ?? []) as unknown as Row[]).map((r) => ({ ...r, _lot: lot.number })));
+  const many = lots.length > 1;
+
+  /*
+   * What the header states, derived rather than stored — the rule this module
+   * follows about everything on a certificate bar the number and the date.
+   *
+   * **Resin** is what the product's recipe consumes, which is where PET and
+   * HDPE already live. **Production period** is the span of the shift entries
+   * actually booked into these lots, so it narrows when a mis-keyed shift is
+   * deleted. **Colour** is the order line's, the one printed on every selling
+   * document. Each prints an em-dash rather than a guess where the record is
+   * silent.
+   */
+  const ids = lots.map((l) => l.id);
+  const holes = ids.map(() => '?').join(', ');
+  const span = db.prepare(
+    `SELECT MIN(date) AS lo, MAX(date) AS hi FROM production_entries WHERE batch_id IN (${holes})`
+  ).get(...(ids as never[])) as { lo: string | null; hi: string | null };
+  const resin = (db.prepare(
+    `SELECT m.name FROM product_materials pm JOIN materials m ON m.id = pm.material_id
+      WHERE pm.product_id = (SELECT product_id FROM work_orders WHERE id = ?)
+      ORDER BY pm.sort_order, pm.id`
+  ).all(b.work_order_id) as { name: string }[]).map((r) => r.name).join(', ');
+  const colour = String((db.prepare(
+    `SELECT COALESCE(NULLIF(oi.color, ''), p.color, '') AS color
+       FROM work_orders w
+       JOIN (SELECT order_id, color, ROW_NUMBER() OVER (PARTITION BY order_id ORDER BY sort_order, id) - 1 AS pos
+               FROM order_items) oi ON oi.order_id = w.order_id AND oi.pos = w.order_line
+       LEFT JOIN products p ON p.id = w.product_id
+      WHERE w.id = ?`
+  ).get(b.work_order_id) as { color?: string } | undefined)?.color ?? '');
 
   const grid: Content = {
     table: {
@@ -3193,12 +3252,24 @@ export function buildCoaPdf(batchId: number): TDocumentDefinitions {
       body: [
         [
           lv('Certificate No.  /  Date', `${b.coa_no}   ${fmtDate(b.coa_date)}`),
-          lv('Batch No.  /  Date', `${b.number}   ${fmtDate(b.date)}`),
+          // A run of lots reads as a range, the way the paper writes it; one
+          // lot still reads as itself, so nothing already issued changes.
+          lv(many ? 'Batch Nos.' : 'Batch No.  /  Date', many
+            ? `${lots[0].number} to ${lots[lots.length - 1].number}`
+            : `${b.number}   ${fmtDate(b.date)}`),
           lv('Work Order', String(wo.number ?? '')),
         ],
         [
           lv('Product', String(wo.product_name || wo.description || '—')),
-          lv('Quantity Certified', `${fmtNum(b.made, 0)} pcs`),
+          // Across every lot the certificate covers.
+          lv('Quantity Certified', `${fmtNum(lots.reduce((t, l) => t + l.made, 0), 0)} pcs`),
+          lv('Production Period', span.lo
+            ? (span.lo === span.hi ? fmtDate(span.lo) : `${fmtDate(span.lo)} – ${fmtDate(String(span.hi))}`)
+            : '—'),
+        ],
+        [
+          lv('Colour', colour || '—'),
+          lv('Resin', resin || '—'),
           lv('Inspected On', check ? `${fmtDate(String(check.date))}${check.shift ? `   Shift ${check.shift}` : ''}` : '—'),
         ],
         [
@@ -3215,6 +3286,10 @@ export function buildCoaPdf(batchId: number): TDocumentDefinitions {
 
   const specs: ColumnSpec[] = [
     { key: 'sl', label: 'SL', width: 16, align: 'center', always: true, value: (_it, i) => String(i + 1) },
+    // Which lot each reading came from. Drawn only where the certificate
+    // covers more than one — on a single-lot certificate it would be the same
+    // word on every row, which the header already states.
+    ...(many ? [{ key: '_lot', label: 'Batch', width: 70, always: true, value: (it: Row) => String(it._lot ?? '') }] : []),
     { key: 'name', label: 'Characteristic', width: '*', always: true, value: (it) => String(it.name ?? '') },
     { key: 'method', label: 'Specification', width: 130, align: 'center', always: true, value: (it) => toleranceText(it) },
     { key: 'reading', label: 'Result', width: 96, align: 'center', always: true, value: (it) => readingText(it) },
@@ -3250,7 +3325,12 @@ export function buildCoaPdf(batchId: number): TDocumentDefinitions {
       : []),
     ...(b.notes ? [{ text: String(b.notes), fontSize: 8, margin: [0, 4, 0, 0] as any }] : []),
     ...(b.coa_issued_by_name
-      ? [{ text: `Certificate issued by: ${b.coa_issued_by_name}`, fontSize: 7.5, color: '#666666', margin: [0, 4, 0, 0] as any }]
+      ? [{ text: `Prepared by: ${b.coa_issued_by_name}`, fontSize: 7.5, color: '#666666', margin: [0, 4, 0, 0] as any }]
+      : []),
+    // The second signatory, which both of Aglo's certificates carry and which
+    // is the one header fact nothing else on file could supply.
+    ...(b.coa_approved_by
+      ? [{ text: `Approved by: ${b.coa_approved_by}`, fontSize: 7.5, color: '#666666', margin: [0, 1, 0, 0] as any }]
       : []),
     signatureBlock(s, {}),
   ];

@@ -69,6 +69,8 @@ export interface Batch {
   coa_date: string;
   coa_issued_by: number | null;
   coa_issued_by_name: string | null;
+  /** The second signatory, as the certificate prints it. */
+  coa_approved_by: string;
   /** Derived from the shift entries filed against this lot. */
   made: number;
   rejected: number;
@@ -192,6 +194,7 @@ export function batchesFor(workOrderId: number): Batch[] {
       coa_date: String(r.coa_date ?? ''),
       coa_issued_by: r.coa_issued_by == null ? null : Number(r.coa_issued_by),
       coa_issued_by_name: r.coa_issued_by_name == null ? null : String(r.coa_issued_by_name),
+      coa_approved_by: String(r.coa_approved_by ?? ''),
       made: num(made.ok),
       rejected: num(made.rej),
       entries: made.n,
@@ -295,6 +298,54 @@ export function coaBlockError(id: number): string | null {
   }
   if (b.qc === 'failed') {
     return `The final quality check on batch ${b.number} did not pass, so it cannot be certified.`;
+  }
+  return null;
+}
+
+/**
+ * Several lots under **one** certificate (2026-10-16, from Aglo's own
+ * paperwork: their cap COA is headed *Batch No: 05032026A+B TO 09032026A+B* —
+ * five days of two shifts, certified once).
+ *
+ * This app issued one certificate per lot, which for that consignment would
+ * have been **ten documents** where the buyer has one. The fix is not a new
+ * table: a certificate is still `coa_no` on each lot, and what changes is that
+ * **one number may be written to several of them in one act**. Every rule
+ * downstream keeps answering exactly as it did — `despatchBatchError` asks
+ * whether a lot carries a COA, `renameError` whether its number is on paper,
+ * the delete guard likewise — because each of them still does.
+ *
+ * Two refusals of its own, before the per-lot ones:
+ *
+ * - **Nothing named.** A certificate over no lots certifies nothing.
+ * - **Lots from different sales orders.** The document prints one customer and
+ *   one buyer's order, so a certificate spanning two would state something
+ *   untrue of half of what it covers. The same order is the conservative
+ *   reading of "one consignment" and is what both of Aglo's certificates are.
+ *
+ * Then `coaBlockError` per lot, named, so a group refused for one bad lot says
+ * which — and the caller writes nothing at all, a half-issued certificate
+ * being worse than none.
+ */
+export function coaGroupError(ids: number[]): string | null {
+  if (!ids.length) return 'Name at least one batch to certify.';
+  const lots = ids.map((id) => ({ id, b: batchById(id) }));
+  const missing = lots.find((l) => !l.b);
+  if (missing) return 'Batch not found.';
+
+  const orders = new Set<number>();
+  for (const { b } of lots) {
+    const row = db.prepare('SELECT order_id FROM work_orders WHERE id = ?')
+      .get(b!.work_order_id) as { order_id: number } | undefined;
+    if (row) orders.add(Number(row.order_id));
+  }
+  if (orders.size > 1) {
+    return 'A certificate covers one sales order: these batches are on more than one, '
+      + 'so they need a certificate each.';
+  }
+  for (const { id } of lots) {
+    const refused = coaBlockError(id);
+    if (refused) return refused;
   }
   return null;
 }

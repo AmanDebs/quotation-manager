@@ -1,7 +1,7 @@
-import { Router } from 'express';
+import { Router, type Response } from 'express';
 import { db, transaction } from '../db/connection.js';
 import { nextNumber } from '../services/numbering.js';
-import { batchesFor, batchById, coaBlockError, renameError, dispositionError, isDisposition, DISPOSITIONS }
+import { batchesFor, batchById, coaBlockError, coaGroupError, renameError, dispositionError, isDisposition, DISPOSITIONS }
   from '../services/batch.js';
 import { progressFor, progressForMany, LIVE_OK } from '../services/production.js';
 import { despatchedByOrder, lastTripForLine } from '../services/despatch.js';
@@ -748,28 +748,78 @@ workOrdersRouter.delete('/batches/:batchId', requirePermission('output', 'full')
  * `/api/pdf` is a GET, and a GET that consumed a number would issue a fresh
  * certificate every time somebody opened the file.
  */
-workOrdersRouter.post('/batches/:batchId/coa', requirePermission('qc', 'full'), (req: AuthedRequest, res) => {
-  const batchId = Number(req.params.batchId);
-  const b = db.prepare('SELECT work_order_id FROM batches WHERE id = ?').get(batchId) as
-    { work_order_id: number } | undefined;
-  if (!b || !accessible(req, Number(b.work_order_id))) {
-    return res.status(404).json({ error: 'Batch not found' });
+workOrdersRouter.post('/batches/:batchId/coa', requirePermission('qc', 'full'), (req: AuthedRequest, res) =>
+  issueCoa(req, res, [Number(req.params.batchId)]));
+
+/**
+ * The same certificate over **several** lots, which is how Aglo issue theirs:
+ * *Batch No: 05032026A+B TO 09032026A+B*, five days of two shifts under one
+ * number. Per lot that consignment would be ten documents where the buyer
+ * has one.
+ *
+ * One number, written to every named lot in **one transaction**, so a group
+ * refused for one bad lot writes nothing at all — a half-issued certificate
+ * being worse than none. `coaGroupError` owns the two rules that are about the
+ * group (something named, one sales order) and asks `coaBlockError` about each
+ * lot, so the single-lot door above and this one refuse for the same reasons
+ * in the same words.
+ *
+ * Declared **above** nothing in particular, but it must not be reachable as
+ * `/batches/:batchId/coa` — it is not, the paths differing in shape.
+ */
+workOrdersRouter.post('/batches/coa', requirePermission('qc', 'full'), (req: AuthedRequest, res) => {
+  const raw = Array.isArray(req.body?.batch_ids) ? (req.body.batch_ids as unknown[]) : [];
+  const ids = [...new Set(raw.map(Number).filter((n) => Number.isInteger(n) && n > 0))];
+  if (ids.length !== raw.length) {
+    return res.status(400).json({ error: 'Every batch must be named by its id, once' });
   }
-  const refused = coaBlockError(batchId);
+  return issueCoa(req, res, ids);
+});
+
+/**
+ * Claim one certificate number and write it to every lot named.
+ *
+ * The number is claimed **here**, inside the same statement that records the
+ * issue, and never at print time: `/api/pdf` is a GET, and a GET that consumed
+ * a number would issue a fresh certificate every time somebody opened the
+ * file.
+ *
+ * `approved_by` is the second signatory — the one field of the header that
+ * cannot be derived from anything the app holds. Both of Aglo's certificates
+ * carry *Prepared by* and *Approved by*; the first is the account that issued
+ * it, which is already recorded.
+ */
+function issueCoa(req: AuthedRequest, res: Response, ids: number[]) {
+  // Scope first, so an id on somebody else's order cannot be probed for
+  // through a refusal that names the batch.
+  for (const id of ids) {
+    const b = db.prepare('SELECT work_order_id FROM batches WHERE id = ?').get(id) as
+      { work_order_id: number } | undefined;
+    if (!b || !accessible(req, Number(b.work_order_id))) {
+      return res.status(404).json({ error: 'Batch not found' });
+    }
+  }
+  const refused = coaGroupError(ids);
   if (refused) return res.status(409).json({ error: refused });
 
-  const wo = accessible(req, Number(b.work_order_id))!;
+  const first = db.prepare('SELECT work_order_id FROM batches WHERE id = ?').get(ids[0]) as
+    { work_order_id: number };
+  const wo = accessible(req, Number(first.work_order_id))!;
   const order = db.prepare('SELECT company_id, customer_id FROM orders WHERE id = ?')
     .get(Number(wo.order_id)) as { company_id: number; customer_id: number };
   const companyId = resolveCompanyId(order.company_id, order.customer_id);
   const date = String(req.body?.date ?? '').trim() || new Date().toISOString().slice(0, 10);
+  const approvedBy = String(req.body?.approved_by ?? '').trim();
 
   transaction(() => {
-    db.prepare('UPDATE batches SET coa_no = ?, coa_date = ?, coa_issued_by = ? WHERE id = ?')
-      .run(nextNumber('coa', { companyId, date }), date, req.user!.id, batchId);
+    const number = nextNumber('coa', { companyId, date });
+    const set = db.prepare(
+      'UPDATE batches SET coa_no = ?, coa_date = ?, coa_issued_by = ?, coa_approved_by = ? WHERE id = ?'
+    );
+    for (const id of ids) set.run(number, date, req.user!.id, approvedBy, id);
   });
-  res.status(201).json(batchById(batchId));
-});
+  res.status(201).json(ids.map((id) => batchById(id)));
+}
 
 /**
  * What to do with a lot that failed — the specification's *"initiating rework

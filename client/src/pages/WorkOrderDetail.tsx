@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Batch, WorkOrder, WorkOrderStatus } from '../types';
 import {
-  Button, Card, EmptyState, ErrorText, Field, Input, PageHeader, Tabs, Textarea,
+  Button, Card, EmptyState, ErrorText, Field, Input, Modal, PageHeader, Tabs, Textarea,
   CAPTION_CLASS, TH_CLASS,
 } from '../components/ui';
 import { LogOutput } from '../components/LogOutputModal';
@@ -15,7 +15,7 @@ import OpenBatchModal from '../components/OpenBatchModal';
 import { PdfLink } from '../components/PdfLink';
 import { useUnsavedChanges } from '../lib/useUnsavedChanges';
 import { useCan } from '../App';
-import { fmtDate, fmtMoney, fmtQty } from '../lib/format';
+import { fmtDate, fmtMoney, fmtQty, today } from '../lib/format';
 import { offeredWorkOrderStatuses, workOrderStatusLabel, workOrderStatusStyle } from './WorkOrders';
 
 /**
@@ -137,9 +137,27 @@ export default function WorkOrderDetailPage() {
    * merely hides the reason teaches nobody anything, so its sentence is shown.
    */
   const issueCoa = useMutation({
-    mutationFn: (batchId: number) => api.post(`/api/work-orders/batches/${batchId}/coa`, {}),
-    onSuccess: refresh,
+    mutationFn: (body: { batch_ids: number[]; date: string; approved_by: string }) =>
+      api.post('/api/work-orders/batches/coa', body),
+    onSuccess: () => { setCertifying(null); refresh(); },
   });
+  /*
+   * Which lots this certificate covers (2026-10-16). Aglo issue one COA over
+   * a run of them — *Batch No: 05032026A+B TO 09032026A+B* — so certifying is
+   * an act over a **set**, and the one-lot case is that set with one member
+   * rather than a second control.
+   *
+   * The dialog exists because of `approved_by`: both of their certificates
+   * carry *Prepared by* and *Approved by*, and the second is the only header
+   * fact nothing on file could supply. Everything else on the document is
+   * derived.
+   */
+  const [certifying, setCertifying] = useState<number[] | null>(null);
+  const [coaHead, setCoaHead] = useState({ date: today(), approved_by: '' });
+  const [ticked, setTicked] = useState<Set<number>>(new Set());
+  // A lot may join a certificate when its final check passed and it has not
+  // already been certified or condemned — the server refuses the rest by name.
+  const certifiable = (b: Batch) => b.qc === 'passed' && !b.coa_no && !b.scrapped;
   /*
    * What to do with a lot that failed. The note is asked for on the way, and
    * only for a decision being *made* — withdrawing one asks nothing, because
@@ -468,6 +486,27 @@ export default function WorkOrderDetailPage() {
             itself, rather than the shift-wise checks on the Quality tab.
           </p>
 
+          {/*
+            * One certificate over the ticked lots — the shape Aglo's own
+            * paperwork has. Drawn only once something is ticked, so the
+            * ordinary single-lot case is the row button it always was.
+            */}
+          {can('qc', 'full') && ticked.size > 0 && (
+            <div className="mb-3 flex items-center gap-3 rounded-lg bg-brand-50 px-3 py-2 text-sm ring-1 ring-inset ring-brand-200">
+              <span className="text-brand-900">
+                <span className="font-medium">{ticked.size} lot{ticked.size === 1 ? '' : 's'}</span> ticked
+              </span>
+              <Button
+                className="ml-auto"
+                onClick={() => { issueCoa.reset(); setCertifying([...ticked]); }}
+              >
+                Issue one certificate for {ticked.size}
+              </Button>
+              <button className="text-xs text-slate-500 hover:text-slate-700" onClick={() => setTicked(new Set())}>
+                Clear
+              </button>
+            </div>
+          )}
           {(job.batches ?? []).length === 0 ? (
             <EmptyState message="No batches on this job. Output booked without one still counts towards the job — a batch is how a lot is identified and certified, not how it is counted." />
           ) : (
@@ -475,6 +514,10 @@ export default function WorkOrderDetailPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className={TH_CLASS}>
+                    {/* Ticking several and certifying them once is the shape
+                        their own paperwork has; the column is drawn only for
+                        somebody who may issue one. */}
+                    {can('qc', 'full') && <th className="pb-2 pr-2" />}
                     <th className="pb-2 pr-3">Batch</th>
                     <th className="pb-2 pr-3">Started</th>
                     <th className="pb-2 pr-3 text-right">Made</th>
@@ -489,6 +532,23 @@ export default function WorkOrderDetailPage() {
                 <tbody>
                   {(job.batches ?? []).map((b) => (
                     <tr key={b.id} className="border-b border-slate-100 last:border-0">
+                      {can('qc', 'full') && (
+                        <td className="py-2 pr-2">
+                          <input
+                            type="checkbox"
+                            disabled={!certifiable(b)}
+                            checked={ticked.has(b.id)}
+                            title={certifiable(b)
+                              ? 'Include this lot on one certificate with the others ticked'
+                              : 'Only a lot whose final check passed, and which is not already certified, can join a certificate'}
+                            onChange={(e) => setTicked((prev) => {
+                              const next = new Set(prev);
+                              if (e.target.checked) next.add(b.id); else next.delete(b.id);
+                              return next;
+                            })}
+                          />
+                        </td>
+                      )}
                       <td className="py-2 pr-3 font-medium">{b.number}</td>
                       <td className="py-2 pr-3 whitespace-nowrap">{fmtDate(b.date)}</td>
                       <td className="py-2 pr-3 text-right tabular-nums">{fmtQty(b.made)}</td>
@@ -590,7 +650,7 @@ export default function WorkOrderDetailPage() {
                                 title={b.qc === 'passed'
                                   ? 'Issue the Certificate of Analysis for this batch'
                                   : 'A batch is certified on a passing final check'}
-                                onClick={() => issueCoa.mutate(b.id)}
+                                onClick={() => { issueCoa.reset(); setTicked(new Set()); setCertifying([b.id]); }}
                               >
                                 Issue COA
                               </Button>
@@ -777,6 +837,43 @@ export default function WorkOrderDetailPage() {
       {prompt}
       {logging && <LogOutput job={job} onClose={() => setLogging(false)} onSaved={refresh} />}
       {openingBatch && <OpenBatchModal job={job} onClose={() => setOpeningBatch(false)} onSaved={refresh} />}
+      {/*
+        * What the certificate cannot derive. Everything else on it — the
+        * customer, the product, the quantity, the resin from the recipe, the
+        * production period from the shift dates, the colour from the order
+        * line — is read at print time, so a correction reaches the reprint.
+        */}
+      {certifying && (
+        <Modal title={`Certificate of Analysis — ${certifying.length} lot${certifying.length === 1 ? '' : 's'}`} onClose={() => setCertifying(null)}>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <Field label="Date of issue">
+              <Input type="date" value={coaHead.date} onChange={(e) => setCoaHead({ ...coaHead, date: e.target.value })} />
+            </Field>
+            <Field label="Approved by">
+              <Input
+                value={coaHead.approved_by}
+                onChange={(e) => setCoaHead({ ...coaHead, approved_by: e.target.value })}
+                placeholder="Who signs it off"
+              />
+            </Field>
+          </div>
+          <p className="mt-2 text-xs text-slate-500">
+            {(job.batches ?? []).filter((b) => certifying.includes(b.id)).map((b) => b.number).join(', ')}
+            {' — '}one number, written to every lot named. A lot is certified once, so this cannot be undone.
+          </p>
+          <ErrorText error={issueCoa.error} />
+          <div className="mt-3 flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setCertifying(null)}>Cancel</Button>
+            <Button
+              disabled={issueCoa.isPending}
+              onClick={() => issueCoa.mutate({ batch_ids: certifying, ...coaHead })}
+            >
+              {issueCoa.isPending ? 'Issuing…' : 'Issue certificate'}
+            </Button>
+          </div>
+        </Modal>
+      )}
+
       {deciding && (
         <BatchDispositionModal
           batch={deciding.batch}
