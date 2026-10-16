@@ -1,13 +1,14 @@
 import { Router } from 'express';
 import type { AuthedRequest } from '../middleware/auth.js';
-import { requirePermission } from '../middleware/auth.js';
+import { requirePermission, allows } from '../middleware/auth.js';
 import { scopeClause } from '../middleware/scope.js';
 import { fiscalYearRange } from '../services/numbering.js';
 import type { Response } from 'express';
 import { buildXlsx, attachmentName, type Column } from '../services/xlsx.js';
 import {
-  plannedReport, unscheduledReport, dispatchReport, dueReport,
+  plannedReport, unscheduledReport, dispatchReport, dueReport, bookReport,
   type ReportFilter, type Pivot, type PivotRow, type DueReport,
+  type BookDoc, type BookGroupBy, type BookReport,
 } from '../services/reports.js';
 
 /**
@@ -131,4 +132,99 @@ reportsRouter.get('/dispatch', requirePermission('invoice'), (req: AuthedRequest
 
 reportsRouter.get('/due', requirePermission('payment'), (req: AuthedRequest, res) => {
   res.json(dueReport(filter(req, 'i.customer_id'), todayIso()));
+});
+
+
+/* ------------------------------------------------------------------ *
+ * The sales book
+ * ------------------------------------------------------------------ */
+
+/**
+ * Which of the three the caller may actually read.
+ *
+ * This sheet spans three functions, and the rule is `customerSummary`'s:
+ * **a document kind the caller may not read is absent, not empty**, decided
+ * here rather than on the client, which must never hold a second copy of the
+ * access table. So a login with `order` alone gets the sales orders and is
+ * told so by `included`, rather than a page that silently looks like a short
+ * book.
+ */
+function bookDocs(req: AuthedRequest): BookDoc[] {
+  const out: BookDoc[] = [];
+  if (allows(req, 'order')) out.push('order');
+  if (allows(req, 'proforma')) out.push('proforma');
+  if (allows(req, 'quotation')) out.push('quotation');
+  return out;
+}
+
+const bookGroupBy = (req: AuthedRequest): BookGroupBy =>
+  (String(req.query.by ?? '') === 'country' ? 'country' : 'customer');
+
+/**
+ * Every live line of the selling book, by customer or by where it is going.
+ *
+ * Mounted on no one function — see `bookDocs`. A caller holding none of the
+ * three is refused outright rather than handed an empty sheet, which would
+ * read as *there is no business* rather than as *this is not yours*.
+ */
+function book(req: AuthedRequest): BookReport | null {
+  const docs = bookDocs(req);
+  if (!docs.length) return null;
+  // Scoped on `c.id`: all three parts join `customers c`, so one clause
+  // covers them and a part added later is scoped by construction.
+  return bookReport(filter(req, 'c.id'), { by: bookGroupBy(req), docs });
+}
+
+reportsRouter.get('/book', (req: AuthedRequest, res) => {
+  const out = book(req);
+  if (!out) return res.status(403).json({ error: 'You do not have access to any of the sales documents' });
+  return res.json(out);
+});
+
+const DOC_LABEL: Record<BookDoc, string> = {
+  order: 'Sales Order',
+  proforma: 'Proforma',
+  quotation: 'Quotation',
+};
+
+/**
+ * The sheet as a spreadsheet: one row per line, the group on every row so the
+ * file can be pivoted in Excel the way the desk already does. The whole
+ * filtered set, never a page, and `?currency=` narrows to the one on screen.
+ */
+reportsRouter.get('/book/export', (req: AuthedRequest, res) => {
+  const out = book(req);
+  if (!out) return res.status(403).json({ error: 'You do not have access to any of the sales documents' });
+  const only = String(req.query.currency ?? '').trim();
+  const rows: Row[] = [];
+  for (const g of out.groups) {
+    for (const l of g.lines) {
+      if (only && l.currency !== only) continue;
+      rows.push({ ...l, group: g.label });
+    }
+  }
+  /*
+   * No separate column for the grouping: every row already carries its
+   * customer *and* its destination, so the file pivots on either — where a
+   * group column would simply repeat one of them under a second heading.
+   */
+  const cols: Column<Row>[] = [
+    { header: 'Document', value: (r) => DOC_LABEL[r.doc as BookDoc] ?? String(r.doc ?? '') },
+    { header: 'Number', value: (r) => String(r.number ?? '') },
+    { header: 'Date', value: (r) => String(r.date ?? ''), type: 'date' },
+    { header: 'Customer', value: (r) => String(r.customer_name ?? '') },
+    { header: 'Country / destination', value: (r) => String(r.country ?? '') },
+    // Where that came from, so a row placed by the buyer's registered country
+    // is not read as a shipping destination.
+    { header: 'Placed by', value: (r) => String(r.country_from ?? '') },
+    { header: 'Product', value: (r) => String(r.product ?? '') },
+    { header: 'Line description', value: (r) => String(r.description ?? '') },
+    { header: 'Colour', value: (r) => String(r.color ?? '') },
+    { header: 'Qty', value: (r) => (r.qty == null ? '' : Number(r.qty)), type: 'number' },
+    { header: 'Unit', value: (r) => String(r.unit ?? '') },
+    { header: 'Unit price', value: (r) => Number(r.unit_price ?? 0), type: 'money' },
+    { header: 'Currency', value: (r) => String(r.currency ?? '') },
+    { header: 'Total', value: (r) => Number(r.amount ?? 0), type: 'money' },
+  ];
+  return sendXlsx(res, 'Sales book', cols, rows);
 });

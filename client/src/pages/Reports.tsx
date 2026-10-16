@@ -1,12 +1,13 @@
+import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
-import type { ReportPivot, DispatchReport, DueReport, DueGroup, DueColour } from '../types';
-import { PageHeader, Card, Select, Input, SegmentedTabs, EmptyState, DownloadButton, TH_CLASS } from '../components/ui';
+import type { ReportPivot, DispatchReport, DueReport, DueGroup, DueColour, BookReport, BookDoc } from '../types';
+import { PageHeader, Card, Select, Input, SegmentedTabs, EmptyState, DownloadButton, TH_CLASS, CAPTION_CLASS } from '../components/ui';
 import { PivotTable } from '../components/PivotTable';
 import { useCompanies } from '../components/CompanySelect';
 import { useCan } from '../App';
-import { fmtMoney, fmtMoneyRound, fmtDate, fiscalYearRange } from '../lib/format';
+import { fmtMoney, fmtMoneyRound, fmtQty, fmtDate, fiscalYearRange } from '../lib/format';
 import { useUrlFilter } from '../lib/useUrlFilter';
 
 /**
@@ -25,13 +26,20 @@ import { useUrlFilter } from '../lib/useUrlFilter';
  * date columns are the server's: a month with nothing in it is still a
  * column, so the sheet reads Apr…Mar with the gaps visible.
  */
-type View = 'planned' | 'unscheduled' | 'dispatch' | 'due';
+type View = 'planned' | 'unscheduled' | 'dispatch' | 'due' | 'book';
 
 const TABS: { key: View; label: string; needs: string; subtitle: string }[] = [
   { key: 'planned', label: 'Planned for production', needs: 'proforma', subtitle: 'Proformas with a sales order booked, by the date production is planned for' },
   { key: 'unscheduled', label: 'Yet to be scheduled', needs: 'proforma', subtitle: 'Proformas with the buyer, and those confirmed but not yet given a production date' },
   { key: 'dispatch', label: 'Dispatch by month', needs: 'invoice', subtitle: 'Commercial invoices raised, by the month of the invoice' },
   { key: 'due', label: 'Due', needs: 'payment', subtitle: 'Every invoice still owing money that is overdue or falls due within two weeks' },
+  /*
+   * Gated on `order`, which is the broadest of the three it spans — the
+   * server decides per document kind (see `bookDocs`) and tells the page
+   * which it included, so a login holding `order` alone gets the sales
+   * orders and is told so rather than shown a short book.
+   */
+  { key: 'book', label: 'Sales book', needs: 'order', subtitle: 'Every sales order, and the proformas and quotations still open — by customer or by where the goods are going' },
 ];
 
 /** `2026-09-15` → `15-Sep`, the sheet's own heading. */
@@ -76,6 +84,9 @@ export default function ReportsPage() {
   // SPOC filter, and a subtotal line per SPOC when nobody is chosen.
   const [spoc, setSpoc] = useUrlFilter('spoc');
   const [subtotals, setSubtotals] = useUrlFilter('subtotals');
+  // Customer or country, on the Sales book alone. In the URL like every
+  // other filter here, so a grouping is a link somebody can send.
+  const [by, setBy] = useUrlFilter('by');
   const companies = useCompanies();
   const fy = fiscalYearRange();
 
@@ -85,10 +96,11 @@ export default function ReportsPage() {
     if (from) params.set('from', from);
     if (to) params.set('to', to);
   }
+  if (view === 'book' && by) params.set('by', by);
   const query = params.toString();
   const { data, isPending } = useQuery({
     queryKey: ['report', view, query],
-    queryFn: () => api.get<ReportPivot | DispatchReport | DueReport>(`/api/reports/${view}${query ? `?${query}` : ''}`),
+    queryFn: () => api.get<ReportPivot | DispatchReport | DueReport | BookReport>(`/api/reports/${view}${query ? `?${query}` : ''}`),
     enabled: tabs.length > 0,
   });
 
@@ -101,10 +113,22 @@ export default function ReportsPage() {
   };
 
   const tab = TABS.find((t) => t.key === view)!;
-  const currencyRows = data ? ('groups' in data ? data.groups : data.rows) : [];
+  /*
+   * The Sales book states its currencies as per-currency totals rather than
+   * one per row, so it is read from those — weighted by how many lines each
+   * carries, which is what `pickCurrency` means by *the one most rows are in*.
+   */
+  const bookData = view === 'book' ? (data as BookReport | undefined) : undefined;
+  const currencyRows: { currency: string }[] = bookData
+    ? bookData.totals.flatMap((t) => Array.from({ length: t.lines }, () => ({ currency: t.currency })))
+    : !data || view === 'book'
+      ? []
+      : 'groups' in data
+        ? (data as DueReport).groups
+        : (data as ReportPivot | DispatchReport).rows;
   const present = [...new Set(currencyRows.map((r) => r.currency))].sort();
   const active = pickCurrency(currency, currencyRows);
-  const spocs = data && !('groups' in data) ? [...new Set(data.rows.map((r) => r.spoc))].sort() : [];
+  const spocs = data && !bookData && !('groups' in data) ? [...new Set(data.rows.map((r) => r.spoc))].sort() : [];
   const exportParams = new URLSearchParams(params);
   if (active) exportParams.set('currency', active);
   const exportHref = `/api/reports/${view}/export${exportParams.toString() ? `?${exportParams}` : ''}`;
@@ -140,6 +164,20 @@ export default function ReportsPage() {
             {present.map((c) => <option key={c} value={c}>{c}</option>)}
           </Select>
         )}
+        {view === 'book' && (
+          <>
+            <SegmentedTabs<'customer' | 'country'>
+              value={by === 'country' ? 'country' : 'customer'}
+              onChange={(v) => setBy(v === 'customer' ? '' : v)}
+              tabs={[{ key: 'customer', label: 'By customer' }, { key: 'country', label: 'By country' }]}
+            />
+            {bookData && bookData.included.length < 3 && (
+              <span className="text-xs text-amber-700" title="The server sends only the document kinds this login may read">
+                {bookData.included.map((d) => BOOK_DOC_LABEL[d]).join(' and ')} only — the rest is not yours to read
+              </span>
+            )}
+          </>
+        )}
         {view === 'dispatch' && (
           <>
             <Input type="date" className="w-40" value={from || fy.from} onChange={(e) => setFrom(e.target.value === fy.from ? '' : e.target.value)} />
@@ -164,6 +202,8 @@ export default function ReportsPage() {
 
       {isPending || !data ? (
         <div className="py-8 text-center text-sm text-slate-400">Loading…</div>
+      ) : view === 'book' ? (
+        <BookTable report={data as BookReport} currency={active} listUrl={listUrl} />
       ) : view === 'due' ? (
         <DueTable report={data as DueReport} currency={active} listUrl={listUrl} />
       ) : (
@@ -347,6 +387,178 @@ function DueTable({ report, currency, listUrl }: {
         <span><span className={`mr-1 inline-block h-2 w-2 rounded-full ${DOT.green}`} />Green — due in 8 to 14 days</span>
         <span>Window to {fmtDate(report.until)}. Due date is the one typed on the invoice, else the shipment's ETA.</span>
       </p>
+    </Card>
+  );
+}
+
+/** What each document kind is called on screen. */
+const BOOK_DOC_LABEL: Record<BookDoc, string> = {
+  order: 'Sales Order',
+  proforma: 'Proforma',
+  quotation: 'Quotation',
+};
+
+const BOOK_DOC_PATH: Record<BookDoc, string> = {
+  order: '/orders',
+  proforma: '/proformas',
+  quotation: '/quotations',
+};
+
+/**
+ * The sales book: a group per customer or per destination, opening on the
+ * lines it is made of (2026-10-16, the client: *"a summary … capturing date,
+ * product info, qty, unit price and total"*).
+ *
+ * **A summary that opens**, the shape *Raw Material Required* uses: the live
+ * book runs to several hundred lines, so a flat listing would be a sheet
+ * nobody could read at the top, while a total with no way into it would not
+ * answer the half of the question that names a product and a price. The group
+ * row is the summary; the lines under it are the detail, and the group's total
+ * is exactly the sum of them.
+ *
+ * **One currency at a time**, the rule this whole page follows: the lines are
+ * narrowed to the currency shown and the group's figure is that currency's
+ * own, never a sum across them.
+ */
+function BookTable({ report, currency, listUrl }: {
+  report: BookReport;
+  currency: string;
+  listUrl: (path: string, extra?: Record<string, string>) => string;
+}) {
+  const [open, setOpen] = useState<Set<string>>(new Set());
+  const toggle = (key: string) => setOpen((prev) => {
+    const next = new Set(prev);
+    if (next.has(key)) next.delete(key); else next.add(key);
+    return next;
+  });
+
+  const groups = report.groups
+    .map((g) => ({ ...g, lines: g.lines.filter((l) => l.currency === currency) }))
+    .filter((g) => g.lines.length > 0);
+  const total = report.totals.find((t) => t.currency === currency);
+  const byCountry = report.by === 'country';
+
+  if (!groups.length) {
+    return <EmptyState message="Nothing open in this currency. Every sales order is here, with the proformas and quotations not yet converted." />;
+  }
+
+  return (
+    <Card className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className={TH_CLASS}>
+            <th className="pb-2 pr-3">{byCountry ? 'Country / destination' : 'Customer'}</th>
+            <th className="pb-2 pr-3 text-right">Sales orders</th>
+            <th className="pb-2 pr-3 text-right">Proformas</th>
+            <th className="pb-2 pr-3 text-right">Quotations</th>
+            <th className="pb-2 pr-3 text-right">Lines</th>
+            <th className="pb-2 text-right">Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          {groups.map((g) => {
+            const isOpen = open.has(g.key);
+            const sum = g.totals.find((t) => t.currency === currency);
+            return (
+              <React.Fragment key={g.key || '(none)'}>
+                <tr
+                  className="cursor-pointer border-b border-slate-100 hover:bg-slate-50"
+                  onClick={() => toggle(g.key)}
+                >
+                  <td className="py-2 pr-3 font-medium">
+                    <span className="mr-1 inline-block w-3 text-slate-400">{isOpen ? '▾' : '▸'}</span>
+                    {/* An absence reads as one rather than as a blank cell —
+                        the *Dest Port* rule this codebase states. */}
+                    {g.key ? g.label : <span className="text-amber-700">Not stated</span>}
+                  </td>
+                  <td className="py-2 pr-3 text-right tabular-nums">{g.counts.order || <span className="text-slate-300">—</span>}</td>
+                  <td className="py-2 pr-3 text-right tabular-nums">{g.counts.proforma || <span className="text-slate-300">—</span>}</td>
+                  <td className="py-2 pr-3 text-right tabular-nums">{g.counts.quotation || <span className="text-slate-300">—</span>}</td>
+                  <td className="py-2 pr-3 text-right tabular-nums text-slate-500">{g.lines.length}</td>
+                  <td className="py-2 text-right font-medium tabular-nums">{fmtMoney(sum?.amount ?? 0, currency)}</td>
+                </tr>
+                {isOpen && (
+                  <tr className="border-b border-slate-100 bg-slate-50/60">
+                    <td colSpan={6} className="px-3 py-2">
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className={CAPTION_CLASS}>
+                            <th className="pb-1 pr-3 text-left">Document</th>
+                            <th className="pb-1 pr-3 text-left">Date</th>
+                            <th className="pb-1 pr-3 text-left">{byCountry ? 'Customer' : 'Country / destination'}</th>
+                            <th className="pb-1 pr-3 text-left">Product</th>
+                            <th className="pb-1 pr-3 text-left">Colour</th>
+                            <th className="pb-1 pr-3 text-right">Qty</th>
+                            <th className="pb-1 pr-3 text-right">Unit price</th>
+                            <th className="pb-1 text-right">Total</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {g.lines.map((l, i) => (
+                            <tr key={`${l.doc}-${l.doc_id}-${i}`} className="border-t border-slate-200/70">
+                              <td className="py-1 pr-3 whitespace-nowrap">
+                                <Link
+                                  to={`${BOOK_DOC_PATH[l.doc]}/${l.doc_id}`}
+                                  className="text-brand-600 hover:underline"
+                                  title={BOOK_DOC_LABEL[l.doc]}
+                                >
+                                  {l.number}
+                                </Link>
+                                <span className="ml-1 text-slate-400">{BOOK_DOC_LABEL[l.doc]}</span>
+                              </td>
+                              <td className="py-1 pr-3 whitespace-nowrap">{fmtDate(l.date)}</td>
+                              <td className="py-1 pr-3">
+                                {byCountry ? (
+                                  <Link to={listUrl(`/customers/${l.customer_id}`)} className="hover:underline">{l.customer_name}</Link>
+                                ) : (
+                                  <span title={l.country_from === 'destination'
+                                    ? 'The destination this document states'
+                                    : l.country_from === 'customer'
+                                      ? "The customer's own country — this document states no destination"
+                                      : 'Neither a destination nor a country is recorded'}>
+                                    {l.country || <span className="text-amber-700">Not stated</span>}
+                                    {l.country_from === 'customer' && <span className="ml-1 text-slate-400">(customer)</span>}
+                                  </span>
+                                )}
+                              </td>
+                              {/* The catalogue product, with the line's own
+                                  wording on hover where the two differ — the
+                                  rule the order book's Item column follows. */}
+                              <td className="py-1 pr-3" title={l.description !== l.product ? l.description : undefined}>{l.product}</td>
+                              <td className="py-1 pr-3">{l.color || <span className="text-slate-300">—</span>}</td>
+                              <td className="py-1 pr-3 text-right tabular-nums whitespace-nowrap">
+                                {l.qty == null ? <span className="text-slate-300">—</span> : <>{fmtQty(l.qty)} <span className="text-slate-400">{l.unit}</span></>}
+                              </td>
+                              <td className="py-1 pr-3 text-right tabular-nums">{fmtMoney(l.unit_price, l.currency)}</td>
+                              <td className="py-1 text-right tabular-nums">{fmtMoney(l.amount, l.currency)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </td>
+                  </tr>
+                )}
+              </React.Fragment>
+            );
+          })}
+        </tbody>
+        <tfoot>
+          <tr className="border-t-2 border-slate-200 font-medium">
+            <td className="pt-2 pr-3">Total — {currency}</td>
+            <td className="pt-2 pr-3" />
+            <td className="pt-2 pr-3" />
+            <td className="pt-2 pr-3" />
+            <td className="pt-2 pr-3 text-right tabular-nums text-slate-500">{total?.lines ?? 0}</td>
+            <td className="pt-2 text-right tabular-nums">{fmtMoney(total?.amount ?? 0, currency)}</td>
+          </tr>
+        </tfoot>
+      </table>
+      {report.unplaced > 0 && (
+        <p className="mt-2 text-xs text-slate-500">
+          {report.unplaced} line{report.unplaced === 1 ? '' : 's'} the record cannot place: the document states no
+          destination and the customer no country. They are grouped under <em>Not stated</em> rather than left out.
+        </p>
+      )}
     </Card>
   );
 }

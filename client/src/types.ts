@@ -1564,3 +1564,56 @@ export interface DocumentFinding {
   level: 'block' | 'warn';
   message: string;
 }
+
+/* ------------------------------------------------------------------ *
+ * The sales book (Reports → Sales book)
+ * ------------------------------------------------------------------ */
+
+/**
+ * One live line of the selling book: every sales order, plus the proformas
+ * not yet booked and the quotations not yet converted (2026-10-16).
+ *
+ * `qty` is the **billing** quantity and `unit` its basis, so qty × unit_price
+ * is the total — the pair the document's own arithmetic uses.
+ */
+export type BookDoc = 'order' | 'proforma' | 'quotation';
+
+export interface BookLine {
+  doc: BookDoc;
+  doc_id: number;
+  number: string;
+  date: string;
+  customer_id: number;
+  customer_name: string;
+  /** The destination the document states, else the customer's country. */
+  country: string;
+  /** Which of the two that was — blank when the record states neither. */
+  country_from: 'destination' | 'customer' | '';
+  product: string;
+  description: string;
+  color: string;
+  qty: number | null;
+  unit: string;
+  unit_price: number;
+  currency: string;
+  amount: number;
+}
+
+export interface BookTotal { currency: string; amount: number; lines: number }
+
+export interface BookGroup {
+  key: string;
+  label: string;
+  counts: Record<BookDoc, number>;
+  totals: BookTotal[];
+  lines: BookLine[];
+}
+
+export interface BookReport {
+  by: 'customer' | 'country';
+  /** The document kinds this login may read — absent, not empty. */
+  included: BookDoc[];
+  groups: BookGroup[];
+  totals: BookTotal[];
+  unplaced: number;
+}

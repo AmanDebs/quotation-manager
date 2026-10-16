@@ -4,7 +4,8 @@ import assert from 'node:assert/strict';
 import { db } from '../src/db/connection.js';
 import {
   plannedReport, unscheduledReport, dispatchReport, dueReport, monthsBetween,
-  dueColour, daysBetween, addDaysIso, type ReportFilter,
+  dueColour, daysBetween, addDaysIso, bookReport,
+  type ReportFilter, type BookDoc,
 } from '../src/services/reports.js';
 import { fiscalYearRange } from '../src/services/numbering.js';
 import { scopeClause } from '../src/middleware/scope.js';
@@ -204,5 +205,196 @@ describe('due', () => {
     const b = makeInvoice({ customerId: c, currency: 'INR', total: 20 }); setDue(b, '2026-09-10');
     const groups = dueReport(ALL, '2026-09-15').groups.filter((g) => g.customer_id === c);
     assert.deepEqual(groups.map((g) => [g.currency, g.due]), [['INR', 20], ['USD', 10]]);
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * The sales book
+ * ------------------------------------------------------------------ */
+
+/**
+ * Every live line of the selling book, by customer or by where it is going
+ * (2026-10-16). Most of these are about what it leaves out and what it must
+ * not count twice: the three document kinds have to **partition** the open
+ * book, or a total is the same business added up more than once.
+ */
+
+const ALL_DOCS: BookDoc[] = ['order', 'proforma', 'quotation'];
+const book = (by: 'customer' | 'country' = 'customer', f: ReportFilter = ALL) =>
+  bookReport(f, { by, docs: ALL_DOCS });
+
+/** A goods line on whichever document, in the shape all three item tables share. */
+function line(
+  table: 'order_items' | 'pi_items' | 'quotation_items',
+  fk: string,
+  id: number,
+  o: Partial<{ desc: string; qty: number; unit: string; price: number; amount: number; charge: number; color: string }> = {},
+) {
+  db.prepare(
+    `INSERT INTO ${table} (${fk}, description, color, qty, unit, unit_price, amount, is_charge, sort_order)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)`
+  ).run(id, o.desc ?? 'Preform 28mm', o.color ?? 'Natural', o.qty ?? 10, o.unit ?? 'per 1000',
+    o.price ?? 100, o.amount ?? 1000, o.charge ?? 0);
+}
+
+function quotation(customerId: number, o: Partial<{ status: string; superseded: number | null; currency: string }> = {}): number {
+  return Number((db.prepare(
+    `INSERT INTO quotations (number, date, customer_id, company_id, currency, tax_type, status, superseded_by)
+     VALUES (?, '2026-09-01', ?, 1, ?, 'none', ?, ?) RETURNING id`
+  ).get(`QT/R-${++seq}`, customerId, o.currency ?? 'USD', o.status ?? 'draft', o.superseded ?? null) as { id: number }).id);
+}
+
+const linesFor = (customerId: number, by: 'customer' | 'country' = 'customer') =>
+  book(by).groups.flatMap((g) => g.lines).filter((l) => l.customer_id === customerId);
+
+describe('the sales book', () => {
+  test('carries a sales order, an unbooked proforma and an unconverted quotation', () => {
+    const c = makeCustomer();
+    line('order_items', 'order_id', order(c));
+    line('pi_items', 'pi_id', pi(c, { orderId: null }));
+    line('quotation_items', 'quotation_id', quotation(c));
+    assert.deepEqual(linesFor(c).map((l) => l.doc).sort(), ['order', 'proforma', 'quotation']);
+  });
+
+  /**
+   * The rule that stops the same business being counted twice: booking is
+   * what `lockError` already reads as converted, so a booked proforma is the
+   * order's lines and not its own.
+   */
+  test('a proforma that has been booked is the order, not the proforma', () => {
+    const c = makeCustomer();
+    const o = order(c);
+    line('order_items', 'order_id', o);
+    line('pi_items', 'pi_id', pi(c, { orderId: o }));
+    assert.deepEqual(linesFor(c).map((l) => l.doc), ['order']);
+  });
+
+  /**
+   * And it is the **proforma naming it**, not the `accepted` status that
+   * conversion happens to set — so deleting that proforma opens the quotation
+   * again, which is what `quotationLockedBy` means by locked.
+   */
+  test('a quotation is converted when a proforma names it, and open again when that proforma goes', () => {
+    const c = makeCustomer();
+    const q = quotation(c, { status: 'accepted' });
+    line('quotation_items', 'quotation_id', q);
+    const p = pi(c, { orderId: null });
+    db.prepare('UPDATE proforma_invoices SET quotation_id = ? WHERE id = ?').run(q, p);
+    assert.equal(linesFor(c).filter((l) => l.doc === 'quotation').length, 0, 'a quoted-then-converted offer is counted twice');
+
+    db.prepare('DELETE FROM proforma_invoices WHERE id = ?').run(p);
+    assert.equal(linesFor(c).filter((l) => l.doc === 'quotation').length, 1, 'deleting the proforma did not re-open the quotation');
+  });
+
+  test('a superseded revision is last round’s answer and is never its own line', () => {
+    const c = makeCustomer();
+    const latest = quotation(c);
+    line('quotation_items', 'quotation_id', latest);
+    const old = quotation(c, { superseded: latest });
+    line('quotation_items', 'quotation_id', old);
+    assert.equal(linesFor(c).length, 1);
+  });
+
+  test('the dead are left out — a cancelled order, a cancelled or lapsed proforma, a rejected quotation', () => {
+    const c = makeCustomer();
+    line('order_items', 'order_id', order(c, { status: 'cancelled' }));
+    line('pi_items', 'pi_id', pi(c, { orderId: null, status: 'cancelled' }));
+    line('pi_items', 'pi_id', pi(c, { orderId: null, status: 'sent', validity: '2020-01-01' }));
+    line('quotation_items', 'quotation_id', quotation(c, { status: 'rejected' }));
+    assert.deepEqual(linesFor(c), []);
+  });
+
+  /** A fee is not a product and has no quantity anybody is selling. */
+  test('charge lines are excluded', () => {
+    const c = makeCustomer();
+    const o = order(c);
+    line('order_items', 'order_id', o);
+    line('order_items', 'order_id', o, { desc: 'Freight', charge: 1, amount: 5000 });
+    const got = linesFor(c);
+    assert.equal(got.length, 1);
+    assert.equal(got[0].amount, 1000);
+  });
+
+  /**
+   * Where a line is going: the destination the document states, falling back
+   * to the customer's own country — the client's call, and the only one that
+   * can be right on a book sold through intermediaries registered in India.
+   */
+  test('the destination wins over the customer’s country', () => {
+    const c = makeCustomer();
+    db.prepare("UPDATE customers SET country = 'India' WHERE id = ?").run(c);
+    const o = order(c);
+    db.prepare("UPDATE orders SET port_of_discharge = 'Nacala' WHERE id = ?").run(o);
+    line('order_items', 'order_id', o);
+    const [l] = linesFor(c);
+    assert.equal(l.country, 'Nacala');
+    assert.equal(l.country_from, 'destination');
+  });
+
+  test('and the customer’s country stands in where the document states none', () => {
+    const c = makeCustomer();
+    db.prepare("UPDATE customers SET country = 'India' WHERE id = ?").run(c);
+    line('quotation_items', 'quotation_id', quotation(c));
+    const [l] = linesFor(c);
+    assert.equal(l.country, 'India');
+    assert.equal(l.country_from, 'customer', 'a quotation carries no destination field at all');
+  });
+
+  test('a line the record cannot place is grouped as such rather than dropped', () => {
+    const c = makeCustomer();
+    db.prepare("UPDATE customers SET country = '' WHERE id = ?").run(c);
+    line('quotation_items', 'quotation_id', quotation(c));
+    const r = book('country');
+    const mine = r.groups.find((g) => g.lines.some((l) => l.customer_id === c))!;
+    assert.equal(mine.key, '', 'it was dropped rather than grouped');
+    assert.ok(r.unplaced >= 1);
+  });
+
+  /** Money only adds up within one currency — `receivables.ts`'s rule. */
+  test('totals are per currency and never one figure across them', () => {
+    const c = makeCustomer();
+    line('order_items', 'order_id', order(c), { amount: 1000 });
+    const q = quotation(c, { currency: 'EUR' });
+    line('quotation_items', 'quotation_id', q, { amount: 250 });
+    const g = book().groups.find((x) => x.label !== '' && x.lines.some((l) => l.customer_id === c))!;
+    assert.deepEqual(
+      g.totals.map((t) => [t.currency, t.amount]).sort(),
+      [['EUR', 250], ['USD', 1000]],
+    );
+  });
+
+  /** A group's figure is exactly the lines under it — the summary opens onto its own detail. */
+  test('a group’s total is the sum of its own lines', () => {
+    const c = makeCustomer();
+    const o = order(c);
+    line('order_items', 'order_id', o, { amount: 1200 });
+    line('order_items', 'order_id', o, { amount: 800 });
+    const g = book().groups.find((x) => x.lines.some((l) => l.customer_id === c))!;
+    const usd = g.totals.find((t) => t.currency === 'USD')!;
+    assert.equal(usd.amount, g.lines.filter((l) => l.currency === 'USD').reduce((n, l) => n + l.amount, 0));
+    assert.equal(usd.lines, g.lines.filter((l) => l.currency === 'USD').length);
+  });
+
+  /** The counts over a group are documents, not lines. */
+  test('a two-line order counts as one sales order', () => {
+    const c = makeCustomer();
+    const o = order(c);
+    line('order_items', 'order_id', o);
+    line('order_items', 'order_id', o);
+    const g = book().groups.find((x) => x.lines.some((l) => l.customer_id === c))!;
+    assert.equal(g.counts.order, 1);
+    assert.equal(g.lines.length, 2);
+  });
+
+  /** Absent, not empty: a caller without a function does not get its documents. */
+  test('only the document kinds asked for are included', () => {
+    const c = makeCustomer();
+    line('order_items', 'order_id', order(c));
+    line('quotation_items', 'quotation_id', quotation(c));
+    const only = bookReport(ALL, { by: 'customer', docs: ['order'] });
+    const mine = only.groups.flatMap((g) => g.lines).filter((l) => l.customer_id === c);
+    assert.deepEqual(mine.map((l) => l.doc), ['order']);
+    assert.deepEqual(only.included, ['order']);
+    assert.deepEqual(bookReport(ALL, { by: 'customer', docs: [] }).groups, []);
   });
 });
