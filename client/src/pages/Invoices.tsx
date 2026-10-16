@@ -4,6 +4,8 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Invoice } from '../types';
 import { Button, Select, Input, PageHeader, EmptyState, Card, ExportTabs, ErrorText, Pagination, DownloadButton, TH_CLASS } from '../components/ui';
+import { ColumnFilter, FilteredByStrip } from '../components/ColumnFilter';
+import { useColumnFilters, type ColumnFilterSpec } from '../lib/useColumnFilters';
 import { useCompanies } from '../components/CompanySelect';
 import NewDocumentDialog from '../components/NewDocumentDialog';
 import { fmtDate, fmtMoney } from '../lib/format';
@@ -22,6 +24,32 @@ const statusTint: Record<string, string> = {
 };
 
 const label = (s: string) => s[0].toUpperCase() + s.slice(1);
+/** What the Status funnel calls each stored value. */
+const STATUS_LABELS: Record<string, string> = Object.fromEntries(STATUSES.map((s) => [s, label(s)]));
+
+/**
+ * The header funnels (2026-10-16, the client: *"Add this column wise filter in
+ * all reports"*). The quotation list's own spec states the rule.
+ *
+ * Six of the seven headings; *Issued By* is the company, which the select
+ * above the table already narrows and which is drawn only for a group with
+ * more than one entity.
+ *
+ * **Status is one of them here**, where on the quotation and proforma lists it
+ * is not: theirs is a tick-box picker carrying a default-shown rule a funnel
+ * has no notion of, while this one was a plain single-value select — so the
+ * funnel replaces it outright rather than sitting beside it. It keeps the
+ * `?status=` key through `param`, so the dashboard's own links still land and
+ * the dropdown can clear what they set.
+ */
+const INVOICE_FILTERS: ColumnFilterSpec[] = [
+  { key: 'number', label: 'Number', kind: 'values' },
+  { key: 'date', label: 'Date', kind: 'dates' },
+  { key: 'customer', label: 'Customer', kind: 'values' },
+  { key: 'pi', label: 'Ref. PI', kind: 'values' },
+  { key: 'total', label: 'Total', kind: 'numbers' },
+  { key: 'status', label: 'Status', kind: 'values', param: 'status', labels: STATUS_LABELS },
+];
 
 export default function InvoicesPage() {
   // Only worth a column once the group has more than one entity.
@@ -30,23 +58,41 @@ export default function InvoicesPage() {
   const [companyFilter, setCompanyFilter] = useUrlFilter('company');
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  // In the URL, so the dashboard can link to one slice of the list and the
-  // back button undoes a filter instead of leaving the page.
-  const [statusFilter, setStatusFilter] = useUrlFilter('status');
   const [exportFilter, setExportFilter] = useUrlFilter('export');
   // Server-side, not a filter over the rows on screen: the list is paged,
   // so searching what has been fetched would only search the current page.
   const [search, setSearch] = useUrlFilter('q');
   const [creating, setCreating] = useState(false);
+  const columns = useColumnFilters(INVOICE_FILTERS);
+
+  /** One funnel, drawn inside its heading — see the quotation list's own. */
+  const filterFor = (key: string) => {
+    const spec = INVOICE_FILTERS.find((c) => c.key === key)!;
+    return (
+      <ColumnFilter
+        column={key}
+        kind={spec.kind}
+        label={spec.label}
+        labels={spec.labels}
+        value={columns.get(key)}
+        onChange={(v) => columns.set(key, v)}
+        query={columns.params.toString()}
+        path="/api/invoices/facet"
+      />
+    );
+  };
+
   const params = new URLSearchParams();
-  if (statusFilter) params.set('status', statusFilter);
   if (exportFilter) params.set('export', exportFilter);
   if (companyFilter) params.set('company', companyFilter);
   if (search) params.set('q', search);
+  // The header funnels, Status among them, carried into the rows, the
+  // count and the download alike.
+  for (const [k, v] of columns.params) params.set(k, v);
   const list = usePagedList<Invoice>(
     // search rides in the key, so typing returns to page 1 rather than
     // leaving somebody on page 7 of a three-row result.
-    ['invoices', statusFilter, exportFilter, companyFilter, search],
+    ['invoices', exportFilter, companyFilter, search, columns.params.toString()],
     `/api/invoices${params.toString() ? `?${params}` : ''}`,
   );
   const invoices = list.rows;
@@ -88,10 +134,6 @@ export default function InvoicesPage() {
             ))}
           </Select>
         )}
-        <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="max-w-45">
-          <option value="">All statuses</option>
-          {STATUSES.map((s) => <option key={s} value={s}>{label(s)}</option>)}
-        </Select>
         <Input
           className="max-w-64"
           placeholder="Search number or customer…"
@@ -100,11 +142,16 @@ export default function InvoicesPage() {
         />
       </div>
       <ErrorText error={setStatus.error} />
+      <FilteredByStrip
+        columns={columns.filtered}
+        onClear={(key) => columns.set(key, {})}
+        onClearAll={columns.clearAll}
+      />
       <Card className="overflow-x-auto">
         {invoices.length === 0 ? (
           <EmptyState
             message={
-              search || statusFilter || exportFilter || companyFilter
+              search || exportFilter || companyFilter || columns.filtered.length
                 ? 'Nothing matches those filters.'
                 : 'No commercial invoices yet. Create one from a confirmed proforma invoice at dispatch time.'
             }
@@ -113,13 +160,25 @@ export default function InvoicesPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className={TH_CLASS}>
-                <th className="pb-2 pr-3">Number</th>
-                <th className="pb-2 pr-3">Date</th>
-                <th className="pb-2 pr-3">Customer</th>
+                <th className="whitespace-nowrap pb-2 pr-3">
+                  <span className="flex items-center gap-0.5">Number{filterFor('number')}</span>
+                </th>
+                <th className="whitespace-nowrap pb-2 pr-3">
+                  <span className="flex items-center gap-0.5">Date{filterFor('date')}</span>
+                </th>
+                <th className="whitespace-nowrap pb-2 pr-3">
+                  <span className="flex items-center gap-0.5">Customer{filterFor('customer')}</span>
+                </th>
                 {showCompany && <th className="pb-2 pr-3">Issued By</th>}
-                <th className="pb-2 pr-3">Ref. PI</th>
-                <th className="pb-2 pr-3 text-right">Total</th>
-                <th className="pb-2 pr-3">Status</th>
+                <th className="whitespace-nowrap pb-2 pr-3">
+                  <span className="flex items-center gap-0.5">Ref. PI{filterFor('pi')}</span>
+                </th>
+                <th className="whitespace-nowrap pb-2 pr-3 text-right">
+                  <span className="flex items-center justify-end gap-0.5">Total{filterFor('total')}</span>
+                </th>
+                <th className="whitespace-nowrap pb-2 pr-3">
+                  <span className="flex items-center gap-0.5">Status{filterFor('status')}</span>
+                </th>
               </tr>
             </thead>
             <tbody>

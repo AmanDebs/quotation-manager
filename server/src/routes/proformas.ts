@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { db, transaction } from '../db/connection.js';
-import { STATUS_SQL } from '../services/proformaStatus.js';
+import { STATUS_SQL, statusSqlFor } from '../services/proformaStatus.js';
 import { nextNumber, exportChangeError } from '../services/numbering.js';
 import { computeTotals, round2, type LineItemInput } from '../services/totals.js';
 import type { AuthedRequest } from '../middleware/auth.js';
@@ -13,6 +13,9 @@ import { searchClause } from '../services/search.js';
 import { proformaAdvance } from '../services/receivables.js';
 import { lockError, syncQuotationConverted, alreadyConvertedError } from '../services/documentChain.js';
 import { buildXlsx, attachmentName, type Column } from '../services/xlsx.js';
+import {
+  columnWhere, readColumnFilters, facetOver, isColumnOf, type ColumnSpecs,
+} from '../services/columnFilters.js';
 
 export const proformasRouter = Router();
 
@@ -40,17 +43,26 @@ export const proformasRouter = Router();
  * what the deployed box does for quotations too, `todayLocal()` there reading
  * the server's clock, which on Render is UTC.
  *
- * It is selected **after `p.*`**, and that is load-bearing: the later alias
- * wins, which is what lets one expression cover the list, `getFull` and the
- * spreadsheet export without any of them mapping rows by hand. Measured, not
- * assumed. Moving it above `p.*` would silently restore the stored value.
+ * **It is derived one layer out rather than beside `p.*`**, and the reason is
+ * worth keeping. It used to be selected *after* `p.*` and rely on the later
+ * alias winning — true of a bare statement, and **false the moment that
+ * statement becomes a subquery**: wrapping it to filter on its own aliases
+ * (the header funnels, 2026-10-16) made `SELECT *` carry both columns, and
+ * node:sqlite disambiguates those as `status` and `status:1` with the *first*
+ * — the stored one — under the plain name. Measured: a lapsed offer read
+ * `sent` in the list while its own page read `expired`.
  *
- * The expression itself is `STATUS_SQL` in `services/proformaStatus.ts`,
+ * So `listSql` carries the stored status alone and every reader of it goes
+ * through `withStatus`, which derives once over the subquery's own columns.
+ * One rule, one layer, and nothing that depends on which of two columns a
+ * driver happens to pick.
+ *
+ * The expression itself is `statusSqlFor` in `services/proformaStatus.ts`,
  * moved there on 2026-09-15 when the Reports page needed the same reading.
  */
 
 const listSql = `
-  SELECT p.*, ${STATUS_SQL} AS status,
+  SELECT p.*,
          c.name AS customer_name, c.country AS customer_country, q.number AS quotation_number,
          co.company_name AS company_name,
          o.number AS order_number, u.name AS created_by_name, a.name AS approved_by_name,
@@ -87,8 +99,20 @@ const listSql = `
   LEFT JOIN users u ON u.id = p.created_by
   LEFT JOIN users a ON a.id = p.approved_by`;
 
+/**
+ * `listSql`, with the status the app reads rather than the one stored.
+ *
+ * Every reader goes through it — the list, `getFull` and the export — so the
+ * three cannot disagree about which offers have lapsed. The derived value is
+ * selected **last**, which is what makes it win over the `status` that arrives
+ * with `*`: measured, not assumed, and the one shape of the several tried that
+ * node:sqlite resolves the way the name reads.
+ */
+const withStatus = (inner: string) =>
+  `SELECT *, ${statusSqlFor('doc')} AS status FROM (${inner}) doc`;
+
 function getFull(id: number) {
-  const pi = db.prepare(`${listSql} WHERE p.id = ?`).get(id) as Record<string, unknown> | undefined;
+  const pi = db.prepare(`${withStatus(`${listSql} WHERE p.id = ?`)}`).get(id) as Record<string, unknown> | undefined;
   if (!pi) return undefined;
   pi.items = db.prepare('SELECT * FROM pi_items WHERE pi_id = ? ORDER BY sort_order, id').all(id);
   pi.column_config = JSON.parse(String(pi.column_config || '{}'));
@@ -221,13 +245,70 @@ function proformaListWhere(req: AuthedRequest): { where: string[]; params: unkno
   return { where, params };
 }
 
-proformasRouter.get('/', (req: AuthedRequest, res) => {
+/*
+ * What each heading can be filtered by (2026-10-16, the client: *"Add this
+ * column wise filter in all reports"*). The quotation list's own entry states
+ * the rule; this list's exceptions are its own.
+ *
+ * Nine of the eleven headings. *Customer* keeps its select, which the Reports
+ * page deep-links with `customer_id` — a funnel over the name could neither
+ * show nor clear that, which is the filter-the-control-cannot-see trap — and
+ * *Status* keeps the tick-box picker with its `SHOWN_BY_DEFAULT` rule.
+ *
+ * **Balance is restated rather than named**, the rule the order book states
+ * about its own: the cell prints `grand_total − advance_received`, so a filter
+ * on anything else would quietly disagree with the figure beside it. Both are
+ * reachable here because the outer layer filters on what the select produced.
+ */
+export const PROFORMA_FILTERABLE = {
+  number: { sql: 'number', kind: 'values' },
+  date: { sql: 'date', kind: 'dates' },
+  total: { sql: 'grand_total', kind: 'numbers' },
+  advance: { sql: 'advance_received', kind: 'numbers' },
+  balance: { sql: 'grand_total - advance_received', kind: 'numbers' },
+  payment_terms: { sql: 'payment_terms', kind: 'values' },
+  issued_by: { sql: 'created_by_name', kind: 'values' },
+  spoc: { sql: 'prepared_by', kind: 'values' },
+  order_number: { sql: 'order_number', kind: 'values' },
+} as const satisfies ColumnSpecs;
+
+/**
+ * The list as one statement, filters and all — the quotation list's own shape,
+ * and see its comment for why it is wrapped whether or not a funnel is set.
+ *
+ * The derived status is added by `withStatus` as the outermost layer, so the
+ * column filters below it read the **stored** `status` should one ever name it
+ * — none does, this list keeping its own status picker, and a funnel added on
+ * it later must read `statusSqlFor('doc')` rather than the bare column.
+ */
+const LIST_ORDER = 'ORDER BY date DESC, id DESC';
+
+function proformaListQuery(
+  req: AuthedRequest,
+  except?: keyof typeof PROFORMA_FILTERABLE,
+): { sql: string; params: unknown[] } {
   const { where, params } = proformaListWhere(req);
-  res.json(listBody(req.query, {
-    sql: `${listSql}${where.length ? ' WHERE ' + where.join(' AND ') : ''}`,
-    order: 'ORDER BY p.date DESC, p.id DESC',
-    params,
-  }));
+  const inner = `${listSql}${where.length ? ' WHERE ' + where.join(' AND ') : ''}`;
+  const cols = columnWhere(
+    PROFORMA_FILTERABLE,
+    readColumnFilters(req.query as Record<string, unknown>, PROFORMA_FILTERABLE),
+    except,
+  );
+  /*
+   * One layer, not two: `withStatus` already selects `FROM (inner) doc`, so
+   * every alias the inner statement produced — `advance_received`,
+   * `created_by_name`, `order_number` — is a column of `doc` and therefore
+   * nameable in this WHERE, which is the only place a filter on them can live.
+   */
+  return {
+    sql: `${withStatus(inner)}${cols.sql.length ? ` WHERE ${cols.sql.join(' AND ')}` : ''}`,
+    params: [...params, ...cols.params],
+  };
+}
+
+proformasRouter.get('/', (req: AuthedRequest, res) => {
+  const { sql, params } = proformaListQuery(req);
+  res.json(listBody(req.query, { sql, order: LIST_ORDER, params }));
 });
 
 /**
@@ -277,13 +358,31 @@ const proformaColumns: Column<Row>[] = [
 ];
 
 proformasRouter.get('/export', (req: AuthedRequest, res) => {
-  const { where, params } = proformaListWhere(req);
-  const rows = db
-    .prepare(`${listSql}${where.length ? ' WHERE ' + where.join(' AND ') : ''} ORDER BY p.date DESC, p.id DESC`)
-    .all(...(params as never[])) as Row[];
+  const { sql, params } = proformaListQuery(req);
+  const rows = db.prepare(`${sql} ${LIST_ORDER}`).all(...(params as never[])) as Row[];
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.setHeader('Content-Disposition', `attachment; filename="${attachmentName('Proforma invoices')}"`);
   res.send(buildXlsx('Proforma invoices', proformaColumns, rows));
+});
+
+/**
+ * What one column's tick list should offer, over the whole filtered list.
+ * Declared **above `/:id`** like `/export` beside it, and guarded by the
+ * router's own `requireFunction('proforma')` mount — see the quotation list's
+ * own facet for the reasoning.
+ */
+proformasRouter.get('/facet', (req: AuthedRequest, res) => {
+  const column = String(req.query.column ?? '');
+  if (!isColumnOf(PROFORMA_FILTERABLE, column)) {
+    return res.status(400).json({ error: `Not a filterable column: ${column}` });
+  }
+  if (PROFORMA_FILTERABLE[column].kind !== 'values') {
+    return res.status(400).json({ error: `${column} is filtered by range, not by a list of values` });
+  }
+  const { sql, params } = proformaListQuery(req, column);
+  return res.json(facetOver(sql, params, PROFORMA_FILTERABLE[column].sql, {
+    search: String(req.query.search ?? ''),
+  }));
 });
 
 proformasRouter.get('/:id', (req: AuthedRequest, res) => {

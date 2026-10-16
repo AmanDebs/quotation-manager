@@ -13,6 +13,9 @@ import { lockError } from '../services/documentChain.js';
 import { listBody } from '../services/pagination.js';
 import { searchClause } from '../services/search.js';
 import { buildXlsx, attachmentName, type Column } from '../services/xlsx.js';
+import {
+  columnWhere, readColumnFilters, facetOver, isColumnOf, type ColumnSpecs,
+} from '../services/columnFilters.js';
 
 export const quotationsRouter = Router();
 
@@ -135,13 +138,67 @@ function quotationListWhere(req: AuthedRequest): { where: string[]; params: unkn
   return { where, params };
 }
 
-quotationsRouter.get('/', (req: AuthedRequest, res) => {
+/*
+ * What each heading can be filtered by (2026-10-16, the client with the order
+ * book's own funnels in front of them: *"Add this column wise filter in all
+ * reports (Quotation, proforma, commercial etc.)"*).
+ *
+ * The mechanism is `services/columnFilters.ts`, shared with the order book and
+ * the Work Orders list; what stays here is **which columns this list offers**,
+ * beside the query whose aliases it names — or the two drift the first time a
+ * column is renamed.
+ *
+ * Six of the nine headings. The other three are **left to the controls they
+ * already have**, which is the two-controls-over-one-fact rule this codebase
+ * states everywhere: *Type* is the Export/Domestic tabs, *Issued By* is the
+ * company select, and *Status* is the tick-box picker whose
+ * `SHOWN_BY_DEFAULT` rule a funnel has no notion of — a second clause under a
+ * second key would be a filter neither control could see or clear.
+ */
+export const QUOTATION_FILTERABLE = {
+  number: { sql: 'number', kind: 'values' },
+  date: { sql: 'date', kind: 'dates' },
+  customer: { sql: 'customer_name', kind: 'values' },
+  spoc: { sql: 'prepared_by', kind: 'values' },
+  total: { sql: 'grand_total', kind: 'numbers' },
+  approval: { sql: 'approval_status', kind: 'values' },
+} as const satisfies ColumnSpecs;
+
+/**
+ * The list as one statement, filters and all.
+ *
+ * Two layers, and the split is not cosmetic: the **inner** WHERE narrows rows
+ * on the tables themselves, while the **outer** one filters on what the select
+ * produced — which is the only place a filter on *Customer* can live, that
+ * being a join's alias rather than a column of `quotations`. It is wrapped
+ * whether or not a funnel is set, so there is one shape to reason about and
+ * one ORDER BY to name.
+ *
+ * `except` leaves one column's own filter out, which is what a tick list has
+ * to be measured against — see `columnWhere`.
+ */
+const LIST_ORDER = 'ORDER BY date DESC, id DESC';
+
+function quotationListQuery(
+  req: AuthedRequest,
+  except?: keyof typeof QUOTATION_FILTERABLE,
+): { sql: string; params: unknown[] } {
   const { where, params } = quotationListWhere(req);
-  res.json(listBody(req.query, {
-    sql: `${listSql}${where.length ? ' WHERE ' + where.join(' AND ') : ''}`,
-    order: 'ORDER BY q.date DESC, q.id DESC',
-    params,
-  }));
+  const inner = `${listSql}${where.length ? ' WHERE ' + where.join(' AND ') : ''}`;
+  const cols = columnWhere(
+    QUOTATION_FILTERABLE,
+    readColumnFilters(req.query as Record<string, unknown>, QUOTATION_FILTERABLE),
+    except,
+  );
+  return {
+    sql: `SELECT * FROM (${inner}) doc${cols.sql.length ? ` WHERE ${cols.sql.join(' AND ')}` : ''}`,
+    params: [...params, ...cols.params],
+  };
+}
+
+quotationsRouter.get('/', (req: AuthedRequest, res) => {
+  const { sql, params } = quotationListQuery(req);
+  res.json(listBody(req.query, { sql, order: LIST_ORDER, params }));
 });
 
 /**
@@ -181,13 +238,35 @@ const quotationColumns: Column<Row>[] = [
 ];
 
 quotationsRouter.get('/export', (req: AuthedRequest, res) => {
-  const { where, params } = quotationListWhere(req);
-  const rows = db
-    .prepare(`${listSql}${where.length ? ' WHERE ' + where.join(' AND ') : ''} ORDER BY q.date DESC, q.id DESC`)
-    .all(...(params as never[])) as Row[];
+  const { sql, params } = quotationListQuery(req);
+  const rows = db.prepare(`${sql} ${LIST_ORDER}`).all(...(params as never[])) as Row[];
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.setHeader('Content-Disposition', `attachment; filename="${attachmentName('Quotations')}"`);
   res.send(buildXlsx('Quotations', quotationColumns, rows));
+});
+
+/**
+ * What one column's tick list should offer, over the whole filtered list.
+ *
+ * Declared **above `/:id`**, the rule `/export` beside it already follows, or
+ * Express reads "facet" as a quotation id. It needs no guard of its own: this
+ * router is mounted `requireFunction('quotation')`, so a read already answers
+ * to the same cell the list does — and it is scoped by `quotationListWhere`
+ * like the list it describes, a facet being real values off real rows and an
+ * unscoped one a customer book handed out through a filter control.
+ */
+quotationsRouter.get('/facet', (req: AuthedRequest, res) => {
+  const column = String(req.query.column ?? '');
+  if (!isColumnOf(QUOTATION_FILTERABLE, column)) {
+    return res.status(400).json({ error: `Not a filterable column: ${column}` });
+  }
+  if (QUOTATION_FILTERABLE[column].kind !== 'values') {
+    return res.status(400).json({ error: `${column} is filtered by range, not by a list of values` });
+  }
+  const { sql, params } = quotationListQuery(req, column);
+  return res.json(facetOver(sql, params, QUOTATION_FILTERABLE[column].sql, {
+    search: String(req.query.search ?? ''),
+  }));
 });
 
 quotationsRouter.get('/:id', (req: AuthedRequest, res) => {

@@ -14,6 +14,9 @@ import { syncInvoiceStatus, syncInvoicesForProforma } from '../services/invoiceS
 import { listBody } from '../services/pagination.js';
 import { searchClause } from '../services/search.js';
 import { buildXlsx, attachmentName, type Column } from '../services/xlsx.js';
+import {
+  columnWhere, readColumnFilters, facetOver, isColumnOf, type ColumnSpecs,
+} from '../services/columnFilters.js';
 
 /**
  * Bring the paid/unpaid status back into line after anything that moves money.
@@ -355,7 +358,13 @@ function invoiceListWhere(req: AuthedRequest): { where: string[]; params: unknow
   // somebody has in hand when they come looking for a invoice.
   const text = searchClause(['i.number', 'c.name'], search);
   if (text.sql) { where.push(text.sql); params.push(...text.params); }
-  if (req.query.status) { where.push('i.status = ?'); params.push(String(req.query.status)); }
+  /*
+   * Status is **not** read here any more: it is the Status column's own funnel
+   * (2026-10-16), under the same `?status=` key it has always used, so links
+   * from elsewhere in the app still land. A second clause here would be a
+   * filter the dropdown could neither see nor clear — the trap the Work Orders
+   * list records when its own standalone status select went.
+   */
   if (req.query.export === '1' || req.query.export === '0') { where.push('i.is_export = ?'); params.push(Number(req.query.export)); }
   // Narrow to one selling entity. Ignored when the group has just one.
   if (Number(req.query.company) > 0) { where.push('i.company_id = ?'); params.push(Number(req.query.company)); }
@@ -363,13 +372,56 @@ function invoiceListWhere(req: AuthedRequest): { where: string[]; params: unknow
   return { where, params };
 }
 
-invoicesRouter.get('/', (req: AuthedRequest, res) => {
+/*
+ * What each heading can be filtered by (2026-10-16, the client: *"Add this
+ * column wise filter in all reports"*). The quotation list's own entry states
+ * the rule; this list's exceptions are its own.
+ *
+ * Six of the seven headings. *Issued By* is the company, which the select
+ * above the table already narrows and which is only drawn for a group with
+ * more than one entity.
+ *
+ * **Status is a funnel here rather than a select**, which the other two lists
+ * cannot be: theirs carry a `SHOWN_BY_DEFAULT` rule a tick list has no notion
+ * of, where this one was a plain single-value picker. It keeps the `?status=`
+ * key through `param`, so a link carrying one value still lands — and reading
+ * that spelling as this column's own is what lets the dropdown clear it.
+ */
+export const INVOICE_FILTERABLE = {
+  number: { sql: 'number', kind: 'values' },
+  date: { sql: 'date', kind: 'dates' },
+  customer: { sql: 'customer_name', kind: 'values' },
+  pi: { sql: 'pi_number', kind: 'values' },
+  total: { sql: 'grand_total', kind: 'numbers' },
+  status: { sql: 'status', kind: 'values', param: 'status' },
+} as const satisfies ColumnSpecs;
+
+/**
+ * The list as one statement, filters and all — the quotation list's own shape,
+ * and see its comment for why it is wrapped whether or not a funnel is set.
+ */
+const LIST_ORDER = 'ORDER BY date DESC, id DESC';
+
+function invoiceListQuery(
+  req: AuthedRequest,
+  except?: keyof typeof INVOICE_FILTERABLE,
+): { sql: string; params: unknown[] } {
   const { where, params } = invoiceListWhere(req);
-  res.json(listBody(req.query, {
-    sql: `${listSql}${where.length ? ' WHERE ' + where.join(' AND ') : ''}`,
-    order: 'ORDER BY i.date DESC, i.id DESC',
-    params,
-  }));
+  const inner = `${listSql}${where.length ? ' WHERE ' + where.join(' AND ') : ''}`;
+  const cols = columnWhere(
+    INVOICE_FILTERABLE,
+    readColumnFilters(req.query as Record<string, unknown>, INVOICE_FILTERABLE),
+    except,
+  );
+  return {
+    sql: `SELECT * FROM (${inner}) doc${cols.sql.length ? ` WHERE ${cols.sql.join(' AND ')}` : ''}`,
+    params: [...params, ...cols.params],
+  };
+}
+
+invoicesRouter.get('/', (req: AuthedRequest, res) => {
+  const { sql, params } = invoiceListQuery(req);
+  res.json(listBody(req.query, { sql, order: LIST_ORDER, params }));
 });
 
 /**
@@ -417,10 +469,8 @@ const invoiceColumns: Column<Row>[] = [
 ];
 
 invoicesRouter.get('/export', (req: AuthedRequest, res) => {
-  const { where, params } = invoiceListWhere(req);
-  const rows = db
-    .prepare(`${listSql}${where.length ? ' WHERE ' + where.join(' AND ') : ''} ORDER BY i.date DESC, i.id DESC`)
-    .all(...(params as never[])) as Row[];
+  const { sql, params } = invoiceListQuery(req);
+  const rows = db.prepare(`${sql} ${LIST_ORDER}`).all(...(params as never[])) as Row[];
   for (const inv of rows) {
     const money = invoiceReceivable(Number(inv.id));
     inv.amount_received = money.amount_received;
@@ -434,6 +484,26 @@ invoicesRouter.get('/export', (req: AuthedRequest, res) => {
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.setHeader('Content-Disposition', `attachment; filename="${attachmentName('Commercial invoices')}"`);
   res.send(buildXlsx('Commercial invoices', invoiceColumns, rows));
+});
+
+/**
+ * What one column's tick list should offer, over the whole filtered list.
+ * Declared **above `/:id`** like `/export` beside it, and guarded by the
+ * router's own `requireFunction('invoice')` mount — see the quotation list's
+ * own facet for the reasoning.
+ */
+invoicesRouter.get('/facet', (req: AuthedRequest, res) => {
+  const column = String(req.query.column ?? '');
+  if (!isColumnOf(INVOICE_FILTERABLE, column)) {
+    return res.status(400).json({ error: `Not a filterable column: ${column}` });
+  }
+  if (INVOICE_FILTERABLE[column].kind !== 'values') {
+    return res.status(400).json({ error: `${column} is filtered by range, not by a list of values` });
+  }
+  const { sql, params } = invoiceListQuery(req, column);
+  return res.json(facetOver(sql, params, INVOICE_FILTERABLE[column].sql, {
+    search: String(req.query.search ?? ''),
+  }));
 });
 
 invoicesRouter.get('/:id', (req: AuthedRequest, res) => {

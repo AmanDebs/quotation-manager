@@ -4,6 +4,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Proforma, Customer } from '../types';
 import { Button, Select, Input, PageHeader, EmptyState, Card, ExportTabs, ErrorText, Pagination, DownloadButton, TH_CLASS, MultiSelectFilter } from '../components/ui';
+import { ColumnFilter, FilteredByStrip } from '../components/ColumnFilter';
+import { useColumnFilters, type ColumnFilterSpec } from '../lib/useColumnFilters';
 import { useCompanies } from '../components/CompanySelect';
 import NewDocumentDialog from '../components/NewDocumentDialog';
 import { fmtDate, fmtMoney, today } from '../lib/format';
@@ -73,6 +75,28 @@ const statusTint: Record<string, string> = {
 
 const label = proformaStatusLabel;
 
+/**
+ * The header funnels (2026-10-16, the client: *"Add this column wise filter in
+ * all reports"*). The quotation list's own spec states the rule.
+ *
+ * Nine of the eleven headings. *Customer* keeps its select, which the Reports
+ * page deep-links with `customer_id` — a funnel over the name could neither
+ * show nor clear that — and *Status* keeps the tick-box picker with its own
+ * default. **Balance** filters on the figure the cell prints, total less
+ * advance, rather than on either half of it.
+ */
+const PROFORMA_FILTERS: ColumnFilterSpec[] = [
+  { key: 'number', label: 'Number', kind: 'values' },
+  { key: 'date', label: 'Date', kind: 'dates' },
+  { key: 'total', label: 'Total', kind: 'numbers' },
+  { key: 'advance', label: 'Advance', kind: 'numbers' },
+  { key: 'balance', label: 'Balance', kind: 'numbers' },
+  { key: 'payment_terms', label: 'Payment Terms', kind: 'values' },
+  { key: 'issued_by', label: 'Issued By', kind: 'values' },
+  { key: 'spoc', label: 'SPOC', kind: 'values' },
+  { key: 'order_number', label: 'Sales Order', kind: 'values' },
+];
+
 export default function ProformasPage() {
   // Only worth a column once the group has more than one entity.
   const companies = useCompanies();
@@ -96,6 +120,23 @@ export default function ProformasPage() {
   // The proforma a follow-up is being scheduled on from its row (2026-09-20,
   // the client: "Add the follow up in proforma also").
   const [chasing, setChasing] = useState<Proforma | null>(null);
+  const columns = useColumnFilters(PROFORMA_FILTERS);
+
+  /** One funnel, drawn inside its heading — see the quotation list's own. */
+  const filterFor = (key: string) => {
+    const spec = PROFORMA_FILTERS.find((c) => c.key === key)!;
+    return (
+      <ColumnFilter
+        column={key}
+        kind={spec.kind}
+        label={spec.label}
+        value={columns.get(key)}
+        onChange={(v) => columns.set(key, v)}
+        query={columns.params.toString()}
+        path="/api/proformas/facet"
+      />
+    );
+  };
 
   const toggleNote = (id: number) =>
     setOpenNotes((prev) => {
@@ -110,10 +151,12 @@ export default function ProformasPage() {
   if (companyFilter) params.set('company', companyFilter);
   if (customerFilter) params.set('customer_id', customerFilter);
   if (search) params.set('q', search);
+  // The header funnels, carried into the rows, the count and the download.
+  for (const [k, v] of columns.params) params.set(k, v);
   const list = usePagedList<Proforma>(
     // search rides in the key, so typing returns to page 1 rather than
     // leaving somebody on page 7 of a three-row result.
-    ['proformas', statusFilter, exportFilter, companyFilter, search],
+    ['proformas', statusFilter, exportFilter, companyFilter, search, columns.params.toString()],
     `/api/proformas${params.toString() ? `?${params}` : ''}`,
   );
   const proformas = list.rows;
@@ -185,12 +228,17 @@ export default function ProformasPage() {
           onChange={(e) => setSearch(e.target.value)}
         />
       </div>
+      <FilteredByStrip
+        columns={columns.filtered}
+        onClear={(key) => columns.set(key, {})}
+        onClearAll={columns.clearAll}
+      />
       <ErrorText error={setStatus.error} />
       <Card className="overflow-x-auto">
         {proformas.length === 0 ? (
           <EmptyState
             message={
-              search || statusFilter || exportFilter || companyFilter || customerFilter
+              search || statusFilter || exportFilter || companyFilter || customerFilter || columns.filtered.length
                 ? 'Nothing matches those filters.'
                 // Only the open offers show with no filter set, so an empty
                 // table is not proof the book is empty.
@@ -201,21 +249,39 @@ export default function ProformasPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className={TH_CLASS}>
-                <th className="pb-2 pr-3">Number</th>
-                <th className="pb-2 pr-3">Date</th>
+                <th className="whitespace-nowrap pb-2 pr-3">
+                  <span className="flex items-center gap-0.5">Number{filterFor('number')}</span>
+                </th>
+                <th className="whitespace-nowrap pb-2 pr-3">
+                  <span className="flex items-center gap-0.5">Date{filterFor('date')}</span>
+                </th>
                 <th className="pb-2 pr-3">Customer</th>
-                <th className="pb-2 pr-3 text-right">Total</th>
-                <th className="pb-2 pr-3 text-right">Advance</th>
-                <th className="pb-2 pr-3 text-right">Balance</th>
-                <th className="pb-2 pr-3">Payment Terms</th>
-                <th className="pb-2 pr-3">Issued By</th>
+                <th className="whitespace-nowrap pb-2 pr-3 text-right">
+                  <span className="flex items-center justify-end gap-0.5">Total{filterFor('total')}</span>
+                </th>
+                <th className="whitespace-nowrap pb-2 pr-3 text-right">
+                  <span className="flex items-center justify-end gap-0.5">Advance{filterFor('advance')}</span>
+                </th>
+                <th className="whitespace-nowrap pb-2 pr-3 text-right">
+                  <span className="flex items-center justify-end gap-0.5">Balance{filterFor('balance')}</span>
+                </th>
+                <th className="whitespace-nowrap pb-2 pr-3">
+                  <span className="flex items-center gap-0.5">Payment Terms{filterFor('payment_terms')}</span>
+                </th>
+                <th className="whitespace-nowrap pb-2 pr-3">
+                  <span className="flex items-center gap-0.5">Issued By{filterFor('issued_by')}</span>
+                </th>
                 {/* Who on the desk is answerable for this offer — `prepared_by`,
                     the field the form calls SPOC since 2026-10-07. Beside
                     *Issued By*, which on this list is whoever typed the row in
                     and is rarely the same person; the order book made exactly
                     that distinction when its *Added By* column became SPOC. */}
-                <th className="pb-2 pr-3">SPOC</th>
-                <th className="pb-2 pr-3">Sales Order</th>
+                <th className="whitespace-nowrap pb-2 pr-3">
+                  <span className="flex items-center gap-0.5">SPOC{filterFor('spoc')}</span>
+                </th>
+                <th className="whitespace-nowrap pb-2 pr-3">
+                  <span className="flex items-center gap-0.5">Sales Order{filterFor('order_number')}</span>
+                </th>
                 <th className="pb-2 pr-3">Status</th>
                 <th className="w-14 pb-2" />
               </tr>

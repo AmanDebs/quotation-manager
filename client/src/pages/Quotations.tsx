@@ -4,6 +4,8 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Quotation } from '../types';
 import { Button, Select, Input, PageHeader, EmptyState, Card, ExportTabs, ErrorText, Pagination, DownloadButton, MultiSelectFilter, TH_CLASS } from '../components/ui';
+import { ColumnFilter, FilteredByStrip } from '../components/ColumnFilter';
+import { useColumnFilters, type ColumnFilterSpec } from '../lib/useColumnFilters';
 import NewDocumentDialog from '../components/NewDocumentDialog';
 import InternalNotes from '../components/InternalNotes';
 import { FollowupDialog } from '../components/FollowupButton';
@@ -87,6 +89,30 @@ const statusTint: Record<string, string> = {
   expired: 'bg-slate-100 text-slate-500 border-slate-300',
 };
 
+/**
+ * The header funnels (2026-10-16, the client with the order book's own in
+ * front of them: *"Add this column wise filter in all reports (Quotation,
+ * proforma, commercial etc.)"*).
+ *
+ * Six of the nine headings, and the three left out are the ones this page
+ * already has a control for — *Issued By* the company select, *Type* the
+ * Export/Domestic tabs, *Status* the tick-box picker with its own default.
+ * Two controls over one fact is how the two come to disagree, which is the
+ * rule the Work Orders list states when its standalone status select went.
+ *
+ * The keys are the server's own (`QUOTATION_FILTERABLE`), and the whole set
+ * lives in the URL, so a narrowed list is a link — and the **download matches
+ * the screen**, the same parameters reaching the rows, the count and the file.
+ */
+const QUOTATION_FILTERS: ColumnFilterSpec[] = [
+  { key: 'number', label: 'Number', kind: 'values' },
+  { key: 'date', label: 'Date', kind: 'dates' },
+  { key: 'customer', label: 'Customer', kind: 'values' },
+  { key: 'spoc', label: 'SPOC', kind: 'values' },
+  { key: 'total', label: 'Total', kind: 'numbers' },
+  { key: 'approval', label: 'Approval', kind: 'values' },
+];
+
 export default function QuotationsPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -108,6 +134,27 @@ export default function QuotationsPage() {
   // The quotation a follow-up is being scheduled on from its row (2026-09-20,
   // the client: "Add a follow up button beside notes button").
   const [chasing, setChasing] = useState<Quotation | null>(null);
+  const columns = useColumnFilters(QUOTATION_FILTERS);
+
+  /*
+   * One funnel, drawn inside its heading. The flex and `whitespace-nowrap` are
+   * not decoration: the control is inline inside a heading narrow enough to
+   * wrap, and a heading broken under its own control reads as a fault.
+   */
+  const filterFor = (key: string) => {
+    const spec = QUOTATION_FILTERS.find((c) => c.key === key)!;
+    return (
+      <ColumnFilter
+        column={key}
+        kind={spec.kind}
+        label={spec.label}
+        value={columns.get(key)}
+        onChange={(v) => columns.set(key, v)}
+        query={columns.params.toString()}
+        path="/api/quotations/facet"
+      />
+    );
+  };
 
   const toggleNote = (id: number) =>
     setOpenNotes((prev) => {
@@ -120,10 +167,13 @@ export default function QuotationsPage() {
   if (exportFilter) params.set('export', exportFilter);
   if (companyFilter) params.set('company', companyFilter);
   if (search) params.set('q', search);
+  // The header funnels, held in the URL like every other filter here, and
+  // carried into the rows, the count and the download alike.
+  for (const [k, v] of columns.params) params.set(k, v);
   const list = usePagedList<Quotation>(
     // search rides in the key, so typing returns to page 1 rather than
     // leaving somebody on page 7 of a four-row result.
-    ['quotations', statusFilter, exportFilter, companyFilter, search],
+    ['quotations', statusFilter, exportFilter, companyFilter, search, columns.params.toString()],
     `/api/quotations${params.toString() ? `?${params}` : ''}`,
   );
   const quotations = list.rows;
@@ -190,12 +240,17 @@ export default function QuotationsPage() {
           onChange={(e) => setSearch(e.target.value)}
         />
       </div>
+      <FilteredByStrip
+        columns={columns.filtered}
+        onClear={(key) => columns.set(key, {})}
+        onClearAll={columns.clearAll}
+      />
       <ErrorText error={setStatus.error} />
       <Card className="overflow-x-auto">
         {quotations.length === 0 ? (
           <EmptyState
             message={
-              search || statusFilter || exportFilter || companyFilter
+              search || statusFilter || exportFilter || companyFilter || columns.filtered.length
                 ? 'Nothing matches those filters.'
                 // Only the live offers show with no filter set, so an empty
                 // table here is not proof the book is empty.
@@ -206,9 +261,15 @@ export default function QuotationsPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className={TH_CLASS}>
-                <th className="pb-2 pr-3">Number</th>
-                <th className="pb-2 pr-3">Date</th>
-                <th className="pb-2 pr-3">Customer</th>
+                <th className="whitespace-nowrap pb-2 pr-3">
+                  <span className="flex items-center gap-0.5">Number{filterFor('number')}</span>
+                </th>
+                <th className="whitespace-nowrap pb-2 pr-3">
+                  <span className="flex items-center gap-0.5">Date{filterFor('date')}</span>
+                </th>
+                <th className="whitespace-nowrap pb-2 pr-3">
+                  <span className="flex items-center gap-0.5">Customer{filterFor('customer')}</span>
+                </th>
                 {showCompany && <th className="pb-2 pr-3">Issued By</th>}
                 {/* Who wrote the offer, beside the entity that issued it —
                     the desk reads this column to find whose quotation it is,
@@ -217,11 +278,17 @@ export default function QuotationsPage() {
                     carried and been unable to be approved without since
                     2026-09-12, and which the spreadsheet export has printed
                     all along; only the screen was missing it. */}
-                <th className="pb-2 pr-3">SPOC</th>
+                <th className="whitespace-nowrap pb-2 pr-3">
+                  <span className="flex items-center gap-0.5">SPOC{filterFor('spoc')}</span>
+                </th>
                 <th className="pb-2 pr-3">Type</th>
-                <th className="pb-2 pr-3 text-right">Total</th>
+                <th className="whitespace-nowrap pb-2 pr-3 text-right">
+                  <span className="flex items-center justify-end gap-0.5">Total{filterFor('total')}</span>
+                </th>
                 <th className="pb-2 pr-3">Status</th>
-                <th className="pb-2 pr-3">Approval</th>
+                <th className="whitespace-nowrap pb-2 pr-3">
+                  <span className="flex items-center gap-0.5">Approval{filterFor('approval')}</span>
+                </th>
                 <th className="w-14 pb-2" />
               </tr>
             </thead>
