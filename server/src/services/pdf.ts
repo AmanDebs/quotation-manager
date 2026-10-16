@@ -2752,11 +2752,14 @@ function qcReportContent(s: Row, jobs: QcJob[]): Content[] {
           body.push([
             { text: r.name, fontSize: 8 },
             { text: spec, fontSize: 8, alignment: 'center' as const },
-            { text: r.value === null || r.value === undefined ? '—' : String(r.value), fontSize: 8, alignment: 'right' as const },
+            // The same formatter the certificate uses, so a range and an N/A
+            // read identically on both documents.
+            { text: readingText(r), fontSize: 8, alignment: 'right' as const },
             // Never recomputed here: `ok` is the arithmetic `resultOk` did, and
-            // a blank reading is *not measured* rather than a pass.
+            // a blank reading is *not measured* rather than a pass — while a
+            // deliberate N/A says so in its own word.
             {
-              text: r.ok === null ? 'not measured' : r.ok ? 'Pass' : 'Fail',
+              text: r.na ? 'N/A' : r.ok === null ? 'not measured' : r.ok ? 'Pass' : 'Fail',
               fontSize: 8, alignment: 'center' as const, bold: r.ok === false,
               color: r.ok === false ? '#a11' : r.ok ? '#186a3b' : '#888888',
             },
@@ -3114,12 +3117,25 @@ function toleranceText(r: { kind?: unknown; min_value?: unknown; max_value?: unk
   return '—';
 }
 
-/** What was read, in the same units the tolerance is stated in. */
-function readingText(r: { kind?: unknown; value?: unknown; unit?: unknown }): string {
+/**
+ * What was read, in the same units the tolerance is stated in.
+ *
+ * Three shapes since 2026-10-16, because Aglo's own certificates carry all
+ * three: a single reading, a **range** observed across the batch (*50.26 –
+ * 50.45 mm*, how their cap COA records every dimension), and **N/A**, which is
+ * an answer somebody gave rather than a blank — their preform COA states it
+ * against acetaldehyde, overall migration and colour migration.
+ */
+export function readingText(r: {
+  kind?: unknown; value?: unknown; value_max?: unknown; unit?: unknown; na?: unknown;
+}): string {
+  if (r.na) return 'N/A';
   if (r.value == null) return '—';
   if (String(r.kind) === 'boolean') return Number(r.value) ? 'Pass' : 'Fail';
   const u = String(r.unit ?? '').trim();
-  return `${fmtNum(Number(r.value), 3)}${u ? ` ${u}` : ''}`;
+  const tail = u ? ` ${u}` : '';
+  if (r.value_max != null) return `${fmtNum(Number(r.value), 3)} – ${fmtNum(Number(r.value_max), 3)}${tail}`;
+  return `${fmtNum(Number(r.value), 3)}${tail}`;
 }
 
 /**
@@ -3206,7 +3222,11 @@ export function buildCoaPdf(batchId: number): TDocumentDefinitions {
       key: 'verdict', label: 'Verdict', width: 62, align: 'center', always: true,
       // Not measured is neither a pass nor a failure, and says so — the one
       // distinction this whole module exists to keep.
-      value: (it) => (it.ok === null || it.ok === undefined ? 'Not measured' : it.ok ? 'Pass' : 'Fail'),
+      // Not applicable is its own word: it reads as no verdict like an
+      // unmeasured row, but saying "Not measured" over a line the inspector
+      // deliberately answered would be the certificate contradicting itself.
+      value: (it) => ((it as { na?: unknown }).na ? 'N/A'
+        : it.ok === null || it.ok === undefined ? 'Not measured' : it.ok ? 'Pass' : 'Fail'),
     },
   ];
 

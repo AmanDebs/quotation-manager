@@ -224,13 +224,17 @@ productsRouter.put('/:id/qc-params', requirePermission('qc', 'full'), (req, res)
         : 'DELETE FROM product_qc_params WHERE product_id = ? AND customer_id IS NULL'
     ).run(...(customerId ? [id, customerId] : [id]) as never[]);
     const ins = db.prepare(
-      `INSERT INTO product_qc_params (product_id, customer_id, name, kind, unit, min_value, max_value, notes, sort_order)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO product_qc_params (product_id, customer_id, name, kind, ranged, unit, min_value, max_value, notes, sort_order)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     );
     lines.forEach((r, i) => {
       const kind = String(r.kind ?? 'numeric');
       ins.run(
-        id, customerId, String(r.name).trim(), kind, String(r.unit ?? ''),
+        id, customerId, String(r.name).trim(), kind,
+        // Observed as a min and a max across the batch. Meaningless on a
+        // pass/fail check, so it is not stored on one.
+        kind === 'boolean' ? 0 : (r.ranged ? 1 : 0),
+        String(r.unit ?? ''),
         // A pass/fail check has no tolerance to hold.
         kind === 'boolean' ? null : numOrNull(r.min_value),
         kind === 'boolean' ? null : numOrNull(r.max_value),

@@ -1040,6 +1040,15 @@ CREATE TABLE IF NOT EXISTS product_qc_params (
   -- 'numeric' takes a measurement and compares it to the tolerance below.
   -- 'boolean' is the eye: colour match, flash, short shot — pass or fail.
   kind TEXT NOT NULL DEFAULT 'numeric' CHECK (kind IN ('numeric','boolean')),
+  -- Observed as a **min and a max across the batch** rather than as one
+  -- reading, which is how Aglo's own cap certificates record every dimension:
+  -- "Closure O/D 50.26 – 50.45" against a 50.00–51.00 window. A flag rather
+  -- than a third `kind`, because that column carries a CHECK and SQLite cannot
+  -- ALTER one -- the reason `users.team_role` is a column of its own. It is
+  -- also the truer shape: a range is a numeric characteristic, observed
+  -- differently, not a different kind of characteristic. Meaningless on a
+  -- boolean and ignored there.
+  ranged INTEGER NOT NULL DEFAULT 0,
   unit TEXT NOT NULL DEFAULT '',
   -- Either end may be open: a wall thickness can have a floor and no ceiling.
   min_value REAL,
@@ -1088,8 +1097,26 @@ CREATE TABLE IF NOT EXISTS qc_results (
   name TEXT NOT NULL DEFAULT '',
   kind TEXT NOT NULL DEFAULT 'numeric',
   unit TEXT NOT NULL DEFAULT '',
-  -- The measurement: a dimension, or 1/0 for a visual check.
+  -- The measurement: a dimension, or 1/0 for a visual check. On a ranged
+  -- characteristic it is the **lowest** piece observed and `value_max` the
+  -- highest; on every other it stands alone and `value_max` is NULL.
   value REAL,
+  value_max REAL,
+  -- Copied from the parameter as the tolerance is, so a result still reads
+  -- as what it was after the specification is rewritten.
+  ranged INTEGER NOT NULL DEFAULT 0,
+  /*
+   * **Not applicable** — a recorded answer, and a different claim from a
+   * blank. Aglo's preform certificate carries three: acetaldehyde content,
+   * overall migration and colour migration are all "NA" for that part.
+   *
+   * Until this they could not be told from "nobody got to it", because a
+   * blank row was dropped before the insert and simply did not exist — so the
+   * certificate printed twelve lines where the paper prints fifteen. It is
+   * **not a verdict**: `resultOk` answers null, so an NA neither passes nor
+   * fails and a check made of nothing else has decided nothing.
+   */
+  na INTEGER NOT NULL DEFAULT 0,
   min_value REAL,
   max_value REAL,
   notes TEXT NOT NULL DEFAULT '',

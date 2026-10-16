@@ -461,6 +461,21 @@ addColumnIfMissing('customers', 'company_id', 'INTEGER');
  * trap `batches.disposition` records, where the boot died on a database
  * migrated from an earlier version.
  */
+/*
+ * What a quality result can say, widened to what Aglo's own certificates
+ * record (2026-10-16): a characteristic observed as a **range** across the
+ * batch, and **not applicable** as a recorded answer rather than a blank.
+ *
+ * All four additive and all four defaulting to the old behaviour, so every
+ * check already on file reads exactly as it did: `ranged = 0` is a single
+ * reading, `na = 0` is an answer that was given, and `value_max` NULL is no
+ * upper observation. No index on any of them.
+ */
+addColumnIfMissing('product_qc_params', 'ranged', 'INTEGER NOT NULL DEFAULT 0');
+addColumnIfMissing('qc_results', 'ranged', 'INTEGER NOT NULL DEFAULT 0');
+addColumnIfMissing('qc_results', 'value_max', 'REAL');
+addColumnIfMissing('qc_results', 'na', 'INTEGER NOT NULL DEFAULT 0');
+
 addColumnIfMissing('customers', 'active', 'INTEGER NOT NULL DEFAULT 1');
 addColumnIfMissing('products', 'active', 'INTEGER NOT NULL DEFAULT 1');
 

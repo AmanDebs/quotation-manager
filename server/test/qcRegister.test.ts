@@ -24,12 +24,17 @@ const check = Number(db.prepare(
   "INSERT INTO qc_checks (work_order_id, date, shift, inspector) VALUES (?, '2026-09-05', 'A', '')"
 ).run(woId).lastInsertRowid);
 
+interface Row {
+  kind: string; value: number | null; min_value: number | null; max_value: number | null;
+  value_max?: number | null; na?: number;
+}
+
 /** The SQL half, asked about one row. */
-function sqlFailed(r: { kind: string; value: number | null; min_value: number | null; max_value: number | null }) {
+function sqlFailed(r: Row) {
   const id = Number(db.prepare(
-    `INSERT INTO qc_results (check_id, name, kind, unit, value, min_value, max_value, sort_order)
-     VALUES (?, 'x', ?, '', ?, ?, ?, 0)`
-  ).run(check, r.kind, r.value, r.min_value, r.max_value).lastInsertRowid);
+    `INSERT INTO qc_results (check_id, name, kind, unit, value, value_max, na, min_value, max_value, sort_order)
+     VALUES (?, 'x', ?, '', ?, ?, ?, ?, ?, 0)`
+  ).run(check, r.kind, r.value, r.value_max ?? null, r.na ?? 0, r.min_value, r.max_value).lastInsertRowid);
   const row = db.prepare(
     `SELECT CASE WHEN (${RESULT_FAILED_SQL}) THEN 1 ELSE 0 END AS failed
        FROM qc_results r WHERE r.id = ?`
@@ -42,6 +47,9 @@ describe('the SQL verdict and resultOk agree', () => {
   test('across kinds, readings and open-ended bounds', () => {
     const kinds = ['numeric', 'boolean'];
     const values: (number | null)[] = [null, 0, 1, 0.29, 0.3, 0.4, 0.5, 0.51, 2, -1];
+    // The upper end of a ranged observation. `undefined` is the shape every
+    // check already on file has, so the matrix still covers the old rows.
+    const uppers: (number | null | undefined)[] = [undefined, null, 0.45, 0.52];
     const bounds: [number | null, number | null][] = [
       [null, null],   // no tolerance recorded at all
       [0.3, 0.5],     // both ends
@@ -54,8 +62,9 @@ describe('the SQL verdict and resultOk agree', () => {
     for (const kind of kinds) {
       for (const value of values) {
         for (const [min_value, max_value] of bounds) {
-          const r = { kind, value, min_value, max_value };
-          const ok = resultOk(r);
+          for (const value_max of uppers) {
+            const r: Row = { kind, value, min_value, max_value, value_max };
+            const ok = resultOk(r);
           /*
            * The mapping the register relies on. `resultOk` has three answers
            * and the SQL has two, and this is where they meet: a reading that
@@ -63,12 +72,53 @@ describe('the SQL verdict and resultOk agree', () => {
            * which is why the route counts `measured` separately rather than
            * reading "not failed" as "passed".
            */
-          assert.equal(sqlFailed(r), ok === false, `${kind} ${value} in [${min_value}, ${max_value}]`);
-          cases++;
+            assert.equal(sqlFailed(r), ok === false,
+              `${kind} ${value}–${value_max} in [${min_value}, ${max_value}]`);
+            cases++;
+          }
         }
       }
     }
-    assert.equal(cases, 100);
+    assert.equal(cases, 400);
+  });
+
+  /**
+   * The two answers added on 2026-10-16, from Aglo's own certificates: a
+   * characteristic observed as a range across the batch, and *not applicable*
+   * as a recorded answer. Both have to mean the same thing to the register as
+   * they do to `resultOk`, or a check reads one way on screen and another in
+   * the list that filters it.
+   */
+  test('a ranged observation is judged on both ends', () => {
+    const within: Row = { kind: 'numeric', value: 0.35, value_max: 0.45, min_value: 0.3, max_value: 0.5 };
+    assert.equal(resultOk(within), true);
+    assert.equal(sqlFailed(within), false);
+
+    // The highest piece over the ceiling fails, though the lowest is fine.
+    const high: Row = { kind: 'numeric', value: 0.35, value_max: 0.55, min_value: 0.3, max_value: 0.5 };
+    assert.equal(resultOk(high), false);
+    assert.equal(sqlFailed(high), true);
+
+    // And the lowest under the floor fails, though the highest is fine.
+    const low: Row = { kind: 'numeric', value: 0.25, value_max: 0.45, min_value: 0.3, max_value: 0.5 };
+    assert.equal(resultOk(low), false);
+    assert.equal(sqlFailed(low), true);
+  });
+
+  test('not applicable is neither a pass nor a failure', () => {
+    const na: Row = { kind: 'numeric', value: null, na: 1, min_value: 0.3, max_value: 0.5 };
+    assert.equal(resultOk(na), null, 'it decides nothing');
+    assert.equal(sqlFailed(na), false, 'and it is certainly not a failure');
+
+    /*
+     * The one that would be a silent wrong answer: a row carrying both a
+     * reading **and** the NA flag — which the route cannot produce, but a
+     * hand-written row or an older client could. NA wins, in both halves, so
+     * the two cannot disagree about it.
+     */
+    const both: Row = { kind: 'numeric', value: 9.9, na: 1, min_value: 0.3, max_value: 0.5 };
+    assert.equal(resultOk(both), null);
+    assert.equal(sqlFailed(both), false);
   });
 
   /** The distinction the whole feature turns on, stated on its own. */

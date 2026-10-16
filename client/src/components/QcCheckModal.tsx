@@ -31,7 +31,18 @@ export default function QcCheckModal({ job, batch, onClose, onSaved }: {
   onClose: () => void; onSaved: () => void;
 }) {
   const [head, setHead] = useState({ date: today(), shift: '', sample_size: '', inspector: '', notes: '' });
-  const [values, setValues] = useState<Record<number, string>>({});
+  /*
+   * Three facts per parameter since 2026-10-16, where there was one string.
+   *
+   * `v` is the reading — or the **lowest** piece on a characteristic observed
+   * as a range, with `vmax` the highest. `na` is *not applicable*, which is an
+   * answer somebody gives rather than a box left alone: Aglo's own preform
+   * certificate carries three of them, and a blank could not say it.
+   */
+  const [values, setValues] = useState<Record<number, { v?: string; vmax?: string; na?: boolean }>>({});
+  const row = (id: number) => values[id] ?? {};
+  const setRow = (id: number, patch: { v?: string; vmax?: string; na?: boolean }) =>
+    setValues((prev) => ({ ...prev, [id]: { ...(prev[id] ?? {}), ...patch } }));
   const queryClient = useQueryClient();
 
   const { data: full } = useQuery({
@@ -48,14 +59,19 @@ export default function QcCheckModal({ job, batch, onClose, onSaved }: {
       ...head,
       batch_id: batch?.id ?? null,
       sample_size: head.sample_size === '' ? null : Number(head.sample_size),
-      results: (full?.qc?.params ?? []).map((p) => ({
-        param_id: p.id,
-        // A visual check only counts once a verdict was actually given; "not
-        // looked at" and "failed" must not collapse into each other.
-        value: p.kind === 'boolean'
-          ? (values[p.id!] ? values[p.id!] === 'pass' : '')
-          : values[p.id!] ?? '',
-      })),
+      results: (full?.qc?.params ?? []).map((p) => {
+        const r = row(p.id!);
+        return {
+          param_id: p.id,
+          // Sent as its own fact: the server writes the row and records the
+          // answer, where a blank is still dropped as never looked at.
+          na: !!r.na,
+          // A visual check only counts once a verdict was actually given; "not
+          // looked at" and "failed" must not collapse into each other.
+          value: r.na ? '' : p.kind === 'boolean' ? (r.v ? r.v === 'pass' : '') : r.v ?? '',
+          value_max: r.na || p.kind === 'boolean' || !p.ranged ? '' : r.vmax ?? '',
+        };
+      }),
     }),
     onSuccess: () => { setValues({}); after(); },
   });
@@ -157,25 +173,65 @@ export default function QcCheckModal({ job, batch, onClose, onSaved }: {
                     <td className="py-1.5 pr-2">{p.name}</td>
                     <td className="py-1.5 pr-2 text-slate-500">
                       {p.kind === 'boolean' ? 'pass' : tolerance(p)}
+                      {!!p.ranged && p.kind !== 'boolean' && (
+                        <span className="ml-1 text-xs text-slate-400">· both ends</span>
+                      )}
                     </td>
                     <td className="py-1.5">
-                      {p.kind === 'boolean' ? (
-                        <Select
-                          value={values[p.id!] ?? ''}
-                          onChange={(e) => setValues({ ...values, [p.id!]: e.target.value })}
+                      <div className="flex items-center gap-1.5">
+                        {p.kind === 'boolean' ? (
+                          <Select
+                            className="w-full"
+                            disabled={!!row(p.id!).na}
+                            value={row(p.id!).v ?? ''}
+                            onChange={(e) => setRow(p.id!, { v: e.target.value })}
+                          >
+                            <option value="">not checked</option>
+                            <option value="pass">pass</option>
+                            <option value="fail">fail</option>
+                          </Select>
+                        ) : (
+                          <>
+                            <Input
+                              type="number"
+                              className="w-full"
+                              disabled={!!row(p.id!).na}
+                              value={row(p.id!).v ?? ''}
+                              onChange={(e) => setRow(p.id!, { v: e.target.value })}
+                              placeholder={p.ranged ? 'lowest' : p.unit || 'value'}
+                            />
+                            {/* Observed across the batch: the highest piece
+                                beside the lowest, and the verdict is taken on
+                                both ends. */}
+                            {!!p.ranged && (
+                              <>
+                                <span className="text-xs text-slate-300">–</span>
+                                <Input
+                                  type="number"
+                                  className="w-full"
+                                  disabled={!!row(p.id!).na}
+                                  value={row(p.id!).vmax ?? ''}
+                                  onChange={(e) => setRow(p.id!, { vmax: e.target.value })}
+                                  placeholder="highest"
+                                />
+                              </>
+                            )}
+                          </>
+                        )}
+                        {/* Not applicable: a recorded answer, so it is a tick
+                            rather than the absence of one. */}
+                        <label
+                          className="flex shrink-0 items-center gap-1 text-xs text-slate-500"
+                          title="Not applicable to this product — recorded as an answer, and neither a pass nor a failure"
                         >
-                          <option value="">not checked</option>
-                          <option value="pass">pass</option>
-                          <option value="fail">fail</option>
-                        </Select>
-                      ) : (
-                        <Input
-                          type="number"
-                          value={values[p.id!] ?? ''}
-                          onChange={(e) => setValues({ ...values, [p.id!]: e.target.value })}
-                          placeholder={p.unit || 'value'}
-                        />
-                      )}
+                          <input
+                            type="checkbox"
+                            checked={!!row(p.id!).na}
+                            onChange={(e) => setRow(p.id!, { na: e.target.checked })}
+                          />
+                          N/A
+                        </label>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -185,6 +241,8 @@ export default function QcCheckModal({ job, batch, onClose, onSaved }: {
             <div className="mt-2 flex items-center justify-between gap-3">
               <p className="text-xs text-slate-400">
                 Leave a row blank if it was not checked — that is recorded as unmeasured, never as a failure.
+                Tick <span className="font-medium">N/A</span> where the characteristic does not apply to this
+                product: that is written down and prints on the certificate, and is neither a pass nor a failure.
               </p>
               <Button onClick={() => add.mutate()} disabled={add.isPending}>
                 {add.isPending ? 'Saving…' : 'Record inspection'}

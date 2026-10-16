@@ -865,14 +865,44 @@ workOrdersRouter.post('/:id/qc-checks', requirePermission('qc', 'full'), (req: A
     .get(Number(wo.order_id)) as { customer_id: number } | undefined)?.customer_id ?? null;
   const spec = new Map(paramsFor(wo.product_id as number | null, specCustomer).map((p) => [p.id, p]));
   const rows = Array.isArray(body.results) ? (body.results as Record<string, unknown>[]) : [];
-  // A parameter left blank was not measured; it is not a failure, and it is
-  // not recorded as one. Only what somebody actually read is stored.
-  const measured = rows.filter((r) => r.value !== '' && r.value !== null && r.value !== undefined);
+  const given = (v: unknown) => v !== '' && v !== null && v !== undefined;
+  /*
+   * Three states per parameter now, where there were two (2026-10-16).
+   *
+   * A row left **blank** was not looked at: it is not a failure, it is not
+   * recorded, and nothing about that changed. A row marked **not applicable**
+   * is an answer somebody gave — it is written, it prints on the certificate,
+   * and `resultOk` reads it as no verdict. Aglo's own preform certificate
+   * carries three of them, and until this they were indistinguishable from
+   * the parameters nobody reached.
+   *
+   * So `recorded` is what gets written and `measured` is what counts as an
+   * inspection: a check of nothing but NA is still refused, since recording
+   * that four things do not apply is not an inspection of anything.
+   */
+  const recorded = rows.filter((r) => given(r.value) || r.na);
+  const measured = recorded.filter((r) => !r.na && given(r.value));
   if (!measured.length) {
     return res.status(400).json({ error: 'Record at least one measurement' });
   }
-  const stray = measured.find((r) => !spec.has(Number(r.param_id)));
+  const stray = recorded.find((r) => !spec.has(Number(r.param_id)));
   if (stray) return res.status(400).json({ error: 'That check is not on the specification for this product' });
+  /*
+   * A ranged characteristic takes both ends or neither. The upper is refused
+   * below the lower rather than quietly swapped: which way round somebody
+   * meant them is not for this route to decide, and a silently reordered pair
+   * is a reading nobody typed.
+   */
+  for (const r of measured) {
+    const param = spec.get(Number(r.param_id))!;
+    if (!param.ranged || param.kind === 'boolean') continue;
+    if (!given(r.value_max)) {
+      return res.status(400).json({ error: `${param.name} is observed as a range — record the highest as well as the lowest` });
+    }
+    if (Number(r.value_max) < Number(r.value)) {
+      return res.status(400).json({ error: `${param.name}: the highest observed is below the lowest` });
+    }
+  }
 
   /*
    * Naming a batch is what makes this a **final** check rather than an
@@ -897,16 +927,23 @@ workOrdersRouter.post('/:id/qc-checks', requirePermission('qc', 'full'), (req: A
     checkId = Number(info.lastInsertRowid);
 
     const ins = db.prepare(
-      `INSERT INTO qc_results (check_id, param_id, name, kind, unit, value, min_value, max_value, notes, sort_order)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO qc_results (check_id, param_id, name, kind, unit, value, value_max, ranged, na,
+                               min_value, max_value, notes, sort_order)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     );
-    measured.forEach((r, i) => {
+    recorded.forEach((r, i) => {
       const param = spec.get(Number(r.param_id))!;
+      const na = r.na ? 1 : 0;
+      const ranged = !na && param.ranged && param.kind !== 'boolean' ? 1 : 0;
       ins.run(
         checkId, param.id, param.name, param.kind, param.unit,
         // A visual check comes in as true/false and is stored as 1/0, so one
-        // column holds both kinds and `resultOk` reads them the same way.
-        param.kind === 'boolean' ? (r.value ? 1 : 0) : Number(r.value),
+        // column holds both kinds and `resultOk` reads them the same way. An
+        // NA row carries no reading at all — it is the absence of one, said
+        // out loud.
+        na ? null : param.kind === 'boolean' ? (r.value ? 1 : 0) : Number(r.value),
+        ranged ? Number(r.value_max) : null,
+        ranged, na,
         param.min_value, param.max_value, String(r.notes ?? ''), i
       );
     });

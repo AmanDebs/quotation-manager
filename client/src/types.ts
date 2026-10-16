@@ -564,6 +564,12 @@ export interface QcParam {
   customer_id?: number | null;
   name: string;
   kind: QcKind;
+  /**
+   * 1 when the characteristic is observed as a **min and a max across the
+   * batch** rather than as one reading — how Aglo's cap certificates record
+   * every dimension. Meaningless on a pass/fail check.
+   */
+  ranged?: number;
   unit: string;
   /** Either end may be open — a wall can be too thin but never too thick. */
   min_value: number | null;
@@ -584,10 +590,17 @@ export interface QcResult {
   name: string;
   kind: QcKind;
   unit: string;
+  /** The reading, or the **lowest** observed on a ranged characteristic. */
   value: number | null;
+  /** The highest observed; null on anything but a ranged characteristic. */
+  value_max?: number | null;
+  ranged?: number;
+  /** 1 when the recorded answer was *not applicable* — an answer, not a blank. */
+  na?: number;
   min_value: number | null;
   max_value: number | null;
   notes: string;
+  /** null covers both *nothing measured* and *not applicable*: neither is a verdict. */
   ok: boolean | null;
 }
 

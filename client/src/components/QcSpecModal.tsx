@@ -24,7 +24,22 @@ import { Button, Input, Select, Modal, ErrorText, EmptyState, TH_CLASS } from '.
  */
 
 const emptyParam = (): QcParam =>
-  ({ name: '', kind: 'numeric', unit: '', min_value: null, max_value: null, notes: '' });
+  ({ name: '', kind: 'numeric', ranged: 0, unit: '', min_value: null, max_value: null, notes: '' });
+
+/*
+ * How the characteristic is observed, as one control.
+ *
+ * *Range* stores `kind: 'numeric'` with `ranged: 1` rather than a third kind,
+ * because `product_qc_params.kind` carries a CHECK and SQLite cannot ALTER one
+ * — the reason `users.team_role` is a column of its own. It is also the truer
+ * shape: a range is a numeric characteristic observed differently.
+ */
+const KINDS: { value: string; label: string; kind: QcKind; ranged: number }[] = [
+  { value: 'numeric', label: 'Measurement', kind: 'numeric', ranged: 0 },
+  { value: 'range', label: 'Measurement (min–max across the batch)', kind: 'numeric', ranged: 1 },
+  { value: 'boolean', label: 'Pass / fail', kind: 'boolean', ranged: 0 },
+];
+const kindValue = (p: QcParam) => (p.kind === 'boolean' ? 'boolean' : p.ranged ? 'range' : 'numeric');
 
 /** Blank must persist as null, not 0 — an open-ended tolerance is not "zero". */
 const numOrNull = (v: string) => (v.trim() === '' || Number.isNaN(Number(v)) ? null : Number(v));
@@ -127,18 +142,17 @@ export default function QcSpecModal({ product, onClose }: { product: Product; on
                   </td>
                   <td className="py-1.5 pr-2">
                     <Select
-                      value={line.kind}
+                      value={kindValue(line)}
                       onChange={(e) => {
-                        const kind = e.target.value as QcKind;
+                        const k = KINDS.find((x) => x.value === e.target.value)!;
                         // A pass/fail check has no tolerance to hold, so the
                         // fields are cleared rather than left to be ignored.
-                        set(i, kind === 'boolean'
-                          ? { kind, min_value: null, max_value: null, unit: '' }
-                          : { kind });
+                        set(i, k.kind === 'boolean'
+                          ? { kind: k.kind, ranged: 0, min_value: null, max_value: null, unit: '' }
+                          : { kind: k.kind, ranged: k.ranged });
                       }}
                     >
-                      <option value="numeric">Measurement</option>
-                      <option value="boolean">Pass / fail</option>
+                      {KINDS.map((k) => <option key={k.value} value={k.value}>{k.label}</option>)}
                     </Select>
                   </td>
                   <td className="py-1.5 pr-2">
@@ -182,6 +196,8 @@ export default function QcSpecModal({ product, onClose }: { product: Product; on
           </table>
 
           <p className="mt-2 text-xs text-slate-400">
+            A <span className="font-medium">min–max</span> characteristic is recorded as the lowest and
+            highest piece seen in the batch, and passes when both ends clear the tolerance.{' '}
             Leave Min or Max empty for a one-sided tolerance — a wall thickness can have a floor and no
             ceiling. A <b>Pass / fail</b> check is the eye: colour match, flash, short shot.
           </p>

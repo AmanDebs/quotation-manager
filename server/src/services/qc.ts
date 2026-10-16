@@ -28,6 +28,12 @@ export interface QcParam {
   name: string;
   kind: QcKind;
   unit: string;
+  /**
+   * 1 when this characteristic is observed as a min and a max across the
+   * batch rather than as one reading — see `schema.sql`. Meaningless on a
+   * boolean.
+   */
+  ranged: number;
   min_value: number | null;
   max_value: number | null;
   notes: string;
@@ -41,12 +47,22 @@ export interface QcResult {
   name: string;
   kind: QcKind;
   unit: string;
+  /** The reading, or the **lowest** observed where the characteristic is ranged. */
   value: number | null;
+  /** The highest observed; null on anything but a ranged characteristic. */
+  value_max: number | null;
+  ranged: number;
+  /** 1 when the answer recorded was *not applicable* — see `schema.sql`. */
+  na: number;
   min_value: number | null;
   max_value: number | null;
   notes: string;
   sort_order: number;
-  /** Derived: true, false, or null when nothing was measured. */
+  /**
+   * Derived: true, false, or null — which covers **both** nothing measured and
+   * a deliberate *not applicable*. Neither is a verdict, and `decorate` counts
+   * neither towards one.
+   */
   ok: boolean | null;
 }
 
@@ -70,14 +86,32 @@ export interface QcCheck {
 
 /** Whether one measurement sits inside the tolerance recorded against it. */
 export function resultOk(r: {
-  kind: string; value: number | null; min_value: number | null; max_value: number | null;
+  kind: string; value: number | null; value_max?: number | null;
+  min_value: number | null; max_value: number | null;
+  na?: number | boolean | null;
 }): boolean | null {
+  /*
+   * **Not applicable is an answer, not a verdict** (2026-10-16). It is
+   * recorded, it prints on the certificate, and it neither passes nor fails —
+   * so it reads as null exactly as an unmeasured row does, and `decorate`
+   * counts neither towards a pass. A check made of nothing but NA has decided
+   * nothing, which is the honest reading of it.
+   */
+  if (r.na) return null;
   if (r.value === null || r.value === undefined) return null;
   // A visual check is its own verdict: 1 is pass, anything else is not.
   if (r.kind === 'boolean') return Number(r.value) === 1;
+  /*
+   * A **ranged** characteristic is judged on both ends: the lowest piece
+   * observed has to clear the floor and the highest has to clear the ceiling.
+   * One expression serves both shapes — on a single reading the two ends are
+   * the same number — so nothing already on file changes its answer.
+   */
+  const lo = Number(r.value);
+  const hi = r.value_max === null || r.value_max === undefined ? lo : Number(r.value_max);
   // Either end may be open — a wall thickness can have a floor and no ceiling.
-  if (r.min_value !== null && r.value < r.min_value) return false;
-  if (r.max_value !== null && r.value > r.max_value) return false;
+  if (r.min_value !== null && lo < r.min_value) return false;
+  if (r.max_value !== null && hi > r.max_value) return false;
   return true;
 }
 
@@ -93,10 +127,10 @@ export function resultOk(r: {
  * table aliased `r`.
  */
 export const RESULT_FAILED_SQL = `
-  r.value IS NOT NULL AND CASE
+  r.na <> 1 AND r.value IS NOT NULL AND CASE
     WHEN r.kind = 'boolean' THEN r.value <> 1
     ELSE (r.min_value IS NOT NULL AND r.value < r.min_value)
-      OR (r.max_value IS NOT NULL AND r.value > r.max_value)
+      OR (r.max_value IS NOT NULL AND COALESCE(r.value_max, r.value) > r.max_value)
   END`;
 
 /**
