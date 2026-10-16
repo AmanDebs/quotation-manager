@@ -10,6 +10,8 @@ import { PageHeader, Card, Select, Input, Field, Button, EmptyState, ErrorText, 
 import { fmtMoney, fmtQty, fmtDate, today } from '../lib/format';
 import { usePagedList, PAGE_SIZE } from '../lib/usePagedList';
 import type { PoDraft } from './PurchaseOrderForm';
+import { ColumnFilter, FilteredByStrip } from '../components/ColumnFilter';
+import { useColumnFilters, type ColumnFilterSpec } from '../lib/useColumnFilters';
 
 /**
  * Buying material. Manager-only in full, so there is no read-only mode here.
@@ -36,16 +38,66 @@ export const poStatusStyle: Record<PoStatus, string> = {
 };
 export const poStatusLabel = (s: PoStatus) => s.replace(/_/g, ' ');
 
+/**
+ * The header funnels (2026-10-16, the client: *"Add the same filters to
+ * Despatches and Purchase Orders"*). The quotation list's own spec states the
+ * rule, and this is the one list with no exception to it: every column gets
+ * one, the page above the table having only the *Open orders only* tick.
+ *
+ * Status is labelled — it is stored `part_received` and drawn *part
+ * received* — and keeps its `?status=` key through `param`, so a link
+ * carrying one still lands and the dropdown can clear it.
+ */
+const PURCHASE_ORDER_FILTERS: ColumnFilterSpec[] = [
+  { key: 'number', label: 'Number', kind: 'values' },
+  { key: 'date', label: 'Date', kind: 'dates' },
+  { key: 'supplier', label: 'Supplier', kind: 'values' },
+  { key: 'location', label: 'Deliver to', kind: 'values' },
+  { key: 'expected', label: 'Expected', kind: 'dates' },
+  { key: 'value', label: 'Value', kind: 'numbers' },
+  {
+    key: 'status',
+    label: 'Status',
+    kind: 'values',
+    param: 'status',
+    labels: Object.fromEntries(
+      (Object.keys(poStatusStyle) as PoStatus[]).map((s) => [s, poStatusLabel(s)]),
+    ),
+  },
+];
+
 export default function PurchaseOrdersPage() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [openOnly, setOpenOnly] = useState(false);
+  const columns = useColumnFilters(PURCHASE_ORDER_FILTERS);
+
+  /** One funnel, drawn inside its heading — see the quotation list's own. */
+  const filterFor = (key: string) => {
+    const spec = PURCHASE_ORDER_FILTERS.find((c) => c.key === key)!;
+    return (
+      <ColumnFilter
+        column={key}
+        kind={spec.kind}
+        label={spec.label}
+        labels={spec.labels}
+        value={columns.get(key)}
+        onChange={(v) => columns.set(key, v)}
+        query={columns.params.toString()}
+        path="/api/purchase-orders/facet"
+      />
+    );
+  };
   const [receiving, setReceiving] = useState<PurchaseOrder | null>(null);
   const [fromShortfall, setFromShortfall] = useState(false);
 
+  // The header funnels ride in the URL, and reach the rows and the count
+  // alike. This list has no spreadsheet export to keep in step with.
+  const params = new URLSearchParams(columns.params);
+  if (openOnly) params.set('open', '1');
   const list = usePagedList<PurchaseOrder>(
-    ['purchase-orders', openOnly],
-    `/api/purchase-orders${openOnly ? '?open=1' : ''}`,
+    ['purchase-orders', openOnly, columns.params.toString()],
+    `/api/purchase-orders${params.toString() ? `?${params}` : ''}`,
   );
   const pos = list.rows;
   const { data: suppliers = [] } = useQuery({ queryKey: ['master', 'suppliers', false], queryFn: () => api.get<Supplier[]>('/api/suppliers') });
@@ -131,20 +183,46 @@ export default function PurchaseOrdersPage() {
 
       <ErrorText error={remove.error ?? setStatus.error ?? duplicate.error} />
 
+      <FilteredByStrip
+        columns={columns.filtered}
+        onClear={(key) => columns.set(key, {})}
+        onClearAll={columns.clearAll}
+      />
+
       <Card className="overflow-x-auto">
         {pos.length === 0 ? (
-          <EmptyState message="No purchase orders yet." />
+          <EmptyState
+            message={
+              openOnly || columns.filtered.length
+                ? 'Nothing matches those filters.'
+                : 'No purchase orders yet.'
+            }
+          />
         ) : (
           <table className="w-full text-sm">
             <thead>
               <tr className={TH_CLASS}>
-                <th className="pb-2 pr-3">Number</th>
-                <th className="pb-2 pr-3">Date</th>
-                <th className="pb-2 pr-3">Supplier</th>
-                <th className="pb-2 pr-3">Deliver to</th>
-                <th className="pb-2 pr-3">Expected</th>
-                <th className="pb-2 pr-3 text-right">Value</th>
-                <th className="pb-2 pr-3">Status</th>
+                <th className="whitespace-nowrap pb-2 pr-3">
+                  <span className="flex items-center gap-0.5">Number{filterFor('number')}</span>
+                </th>
+                <th className="whitespace-nowrap pb-2 pr-3">
+                  <span className="flex items-center gap-0.5">Date{filterFor('date')}</span>
+                </th>
+                <th className="whitespace-nowrap pb-2 pr-3">
+                  <span className="flex items-center gap-0.5">Supplier{filterFor('supplier')}</span>
+                </th>
+                <th className="whitespace-nowrap pb-2 pr-3">
+                  <span className="flex items-center gap-0.5">Deliver to{filterFor('location')}</span>
+                </th>
+                <th className="whitespace-nowrap pb-2 pr-3">
+                  <span className="flex items-center gap-0.5">Expected{filterFor('expected')}</span>
+                </th>
+                <th className="whitespace-nowrap pb-2 pr-3 text-right">
+                  <span className="flex items-center justify-end gap-0.5">Value{filterFor('value')}</span>
+                </th>
+                <th className="whitespace-nowrap pb-2 pr-3">
+                  <span className="flex items-center gap-0.5">Status{filterFor('status')}</span>
+                </th>
                 <th className="pb-2" />
               </tr>
             </thead>

@@ -803,6 +803,13 @@ export interface Despatch {
   order_number?: string; customer_id?: number; customer_name?: string;
   location_name?: string | null; transporter_name?: string | null;
   invoice_number?: string | null; created_by_name?: string | null;
+  /**
+   * What went on the lorry, summed by the server (2026-10-16). The register
+   * used to add these up over `items` and the export wrote its own copy of
+   * the same two sums; one column serves the cell, the figure over the table
+   * and the column filter, which is what keeps the three from disagreeing.
+   */
+  pieces?: number; boxes?: number;
   items?: DespatchItem[];
   /** Which identified lots went — read back on every despatch. */
   batches?: DespatchBatch[];

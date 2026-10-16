@@ -13,6 +13,9 @@ import { SEA_LEG, DOCS_OUTSTANDING_D } from '../services/despatch.js';
 import { readyLines } from '../services/dispatchReady.js';
 import { batchesOnDespatch, setDespatchBatches, despatchBatchError } from '../services/batch.js';
 import { buildXlsx, attachmentName, type Column } from '../services/xlsx.js';
+import {
+  columnWhere, readColumnFilters, facetOver, isColumnOf, type ColumnSpecs,
+} from '../services/columnFilters.js';
 
 export const despatchesRouter = Router();
 
@@ -39,7 +42,16 @@ const listSql = `
   SELECT d.*, o.number AS order_number, o.customer_id,
          c.name AS customer_name,
          l.name AS location_name, t.name AS transporter_name,
-         i.number AS invoice_number, u.name AS created_by_name
+         i.number AS invoice_number, u.name AS created_by_name,
+         -- What went on the lorry, summed here rather than on the screen
+         -- (2026-10-16). The export already wrote these two subqueries out
+         -- beside a near-copy of this statement, and the page added the same
+         -- figures up again over the items it had fetched — three expressions
+         -- of one sum, which is how three readers come to disagree. They are
+         -- one column now, which is also what lets a heading filter on them
+         -- mean the figure printed in the cell.
+         COALESCE((SELECT SUM(di.qty) FROM despatch_items di WHERE di.despatch_id = d.id), 0) AS pieces,
+         COALESCE((SELECT SUM(di.packs) FROM despatch_items di WHERE di.despatch_id = d.id), 0) AS boxes
   FROM despatches d
   JOIN orders o ON o.id = d.order_id
   JOIN customers c ON c.id = o.customer_id
@@ -246,21 +258,72 @@ const despatchColumns: Column<Record<string, unknown>>[] = [
   { header: 'Notes', value: (r) => String(r.notes ?? '') },
 ];
 
-despatchesRouter.get('/export', (req: AuthedRequest, res) => {
+/*
+ * What each heading of the register can be filtered by (2026-10-16, the
+ * client: *"Add the same filters to Despatches and Purchase Orders"*). The
+ * quotation list's own spec states the rule; this register's exceptions are
+ * its own, and there are more of them than anywhere else because this page
+ * has carried a row of filters above its table since it was written.
+ *
+ * So *Date*, *From*, *Customer* and *Documents* keep the controls they have —
+ * the first three because their keys are `from`/`to` and ids rather than the
+ * names the cells print, and *Documents* because `?docs=pending` is a derived
+ * question (not received, asked of sea-leg trips alone) rather than a match on
+ * the column. *Reference* has none either: it prints whichever pair of
+ * references a trip carries, and the search box already covers all four.
+ *
+ * **ETA is the one that folds in**, and cleanly: a `dates` funnel under
+ * `param: 'eta'` reads `eta_from`/`eta_to`, which is exactly the key the
+ * dashboard's *arriving this week* chip already links with — so that chip
+ * still lands and the dropdown can now clear what it set, which it could not
+ * before.
+ */
+export const DESPATCH_FILTERABLE = {
+  order: { sql: 'order_number', kind: 'values' },
+  destination: { sql: 'destination', kind: 'values' },
+  transporter: { sql: 'transporter_name', kind: 'values' },
+  eta: { sql: 'eta', kind: 'dates', param: 'eta' },
+  challan: { sql: 'challan_no', kind: 'values' },
+  pieces: { sql: 'pieces', kind: 'numbers' },
+  boxes: { sql: 'boxes', kind: 'numbers' },
+} as const satisfies ColumnSpecs;
+
+/**
+ * The register as one statement, filters and all — the quotation list's own
+ * shape, and see its comment for why it is wrapped whether or not a funnel is
+ * set. The outer layer is the only place a filter on *Sales Order*,
+ * *Transporter*, *Pieces* or *Boxes* can live, those being a join's alias and
+ * two correlated sums.
+ *
+ * **The summary reads the same statement**, so the pieces, boxes and unbilled
+ * count over the table always describe the rows under it. A figure measured
+ * over a different set in the same words is worse than no figure.
+ */
+const LIST_ORDER = 'ORDER BY date DESC, id DESC';
+
+function despatchListQuery(
+  req: AuthedRequest,
+  except?: keyof typeof DESPATCH_FILTERABLE,
+): { sql: string; params: unknown[] } {
   const { where, params } = despatchListWhere(req);
-  const rows = db.prepare(
-    `SELECT d.*, o.number AS order_number, o.customer_id, c.name AS customer_name,
-            l.name AS location_name, t.name AS transporter_name, i.number AS invoice_number,
-            COALESCE((SELECT SUM(di.qty) FROM despatch_items di WHERE di.despatch_id = d.id), 0) AS pieces,
-            COALESCE((SELECT SUM(di.packs) FROM despatch_items di WHERE di.despatch_id = d.id), 0) AS boxes
-     FROM despatches d
-     JOIN orders o ON o.id = d.order_id
-     JOIN customers c ON c.id = o.customer_id
-     LEFT JOIN locations l ON l.id = d.location_id
-     LEFT JOIN transporters t ON t.id = d.transporter_id
-     LEFT JOIN commercial_invoices i ON i.id = d.invoice_id
-     ${whereSql(where)} ORDER BY d.date DESC, d.id DESC`
-  ).all(...(params as never[])) as Record<string, unknown>[];
+  const inner = `${listSql} ${whereSql(where)}`;
+  const cols = columnWhere(
+    DESPATCH_FILTERABLE,
+    readColumnFilters(req.query as Record<string, unknown>, DESPATCH_FILTERABLE),
+    except,
+  );
+  return {
+    sql: `SELECT * FROM (${inner}) doc${cols.sql.length ? ` WHERE ${cols.sql.join(' AND ')}` : ''}`,
+    params: [...params, ...cols.params],
+  };
+}
+
+despatchesRouter.get('/export', (req: AuthedRequest, res) => {
+  // One statement, shared with the list: this used to be a hand-written
+  // near-copy of `listSql` carrying the two sums, which is exactly how a
+  // download comes to hold different columns from the table above it.
+  const { sql, params } = despatchListQuery(req);
+  const rows = db.prepare(`${sql} ${LIST_ORDER}`).all(...(params as never[])) as Record<string, unknown>[];
 
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.setHeader('Content-Disposition', `attachment; filename="${attachmentName('Dispatches')}"`);
@@ -268,14 +331,13 @@ despatchesRouter.get('/export', (req: AuthedRequest, res) => {
 });
 
 despatchesRouter.get('/', (req: AuthedRequest, res) => {
-  const { where, params } = despatchListWhere(req);
+  const { sql, params } = despatchListQuery(req);
 
   // This list has always been capped — at 300 rows, silently, with no way to
   // reach the 301st. Paging replaces the cap outright: `?limit=` now means a
   // page size rather than a ceiling, and the rows beyond it are reachable.
-  const sql = `${listSql} ${whereSql(where)}`;
   const body = listBody<Record<string, unknown>>(req.query, {
-    sql, order: 'ORDER BY d.date DESC, d.id DESC', params,
+    sql, order: LIST_ORDER, params,
   }, (rows) => rows.map(withItems));
   // The strip above the table adds up pieces, boxes and what is still
   // unbilled. Adding up one page of rows would answer a different question in
@@ -310,6 +372,29 @@ despatchesRouter.get('/ready', requirePermission('dispatch', 'full'), (req: Auth
 despatchesRouter.get('/ready/count', requirePermission('dispatch', 'full'), (req: AuthedRequest, res) => {
   const { ready, held } = readyLines(req);
   res.json({ ready, held });
+});
+
+/**
+ * What one column's tick list should offer, over the whole filtered register.
+ *
+ * Declared **above `/:id`** like `/export` and `/ready` beside it, or Express
+ * reads "facet" as a despatch id. Guarded by the router's own mount, and
+ * **scoped by `despatchListWhere`** like the list it describes — a facet is
+ * real values off real rows, and an unscoped one would hand out the customer
+ * book through a filter control.
+ */
+despatchesRouter.get('/facet', (req: AuthedRequest, res) => {
+  const column = String(req.query.column ?? '');
+  if (!isColumnOf(DESPATCH_FILTERABLE, column)) {
+    return res.status(400).json({ error: `Not a filterable column: ${column}` });
+  }
+  if (DESPATCH_FILTERABLE[column].kind !== 'values') {
+    return res.status(400).json({ error: `${column} is filtered by range, not by a list of values` });
+  }
+  const { sql, params } = despatchListQuery(req, column);
+  return res.json(facetOver(sql, params, DESPATCH_FILTERABLE[column].sql, {
+    search: String(req.query.search ?? ''),
+  }));
 });
 
 despatchesRouter.get('/:id', (req: AuthedRequest, res) => {

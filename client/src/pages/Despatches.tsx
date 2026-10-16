@@ -7,6 +7,8 @@ import { PageHeader, Card, Select, Input, Button, Modal, EmptyState, ErrorText, 
 import { useCan } from '../App';
 import { fmtQty, fmtDate } from '../lib/format';
 import { useUrlFilter } from '../lib/useUrlFilter';
+import { ColumnFilter, FilteredByStrip } from '../components/ColumnFilter';
+import { useColumnFilters, type ColumnFilterSpec } from '../lib/useColumnFilters';
 import { usePagedList, PAGE_SIZE } from '../lib/usePagedList';
 
 /**
@@ -373,6 +375,29 @@ function ReadyTable({ rows, canLink, onRecord, onRelease, busy }: {
   );
 }
 
+/**
+ * The header funnels on the register (2026-10-16, the client: *"Add the same
+ * filters to Despatches and Purchase Orders"*). The quotation list's own spec
+ * states the rule, and this page has the most exceptions to it because it has
+ * carried a row of filters above its table since it was written.
+ *
+ * So *Date*, *From*, *Customer* and *Documents* keep the controls they have,
+ * and *Reference* has none of its own — it prints whichever pair of references
+ * a trip carries, and the search box already covers all four. **ETA is the one
+ * that folds in**: under `param: 'eta'` it reads the `eta_from`/`eta_to` keys
+ * the dashboard's *arriving this week* chip already links with, so that chip
+ * still lands and the funnel can clear it.
+ */
+const DESPATCH_FILTERS: ColumnFilterSpec[] = [
+  { key: 'order', label: 'Sales Order', kind: 'values' },
+  { key: 'destination', label: 'Destination', kind: 'values' },
+  { key: 'transporter', label: 'Transporter', kind: 'values' },
+  { key: 'eta', label: 'ETA', kind: 'dates', param: 'eta' },
+  { key: 'pieces', label: 'Pieces', kind: 'numbers' },
+  { key: 'boxes', label: 'Boxes', kind: 'numbers' },
+  { key: 'challan', label: 'Challan', kind: 'values' },
+];
+
 export default function DespatchesPage() {
   const can = useCan();
   const canWrite = can('dispatch', 'full');
@@ -395,6 +420,23 @@ export default function DespatchesPage() {
    * is what this page has always been, and a page that opens somewhere else
    * after an update reads as a page that broke.
    */
+  const columns = useColumnFilters(DESPATCH_FILTERS);
+
+  /** One funnel, drawn inside its heading — see the quotation list's own. */
+  const filterFor = (key: string) => {
+    const spec = DESPATCH_FILTERS.find((c) => c.key === key)!;
+    return (
+      <ColumnFilter
+        column={key}
+        kind={spec.kind}
+        label={spec.label}
+        value={columns.get(key)}
+        onChange={(v) => columns.set(key, v)}
+        query={columns.params.toString()}
+        path="/api/despatches/facet"
+      />
+    );
+  };
   const [view, setView] = useUrlFilter('view');
   /*
    * Three now, and each is drawn for whoever it is *for* rather than for
@@ -413,17 +455,18 @@ export default function DespatchesPage() {
   const [from, setFrom] = useUrlFilter('from');
   const [to, setTo] = useUrlFilter('to');
   const [docs, setDocs] = useUrlFilter('docs');
-  const [etaFrom, setEtaFrom] = useUrlFilter('eta_from');
-  const [etaTo, setEtaTo] = useUrlFilter('eta_to');
   const [uninvoiced, setUninvoiced] = useUrlFilter('uninvoiced');
   const [q, setQ] = useUrlFilter('q');
 
   const query = new URLSearchParams();
   for (const [key, value] of [
     ['location_id', location], ['customer_id', customer], ['from', from], ['to', to],
-    ['docs', docs], ['eta_from', etaFrom], ['eta_to', etaTo],
-    ['uninvoiced', uninvoiced], ['q', q],
+    ['docs', docs], ['uninvoiced', uninvoiced], ['q', q],
   ] as [string, string][]) if (value) query.set(key, value);
+  // The header funnels — ETA among them, under the `eta_from`/`eta_to`
+  // keys the dashboard chip has always linked with — carried into the
+  // rows, the summary over them and the download alike.
+  for (const [k, v] of columns.params) query.set(k, v);
 
   const list = usePagedList<Despatch, Summary>(
     ['despatches', 'all', query.toString()],
@@ -438,7 +481,8 @@ export default function DespatchesPage() {
   const totals = list.summary ?? { ...EMPTY, trips: trips.length };
   const showEta = totals.with_eta > 0;
   const showDocs = totals.with_docs > 0 || totals.docs_pending > 0;
-  const filtered = !!(location || customer || from || to || docs || etaFrom || etaTo || uninvoiced || q);
+  const filtered = !!(location || customer || from || to || docs || uninvoiced || q)
+    || columns.filtered.length > 0;
 
   return (
     <div>
@@ -513,13 +557,11 @@ export default function DespatchesPage() {
         </label>
       </div>
 
-      {/* Arrivals are their own question — "what lands next week" is asked of
-          the ETA, not of the despatch date, which is when it left. */}
+      {/* Arrivals moved into the ETA column's own funnel (2026-10-16), which
+          reads the same `eta_from`/`eta_to` keys — so the dashboard's
+          *arriving this week* chip still lands here, and the dropdown can now
+          clear what it set, which this pair of boxes never said it had. */}
       <div className="mb-3 flex flex-wrap items-center gap-2">
-        <span className="text-sm text-slate-500">Arriving</span>
-        <Input type="date" className="w-40" value={etaFrom} onChange={(e) => setEtaFrom(e.target.value)} />
-        <span className="text-sm text-slate-400">to</span>
-        <Input type="date" className="w-40" value={etaTo} onChange={(e) => setEtaTo(e.target.value)} />
         <span className="ml-auto flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-slate-500">
           <span>
             {totals.trips} dispatch{totals.trips === 1 ? '' : 'es'} · {fmtQty(totals.pieces)} pcs · {fmtQty(totals.boxes)} boxes
@@ -545,6 +587,12 @@ export default function DespatchesPage() {
         </span>
       </div>
 
+      <FilteredByStrip
+        columns={columns.filtered}
+        onClear={(key) => columns.set(key, {})}
+        onClearAll={columns.clearAll}
+      />
+
       <Card className="overflow-x-auto">
         {trips.length === 0 ? (
           <EmptyState message={filtered
@@ -556,28 +604,46 @@ export default function DespatchesPage() {
               <tr className={TH_CLASS}>
                 <th className="pb-2 pr-3">Date</th>
                 <th className="pb-2 pr-3">From</th>
-                <th className="pb-2 pr-3">Sales Order</th>
+                <th className="whitespace-nowrap pb-2 pr-3">
+                  <span className="flex items-center gap-0.5">Sales Order{filterFor('order')}</span>
+                </th>
                 <th className="pb-2 pr-3">Customer</th>
-                <th className="pb-2 pr-3">Destination</th>
-                <th className="pb-2 pr-3">Transporter</th>
+                <th className="whitespace-nowrap pb-2 pr-3">
+                  <span className="flex items-center gap-0.5">Destination{filterFor('destination')}</span>
+                </th>
+                <th className="whitespace-nowrap pb-2 pr-3">
+                  <span className="flex items-center gap-0.5">Transporter{filterFor('transporter')}</span>
+                </th>
                 <th className="pb-2 pr-3">Reference</th>
-                {showEta && <th className="pb-2 pr-3">ETA</th>}
+                {showEta && (
+                  <th className="whitespace-nowrap pb-2 pr-3">
+                    <span className="flex items-center gap-0.5">ETA{filterFor('eta')}</span>
+                  </th>
+                )}
                 {showDocs && <th className="pb-2 pr-3">Documents</th>}
-                <th className="pb-2 pr-3 text-right">Pieces</th>
-                <th className="pb-2 pr-3 text-right">Boxes</th>
+                <th className="whitespace-nowrap pb-2 pr-3 text-right">
+                  <span className="flex items-center justify-end gap-0.5">Pieces{filterFor('pieces')}</span>
+                </th>
+                <th className="whitespace-nowrap pb-2 pr-3 text-right">
+                  <span className="flex items-center justify-end gap-0.5">Boxes{filterFor('boxes')}</span>
+                </th>
                 <th className="pb-2 pr-3">Invoice</th>
                 {/* Named rather than left blank. The link under it was a bare
                     emoji in an unlabelled last column, which is a document
                     nobody can find — the order tab's copy says "Challan"
                     beside its icon and that is the half that was missing. */}
-                <th className="pb-2">Challan</th>
+                <th className="whitespace-nowrap pb-2 pr-3">
+                  <span className="flex items-center gap-0.5">Challan{filterFor('challan')}</span>
+                </th>
                 {canWrite && <th className="pb-2" />}
               </tr>
             </thead>
             <tbody>
               {trips.map((d) => {
-                const pieces = (d.items ?? []).reduce((s, it) => s + (it.qty ?? 0), 0);
-                const boxes = (d.items ?? []).reduce((s, it) => s + (it.packs ?? 0), 0);
+                // Summed on the server now, so the cell, the figure over
+                // the table and the column filter are one answer.
+                const pieces = d.pieces ?? 0;
+                const boxes = d.boxes ?? 0;
                 return (
                   <tr key={d.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50">
                     <td className="py-2 pr-3 whitespace-nowrap">{fmtDate(d.date)}</td>

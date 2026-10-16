@@ -7,6 +7,9 @@ import { shortfallDraft } from '../services/purchasing.js';
 import { resolveCompanyId } from '../services/companies.js';
 import type { AuthedRequest } from '../middleware/auth.js';
 import { listBody } from '../services/pagination.js';
+import {
+  columnWhere, readColumnFilters, facetOver, isColumnOf, type ColumnSpecs,
+} from '../services/columnFilters.js';
 
 export const purchaseOrdersRouter = Router();
 
@@ -175,16 +178,86 @@ function getFull(id: number) {
   return po;
 }
 
-purchaseOrdersRouter.get('/', (req, res) => {
+/*
+ * What each heading can be filtered by (2026-10-16, the client: *"Add the
+ * same filters to Despatches and Purchase Orders"*). The quotation list's own
+ * spec states the rule, and this list is the one place it has no exceptions:
+ * every one of its seven columns gets a funnel, because the page above the
+ * table has only an *Open orders only* tick and no control that names a
+ * column.
+ *
+ * **Status keeps its `?status=` key** through `param`, the shape the Work
+ * Orders list and the commercial invoice both use — it was read here as a
+ * single value and is a tick list now, so a link carrying one still lands and
+ * the dropdown can clear it.
+ */
+export const PURCHASE_ORDER_FILTERABLE = {
+  number: { sql: 'number', kind: 'values' },
+  date: { sql: 'date', kind: 'dates' },
+  supplier: { sql: 'supplier_name', kind: 'values' },
+  location: { sql: 'location_name', kind: 'values' },
+  expected: { sql: 'expected_date', kind: 'dates' },
+  value: { sql: 'grand_total', kind: 'numbers' },
+  status: { sql: 'status', kind: 'values', param: 'status' },
+} as const satisfies ColumnSpecs;
+
+/**
+ * The list as one statement, filters and all — the quotation list's own shape,
+ * and see its comment for why it is wrapped whether or not a funnel is set.
+ * The outer layer is the only place a filter on *Supplier* or *Deliver to* can
+ * live, both being a join's alias rather than a column of `purchase_orders`.
+ */
+const LIST_ORDER = 'ORDER BY date DESC, id DESC';
+
+function purchaseOrderListQuery(
+  req: AuthedRequest,
+  except?: keyof typeof PURCHASE_ORDER_FILTERABLE,
+): { sql: string; params: unknown[] } {
   const where: string[] = [];
   const params: unknown[] = [];
-  if (req.query.status) { where.push('p.status = ?'); params.push(String(req.query.status)); }
+  /*
+   * Status is **not** read here any more: it is the Status column's own
+   * funnel, under the same key. A second clause here would be a filter the
+   * dropdown could neither see nor clear.
+   */
   if (req.query.supplier_id) { where.push('p.supplier_id = ?'); params.push(Number(req.query.supplier_id)); }
   if (req.query.open === '1') where.push("p.status NOT IN ('received','cancelled')");
-  res.json(listBody(req.query, {
-    sql: `${listSql} ${where.length ? `WHERE ${where.join(' AND ')}` : ''}`,
-    order: 'ORDER BY p.date DESC, p.id DESC',
-    params,
+  const inner = `${listSql} ${where.length ? `WHERE ${where.join(' AND ')}` : ''}`;
+  const cols = columnWhere(
+    PURCHASE_ORDER_FILTERABLE,
+    readColumnFilters(req.query as Record<string, unknown>, PURCHASE_ORDER_FILTERABLE),
+    except,
+  );
+  return {
+    sql: `SELECT * FROM (${inner}) doc${cols.sql.length ? ` WHERE ${cols.sql.join(' AND ')}` : ''}`,
+    params: [...params, ...cols.params],
+  };
+}
+
+purchaseOrdersRouter.get('/', (req: AuthedRequest, res) => {
+  const { sql, params } = purchaseOrderListQuery(req);
+  res.json(listBody(req.query, { sql, order: LIST_ORDER, params }));
+});
+
+/**
+ * What one column's tick list should offer, over the whole filtered list.
+ *
+ * Declared **above `/:id`**, or Express reads "facet" as an order id. It needs
+ * no guard of its own: this router is mounted on the `purchasing` cell, so a
+ * read already answers to the same cell the list does — and a supplier's name
+ * and a rate are exactly what that cell exists to keep off the shop floor.
+ */
+purchaseOrdersRouter.get('/facet', (req: AuthedRequest, res) => {
+  const column = String(req.query.column ?? '');
+  if (!isColumnOf(PURCHASE_ORDER_FILTERABLE, column)) {
+    return res.status(400).json({ error: `Not a filterable column: ${column}` });
+  }
+  if (PURCHASE_ORDER_FILTERABLE[column].kind !== 'values') {
+    return res.status(400).json({ error: `${column} is filtered by range, not by a list of values` });
+  }
+  const { sql, params } = purchaseOrderListQuery(req, column);
+  return res.json(facetOver(sql, params, PURCHASE_ORDER_FILTERABLE[column].sql, {
+    search: String(req.query.search ?? ''),
   }));
 });
 
