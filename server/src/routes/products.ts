@@ -293,7 +293,48 @@ productsRouter.get('/', (req, res) => {
     where.push('product_type = ?');
     params.push(type);
   }
-  if (missing === 'weight') where.push('weight_grams IS NULL');
+  /*
+   * The gaps in the catalogue, as filters (2026-10-16, the client: *"Is there
+   * a way to show products which have no QC or Recipe data added"*).
+   *
+   * `weight` has been here since 2026-09-04 and the other two are the same
+   * shape, because the same thing is true of all three: **nothing refuses a
+   * save over them**, so the only way to find a gap was to open each product's
+   * own dialog, which on a catalogue of 110 is not a thing anybody does. And
+   * each gap is quietly load-bearing. A product with no recipe reports
+   * `hasRecipe: false` and the material shortfall calls it **uncosted** rather
+   * than counting it as zero — so the buying figure is incomplete and says so
+   * in a place nobody reads. A product with no specification is **never
+   * blocked** by the QC gate (`has_spec: false` means nobody has said what to
+   * measure), so it ships uninspected.
+   *
+   * One key rather than three, so the three chips are alternatives: asking for
+   * two gaps at once is a question nobody has, and the control that already
+   * exists toggles one value.
+   */
+  const GAPS: Record<string, string> = {
+    weight: 'weight_grams IS NULL',
+    recipe: 'NOT EXISTS (SELECT 1 FROM product_materials pm WHERE pm.product_id = products.id)',
+    /*
+     * No **default** specification, which is the one that governs everybody:
+     * `paramsFor` falls through to `customer_id IS NULL` whenever the customer
+     * being asked about has no rows of their own, so a product carrying only a
+     * customer override has no opinion for every other buyer — and the gate
+     * holds up nothing for them. Counting those as covered would hide the hole
+     * this chip exists to find.
+     */
+    qc: 'NOT EXISTS (SELECT 1 FROM product_qc_params q WHERE q.product_id = products.id AND q.customer_id IS NULL)',
+  };
+  /*
+   * Snapshot before the gap clause goes on, because the three counts below
+   * have to **ignore it**: they are alternatives sharing one key, so measured
+   * inside their own filter the Weight chip's number would change the moment
+   * somebody clicked Recipe. The facet rule, one page over. None of the three
+   * clauses binds a parameter, which is what keeps these arrays aligned.
+   */
+  const gapWhere = [...where];
+  const gapParams = [...params];
+  if (GAPS[missing]) where.push(GAPS[missing]);
   /*
    * `?active=1|0` narrows to the catalogue in use, or to what has been taken
    * out of it — absent means both, which is the default and is deliberate:
@@ -314,6 +355,10 @@ productsRouter.get('/', (req, res) => {
   if (activeFilter === '1' || activeFilter === '0') {
     where.push('active = ?');
     params.push(Number(activeFilter));
+    // The gap counts follow the catalogue on screen: with the tick off, "25
+    // with no weight" means 25 of the products in use.
+    gapWhere.push('active = ?');
+    gapParams.push(Number(activeFilter));
   }
   const sql = `SELECT * FROM products${where.length ? ` WHERE ${where.join(' AND ')}` : ''}`;
 
@@ -328,16 +373,31 @@ productsRouter.get('/', (req, res) => {
    * object instead of a list would show nothing.
    */
   if (Array.isArray(body)) return res.json(body);
-  const gaps = db.prepare(
-    `SELECT COUNT(*) AS c FROM (${sql}) WHERE weight_grams IS NULL`
-  ).get(...(params as never[])) as { c: number };
+  /*
+   * One count per gap, each over the catalogue as filtered by the search, the
+   * type and the active tick — and **not** by the gap filter itself, so the
+   * three chips keep saying the same thing whichever one is lit.
+   */
+  const gapCount = (clause: string): number => {
+    const w = [...gapWhere, clause].join(' AND ');
+    return Number((db.prepare(`SELECT COUNT(*) AS c FROM products WHERE ${w}`)
+      .get(...(gapParams as never[])) as { c: number }).c);
+  };
   // How many have been taken out of the catalogue, so the page can say so and
   // offer to show them. The search and type filters still apply; the active
   // filter does not, for the reason above.
   const off = db.prepare(
     `SELECT COUNT(*) AS c FROM products WHERE ${[...baseWhere, 'active = 0'].join(' AND ')}`
   ).get(...(baseParams as never[])) as { c: number };
-  res.json({ ...body, summary: { missing_weight: Number(gaps.c), disabled: Number(off.c) } });
+  res.json({
+    ...body,
+    summary: {
+      missing_weight: gapCount(GAPS.weight),
+      missing_recipe: gapCount(GAPS.recipe),
+      missing_qc: gapCount(GAPS.qc),
+      disabled: Number(off.c),
+    },
+  });
 });
 
 productsRouter.post('/', (req, res) => {

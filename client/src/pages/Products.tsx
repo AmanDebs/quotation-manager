@@ -107,7 +107,7 @@ export default function ProductsPage() {
   const can = useCan();
   // the import and edit controls
   const isManager = can('product','full');
-  const list = usePagedList<Product, { missing_weight: number; disabled: number }>(
+  const list = usePagedList<Product, { missing_weight: number; missing_recipe: number; missing_qc: number; disabled: number }>(
     ['products', q, type, missing, showDisabled],
     // `active=1` unless the tick is on. Server-side because this list is
     // paged: a tick that dropped rows from the page in hand would filter one
@@ -115,7 +115,37 @@ export default function ProductsPage() {
     `/api/products?q=${encodeURIComponent(q)}&type=${encodeURIComponent(type)}&missing=${encodeURIComponent(missing)}${showDisabled ? '' : '&active=1'}`
   );
   const products = list.rows;
-  const noWeight = list.summary?.missing_weight ?? 0;
+  /*
+   * The gaps in the catalogue, each a count that is also the button that shows
+   * them (2026-10-16, the client: *"Is there a way to show products which have
+   * no QC or Recipe data added"*). Weight has worked this way since
+   * 2026-09-04; the other two are the same shape because the same thing is
+   * true of all three — nothing refuses a save over them, so without a count
+   * the only way to find a gap is to open 110 dialogs.
+   *
+   * The counts come from the server over the whole filtered set and ignore the
+   * gap filter itself, so clicking one does not move the other two.
+   */
+  const GAPS: { key: string; count: number; label: string; title: string }[] = [
+    {
+      key: 'weight',
+      count: list.summary?.missing_weight ?? 0,
+      label: 'with no weight',
+      title: 'Grams per piece is what the packing list weighs from and what a recipe is quoted against',
+    },
+    {
+      key: 'recipe',
+      count: list.summary?.missing_recipe ?? 0,
+      label: 'with no recipe',
+      title: 'What it consumes per 1000 pieces. Without one the material shortfall reports it as uncosted rather than counting it as zero — so the buying figure is short and says so where nobody looks',
+    },
+    {
+      key: 'qc',
+      count: list.summary?.missing_qc ?? 0,
+      label: 'with no QC spec',
+      title: 'What to measure and what passes. Without one the QC gate holds nothing up for it, so the goods ship uninspected',
+    },
+  ];
   const offCount = list.summary?.disabled ?? 0;
   const filtered = !!q || !!type || !!missing;
 
@@ -178,19 +208,26 @@ export default function ProductsPage() {
           * the page — a page total wearing the words of a list total is worse
           * than no total.
           */}
-        {(noWeight > 0 || missing === 'weight') && (
+        {/* One key, so the three are alternatives: asking for two gaps at
+            once is a question nobody has, and the chip that already existed
+            toggles one value. Each is drawn only where there is something
+            behind it — or where it is the one that is on, so it can be
+            turned off from a list it has emptied. */}
+        {GAPS.map((g) => (g.count > 0 || missing === g.key) && (
           <button
+            key={g.key}
             type="button"
-            onClick={() => setMissing(missing === 'weight' ? '' : 'weight')}
+            title={g.title}
+            onClick={() => setMissing(missing === g.key ? '' : g.key)}
             className={`rounded-lg px-2.5 py-1 text-sm ring-1 ring-inset ${
-              missing === 'weight'
+              missing === g.key
                 ? 'bg-amber-100 text-amber-900 ring-amber-300'
                 : 'bg-amber-50 text-amber-800 ring-amber-200 hover:bg-amber-100'
             }`}
           >
-            {noWeight} with no weight
+            {g.count} {g.label}
           </button>
-        )}
+        ))}
         {/* Offered where there is something behind it, or where it is already
             on: a tick that only ever reveals nothing reads as a fault. */}
         {(offCount > 0 || showDisabled) && (
