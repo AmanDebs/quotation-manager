@@ -88,7 +88,9 @@ export const workOrderStatusStyle: Record<WorkOrderStatus, string> = {
  */
 const JOB_FILTERS: ColumnFilterSpec[] = [
   { key: 'job', label: 'Job', kind: 'values' },
+  { key: 'created', label: 'Date raised', kind: 'dates' },
   { key: 'customer', label: 'Customer', kind: 'values' },
+  { key: 'spoc', label: 'SPOC', kind: 'values' },
   { key: 'item', label: 'Item', kind: 'values' },
   { key: 'color', label: 'Colour', kind: 'values' },
   { key: 'planned_start', label: 'Planned Start', kind: 'dates' },
@@ -577,6 +579,12 @@ export default function WorkOrdersPage() {
                     client's word (2026-10-08) — which is what makes the table
                     readable as a flat list once a filter has cut it down to a
                     handful of jobs across several orders. */}
+                {/* When the job was raised, beside the number that names it
+                    — where the sales order book puts its own Date, which is
+                    the list this one is read next to. */}
+                <th className="whitespace-nowrap pb-2 pr-3" rowSpan={2}>
+                  <span className="flex items-center gap-0.5">Date{filterFor('created')}</span>
+                </th>
                 <th className="whitespace-nowrap pb-2 pr-3" rowSpan={2}>
                   <span className="flex items-center gap-0.5">Customer{filterFor('customer')}</span>
                 </th>
@@ -602,6 +610,11 @@ export default function WorkOrdersPage() {
                 </th>
                 <th className="whitespace-nowrap pb-2 pr-3 text-right" rowSpan={2}>
                   <span className="flex items-center justify-end gap-0.5">Made{filterFor('made')}</span>
+                </th>
+                {/* Who is handling the order, as the sales order book shows
+                    it — last before the pill, where that list puts it too. */}
+                <th className="whitespace-nowrap pb-2 pr-3" rowSpan={2}>
+                  <span className="flex items-center gap-0.5">SPOC{filterFor('spoc')}</span>
                 </th>
                 <th className="whitespace-nowrap pb-2 pr-3" rowSpan={2}>
                   <span className="flex items-center gap-0.5">Status{filterFor('status')}</span>
@@ -672,7 +685,9 @@ export default function WorkOrdersPage() {
                           )}
                         </td>
                       )}
-                      <td className="whitespace-nowrap py-1.5 pr-3 font-semibold" colSpan={4}>
+                      {/* Job, Date, Customer, Item, Colour — five since the
+                          Date column went in beside the job number. */}
+                      <td className="whitespace-nowrap py-1.5 pr-3 font-semibold" colSpan={5}>
                         <Link to={`/orders/${w.order_id}`} className="text-brand-700 hover:underline">{w.order_number}</Link>
                         <span className="ml-2 font-normal text-slate-600">{w.customer_name}</span>
                       </td>
@@ -724,7 +739,8 @@ export default function WorkOrdersPage() {
                       </td>
                       <td className={`${GROUP_EDGE} py-1.5 pl-3 pr-3 text-right text-xs tabular-nums text-slate-500`}>{fmtQty(groupPlanned)}</td>
                       <td className="py-1.5 pr-3 text-right text-xs tabular-nums text-slate-500">{fmtQty(groupMade)}</td>
-                      <td />
+                      {/* SPOC and Status: both are the row's own, not the group's. */}
+                      <td colSpan={2} />
                     </tr>
                   ),
                   <tr key={w.id} className={`border-b border-slate-100 last:border-0 hover:bg-slate-50 ${ticked.has(w.id) ? 'bg-brand-50' : ''}`}>
@@ -741,6 +757,12 @@ export default function WorkOrdersPage() {
                     {/* A document number is one word; split across two lines it reads as two. */}
                     <td className="whitespace-nowrap py-2 pl-4 pr-3 font-medium">
                       <Link to={`/work-orders/${w.id}`} className="text-brand-600 hover:underline">{w.number}</Link>
+                    </td>
+                    {/* When the job was raised. Already this desk's own date
+                        when it arrives — the stamp is UTC and the conversion
+                        is done beside the filter that reads it. */}
+                    <td className="whitespace-nowrap py-1.5 pr-3 text-slate-600">
+                      {w.created_date ? fmtDate(w.created_date) : <span className="text-slate-300">—</span>}
                     </td>
                     {/* One line, with the whole name on hover — the rule the
                         order book's own lines view follows about its customer
@@ -894,6 +916,11 @@ export default function WorkOrdersPage() {
                           </button>
                         );
                       })()}
+                    </td>
+                    {/* One word on this book, so it does not wrap; a job whose
+                        order names nobody reads as an absence rather than a gap. */}
+                    <td className="whitespace-nowrap py-1.5 pr-3 text-slate-600">
+                      {w.spoc || <span className="text-slate-300">—</span>}
                     </td>
                     <td className="py-1.5 pr-3">
                       <span className={`inline-block whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ${workOrderStatusStyle[w.status]}`}>

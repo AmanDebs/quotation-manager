@@ -415,6 +415,15 @@ export interface WorkOrder {
   notes: string;
   order_number?: string; customer_id?: number; customer_name?: string;
   /**
+   * The day the job was raised, already converted to this desk's own date on
+   * the server — `created_at` is a **UTC** stamp, and the conversion belongs
+   * where the heading filter reads it, so the column and the filter cannot
+   * disagree about which day a job belongs to.
+   */
+  created_date?: string;
+  /** Who is handling the sales order this job is against. */
+  spoc?: string;
+  /**
    * The sales order's own Remarks, read live rather than copied onto the job —
    * how the goods are to be packed is written there, and the floor needs it.
    */

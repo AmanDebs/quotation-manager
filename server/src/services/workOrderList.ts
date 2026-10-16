@@ -61,6 +61,26 @@ export const listSql = `
   SELECT w.*, o.number AS order_number, o.customer_id,
          o.date AS order_date,
          o.remarks AS order_remarks,
+         -- Who is handling the sales order this job is against (2026-10-15).
+         -- Read off the order, like the colour and the instructions: a job has
+         -- no SPOC of its own, and giving it one would be a second copy able
+         -- to disagree with the document.
+         o.spoc,
+         -- The day the job was raised, as a date rather than the stamp.
+         -- (No backticks in this comment -- the whole statement is a template
+         -- literal, and one closes it.)
+         --
+         -- created_at is datetime('now'), which is UTC, and reading a UTC
+         -- stamp as local is the 5.5-hour error this codebase records fixing
+         -- once already. +330 minutes is not an approximation: India has never
+         -- observed DST, so a fixed offset IS Asia/Kolkata, the timezone
+         -- todayInKolkata already states this desk works in.
+         --
+         -- Its own alias, so the column and its heading filter read ONE
+         -- expression: a range over the raw stamp would miss every job raised
+         -- on its own closing day, 2026-10-16 09:00:00 sorting after
+         -- 2026-10-16.
+         date(w.created_at, '+330 minutes') AS created_date,
          c.name AS customer_name,
          p.name AS product_name,
          -- What the Item column actually prints: the catalogue name where the
@@ -114,7 +134,9 @@ export const listSql = `
  */
 export const JOB_FILTERABLE = {
   job: { sql: 'number', kind: 'values' },
+  created: { sql: 'created_date', kind: 'dates' },
   customer: { sql: 'customer_name', kind: 'values' },
+  spoc: { sql: 'spoc', kind: 'values' },
   item: { sql: 'item_label', kind: 'values' },
   color: { sql: 'color', kind: 'values' },
   planned_start: { sql: 'planned_start', kind: 'dates' },
