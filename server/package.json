@@ -12,6 +12,7 @@
     "test": "tsx --test test/**/*.test.ts",
     "check-series": "tsx src/db/checkSeries.ts",
     "check-bank": "tsx src/db/checkBank.ts",
+    "check-made-here": "tsx src/db/checkMadeHere.ts",
     "reset-book": "tsx src/db/resetBook.ts"
   },
   "dependencies": {
