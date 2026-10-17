@@ -304,6 +304,70 @@ const RESET_LABELS: Record<string, string> = {
   qc_checks: 'QC checks', despatches: 'dispatches', purchase_orders: 'purchase orders', material_moves: 'stock movements',
   fg_adjustments: 'finished-goods counts', audit_log: 'activity entries',
 };
+/**
+ * Whether approval emails can actually leave the building.
+ *
+ * Built with the notification itself (2026-10-17), and for a reason the
+ * complaint it answers makes plain: *"Approval – no notification is coming"*
+ * had two causes at once, and **every way this can be wrong looks identical
+ * from the outside** — no key, a key the provider rejects, a sending domain
+ * nobody verified, a typo in the from-address. All four are silence, and so is
+ * a queue nobody has fed. So the one screen that can tell them apart says
+ * which state it is in and offers to prove it.
+ *
+ * **The key is never read back.** It lives in the service's environment rather
+ * than in `settings`, because a secret in that table is in every backup
+ * download — and this one can send mail in the company's name. The page is
+ * told only whether one is set.
+ */
+function EmailCard() {
+  const { data } = useQuery({
+    queryKey: ['settings', 'email'],
+    queryFn: () => api.get<{ configured: boolean; from: string; app_url: string }>('/api/settings/email'),
+  });
+  const send = useMutation({
+    mutationFn: () => api.post<{ sent: boolean; reason: string; to: string }>('/api/settings/email/test', {}),
+  });
+  if (!data) return null;
+  return (
+    <Card title="Email Notifications">
+      {data.configured ? (
+        <>
+          <p className="text-sm text-slate-600">
+            On. A document that lands in the approvals queue emails everyone who can approve it,
+            and the person who raised it hears back when it is approved or rejected.
+          </p>
+          <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
+            <dt className="text-slate-400">Sent from</dt>
+            <dd className="text-slate-700">{data.from}</dd>
+            <dt className="text-slate-400">Links point at</dt>
+            <dd className="text-slate-700">{data.app_url || <span className="text-amber-700">nowhere — set APP_URL, or emails cannot link to the document</span>}</dd>
+          </dl>
+        </>
+      ) : (
+        <p className="text-sm text-amber-700">
+          Off. Nothing is sent and nothing fails — the badges in the sidebar are still right
+          whenever somebody opens the app. Set <code>MAIL_API_KEY</code> and <code>MAIL_FROM</code> on
+          the server to switch this on.
+        </p>
+      )}
+      {/* The whole point: a button that distinguishes "not set up" from "set up
+          and refused by the provider", which otherwise look the same. */}
+      <div className="mt-4 flex items-center gap-3">
+        <Button variant="secondary" disabled={send.isPending} onClick={() => send.mutate()}>
+          {send.isPending ? 'Sending…' : 'Send a test email to me'}
+        </Button>
+        {send.data && (
+          send.data.sent
+            ? <span className="text-sm text-green-700">Sent to {send.data.to}.</span>
+            : <span className="text-sm text-rose-700">{send.data.reason}</span>
+        )}
+      </div>
+      <ErrorText error={send.error} />
+    </Card>
+  );
+}
+
 function ResetBookCard() {
   const user = useUser();
   const navigate = useNavigate();
@@ -573,6 +637,7 @@ export default function SettingsPage() {
           <p className="mt-2 text-xs text-slate-400">One clause per line — each line prints as a bullet.</p>
         </Card>
 
+        <EmailCard />
         <BackupCard />
         <ResetBookCard />
 

@@ -4,6 +4,7 @@ import { defaultCompany, defaultCompanyId } from '../services/companies.js';
 import { listSeries, setNextNumber } from '../services/numbering.js';
 import { requirePermission } from '../middleware/auth.js';
 import { record } from '../services/audit.js';
+import { mailConfigured, sendMail, appLink } from '../services/mail.js';
 import type { AuthedRequest } from '../middleware/auth.js';
 
 export const settingsRouter = Router();
@@ -76,6 +77,53 @@ settingsRouter.put('/sequences', (req, res) => {
  * document's starting point — did not all have to change at once. Anything
  * that needs a specific company uses /api/companies.
  */
+/**
+ * Whether email notifications are switched on, and a way to prove it.
+ *
+ * The approval notification is the one piece of this app whose failure mode is
+ * **silence** — a wrong key, an unverified sending domain or a typo'd
+ * `MAIL_FROM` all look exactly like a queue nobody has fed, which is the
+ * complaint this was built from (*"Approval – no notification is coming"*). So
+ * there is a button that sends one message to the person pressing it, and
+ * prints the provider's own refusal where it fails.
+ *
+ * The key itself is **never read back** — it lives in the service's
+ * environment rather than in `settings` precisely because a secret in that
+ * table is in every backup download. The page is told only whether one is set.
+ *
+ * Declared above `/` so neither swallows the other, and guarded explicitly:
+ * the mount in `index.ts` lets any GET on `/api/settings` through.
+ */
+settingsRouter.get('/email', requirePermission('settings', 'full'), (_req, res) => {
+  res.json({
+    configured: mailConfigured(),
+    from: String(process.env.MAIL_FROM ?? ''),
+    // Without this an email can describe a document and not link to it.
+    app_url: appLink('/'),
+  });
+});
+
+/**
+ * Send one to yourself. `settings: full` through the mount, like the PUT.
+ *
+ * To the caller's own address and nowhere else: a test that took a recipient
+ * would be a way to send mail in the company's name to anybody at all.
+ */
+settingsRouter.post('/email/test', async (req: AuthedRequest, res) => {
+  const to = String(req.user?.email ?? '').trim();
+  if (!to) return res.status(400).json({ error: 'Your account has no email address.' });
+  const out = await sendMail(
+    [to],
+    'Test email from the Quotation Manager',
+    [
+      'This is the test message from Settings.',
+      '',
+      'If you are reading it, approval notifications will reach this address.',
+    ].join('\n'),
+  );
+  res.json({ ...out, to });
+});
+
 settingsRouter.get('/', (_req, res) => {
   res.json(defaultCompany());
 });

@@ -85,13 +85,42 @@ export function visibleCustomerIds(req: AuthedRequest): number[] | null {
   // (the approvals queue asks six) and this is nine statements now rather than
   // one. Cached on the request so it cannot go stale between requests.
   if (req.scopedCustomerIds) return req.scopedCustomerIds;
+  const ids = visibleCustomerIdsFor(user) ?? [];
+  req.scopedCustomerIds = ids;
+  return ids;
+}
+
+/**
+ * The same answer about somebody who is not the caller.
+ *
+ * There is work this app does *on behalf of* a person who is not making the
+ * request — deciding which approvers an email about a pending document should
+ * go to, which has no `req` of its own. **One rule, two doors**: the body of
+ * the walk lives here and `visibleCustomerIds` is the memoised request-bound
+ * reading of it, rather than a second copy able to answer differently about
+ * the same person. Not memoised, having no request to hang a cache on; the one
+ * caller asks it a handful of times when a document is submitted.
+ */
+export function visibleCustomerIdsFor(
+  user: { id?: unknown; team_role?: unknown } | undefined,
+): number[] | null {
+  if (!user) return [];
+  if (user.team_role !== 'sales') return null;
   const params = new Array(AUTHORED_TABLES.length + 1).fill(user.id);
   const rows = db.prepare(VISIBLE_SQL).all(...params) as { id?: number; customer_id?: number }[];
   // The first branch names the column `id` and the rest `customer_id`; a UNION
   // takes its column names from the first SELECT, so every row reads as `id`.
-  const ids = rows.map((r) => Number(r.id ?? r.customer_id));
-  req.scopedCustomerIds = ids;
-  return ids;
+  return rows.map((r) => Number(r.id ?? r.customer_id));
+}
+
+/** Whether this person — caller or not — may read documents for this customer. */
+export function userSeesCustomer(
+  user: { id?: unknown; team_role?: unknown } | undefined,
+  customerId: number | null | undefined,
+): boolean {
+  const ids = visibleCustomerIdsFor(user);
+  if (ids === null) return true;
+  return customerId != null && ids.includes(Number(customerId));
 }
 
 /** SQL fragment + params restricting a query to the caller's customers. */

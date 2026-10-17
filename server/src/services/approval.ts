@@ -2,6 +2,7 @@ import { db } from '../db/connection.js';
 import type { AuthedRequest, SessionUser } from '../middleware/auth.js';
 import { can } from './accessPolicy.js';
 import { incompleteError } from './documentChecks.js';
+import { notifySubmitted, notifyDecided } from './approvalMail.js';
 
 /**
  * Who may approve — including **implicitly**.
@@ -111,17 +112,34 @@ export function submit(table: DocTable, id: number, user: SessionUser) {
     db.prepare(
       `UPDATE ${table} SET approval_status = 'approved', approved_by = ?, approved_at = datetime('now'), approval_note = '' WHERE id = ?`
     ).run(user.id, id);
-  } else {
-    db.prepare(
-      `UPDATE ${table} SET approval_status = 'pending', approved_by = NULL, approved_at = '', approval_note = '' WHERE id = ?`
-    ).run(id);
+    // Nobody is told, and there is nobody to tell: this branch approves the
+    // document in the same breath, so no queue entry exists to notify about.
+    // The badge has always been right about that; an email must be too.
+    return;
   }
+  db.prepare(
+    `UPDATE ${table} SET approval_status = 'pending', approved_by = NULL, approved_at = '', approval_note = '' WHERE id = ?`
+  ).run(id);
+  /*
+   * And the people who can act on it hear about it away from the app
+   * (2026-10-17). Hung here rather than on the eight routes for the reason
+   * the audit middleware gives about itself — a notification added per route
+   * is one a route added later does not get — and after the UPDATE, so a mail
+   * can only ever describe a state that is already on file.
+   *
+   * Fired and forgotten inside `approvalMail.ts`: a provider being down loses
+   * a notification, never a document.
+   */
+  notifySubmitted(table, id, Number(user.id) || null);
 }
 
 export function decide(table: DocTable, id: number, user: SessionUser, approve: boolean, note: string) {
   db.prepare(
     `UPDATE ${table} SET approval_status = ?, approved_by = ?, approved_at = datetime('now'), approval_note = ? WHERE id = ?`
   ).run(approve ? 'approved' : 'rejected', user.id, note, id);
+  // The author is waiting on this one, and is the only person told — see
+  // `notifyDecided` for why the approvers are not.
+  notifyDecided(table, id, Number(user.id) || null, approve, note);
 }
 
 /** Any edit invalidates a prior approval — the manager must see the new version. */
