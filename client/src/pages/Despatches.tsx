@@ -118,10 +118,16 @@ function DocsCell({ d }: { d: Despatch }) {
  * line reaches *Ready to load* only once the SPOC has signed it off.
  *
  * Held rows are drawn **under** the live ones rather than hidden: goods
- * waiting on an unpaid advance — or on the desk's release — are waiting on
- * Sales rather than on the floor, and a queue that simply omitted them would
- * leave finished goods sitting in the yard with nothing on any screen to say
- * why.
+ * waiting on QC — or on the desk's release — are waiting on somebody else
+ * rather than on the floor, and a queue that simply omitted them would leave
+ * finished goods sitting in the yard with nothing on any screen to say why.
+ *
+ * **An unpaid advance is not one of those** (2026-10-17, the client with a
+ * Held list that was mostly money: *"The dispatch should not be held once it
+ * is released from awaiting approval"*). It is the sales desk's decision, it
+ * is put to them on the release button, and a released line is loadable — so
+ * here it is a mark beside the figure with the shortfall on hover, not a
+ * reason the lorry cannot go.
  */
 function ReadyToDispatch() {
   const can = useCan();
@@ -140,7 +146,7 @@ function ReadyToDispatch() {
     <div className="space-y-4">
       <Card title={`Ready to load${live.length ? ` · ${live.length}` : ''}`}>
         {live.length === 0 ? (
-          <EmptyState message="Nothing is ready to dispatch. A line appears here once the floor has made some of it, it has passed QC, the order's own payment terms have been met and the order's SPOC has released it. A bought-in item is not made here, so it never appears — record its trip from the register." />
+          <EmptyState message="Nothing is ready to dispatch. A line appears here once the floor has made some of it, it has passed QC and the order's SPOC has released it. A bought-in item is not made here, so it never appears — record its trip from the register." />
         ) : (
           <ReadyTable rows={live} canLink={can('work_order')} onRecord={(id) => navigate(`/despatches/new?order=${id}`)} />
         )}
@@ -174,6 +180,16 @@ function ReadyToDispatch() {
  * A line this login may not release is drawn with the reason in place of the
  * button. `may_approve` is the server's own answer rather than a copy of the
  * rule — two readings of who the SPOC is would be two policies.
+ *
+ * **And the money is asked here** (2026-10-17: *"if advance is not received
+ * the SPOC should get a warning about it but he can decide whether to release
+ * it or not when he clicks the release button"*). An unpaid advance used to
+ * hold the line in Logistics' queue, where the one team holding `payment:
+ * none` could do nothing about it; it is a warning under the row now, and
+ * pressing Release on such a line opens the gate's own sentence over *Release
+ * anyway*. The server refuses an unacknowledged release with the same words,
+ * so this dialog is what answers a real 409 rather than a courtesy in front
+ * of a press that would have gone through regardless.
  */
 function AwaitingApproval() {
   const can = useCan();
@@ -182,10 +198,18 @@ function AwaitingApproval() {
     queryKey: ['orders', 'dispatch-approval'],
     queryFn: () => api.get<{ rows: ReadyLine[]; awaiting: number }>('/api/orders/dispatch-approval'),
   });
+  /* The press the dialog is waiting on, with the sentence it has to show. */
+  const [confirm, setConfirm] = useState<{ orderId: number; lines: number[]; advance: string } | null>(null);
   const release = useMutation({
-    mutationFn: (v: { orderId: number; lines: { order_line: number }[] }) =>
-      api.post(`/api/orders/${v.orderId}/dispatch-approval`, { lines: v.lines }),
+    mutationFn: (v: { orderId: number; lines: { order_line: number }[]; confirmAdvance?: boolean }) =>
+      api.post(`/api/orders/${v.orderId}/dispatch-approval`, {
+        lines: v.lines,
+        // Sent only where the person actually said so — the server refuses the
+        // release otherwise, which is what makes the override deliberate.
+        ...(v.confirmAdvance ? { confirm_advance: true } : {}),
+      }),
     onSuccess: () => {
+      setConfirm(null);
       /* Both queues and both badges move together: this is one answer read by
          two audiences, so releasing on one side must not leave the other
          saying something else. */
@@ -195,6 +219,17 @@ function AwaitingApproval() {
     },
   });
   const rows = data?.rows ?? [];
+
+  /*
+   * Every release goes through here, one line or a whole order: where the
+   * order's terms are not yet met the person is shown the shortfall and
+   * decides, and where they are the press is the one click it always was.
+   */
+  function ask(orderId: number, lines: number[]) {
+    const advance = rows.find((r) => r.order_id === orderId && r.advance_due)?.advance_due;
+    if (advance) return setConfirm({ orderId, lines, advance });
+    release.mutate({ orderId, lines: lines.map((order_line) => ({ order_line })) });
+  }
   /* One button per order as well as per line, because that is how a desk signs
      off — one customer, one shipment, every line of it at once. Only drawn
      where there is more than one line to save a press on. */
@@ -219,7 +254,7 @@ function AwaitingApproval() {
               rows={rows}
               canLink={can('work_order')}
               busy={release.isPending}
-              onRelease={(orderId, line) => release.mutate({ orderId, lines: [{ order_line: line }] })}
+              onRelease={(orderId, line) => ask(orderId, [line])}
             />
             <div className="mt-3 flex flex-wrap gap-2">
               {orders.map((orderId) => {
@@ -230,7 +265,7 @@ function AwaitingApproval() {
                     key={orderId}
                     variant="secondary"
                     disabled={release.isPending}
-                    onClick={() => release.mutate({ orderId, lines: mine.map((r) => ({ order_line: r.order_line })) })}
+                    onClick={() => ask(orderId, mine.map((r) => r.order_line))}
                   >
                     {`Release all ${mine.length} lines on ${mine[0].order_number}`}
                   </Button>
@@ -240,8 +275,58 @@ function AwaitingApproval() {
           </>
         )}
       </Card>
+
+      {/* The decision, in the gate's own words. Not a confirm(): what is being
+          weighed is a figure somebody has to read, and the positive button
+          says what it does rather than "OK". */}
+      {confirm && (
+        <Modal title="Release with the advance outstanding?" onClose={() => setConfirm(null)}>
+          <p className="text-sm text-slate-600">{confirm.advance}</p>
+          <p className="mt-3 text-sm text-slate-600">
+            {confirm.lines.length > 1
+              ? `Releasing these ${confirm.lines.length} lines sends them to Logistics to load, whatever is still owed.`
+              : 'Releasing this line sends it to Logistics to load, whatever is still owed.'}
+            {' '}It is recorded against your name, and can be withdrawn until the goods go.
+          </p>
+          <ErrorText error={release.error} />
+          <div className="mt-4 flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setConfirm(null)}>Cancel</Button>
+            <Button
+              disabled={release.isPending}
+              onClick={() => release.mutate({
+                orderId: confirm.orderId,
+                lines: confirm.lines.map((order_line) => ({ order_line })),
+                confirmAdvance: true,
+              })}
+            >
+              Release anyway
+            </Button>
+          </div>
+        </Modal>
+      )}
     </div>
   );
+}
+
+/**
+ * What to say under a row, in order.
+ *
+ * The guard's own sentence rather than a copy: this is what the save would
+ * refuse with, so the queue explains the rule instead of keeping a second
+ * version of it. On the desk's tab the row is instead explained by what the
+ * release would do — and the money, in full, because the desk cannot weigh a
+ * figure it cannot see. On Logistics' tabs the money is the mark beside the
+ * Ready figure, the decision having already been taken.
+ */
+function noteFor(r: ReadyLine, desk: boolean): string[] {
+  const out: string[] = [];
+  if (desk && !r.may_approve) {
+    out.push(`This sales order is handled by ${r.spoc}, so ${r.spoc} releases it for dispatch.`);
+  } else if (r.held) {
+    out.push(r.held);
+  }
+  if (desk && r.advance_due) out.push(r.advance_due);
+  return out;
 }
 
 /**
@@ -331,8 +416,18 @@ function ReadyTable({ rows, canLink, onRecord, onRelease, busy }: {
               {showReady && (
                 <td
                   className="py-2 pr-3 text-right font-semibold tabular-nums"
-                  title={r.approved_by_name ? `Released by ${r.approved_by_name} on ${fmtDate(r.approved_at.slice(0, 10))}` : undefined}
+                  title={r.approved_by_name
+                    ? `Released by ${r.approved_by_name} on ${fmtDate(r.approved_at.slice(0, 10))}`
+                      + (r.approved_note ? ` — ${r.approved_note}` : '')
+                    : undefined}
                 >
+                  {/* Money outstanding on a line the desk has released is a
+                      mark, not a hold: the decision has been taken, and the
+                      figure behind it is a hover away rather than three lines
+                      of sentence repeated down the table. */}
+                  {r.ready > 0 && r.advance_due && (
+                    <span className="mr-1 cursor-help font-normal text-amber-600" title={r.advance_due}>⚠</span>
+                  )}
                   {r.ready ? fmtQty(r.ready) : <span className="font-normal text-slate-300">—</span>}
                 </td>
               )}
@@ -359,12 +454,10 @@ function ReadyTable({ rows, canLink, onRecord, onRelease, busy }: {
                 would refuse with, so the queue explains the rule rather than
                 keeping a second version of it. On the desk's tab the row is
                 instead explained by what the release would do. */}
-            {(r.held || (onRelease && !r.may_approve)) && (
+            {noteFor(r, !!onRelease).length > 0 && (
               <tr>
                 <td colSpan={cols} className="pb-2 pr-3 text-xs text-amber-700">
-                  {onRelease && !r.may_approve
-                    ? `This sales order is handled by ${r.spoc}, so ${r.spoc} releases it for dispatch.`
-                    : r.held}
+                  {noteFor(r, !!onRelease).map((line) => <span key={line} className="block">{line}</span>)}
                 </td>
               </tr>
             )}

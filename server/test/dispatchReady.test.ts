@@ -5,7 +5,7 @@ import { db } from '../src/db/connection.js';
 import { readyLines } from '../src/services/dispatchReady.js';
 import { qcBlockError } from '../src/services/qc.js';
 import { advanceBlockError } from '../src/services/despatchLimits.js';
-import { setApproval, deskApprovalError } from '../src/services/dispatchApproval.js';
+import { setApproval, deskApprovalError, releasedLines } from '../src/services/dispatchApproval.js';
 import type { AuthedRequest } from '../src/middleware/auth.js';
 import { makeCustomer } from './helpers/factory.js';
 
@@ -283,7 +283,11 @@ describe('what is holding a line back', () => {
     assert.notEqual(forOrder(o)[0].held, null);
   });
 
-  test('an unpaid advance holds the line, in the money gate\'s own words', () => {
+  /*
+   * The advance is the sales desk's question and the desk answers it by
+   * releasing (2026-10-17). It warns here; it does not hold.
+   */
+  test('an unpaid advance warns, in the money gate\'s own words, and does not hold', () => {
     const p = makeProduct();
     const o = makeOrder([{ productId: p, pcs: 20000 }]);
     db.prepare("UPDATE orders SET payment_terms = ?, grand_total = 50000 WHERE id = ?")
@@ -291,24 +295,39 @@ describe('what is holding a line back', () => {
     book(makeJob(o, 0, p, 20000), 12000);
     release(o, 0);
     const row = forOrder(o)[0];
-    assert.equal(row.held, advanceBlockError(o));
-    // These terms settle the balance before dispatch, so the gate holds the
+    // Not a copy of the sentence: the warning must say what the gate says.
+    assert.equal(row.advance_due, advanceBlockError(o));
+    // These terms settle the balance before dispatch, so the figure is the
     // whole order value rather than the 30% — its `full` basis, not `advance`.
-    assert.match(row.held!, /has not been paid for/);
-    assert.equal(row.ready, 12000, 'still listed — Logistics can see it is waiting on Sales');
+    assert.match(row.advance_due!, /has not been paid for/);
+    assert.equal(row.held, null, 'released, so it is on the ready list');
+    assert.equal(row.ready, 12000);
   });
 
-  test('an export order on the same split holds the advance alone', () => {
+  test('an export order on the same split warns about the advance alone', () => {
     const p = makeProduct();
     const o = makeOrder([{ productId: p, pcs: 20000 }]);
     db.prepare("UPDATE orders SET payment_terms = ?, grand_total = 50000 WHERE id = ?")
       .run('30% Advance and Balance against shipping documents', o);
     book(makeJob(o, 0, p, 20000), 12000);
     release(o, 0);
-    assert.match(forOrder(o)[0].held!, /up front/);
+    assert.match(forOrder(o)[0].advance_due!, /up front/);
   });
 
-  test('QC is reported before money, the order the save asks them in', () => {
+  /* The desk has to see the money before it decides, so the warning rides a
+     line that is still waiting on it. */
+  test('an unreleased line carries the warning beside the release it is waiting for', () => {
+    const p = makeProduct();
+    const o = makeOrder([{ productId: p, pcs: 20000 }]);
+    db.prepare("UPDATE orders SET payment_terms = ?, grand_total = 50000, spoc = 'Meisha' WHERE id = ?")
+      .run('30% Advance and Balance before Dispatch', o);
+    book(makeJob(o, 0, p, 20000), 12000);
+    const row = forOrder(o)[0];
+    assert.match(row.held!, /not yet released for dispatch by Meisha/);
+    assert.match(row.advance_due!, /has not been paid for/);
+  });
+
+  test('QC still holds a released line — it is not the desk\'s to waive', () => {
     const p = makeProduct({ spec: true });
     const o = makeOrder([{ productId: p, pcs: 20000 }]);
     db.prepare("UPDATE orders SET payment_terms = ?, grand_total = 50000 WHERE id = ?")
@@ -318,14 +337,16 @@ describe('what is holding a line back', () => {
     assert.match(forOrder(o)[0].held!, /has not passed QC yet/);
   });
 
-  test('terms naming no money hold nothing', () => {
+  test('terms naming no money warn about nothing', () => {
     const p = makeProduct();
     const o = makeOrder([{ productId: p, pcs: 20000 }]);
     db.prepare("UPDATE orders SET payment_terms = '30 Days Credit', grand_total = 50000 WHERE id = ?").run(o);
     book(makeJob(o, 0, p, 20000), 12000);
     release(o, 0);
     assert.equal(forOrder(o)[0].held, null);
+    assert.equal(forOrder(o)[0].advance_due, null);
   });
+
 
   test('held lines are counted apart from ready ones, so the badge promises only what can go', () => {
     const plain = makeProduct();
@@ -572,5 +593,90 @@ describe('who may release an order', () => {
 
   test('nobody signed in may release anything', () => {
     assert.notEqual(deskApprovalError({} as AuthedRequest, 'Meisha'), null);
+  });
+});
+
+/**
+ * The release waives the money gate on the save (2026-10-17, the client: *"The
+ * dispatch should not be held once it is released from awaiting approval"*).
+ *
+ * This is the half that keeps the queue honest: the moment an outstanding
+ * advance stopped holding a released line, `POST /despatches` had to stop
+ * refusing one, or the badge would promise what the save denies.
+ */
+describe('a release answers the advance gate', () => {
+  /** An order on terms that ask for money up front, with nothing banked. */
+  function unpaidOrder(): { order: number; product: number } {
+    const product = makeProduct();
+    const order = makeOrder([{ productId: product, pcs: 20000 }, null]);
+    db.prepare("UPDATE orders SET payment_terms = ?, grand_total = 50000 WHERE id = ?")
+      .run('30% Advance and Balance before Dispatch', order);
+    book(makeJob(order, 0, product, 20000), 12000);
+    return { order, product };
+  }
+
+  const trip = [{ order_line: 0, qty: 5000 }];
+
+  test('without a release the gate is exactly what it was', () => {
+    const { order } = unpaidOrder();
+    assert.match(advanceBlockError(order)!, /has not been paid for/);
+    assert.match(advanceBlockError(order, trip)!, /has not been paid for/);
+  });
+
+  test('a released line is not asked again', () => {
+    const { order } = unpaidOrder();
+    release(order, 0);
+    assert.equal(advanceBlockError(order, trip), null);
+    // Asked without lines it still reports the shortfall — that is the
+    // warning the desk reads before deciding, not a gate on a trip.
+    assert.match(advanceBlockError(order)!, /has not been paid for/);
+  });
+
+  test('a trip carrying a line nobody released is still refused', () => {
+    const product = makeProduct();
+    const order = makeOrder([{ productId: product, pcs: 20000 }, { productId: product, pcs: 20000 }]);
+    db.prepare("UPDATE orders SET payment_terms = ?, grand_total = 50000 WHERE id = ?")
+      .run('30% Advance and Balance before Dispatch', order);
+    book(makeJob(order, 0, product, 20000), 12000);
+    book(makeJob(order, 1, product, 20000), 12000);
+    release(order, 0);
+    assert.equal(advanceBlockError(order, [{ order_line: 0, qty: 1000 }]), null);
+    assert.match(
+      advanceBlockError(order, [{ order_line: 0, qty: 1000 }, { order_line: 1, qty: 1000 }])!,
+      /has not been paid for/,
+    );
+  });
+
+  /* The quantity on a release says how much Logistics may load, not how much
+     money was waived — see `releasedLines`. */
+  test('the waiver does not turn into a second quantity ceiling', () => {
+    const { order } = unpaidOrder();
+    release(order, 0, 1000);
+    assert.equal(advanceBlockError(order, [{ order_line: 0, qty: 9000 }]), null);
+  });
+
+  test('withdrawing the release brings the gate back', () => {
+    const { order } = unpaidOrder();
+    release(order, 0);
+    assert.equal(advanceBlockError(order, trip), null);
+    setApproval(order, 0, 0, APPROVER);
+    assert.equal(releasedLines(order).size, 0);
+    assert.match(advanceBlockError(order, trip)!, /has not been paid for/);
+  });
+
+  /* A charge line is nothing the desk can release, so a figure against one
+     neither clears the gate nor breaks a trip that is otherwise cleared. */
+  test('a charge line is not something to release', () => {
+    const { order } = unpaidOrder();
+    release(order, 0);
+    assert.equal(advanceBlockError(order, [{ order_line: 0, qty: 5000 }, { order_line: 1, qty: 1 }]), null);
+    assert.match(advanceBlockError(order, [{ order_line: 1, qty: 1 }])!, /has not been paid for/);
+  });
+
+  test('a settled order is not asked at all, released or not', () => {
+    const { order } = unpaidOrder();
+    db.prepare("UPDATE orders SET payment_terms = '30 Days Credit' WHERE id = ?").run(order);
+    assert.equal(advanceBlockError(order), null);
+    assert.equal(advanceBlockError(order, trip), null);
   });
 });

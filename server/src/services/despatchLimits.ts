@@ -1,6 +1,7 @@
 import { db } from '../db/connection.js';
 import { round2, piecesOrdered, isPieceBasis } from './totals.js';
 import { preDispatchDue } from './receivables.js';
+import { releasedLines } from './dispatchApproval.js';
 
 /**
  * What a despatch line may say went out.
@@ -220,6 +221,27 @@ export function despatchDateError(
  * the intended behaviour rather than an oversight — the alternative is a gate
  * that passes whenever the record is silent, which is no gate at all.
  *
+ * **And the sales desk may answer it** (2026-10-17, the client: *"The
+ * dispatch should not be held once it is released from awaiting approval; if
+ * advance is not received the SPOC should get a warning about it but he can
+ * decide whether to release it or not when he clicks the release button."*).
+ * The money on an order is the desk's business rather than the floor's or the
+ * forwarder's, and since 2026-10-08 the desk already signs each line off
+ * before Logistics may load it — so a line the desk has **released** is one
+ * where this question has been asked of the person whose question it is, and
+ * answered. It is not asked again here. Withdrawing the release withdraws the
+ * answer, the gate coming back with it, which is what keeps the two from
+ * drifting: there is no waiver stored anywhere, only the release itself.
+ *
+ * Three things that keeps honest. A trip recorded **without** any release —
+ * from the register or the order book, which is still allowed and is how
+ * every trip on file was recorded — meets the gate exactly as before, so
+ * nothing already on the book changes. A trip carrying a line nobody released
+ * is refused, because for *that* line nobody made the decision. And the
+ * release route refuses an unacknowledged release while money is outstanding,
+ * so the waiver is always somebody's deliberate act rather than a side effect
+ * of a button press.
+ *
  * **POST only**, unlike `qcBlockError` beside it, and the difference is worth
  * keeping: that one guards the PUT because a trip created with one innocuous
  * line and then edited would walk a POST-only gate, whereas nothing about
@@ -232,12 +254,38 @@ export function despatchDateError(
  * 409, like the QC gate: the record does not support the claim, where
  * `despatchLimitError` answers 400 for a figure that is simply wrong.
  */
-export function advanceBlockError(orderId: number): string | null {
+/**
+ * Whether the desk has cleared every goods line this trip carries.
+ *
+ * A charge line and a position the order no longer has are skipped — neither
+ * is anything the desk could release. A trip naming no goods line at all is
+ * **not** cleared, which is the conservative direction and is unreachable
+ * anyway: `POST /despatches` refuses a trip with nothing on it first.
+ */
+function deskCleared(orderId: number, lines: DespatchLine[]): boolean {
+  const released = releasedLines(orderId);
+  const items = db.prepare(
+    'SELECT is_charge FROM order_items WHERE order_id = ? ORDER BY sort_order, id'
+  ).all(orderId) as { is_charge: number }[];
+  let goods = false;
+  for (const line of lines) {
+    if (num(line.qty) === null && num(line.packs) === null) continue;
+    const item = items[Number(line.order_line ?? -1)];
+    if (!item || item.is_charge) continue;
+    goods = true;
+    if (!released.has(Number(line.order_line))) return false;
+  }
+  return goods;
+}
+
+export function advanceBlockError(orderId: number, lines?: DespatchLine[]): string | null {
   const a = preDispatchDue(orderId);
   // Nothing was decided, so there is nothing to wait for.
   if (a.basis === 'none') return null;
   // A paise of rounding is not an unpaid advance.
   if (a.outstanding <= 0.005) return null;
+  // Asked and answered by the desk, on these goods. See above.
+  if (lines && deskCleared(orderId, lines)) return null;
 
   const money = (n: number) => `${a.currency} ${fmt(n)}`;
   const headline = a.basis === 'full'

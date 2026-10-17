@@ -763,11 +763,18 @@ export interface ReadyLine {
   approved: number;
   approved_by_name: string;
   approved_at: string;
+  /** What the desk said when it released — notably that money was overridden. */
+  approved_note: string;
   /** Whose order it is — `orders.spoc`, one of the six desk names. */
   spoc: string;
   /** Whether this login may release it. The server's answer, not a copy. */
   may_approve: boolean;
   held: string | null;
+  /**
+   * The money gate's own sentence where the order's terms are not yet met — a
+   * warning the desk answers by releasing, never a hold.
+   */
+  advance_due: string | null;
 }
 
 export interface Despatch {

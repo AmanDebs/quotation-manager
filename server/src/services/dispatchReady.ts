@@ -16,13 +16,11 @@ import type { AuthedRequest } from '../middleware/auth.js';
  * `done`, and until this nothing told Logistics — who could not even open the
  * Work Orders list, holding `work_order: none` on it.
  *
- * **Nothing here is a second opinion about whether goods may ship.** "Ready"
- * is four facts and `POST /despatches` already checks all four, so this asks
- * those same guards rather than restating them — `qcBlockError` and
- * `advanceBlockError`, in the order the save runs them, so the sentence this
- * shows is the sentence the save would give. A queue with its own rule is how
- * a badge comes to promise what the API refuses, which this codebase records
- * as the worst way round for a guard to be wrong.
+ * **Nothing here is a second opinion about whether goods may ship.** This
+ * asks `POST /despatches`'s own guards rather than restating them, so the
+ * sentence it shows is the sentence the save would give. A queue with its own
+ * rule is how a badge comes to promise what the API refuses, which this
+ * codebase records as the worst way round for a guard to be wrong.
  *
  * **Almost nothing is stored.** No flag, no `notifications` table: a line
  * appears the moment the last gate clears and leaves the moment the goods go,
@@ -41,10 +39,26 @@ import type { AuthedRequest } from '../middleware/auth.js';
  *   and the only thing the sidebar badge counts.
  *
  * A line the desk has not released is still **shown to Logistics, held, with
- * the reason**, the rule a line held by an unpaid advance already follows: the
- * goods are waiting on Sales rather than on the floor, and a queue that simply
- * omitted them would leave them in the yard with nothing on any screen to say
- * why.
+ * the reason**: the goods are waiting on Sales rather than on the floor, and a
+ * queue that simply omitted them would leave them in the yard with nothing on
+ * any screen to say why.
+ *
+ * **The advance is a warning on that release, not a hold of its own**
+ * (2026-10-17, the client with a Held list full of money: *"The dispatch
+ * should not be held once it is released from awaiting approval; if advance
+ * is not received the SPOC should get a warning about it but he can decide
+ * whether to release it or not when he clicks the release button."*). It had
+ * been a second hold beside QC, which put the decision in front of the one
+ * team that cannot take it — Logistics holds `payment: none` — while the
+ * person who can was looking at a release button that said nothing about
+ * money. So `advance_due` rides every row as the gate's own sentence, the
+ * desk is shown it at the moment of pressing Release, and the release waives
+ * it in the save too (`advanceBlockError`) — or the queue would promise what
+ * `POST /despatches` refuses, which is the one thing it exists not to do.
+ *
+ * **QC is not waivable and stays a hold.** It is the specification's own Hard
+ * Stop, the save refuses it whatever the desk says, and it is Quality's call
+ * rather than the desk's.
  */
 
 /** A live job on the line, named so the queue can link to it. */
@@ -77,12 +91,20 @@ export interface ReadyLine {
   approved: number;
   approved_by_name: string;
   approved_at: string;
+  /** What the desk said when it released — notably that money was overridden. */
+  approved_note: string;
   /** Whose order it is, from `orders.spoc` — one of the six desk names. */
   spoc: string;
   /** Whether *this* caller may release it; see `deskApprovalError`. */
   may_approve: boolean;
   /** The guard's own sentence, or null when the lorry may actually leave. */
   held: string | null;
+  /**
+   * The money gate's own sentence where the order's terms are not yet met —
+   * a **warning** the desk answers by releasing, never a hold. Null once the
+   * terms are met, or where they ask for nothing up front.
+   */
+  advance_due: string | null;
 }
 
 /**
@@ -210,9 +232,12 @@ export function readyLines(
   // What the sales desk has released, asked once for the whole queue.
   const approvals = approvalsForOrders(orderIds);
   // Per order, not per line: the money gate is a fact about the whole order,
-  // and asking it once per line would run it five times for one answer.
-  const moneyHold = new Map<number, string | null>();
-  for (const id of orderIds) moneyHold.set(id, advanceBlockError(id));
+  // and asking it once per line would run it five times for one answer. Asked
+  // without any lines, so it reports the shortfall rather than whether these
+  // particular goods have been released — that is what the desk needs to see
+  // *before* it releases them.
+  const advanceDue = new Map<number, string | null>();
+  for (const id of orderIds) advanceDue.set(id, advanceBlockError(id));
 
   const out: ReadyLine[] = candidates.map((c) => {
     const spoc = String(c.r.spoc ?? '').trim();
@@ -237,19 +262,19 @@ export function readyLines(
     const ready = round2(Math.max(0, released - c.sent));
     const awaiting = round2(Math.max(0, c.supply - Math.max(released, c.sent)));
 
-    // The order the save asks them in, so the reason shown is the reason given.
-    const blocked = qcBlockError(c.r.order_id, [{ order_line: c.r.line }])
-      ?? moneyHold.get(c.r.order_id) ?? null;
     /*
-     * What Logistics is told. QC and the advance come first because they are
-     * the save's own guards and the sentence is the one the save would give —
-     * and because saying *"awaiting Meisha"* over a line that has failed its
-     * check would send somebody to chase the wrong person. The release is
-     * asked last, and only where nothing at all has been cleared: a line
-     * partly released is on the Ready list, where its remainder is the desk's
-     * business rather than a reason the lorry cannot go.
+     * What Logistics is told. QC comes first because it is the save's own
+     * guard and its sentence is the one the save would give — and because
+     * saying *"awaiting Meisha"* over a line that has failed its check would
+     * send somebody to chase the wrong person. The release is asked second,
+     * and only where nothing at all has been cleared: a line partly released
+     * is on the Ready list, where its remainder is the desk's business rather
+     * than a reason the lorry cannot go.
+     *
+     * The advance is **not** here. It is a warning on the release, carried
+     * beside this as `advance_due`, and a released line is not held by it.
      */
-    const held = blocked
+    const held = qcBlockError(c.r.order_id, [{ order_line: c.r.line }])
       ?? (ready === 0 && awaiting > 0
         ? `Made, but not yet released for dispatch${spoc ? ` by ${spoc}` : ''}.`
         : null);
@@ -272,9 +297,11 @@ export function readyLines(
       approved,
       approved_by_name: approval?.by_name ?? '',
       approved_at: approval?.at ?? '',
+      approved_note: approval?.note ?? '',
       spoc,
       may_approve: !deskApprovalError(req, spoc),
       held,
+      advance_due: advanceDue.get(c.r.order_id) ?? null,
     };
   });
 

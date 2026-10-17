@@ -7,6 +7,7 @@ import { productionByOrder, ORDER_DUE, ORDER_DUE_FROM_JOBS } from '../services/p
 import { despatchedByOrder } from '../services/despatch.js';
 import { orderMaterialCost } from '../services/costing.js';
 import { orderAdvance, advanceForProforma, preDispatchDue } from '../services/receivables.js';
+import { advanceBlockError } from '../services/despatchLimits.js';
 import { withStock, orderLines, productDemand, countOrderLines, orderSearchClause,
   lineFacet, isFilterColumn, FILTERABLE, readLineFilters,
   type Filters, type OrderLine, type ProductDemand, statusClause } from '../services/orderLines.js';
@@ -720,6 +721,17 @@ ordersRouter.get('/dispatch-approval/count', requirePermission('order', 'full'),
  * `order: full` through the mount — a write needs it — and then
  * `deskApprovalError` on top, which is where the client's *"the SPOC of that
  * order"* actually bites.
+ *
+ * **And the money is put in front of them here** (2026-10-17: *"if advance is
+ * not received the SPOC should get a warning about it but he can decide
+ * whether to release it or not when he clicks the release button"*). An
+ * unpaid advance used to hold the line in Logistics' queue, which put the
+ * decision in front of the one team that holds `payment: none` and cannot
+ * take it. It is a **409 naming the shortfall** now, answered by sending
+ * `confirm_advance: true` — refused rather than merely warned about, so the
+ * waiver `advanceBlockError` then grants is always somebody's deliberate act
+ * and not a side effect of a button press. Withdrawing a release is never
+ * asked, there being no money question in taking a decision back.
  */
 ordersRouter.post('/:id/dispatch-approval', (req: AuthedRequest, res) => {
   const id = Number(req.params.id);
@@ -782,8 +794,29 @@ ordersRouter.post('/:id/dispatch-approval', (req: AuthedRequest, res) => {
     writes.push({ line, qty: Math.min(round2(asked), supply) });
   }
 
+  /*
+   * The advance, where the order's own terms ask for one. Asked of the order
+   * rather than of these lines — `advanceBlockError` waives itself for lines
+   * already released, and the whole point here is to report the shortfall to
+   * the person about to release them.
+   */
+  const releasing = writes.some((w) => w.qty > 0);
+  const unpaid = releasing ? advanceBlockError(id) : null;
+  if (unpaid && req.body?.confirm_advance !== true) {
+    return res.status(409).json({ error: unpaid, needs: 'advance' });
+  }
+
+  /*
+   * What was knowingly overridden, kept on the row beside who and when — a
+   * waiver with nothing to say it happened is the one thing this codebase
+   * refuses. The caller's own note follows it rather than being replaced.
+   */
+  const stored = unpaid
+    ? ['Released with the advance still outstanding.', note].filter(Boolean).join(' ')
+    : note;
+
   transaction(() => {
-    for (const w of writes) setApproval(id, w.line, w.qty, req.user?.id ?? null, note);
+    for (const w of writes) setApproval(id, w.line, w.qty, req.user?.id ?? null, stored);
   });
 
   const after = readyLines(req).rows.filter((r) => r.order_id === id);

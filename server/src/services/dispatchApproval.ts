@@ -70,6 +70,33 @@ export function approvalsForOrders(orderIds: number[]): Map<string, LineApproval
 }
 
 /**
+ * The lines of this order the desk has cleared, as positions.
+ *
+ * Read by `advanceBlockError`, which is the one gate a release **waives**
+ * (2026-10-17, the client with a Held list full of money: *"The dispatch
+ * should not be held once it is released from awaiting approval; if advance
+ * is not received the SPOC should get a warning about it but he can decide
+ * whether to release it or not when he clicks the release button."*). The
+ * advance is the sales desk's own question, so once the desk has answered it
+ * for these goods the save does not ask it again — and withdrawing the
+ * release withdraws the answer with it, there being nothing else to delete.
+ *
+ * **The quantity on the release is not a money figure.** It says how much of
+ * what the floor has made Logistics may load; the decision about the advance
+ * is the act of releasing at all, which is why a line carrying any release is
+ * cleared here whatever that figure is. Holding the waiver to the released
+ * quantity would turn the release into a second quantity ceiling on the trip,
+ * under a reason — money — that is not the real one; `despatchLimitError`
+ * owns the ceiling and this queue deliberately refuses no dispatch.
+ */
+export function releasedLines(orderId: number): Set<number> {
+  const rows = db.prepare(
+    'SELECT order_line FROM dispatch_approvals WHERE order_id = ? AND approved_qty > 0'
+  ).all(orderId) as { order_line: number }[];
+  return new Set(rows.map((r) => Number(r.order_line)));
+}
+
+/**
  * Whether this caller may release *this* order, by its SPOC.
  *
  * The client asked for the **SPOC of that order**, and nothing in the app

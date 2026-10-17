@@ -422,9 +422,11 @@ despatchesRouter.post('/', (req: AuthedRequest, res) => {
   const blocked = qcBlockError(order.id, items);
   if (blocked) return res.status(409).json({ error: blocked });
   // And nothing leaves until the advance the order's own terms ask for has
-  // arrived. POST only — see `advanceBlockError` for why the PUT is not
-  // guarded and for what it deliberately never blocks.
-  const unpaid = advanceBlockError(order.id);
+  // arrived — unless the sales desk has released these very lines, which is
+  // that question asked of the person whose question it is. The lines are
+  // handed over for exactly that; see `advanceBlockError` for why the PUT is
+  // not guarded and for what it deliberately never blocks.
+  const unpaid = advanceBlockError(order.id, items);
   if (unpaid) return res.status(409).json({ error: unpaid });
   // A figure below zero, or far past what the line has left to ship. 400 and
   // not 409: nothing conflicts, the number itself is wrong.
