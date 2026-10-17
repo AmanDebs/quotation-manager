@@ -1617,3 +1617,56 @@ export interface BookReport {
   totals: BookTotal[];
   unplaced: number;
 }
+
+/* ------------------------------------------------------------------ *
+ * Price history (Reports → Price history)
+ * ------------------------------------------------------------------ */
+
+/**
+ * One price, on one document, on one date (2026-10-17).
+ *
+ * `unit_price` is the rate exactly as the document holds it, in its own
+ * basis; `per1000` is that rate per 1000 pieces, which is the only figure two
+ * lines quoted on different bases may be compared on — and it is **null**,
+ * never zero, on a basis with no piece count.
+ */
+export interface PricePoint {
+  doc: BookDoc;
+  doc_id: number;
+  number: string;
+  date: string;
+  customer_id: number;
+  customer_name: string;
+  /** The document's own status, as that document's list prints it. */
+  status: string;
+  /** Still live — not cancelled, rejected, lapsed or superseded. */
+  live: boolean;
+  currency: string;
+  color: string;
+  qty: number | null;
+  pieces: number | null;
+  unit: string;
+  unit_price: number;
+  per1000: number | null;
+  amount: number;
+}
+
+export interface PriceSeries {
+  currency: string;
+  /** Ascending by date — so `first` and `last` are facts, not a guess. */
+  points: PricePoint[];
+  first: number;
+  last: number;
+  min: number;
+  max: number;
+  change_pct: number | null;
+}
+
+export interface PriceHistory {
+  product_id: number;
+  product_name: string;
+  series: PriceSeries[];
+  /** Lines on a basis with no piece count — listed, never converted. */
+  incomparable: PricePoint[];
+  included: BookDoc[];
+}

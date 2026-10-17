@@ -33,8 +33,11 @@ import { addDays, fmtDate, fmtMoney, fmtQty, today } from '../lib/format';
  * an oversight. Contrast was re-checked — every one of these sits above 4.5:1
  * on white for text, and the ramp steps stay distinguishable side by side.
  * ------------------------------------------------------------------ */
-const BLUE = '#2563eb';       // the primary series, and anything "ours"
-const BLUE_PALE = '#bfdbfe';  // the comparison series, and bar tracks
+// Exported because the Reports page's price chart draws from the same
+// palette: a second copy of the hue is how two charts in one app come to
+// be two different blues.
+export const BLUE = '#2563eb';       // the primary series, and anything "ours"
+export const BLUE_PALE = '#bfdbfe';  // the comparison series, and bar tracks
 /**
  * The funnel's ramp, as **five** stops for four stages.
  *

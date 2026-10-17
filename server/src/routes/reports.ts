@@ -10,6 +10,7 @@ import {
   type ReportFilter, type Pivot, type PivotRow, type DueReport,
   type BookDoc, type BookGroupBy, type BookReport,
 } from '../services/reports.js';
+import { priceHistory, type PriceHistory } from '../services/priceHistory.js';
 
 /**
  * The Reports page's four sheets. Mounted on `requireAuth` alone and guarded
@@ -227,4 +228,89 @@ reportsRouter.get('/book/export', (req: AuthedRequest, res) => {
     { header: 'Total', value: (r) => Number(r.amount ?? 0), type: 'money' },
   ];
   return sendXlsx(res, 'Sales book', cols, rows);
+});
+
+
+/* ------------------------------------------------------------------ *
+ * The price history of one product
+ * ------------------------------------------------------------------ */
+
+/**
+ * What one product has been priced at over time, and to whom.
+ *
+ * It spans the same three functions as the sales book and is gated the same
+ * way, through `bookDocs` — a kind the caller may not read is absent, not
+ * empty, and a caller holding none of the three is refused rather than handed
+ * an empty chart, which would read as *we have never priced this*.
+ *
+ * **No default date range here.** The client fills the last two years in, so
+ * the dates are on screen and editable before anything is asked for — the
+ * `DEFAULT_VALIDITY_DAYS` rule, that a default the form shows is one somebody
+ * can disagree with, where a default applied at the server would be a window
+ * nobody chose and nobody can see.
+ */
+function history(req: AuthedRequest): PriceHistory | null {
+  const docs = bookDocs(req);
+  if (!docs.length) return null;
+  const str = (k: string) => String(req.query[k] ?? '').trim();
+  return priceHistory(filter(req, 'c.id'), {
+    productId: Number(req.query.product) || 0,
+    customerId: Number(req.query.customer_id) || 0,
+    from: str('from'),
+    to: str('to'),
+    docs,
+  });
+}
+
+const NO_DOCS = 'You do not have access to any of the sales documents';
+
+reportsRouter.get('/price-history', (req: AuthedRequest, res) => {
+  // Without a product there is no question to answer — this report is about
+  // one catalogue row, and an unfiltered price list of the whole book would
+  // be a different report wearing these words.
+  if (!(Number(req.query.product) > 0)) return res.status(400).json({ error: 'Name a product to see its price history' });
+  const out = history(req);
+  if (!out) return res.status(403).json({ error: NO_DOCS });
+  // An id that is not on file is refused rather than answered with an empty
+  // chart, which would read as *we have never priced this*.
+  if (!out.product_name) return res.status(404).json({ error: 'Product not found' });
+  return res.json(out);
+});
+
+/**
+ * The same points as a spreadsheet, one row each — including the ones with no
+ * comparable rate, since the screen shows those too and the download has to
+ * match it. The rate is written **twice**: as the document holds it, and
+ * normalised, so the file can be charted without redoing the conversion and
+ * checked without trusting it.
+ */
+reportsRouter.get('/price-history/export', (req: AuthedRequest, res) => {
+  if (!(Number(req.query.product) > 0)) return res.status(400).json({ error: 'Name a product to see its price history' });
+  const out = history(req);
+  if (!out) return res.status(403).json({ error: NO_DOCS });
+  if (!out.product_name) return res.status(404).json({ error: 'Product not found' });
+  const only = String(req.query.currency ?? '').trim();
+  const rows: Row[] = [...out.series.flatMap((s) => s.points), ...out.incomparable]
+    .filter((p) => !only || p.currency === only)
+    .sort((a, b) => String(a.date).localeCompare(String(b.date)) || Number(a.doc_id) - Number(b.doc_id))
+    .map((p) => ({ ...p, product: out.product_name }));
+  const cols: Column<Row>[] = [
+    { header: 'Date', value: (r) => String(r.date ?? ''), type: 'date' },
+    { header: 'Document', value: (r) => DOC_LABEL[r.doc as BookDoc] ?? String(r.doc ?? '') },
+    { header: 'Number', value: (r) => String(r.number ?? '') },
+    { header: 'Status', value: (r) => String(r.status ?? '') },
+    { header: 'Customer', value: (r) => String(r.customer_name ?? '') },
+    { header: 'Product', value: (r) => String(r.product ?? '') },
+    { header: 'Colour', value: (r) => String(r.color ?? '') },
+    { header: 'Qty', value: (r) => (r.qty == null ? '' : Number(r.qty)), type: 'number' },
+    { header: 'Unit', value: (r) => String(r.unit ?? '') },
+    { header: 'Pieces', value: (r) => (r.pieces == null ? '' : Number(r.pieces)), type: 'number' },
+    { header: 'Rate', value: (r) => Number(r.unit_price ?? 0), type: 'money' },
+    // Blank, never zero, on a basis that states no piece count: a weight line
+    // has a real price and no comparable one, and 0 would read as free.
+    { header: 'Rate per 1000 pcs', value: (r) => (r.per1000 == null ? '' : Number(r.per1000)), type: 'money' },
+    { header: 'Currency', value: (r) => String(r.currency ?? '') },
+    { header: 'Amount', value: (r) => Number(r.amount ?? 0), type: 'money' },
+  ];
+  return sendXlsx(res, `Price history ${out.product_name}`.trim(), cols, rows);
 });
