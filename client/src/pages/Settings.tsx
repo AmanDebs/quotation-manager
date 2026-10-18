@@ -323,7 +323,10 @@ const RESET_LABELS: Record<string, string> = {
 function EmailCard() {
   const { data } = useQuery({
     queryKey: ['settings', 'email'],
-    queryFn: () => api.get<{ configured: boolean; from: string; app_url: string }>('/api/settings/email'),
+    queryFn: () => api.get<{
+      configured: boolean; from: string; app_url: string;
+      provider: string; verifies: string; problem: string;
+    }>('/api/settings/email'),
   });
   const send = useMutation({
     mutationFn: () => api.post<{ sent: boolean; reason: string; to: string }>('/api/settings/email/test', {}),
@@ -340,16 +343,32 @@ function EmailCard() {
           <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
             <dt className="text-slate-400">Sent from</dt>
             <dd className="text-slate-700">{data.from}</dd>
+            {/* Which provider, and what it verifies: the two differ in the one
+                way that matters when this will not send — a whole domain's DNS
+                records, or a single address confirmed by clicking a link. */}
+            <dt className="text-slate-400">Through</dt>
+            <dd className="text-slate-700">
+              {data.provider}
+              {data.verifies && <span className="text-slate-400"> — verifies {data.verifies}</span>}
+            </dd>
             <dt className="text-slate-400">Links point at</dt>
             <dd className="text-slate-700">{data.app_url || <span className="text-amber-700">nowhere — set APP_URL, or emails cannot link to the document</span>}</dd>
           </dl>
         </>
       ) : (
-        <p className="text-sm text-amber-700">
-          Off. Nothing is sent and nothing fails — the badges in the sidebar are still right
-          whenever somebody opens the app. Set <code>MAIL_API_KEY</code> and <code>MAIL_FROM</code> on
-          the server to switch this on.
-        </p>
+        <>
+          {/* The server's own sentence rather than a second copy of the rule —
+              "no key", "a provider this build does not know" and "a MAIL_FROM
+              with no address in it" are three different things to fix. */}
+          <p className="text-sm text-rose-700">Off — {data.problem}</p>
+          <p className="mt-2 text-sm text-slate-600">
+            Nothing is sent and nothing fails meanwhile: the badges in the sidebar are still
+            right whenever somebody opens the app. <code>MAIL_PROVIDER</code> is{' '}
+            <code>resend</code>, which sends only from a domain you have added DNS records for,
+            or <code>brevo</code>, which will verify a single sender address by emailing it a
+            link and needs no DNS at all.
+          </p>
+        </>
       )}
       {/* The whole point: a button that distinguishes "not set up" from "set up
           and refused by the provider", which otherwise look the same. */}

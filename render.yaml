@@ -26,12 +26,15 @@ services:
         value: "24"
       # Approval notifications by email. Leave these unset and the app behaves
       # exactly as it did — nothing is sent and nothing fails; the sidebar
-      # badges are still right whenever somebody opens the page. Set all three
-      # to switch it on, and press "Send a test email to me" in Settings.
+      # badges are still right whenever somebody opens the page. Set the key,
+      # the sender and the provider to switch it on, then press "Send a test
+      # email to me" in Settings.
       - key: MAIL_API_KEY
         sync: false # the provider key — set it in the dashboard, never here
       - key: MAIL_FROM
-        sync: false # e.g. Aglo Polymers <no-reply@yourdomain.com>, domain verified
+        sync: false # e.g. Aglo Polymers <no-reply@yourdomain.com>, sender verified
+      - key: MAIL_PROVIDER
+        sync: false # resend (needs a verified domain) or brevo (verifies one address, no DNS)
       - key: APP_URL
         sync: false # so an email can link to the document; RENDER_EXTERNAL_URL otherwise
     disk:

@@ -4,7 +4,7 @@ import { defaultCompany, defaultCompanyId } from '../services/companies.js';
 import { listSeries, setNextNumber } from '../services/numbering.js';
 import { requirePermission } from '../middleware/auth.js';
 import { record } from '../services/audit.js';
-import { mailConfigured, sendMail, appLink } from '../services/mail.js';
+import { mailConfigured, mailProblem, mailProvider, mailVerifies, sendMail, appLink } from '../services/mail.js';
 import type { AuthedRequest } from '../middleware/auth.js';
 
 export const settingsRouter = Router();
@@ -98,6 +98,14 @@ settingsRouter.get('/email', requirePermission('settings', 'full'), (_req, res) 
   res.json({
     configured: mailConfigured(),
     from: String(process.env.MAIL_FROM ?? ''),
+    // Which provider, and what it verifies — the two now differ in the one
+    // way that matters to whoever is setting this up (a domain's DNS records,
+    // or a single address). `problem` is why it is off, where a key is set
+    // but something else is wrong: the card prints the sentence rather than
+    // keeping its own copy of the rule.
+    provider: mailProvider(),
+    verifies: mailVerifies(),
+    problem: mailProblem(),
     // Without this an email can describe a document and not link to it.
     app_url: appLink('/'),
   });
