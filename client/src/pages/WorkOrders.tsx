@@ -302,6 +302,16 @@ export default function WorkOrdersPage() {
    * figure that then appears in no total. A **completed** job *is* offered it,
    * unlike the date cells: an over-run is ordinary and the column beside it
    * already colours *% over*.
+   *
+   * **It is a column of its own since 2026-10-19**, at the client's word
+   * (*"Instead of clicking on made column, add a button to log output"*). It
+   * was the Made figure itself, with a `+` that lifted under the pointer —
+   * chosen to keep a twelfth column off a table that already scrolls inside
+   * its card below 1680, and withdrawn because a figure that is also a button
+   * is a control nobody looks for. What that reasoning bought is kept instead
+   * by **drawing the column only for somebody who may book a shift**, the way
+   * the tick column follows `mayPlan`: a `view` login sees the table it
+   * always had, with no empty cells where a control would be.
    */
   const mayLog = can('output', 'full');
   const loggable = (w: WorkOrder) => mayLog && w.status !== 'cancelled';
@@ -619,6 +629,10 @@ export default function WorkOrdersPage() {
                 <th className="whitespace-nowrap pb-2 pr-3" rowSpan={2}>
                   <span className="flex items-center gap-0.5">Status{filterFor('status')}</span>
                 </th>
+                {/* No heading: the buttons under it say what they are, and a
+                    word here would only widen the column past them. It carries
+                    no funnel either — an action is not a value to filter on. */}
+                {mayLog && <th className="pb-2" rowSpan={2} aria-label="Book output" />}
               </tr>
               {/*
                 The sub-row carries the rule and the banner above it carries
@@ -739,8 +753,10 @@ export default function WorkOrdersPage() {
                       </td>
                       <td className={`${GROUP_EDGE} py-1.5 pl-3 pr-3 text-right text-xs tabular-nums text-slate-500`}>{fmtQty(groupPlanned)}</td>
                       <td className="py-1.5 pr-3 text-right text-xs tabular-nums text-slate-500">{fmtQty(groupMade)}</td>
-                      {/* SPOC and Status: both are the row's own, not the group's. */}
-                      <td colSpan={2} />
+                      {/* SPOC, Status and the output button: all the row's
+                          own, never the group's — a shift is booked against a
+                          job, and an order is not a job. */}
+                      <td colSpan={mayLog ? 3 : 2} />
                     </tr>
                   ),
                   <tr key={w.id} className={`border-b border-slate-100 last:border-0 hover:bg-slate-50 ${ticked.has(w.id) ? 'bg-brand-50' : ''}`}>
@@ -876,10 +892,8 @@ export default function WorkOrdersPage() {
                     {/*
                       * The figure, and the control that moves it. Putting the
                       * button *on* the made figure rather than in a column of
-                      * its own costs no width on a table that has eleven — and
-                      * it is the date cells' own shape one column over: the
-                      * cell reads as its value and answers the pointer where
-                      * there is something to do.
+                      * its own was how this was first built; it is a column
+                      * now (see `mayLog` above), so the figure is a figure.
                       */}
                     <td className="whitespace-nowrap py-1.5 pr-3 text-right tabular-nums">
                       {(() => {
@@ -899,22 +913,7 @@ export default function WorkOrdersPage() {
                             )}
                           </>
                         );
-                        if (!loggable(w)) return figure;
-                        return (
-                          <button
-                            type="button"
-                            onClick={() => setLogging(w)}
-                            title={`Book a shift against ${w.number}`}
-                            className="group/log -mr-1 inline-flex items-center gap-1 rounded px-1 transition-colors hover:bg-brand-50 hover:text-brand-700"
-                          >
-                            {figure}
-                            {/* Faint until the row is under the pointer: a
-                                plus on all eighty rows at full strength is the
-                                loudest thing on the page, and invisible until
-                                hover is a control nobody finds. */}
-                            <span aria-hidden className="text-xs text-slate-300 group-hover/log:text-brand-600">+</span>
-                          </button>
-                        );
+                        return figure;
                       })()}
                     </td>
                     {/* One word on this book, so it does not wrap; a job whose
@@ -956,6 +955,23 @@ export default function WorkOrdersPage() {
                         </div>
                       )}
                     </td>
+                    {/* The action, in a cell of its own. Empty on a cancelled
+                        job rather than dashed: an em-dash reads as a value
+                        that is absent, and there is no value here to be. */}
+                    {mayLog && (
+                      <td className="py-1.5 pr-3">
+                        {loggable(w) && (
+                          <button
+                            type="button"
+                            onClick={() => setLogging(w)}
+                            title={`Book a shift against ${w.number}`}
+                            className="whitespace-nowrap rounded border border-slate-200 px-2 py-0.5 text-xs font-medium text-slate-600 transition-colors hover:border-brand-300 hover:bg-brand-50 hover:text-brand-700"
+                          >
+                            Log output
+                          </button>
+                        )}
+                      </td>
+                    )}
                   </tr>,
                 ];
               })}
