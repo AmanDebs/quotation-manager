@@ -143,7 +143,10 @@ export default function CreditNoteFormPage() {
     },
   });
 
-  useDefaultOnce(isNew, user?.name ?? '', draft.prepared_by, (prepared_by) =>
+  // The desk name where the account has one, so a new document opens on a
+  // value the picker actually offers; their own name otherwise, which is
+  // kept and marked rather than silently dropped.
+  useDefaultOnce(isNew, user?.desk_name || user?.name || '', draft.prepared_by, (prepared_by) =>
     setDraft((d) => ({ ...d, prepared_by })));
 
   if (loadError) return <ErrorText error={loadError} />;

@@ -182,7 +182,7 @@ const NL = String.fromCharCode(10);
 const partsOf = (v: string) => v.split(';').map((s) => s.trim()).filter(Boolean);
 
 function SuggestInput({
-  options, value, onChange, onPick, disabled, placeholder, label, multiple,
+  options, value, onChange, onPick, disabled, placeholder, label, multiple, strict,
 }: {
   options: Suggestion[];
   value: string;
@@ -199,6 +199,24 @@ function SuggestInput({
   label: string;
   /** Add to the line instead of replacing it, and keep the panel open. */
   multiple?: boolean;
+  /**
+   * The list is the whole vocabulary: nothing can be typed, only picked.
+   *
+   * For a field whose values are **matched** rather than merely printed — a
+   * desk name is read back by `users.desk_name` to decide who may release a
+   * dispatch, and is filtered on by exact value in the order book's own
+   * column funnel, so *Sanjib* and *Sanjib Das* are two people as far as
+   * either is concerned. The INCO and payment-terms fields stay free text,
+   * because a basis qualified with a place is the ordinary shape of one.
+   *
+   * **A value already on the row is kept and says so**, rather than reading
+   * blank — the `unitOptions` rule, that a value a saved row holds stays on
+   * it after the list stops offering it. The imported backlog, the
+   * quotation → order carry-forward and the self-filling *Prepared By* have
+   * all written names that are not among the six, and clearing those on the
+   * next ordinary save would destroy a record to tidy a dropdown.
+   */
+  strict?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const wrap = useRef<HTMLDivElement>(null);
@@ -221,9 +239,19 @@ function SuggestInput({
   // A multi-select does not filter at all. Once two terms are on the line the
   // box holds a compound string that matches no single option, and narrowing
   // by it would hide the very rows whose ticks say what is already chosen.
-  const q = multiple ? '' : value.trim().toLowerCase();
+  //
+  // A strict list does not filter either: there is nothing to type, so the
+  // box always holds a chosen value and narrowing by it would leave the one
+  // entry already picked.
+  const q = multiple || strict ? '' : value.trim().toLowerCase();
   const matches = options.filter((t) => !q || t.label.toLowerCase().includes(q) || q.includes(t.value.toLowerCase()));
-  const shown = matches.length ? matches : options;
+  // What the row already holds, where the list no longer offers it — listed
+  // first and marked, so it can be seen and corrected rather than silently
+  // replaced. See `strict` above for why this is not simply dropped.
+  const offList = strict && value.trim() && !options.some((t) => t.value === value)
+    ? [{ value, label: `${value} — not on the list` }]
+    : [];
+  const shown = [...offList, ...(matches.length ? matches : options)];
 
   const chosen = multiple ? partsOf(value) : [];
   const isPicked = (t: Suggestion) => (multiple ? chosen.includes(t.value) : value === t.value);
@@ -243,12 +271,17 @@ function SuggestInput({
     <div className="relative" ref={wrap}>
       <Input
         disabled={disabled}
+        // Not `disabled`: a disabled box is grey and unfocusable, and this one
+        // is a live control that happens to take its value from a list.
+        readOnly={strict}
         value={value}
         onChange={(e) => { onChange(e.target.value); setOpen(true); }}
         onFocus={() => setOpen(true)}
+        // Focus alone does not reopen a panel Escape has just closed.
+        onClick={() => { if (strict) setOpen(true); }}
         onKeyDown={(e) => { if (e.key === 'Escape') setOpen(false); }}
         placeholder={placeholder}
-        className="w-full pr-7"
+        className={`w-full pr-7${strict ? ' cursor-pointer' : ''}`}
       />
       {!disabled && (
         <button
@@ -297,6 +330,18 @@ function SuggestInput({
               <span>{t.label}</span>
             </button>
           ))}
+          {/* With nothing typeable there has to be a way back to blank — the
+              desk name on the Team page is optional, and so is the credit
+              note's. Offered only where there is something to clear. */}
+          {strict && !!value.trim() && (
+            <button
+              type="button"
+              onMouseDown={(e) => { e.preventDefault(); onChange(''); setOpen(false); }}
+              className="mt-1 flex w-full border-t border-slate-100 px-3 py-1.5 text-left text-sm text-slate-400 hover:bg-slate-50 hover:text-slate-600"
+            >
+              Clear
+            </button>
+          )}
         </div>
       )}
     </div>
@@ -464,8 +509,16 @@ export function DeskPersonInput({ value, onChange, disabled, placeholder }: {
       value={value}
       onChange={onChange}
       disabled={disabled}
+      // The list is the whole vocabulary here (2026-10-19, the client with a
+      // sales order in front of them: *"The SPOC should only take the names
+      // present in the dropdown"*). A desk name is matched rather than merely
+      // printed — `users.desk_name` decides who may release a dispatch, and
+      // the order book filters this column by exact value — so a second
+      // spelling of one person is two people to both. A name already on a
+      // row is still kept and marked; see `strict`.
+      strict
       label="Show the desk"
-      placeholder={placeholder ?? 'Pick a name, or type your own'}
+      placeholder={placeholder ?? 'Pick a name'}
     />
   );
 }
