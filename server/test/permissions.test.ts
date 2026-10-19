@@ -121,7 +121,13 @@ describe('the access table', () => {
       // Dispatch Lead — Full on Logistics, Read Only on Sales and QC.
       ['logistics', 'dispatch', 'full'], ['logistics', 'packing_list', 'full'],
       ['logistics', 'order', 'view'], ['logistics', 'qc', 'view'],
-      ['logistics', 'invoice', 'view'], ['logistics', 'quotation', 'none'],
+      // Invoicing came back on 2026-10-19, at the client's word: Logistics is
+      // the desk told to raise the commercial invoice and packing list once
+      // goods are released, and the notification would be useless without it.
+      // The rest of the Sales module stays read-only, which is what the two
+      // lines below and beside this one assert.
+      ['logistics', 'invoice', 'full'], ['logistics', 'quotation', 'none'],
+      ['logistics', 'proforma', 'none'],
       ['logistics', 'work_order', 'view'], ['logistics', 'dashboard', 'view'],
       // Production Supervisor — Full on Production, the order but not the price.
       ['production', 'work_order', 'full'], ['production', 'output', 'full'],

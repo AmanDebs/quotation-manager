@@ -17,6 +17,7 @@ import { scopeClause, canAccessCustomer, linkError, customerChangeError, raiseFo
 import { syncOrderStatus } from '../services/orderStatus.js';
 import { returnedQtyByLine } from '../services/creditNotes.js';
 import { syncOrderJobs } from '../services/orderJobs.js';
+import { notifyJobsRaised, notifyReleased } from '../services/handoffMail.js';
 import { resolveCompanyId } from '../services/companies.js';
 import { listBody, pageRequest } from '../services/pagination.js';
 import { syncProformaOrdered, syncProformaUnordered, alreadyOrderedError } from '../services/documentChain.js';
@@ -826,6 +827,26 @@ ordersRouter.post('/:id/dispatch-approval', (req: AuthedRequest, res) => {
     lines: writes.map((w) => ({ order_line: w.line, approved_qty: w.qty })),
     rows: after,
   });
+
+  /*
+   * Logistics plan the trip and raise the paperwork; Quality hears only about
+   * a line the QC gate is actually holding. Read off `after`, which is the
+   * queue's own answer rather than a second opinion about the same lines —
+   * `held` on a line just released carries `qcBlockError`'s sentence, the
+   * "not yet released" branch being unreachable once it is.
+   */
+  const label = (r: { product_name: string | null; description: string }) =>
+    r.product_name || r.description || 'this line';
+  const releasedNow = new Set(writes.filter((w) => w.qty > 0).map((w) => w.line));
+  if (releasedNow.size) {
+    const mine = after.filter((r) => releasedNow.has(r.order_line));
+    notifyReleased(
+      id,
+      mine.map((r) => ({ item: label(r), qty: r.ready || r.approved })),
+      mine.filter((r) => r.held).map((r) => ({ item: label(r), reason: r.held! })),
+      req.user?.id ?? null,
+    );
+  }
 });
 
 ordersRouter.get('/:id', (req: AuthedRequest, res) => {
@@ -986,6 +1007,10 @@ ordersRouter.post('/', (req: AuthedRequest, res) => {
   });
   syncOrderStatus(id);
   res.status(201).json(getFull(id, req));
+  // The next desk's turn: jobs exist now and have no dates. Fired after the
+  // response, the audit middleware's own shape — a notification is never
+  // worth failing a booking for.
+  notifyJobsRaised(id, req.user?.id ?? null);
 });
 
 ordersRouter.put('/:id', (req: AuthedRequest, res) => {

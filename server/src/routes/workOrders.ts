@@ -12,6 +12,8 @@ import { insertJob, plannedDateError, type OrderRef } from '../services/orderJob
 import { syncOrderStatus } from '../services/orderStatus.js';
 import { syncJobStatus, DUE_TO_START } from '../services/jobStatus.js';
 import { requirePermission, type AuthedRequest } from '../middleware/auth.js';
+import { readyLines } from '../services/dispatchReady.js';
+import { notifyAwaitingRelease } from '../services/handoffMail.js';
 import { scopeClause, canAccessCustomer } from '../middleware/scope.js';
 import { resolveCompanyId } from '../services/companies.js';
 import { listBody } from '../services/pagination.js';
@@ -605,18 +607,48 @@ workOrdersRouter.post('/:id/entries', requirePermission('output', 'full'), (req:
     if (!owned) return res.status(400).json({ error: 'That batch is not on this work order' });
   }
 
+  const job = db.prepare('SELECT order_id, order_line FROM work_orders WHERE id = ?')
+    .get(id) as { order_id: number; order_line: number };
+
+  /*
+   * What the desk was already waiting on, **before** this shift is written.
+   *
+   * The client's own choice (2026-10-19): Sales hears when a line *joins*
+   * their release queue, not on every shift entry — a line is booked against
+   * several times a day, and an email apiece would be dozens about one order
+   * to the same people. So the notification below fires only on the crossing
+   * from nothing-waiting to something-waiting, and stays quiet until the line
+   * is released and the floor books more.
+   *
+   * Asked of `readyLines` narrowed to this order rather than summed here: one
+   * definition of what is awaiting, so the email and the queue it points at
+   * can never disagree about whether there is anything to look at.
+   */
+  const lineOf = (r: { order_line: number }) => r.order_line === job.order_line;
+  const was = readyLines(req, { orderId: job.order_id }).rows.find(lineOf)?.awaiting ?? 0;
+
   db.prepare(
     `INSERT INTO production_entries (work_order_id, batch_id, date, shift, qty_ok, qty_reject, operator, notes, created_by)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(id, entryBatch, String(body.date), String(body.shift ?? ''), ok, reject,
     String(body.operator ?? ''), String(body.notes ?? ''), req.user!.id);
 
-  const job = db.prepare('SELECT order_id FROM work_orders WHERE id = ?').get(id) as { order_id: number };
   // The job first: booked output is what moves it to Running, and the order's
   // own ladder reads job statuses in turn.
   syncJobStatus(id);
   syncOrderStatus(job.order_id);
   res.status(201).json(getFull(req, id));
+
+  const now = readyLines(req, { orderId: job.order_id }).rows.find(lineOf);
+  if (was <= 0 && now && now.awaiting > 0) {
+    notifyAwaitingRelease(
+      job.order_id,
+      job.order_line,
+      now.product_name || now.description || 'this line',
+      now.awaiting,
+      req.user?.id ?? null,
+    );
+  }
 });
 
 /* ---------------- quality control ---------------- */

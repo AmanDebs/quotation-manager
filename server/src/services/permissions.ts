@@ -283,7 +283,21 @@ export const DEFAULT_ACCESS: AccessTable = {
     qc: 'view',        // Read Only (Verify COA Clearance) — the spec's pre-dispatch step
     dispatch: 'full',  // Full (Pick, Pack, Gate Pass, Logistics)
     fg: 'full',        // View FG Inventory — and the stock count, which is a stores act
-    invoice: 'view', packing_list: 'full',
+    /*
+     * **Invoicing came back on 2026-10-19**, at the client's word. The
+     * 2026-09-10 spec made the whole Sales module read-only for this role and
+     * took export invoicing off it — recorded above, and now reversed on one
+     * cell, because they chose Logistics as the desk told to raise the
+     * commercial invoice and packing list once goods are released. An email
+     * asking somebody to raise a document the app refuses them is worse than
+     * no email at all, so the notification and the permission move together
+     * or not at all. The rest of the Sales module stays read-only: quotations
+     * and proformas are still `none`, the order book still `view`.
+     *
+     * `exportOnlyInvoice` can fire again as a result — it had no write left
+     * to narrow while this cell was `view`, and narrows one once more.
+     */
+    invoice: 'full', packing_list: 'full',
     customer: 'view', product: 'view', master: 'view', followup: 'none', payment: 'none',
     purchasing: 'none', approval: 'none', audit: 'none', team: 'none', settings: 'none', backup: 'none',
   },

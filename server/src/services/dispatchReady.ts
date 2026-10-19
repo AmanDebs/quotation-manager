@@ -193,17 +193,21 @@ function jobsByLine(orderIds: number[]): Map<string, ReadyJob[]> {
  */
 export function readyLines(
   req: AuthedRequest,
-  opts: { companyId?: number } = {},
+  /** `orderId` narrows to one order — what a notification hook asks about. */
+  opts: { companyId?: number; orderId?: number } = {},
 ): { rows: ReadyLine[]; ready: number; held: number; awaiting: number } {
   const scope = scopeClause(req, 'o.customer_id');
   // The dashboard narrows every figure to one selling entity; the queue's own
   // page asks about the whole group. Each company's rows partition the
   // unfiltered whole, the invariant the rest of that page is held to.
   const company = opts.companyId ? ' AND o.company_id = ?' : '';
+  // One order, for a caller deciding whether a single line has just joined a
+  // queue. The same rule narrowed, never a second reading of it.
+  const one = opts.orderId ? ' AND o.id = ?' : '';
   const rows = db.prepare(
-    `${CANDIDATE_SQL}${scope.sql ? ` AND (${scope.sql})` : ''}${company}
+    `${CANDIDATE_SQL}${scope.sql ? ` AND (${scope.sql})` : ''}${company}${one}
      ORDER BY o.date DESC, o.id DESC, li.line`
-  ).all(...scope.params, ...(opts.companyId ? [opts.companyId] : [])) as {
+  ).all(...scope.params, ...(opts.companyId ? [opts.companyId] : []), ...(opts.orderId ? [opts.orderId] : [])) as {
     order_id: number; order_number: string; order_date: string; customer_name: string | null;
     spoc: string | null;
     line: number; product_id: number | null; product_name: string | null;

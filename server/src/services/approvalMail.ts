@@ -1,7 +1,6 @@
 import { db } from '../db/connection.js';
-import { can } from './accessPolicy.js';
-import { userSeesCustomer } from '../middleware/scope.js';
-import { sendMail, appLink, mailConfigured } from './mail.js';
+import { appLink, mailConfigured } from './mail.js';
+import { peopleWhoCan, fire } from './recipients.js';
 import type { DocTable } from './approval.js';
 
 /**
@@ -84,20 +83,9 @@ const money = (n: number, currency: string) =>
  */
 export function approversFor(customerId: number, exceptUserId?: number | null):
   { id: number; name: string; email: string }[] {
-  const users = db.prepare(
-    "SELECT id, name, email, team_role FROM users WHERE active = 1 AND email <> '' ORDER BY id"
-  ).all() as { id: number; name: string; email: string; team_role: string }[];
-  return users
-    .filter((u) => u.id !== Number(exceptUserId))
-    .filter((u) => can(u, 'approval', 'full'))
-    .filter((u) => userSeesCustomer(u, customerId))
-    .map((u) => ({ id: u.id, name: u.name, email: u.email }));
-}
-
-/** `void` — fired and forgotten, so a provider being down cannot fail a save. */
-function fire(to: string[], subject: string, body: string): void {
-  if (!to.length || !mailConfigured()) return;
-  void sendMail(to, subject, body);
+  // The shared rule, named for the one cell this file is about. Every other
+  // handoff asks `peopleWhoCan` about its own cell — see `handoffMail.ts`.
+  return peopleWhoCan('approval', 'full', customerId, exceptUserId);
 }
 
 /**
