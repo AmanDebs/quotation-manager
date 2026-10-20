@@ -770,6 +770,8 @@ export interface ReadyLine {
   /** Whether this login may release it. The server's answer, not a copy. */
   may_approve: boolean;
   held: string | null;
+  /** The QC gate's sentence alone, where that is what holds the line. */
+  qc_hold: string | null;
   /**
    * The money gate's own sentence where the order's terms are not yet met — a
    * warning the desk answers by releasing, never a hold.

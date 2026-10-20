@@ -100,6 +100,17 @@ export interface ReadyLine {
   /** The guard's own sentence, or null when the lorry may actually leave. */
   held: string | null;
   /**
+   * The QC gate's own sentence alone, where it is what is holding the line.
+   *
+   * `held` composes two different refusals and reads whichever is more
+   * specific, which is right for Logistics — they want the reason, not its
+   * provenance. Quality's own queue needs to know **which** refusal it is, and
+   * re-asking `qcBlockError` to find out would be a second call with a second
+   * chance to disagree with the first. So it is carried as its own fact and
+   * `held` is composed from it.
+   */
+  qc_hold: string | null;
+  /**
    * The money gate's own sentence where the order's terms are not yet met —
    * a **warning** the desk answers by releasing, never a hold. Null once the
    * terms are met, or where they ask for nothing up front.
@@ -278,7 +289,8 @@ export function readyLines(
      * The advance is **not** here. It is a warning on the release, carried
      * beside this as `advance_due`, and a released line is not held by it.
      */
-    const held = qcBlockError(c.r.order_id, [{ order_line: c.r.line }])
+    const qcHold = qcBlockError(c.r.order_id, [{ order_line: c.r.line }]);
+    const held = qcHold
       ?? (ready === 0 && awaiting > 0
         ? `Made, but not yet released for dispatch${spoc ? ` by ${spoc}` : ''}.`
         : null);
@@ -305,6 +317,7 @@ export function readyLines(
       spoc,
       may_approve: !deskApprovalError(req, spoc),
       held,
+      qc_hold: qcHold,
       advance_due: advanceDue.get(c.r.order_id) ?? null,
     };
   });

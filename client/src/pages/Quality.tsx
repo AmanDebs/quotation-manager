@@ -2,7 +2,12 @@ import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { QcCheckRow, QcRegisterSummary, Customer, Product } from '../types';
-import { PageHeader, Card, Select, Input, EmptyState, Pagination, DownloadButton, TH_CLASS } from '../components/ui';
+import {
+  PageHeader, Card, Select, Input, EmptyState, Pagination, DownloadButton,
+  SegmentedTabs, TH_CLASS,
+} from '../components/ui';
+import type { ReadyLine } from '../types';
+import { fmtQty } from '../lib/format';
 import { fmtDate } from '../lib/format';
 import { useUrlFilter } from '../lib/useUrlFilter';
 import { usePagedList, PAGE_SIZE } from '../lib/usePagedList';
@@ -34,7 +39,7 @@ const verdictPill = (row: QcCheckRow) => {
     );
 };
 
-export default function QualityPage() {
+function Register() {
   const [from, setFrom] = useUrlFilter('from');
   const [to, setTo] = useUrlFilter('to');
   const [customer, setCustomer] = useUrlFilter('customer_id');
@@ -66,13 +71,7 @@ export default function QualityPage() {
   const filtered = !!(from || to || customer || product || result);
 
   return (
-    <div>
-      <PageHeader
-        title="Quality"
-        subtitle="Every inspection recorded, against the tolerance it was judged by"
-        actions={<DownloadButton href={`/api/work-orders/qc-checks/export${query.toString() ? `?${query}` : ''}`} />}
-      />
-
+    <>
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <Input type="date" className="w-40" value={from} onChange={(e) => setFrom(e.target.value)} />
         <span className="text-sm text-slate-400">to</span>
@@ -102,6 +101,7 @@ export default function QualityPage() {
               this whole feature is built to avoid. */}
           {totals.unmeasured > 0 && <span className="ml-2 text-slate-400">{totals.unmeasured} not measured</span>}
         </span>
+        <DownloadButton href={`/api/work-orders/qc-checks/export${query.toString() ? `?${query}` : ''}`} />
       </div>
 
       <Card className="overflow-x-auto">
@@ -131,7 +131,7 @@ export default function QualityPage() {
                   <td className="py-2 pr-3 whitespace-nowrap">{fmtDate(r.date)}</td>
                   <td className="py-2 pr-3 text-slate-500">{r.shift || '—'}</td>
                   <td className="py-2 pr-3">
-                    <Link to={`/orders/${r.order_id}?tab=production`} className="text-brand-600 hover:underline">
+                    <Link to={`/work-orders/${r.work_order_id}`} className="text-brand-600 hover:underline">
                       {r.work_order_number}
                     </Link>
                   </td>
@@ -166,6 +166,132 @@ export default function QualityPage() {
           onPage={list.setPage} noun="inspections"
         />
       </Card>
+    </>
+  );
+}
+
+/**
+ * What is waiting on a check (2026-10-20, the client, looking at a Held list
+ * full of *"has not passed QC yet"*: *"QC not done should be shown in quality
+ * tab as pending"*).
+ *
+ * The register above answers *what has the quality desk seen*; this answers
+ * *what is it holding up*, which until now could only be read off the
+ * dispatch queue — a page Quality holds `dispatch: view` on and which is
+ * written for somebody loading a lorry rather than somebody taking a
+ * measurement.
+ *
+ * **The same rows the dispatch queue holds, filtered to the ones its QC gate
+ * is holding**, so a line leaves this list the moment the check that unblocks
+ * it is recorded. Not paged: it is bounded by what is made and unshipped
+ * rather than by how long the business has been trading, and it is a queue
+ * that is meant to empty.
+ */
+function Pending() {
+  const { data, isPending } = useQuery({
+    queryKey: ['qc-pending'],
+    queryFn: () => api.get<{ rows: ReadyLine[]; pending: number }>('/api/work-orders/qc-pending'),
+  });
+  const rows = data?.rows ?? [];
+  if (isPending) return <div className="py-8 text-center text-sm text-slate-400">Loading…</div>;
+  return (
+    <Card className="overflow-x-auto">
+      {rows.length === 0 ? (
+        <EmptyState message="Nothing is waiting on a check. Every line that has been made either has a passing check or needs none." />
+      ) : (
+        <table className="w-full text-sm">
+          <thead>
+            <tr className={TH_CLASS}>
+              <th className="pb-2 pr-3">Sales Order</th>
+              <th className="pb-2 pr-3">Customer</th>
+              <th className="pb-2 pr-3">Item</th>
+              <th className="pb-2 pr-3">Colour</th>
+              <th className="pb-2 pr-3">Job</th>
+              <th className="pb-2 pr-3 text-right">Made</th>
+              <th className="pb-2 pr-3 text-right">To ship</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={`${r.order_id}:${r.order_line}`} className="border-b border-slate-100 last:border-0 hover:bg-slate-50">
+                <td className="whitespace-nowrap py-2 pr-3">
+                  <Link to={`/orders/${r.order_id}`} className="text-brand-600 hover:underline">{r.order_number}</Link>
+                </td>
+                <td className="max-w-[12rem] truncate py-2 pr-3" title={r.customer_name}>{r.customer_name}</td>
+                <td className="max-w-[16rem] truncate py-2 pr-3" title={r.description}>
+                  {r.product_name || r.description || '—'}
+                </td>
+                <td className="whitespace-nowrap py-2 pr-3 text-slate-500">
+                  {r.color || <span className="text-slate-300">—</span>}
+                </td>
+                {/*
+                  The answer to "is it connected to the work order": a check is
+                  recorded against a job, so the job is the way out of this
+                  list. A split run names both, since either may be the one
+                  that was measured.
+                */}
+                <td className="whitespace-nowrap py-2 pr-3">
+                  {r.jobs.length === 0 ? <span className="text-slate-300">—</span> : r.jobs.map((j, i) => (
+                    <span key={j.id}>
+                      {i > 0 && <span className="text-slate-300"> · </span>}
+                      <Link to={`/work-orders/${j.id}`} className="text-brand-600 hover:underline">{j.number}</Link>
+                    </span>
+                  ))}
+                </td>
+                <td className="whitespace-nowrap py-2 pr-3 text-right tabular-nums">{fmtQty(r.made)}</td>
+                {/* What is actually held up: made, within what was ordered,
+                    and not yet gone. The figure that says whether this row
+                    matters today. */}
+                <td className="whitespace-nowrap py-2 pr-3 text-right font-medium tabular-nums">
+                  {fmtQty(Math.max(0, Math.min(r.made, r.ordered) - r.sent))}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </Card>
+  );
+}
+
+/**
+ * Two views over one desk: what has been inspected, and what is waiting.
+ *
+ * Held in the URL like every other view switch in this app, so a filtered or
+ * a pending list is a link somebody can send.
+ */
+export default function QualityPage() {
+  const [view, setView] = useUrlFilter('view');
+  const pending = view === 'pending';
+  // Asked whichever tab is open, so the count on the quiet tab is still right
+  // — a tab that only counts once you are on it is a tab nobody opens.
+  const { data } = useQuery({
+    queryKey: ['qc-pending'],
+    queryFn: () => api.get<{ rows: ReadyLine[]; pending: number }>('/api/work-orders/qc-pending'),
+  });
+  const waiting = data?.pending ?? 0;
+  return (
+    <div>
+      <PageHeader
+        title="Quality"
+        subtitle={pending
+          ? 'Lines that have been made and cannot ship until somebody records a check'
+          : 'Every inspection recorded, against the tolerance it was judged by'}
+      />
+      <div className="mb-3">
+        <SegmentedTabs
+          value={pending ? 'pending' : 'register'}
+          onChange={(v) => setView(v === 'pending' ? 'pending' : '')}
+          tabs={[
+            { key: 'register', label: 'Register' },
+            {
+              key: 'pending',
+              label: waiting ? `Pending · ${waiting}` : 'Pending',
+            },
+          ]}
+        />
+      </div>
+      {pending ? <Pending /> : <Register />}
     </div>
   );
 }

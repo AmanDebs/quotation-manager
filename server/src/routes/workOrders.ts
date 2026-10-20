@@ -321,6 +321,35 @@ workOrdersRouter.get('/qc-checks/export', requirePermission('qc'), (req: AuthedR
   res.send(buildXlsx('QC checks', qcColumns, rows));
 });
 
+/**
+ * What is waiting on a check — Quality's own queue (2026-10-20, the client,
+ * looking at a Held list full of *"has not passed QC yet"*: *"QC not done
+ * should be shown in quality tab as pending"*).
+ *
+ * **The same rows, read from the other side.** It is `readyLines` filtered to
+ * those its QC gate is holding, never a second question about what needs
+ * inspecting — a queue with its own rule would be a second definition of a
+ * pass, which `qc.ts` says twice it must not have. So a line leaves this list
+ * the moment the check that unblocks it is recorded, by construction.
+ *
+ * It therefore inherits that function's shape exactly: a line is here only
+ * when goods **exist and cannot ship** (`outstanding > 0` — made, within what
+ * was ordered, not yet sent), which is the actionable set. A job with nothing
+ * made yet has nothing to measure, and a product with no specification is
+ * never blocked at all — `has_spec: false` means nobody has said what to
+ * measure, the rule that module states about itself.
+ *
+ * `qc: view` rather than `full`, so the four teams that read a certificate
+ * can see what is outstanding; recording the check is still `qc: full` on the
+ * route that does it. Declared **above `/:id`**, or Express reads
+ * "qc-pending" as a work order id — the trap `/qc-checks` already sits above
+ * that route for.
+ */
+workOrdersRouter.get('/qc-pending', requirePermission('qc'), (req: AuthedRequest, res) => {
+  const rows = readyLines(req).rows.filter((r) => r.qc_hold);
+  res.json({ rows, pending: rows.length });
+});
+
 workOrdersRouter.get('/:id', requirePermission('work_order'), (req: AuthedRequest, res) => {
   const wo = getFull(req, Number(req.params.id));
   if (!wo) return res.status(404).json({ error: 'Work order not found' });

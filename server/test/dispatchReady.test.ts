@@ -680,3 +680,46 @@ describe('a release answers the advance gate', () => {
     assert.equal(advanceBlockError(order, trip), null);
   });
 });
+
+describe('which refusal is holding the line, on the Quality queue', () => {
+  /*
+   * `held` composes two different refusals and shows the more specific, which
+   * is right for Logistics — they want the reason, not its provenance. The
+   * Quality page asks a narrower question (*what is waiting on a check*), so
+   * `qc_hold` carries the QC gate's sentence on its own. Re-asking
+   * `qcBlockError` to find out would be a second call with a second chance to
+   * disagree with the first, which is what these three cases exist to stop.
+   */
+  test('a line the QC gate holds carries that sentence under both names', () => {
+    const p = makeProduct({ spec: true });
+    const o = makeOrder([{ productId: p }]);
+    book(makeJob(o, 0, p), 12000);
+    const row = forOrder(o)[0];
+    assert.match(row.qc_hold!, /has not passed QC yet/);
+    assert.equal(row.held, row.qc_hold, 'the composed reason is the QC one here');
+  });
+
+  test('a line held only by the desk carries no QC hold', () => {
+    /* Nothing to inspect: no specification, so the gate has no opinion — and
+       reading `held` as a QC hold would put this line on Quality's queue
+       with nothing they could do about it. */
+    const p = makeProduct();
+    const o = makeOrder([{ productId: p }]);
+    book(makeJob(o, 0, p), 12000);
+    const row = forOrder(o)[0];
+    assert.equal(row.qc_hold, null);
+    assert.match(row.held!, /not yet released for dispatch/);
+  });
+
+  test('and a line nothing is holding carries neither', () => {
+    const p = makeProduct({ spec: true });
+    const o = makeOrder([{ productId: p }]);
+    const j = makeJob(o, 0, p);
+    book(j, 12000);
+    pass(j);
+    release(o, 0);
+    const row = forOrder(o)[0];
+    assert.equal(row.qc_hold, null);
+    assert.equal(row.held, null);
+  });
+});
