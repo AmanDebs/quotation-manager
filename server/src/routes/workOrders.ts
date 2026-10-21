@@ -1,8 +1,10 @@
 import { Router, type Response } from 'express';
 import { db, transaction } from '../db/connection.js';
 import { nextNumber } from '../services/numbering.js';
-import { batchesFor, batchById, coaBlockError, coaGroupError, renameError, dispositionError, isDisposition, DISPOSITIONS }
-  from '../services/batch.js';
+import {
+  batchesFor, batchById, coaBlockError, coaGroupError, coaEditError, lotsUnderCoa,
+  renameError, dispositionError, isDisposition, DISPOSITIONS,
+} from '../services/batch.js';
 import { coaWhere } from '../services/coaRegister.js';
 import { progressFor, progressForMany, LIVE_OK } from '../services/production.js';
 import { despatchedByOrder, lastTripForLine } from '../services/despatch.js';
@@ -947,6 +949,98 @@ function issueCoa(req: AuthedRequest, res: Response, ids: number[]) {
  * split out when `certify` became its second caller. A lot is certified once,
  * so this is the only place that writes `coa_no`.
  */
+/**
+ * Correct a certificate, or withdraw it (2026-10-22, the client: *"Add option
+ * to edit and delete COA"*).
+ *
+ * **Both act on the group, never on the lot they were opened from**: a number
+ * may cover several lots, and correcting the date on one of them would leave
+ * a certificate whose own lots disagree about when it was issued.
+ *
+ * **What may be corrected is what was typed**, which is the date and the
+ * approver — the two fields the issue dialog asks for, and the only two on a
+ * certificate that are not derived. The number is not among them: it comes
+ * from the company's own series, and a certificate renumbered in place is the
+ * `which COA covers this box` question made unanswerable, which is the rule
+ * this whole module is built on. Nor are the lots: what a certificate covers
+ * is what it certifies, and changing that is withdrawing it and issuing
+ * another.
+ *
+ * `coaEditError` holds both to the one rail — nothing may move once the
+ * number is on a challan or a credit note.
+ */
+function coaGroup(req: AuthedRequest, res: Response): { lots: ReturnType<typeof lotsUnderCoa>; id: number } | null {
+  const id = Number(req.params.batchId);
+  const b = db.prepare('SELECT work_order_id FROM batches WHERE id = ?').get(id) as
+    { work_order_id: number } | undefined;
+  // Scope first, so an id on somebody else's order cannot be probed for
+  // through a refusal that names the certificate.
+  if (!b || !accessible(req, Number(b.work_order_id))) {
+    res.status(404).json({ error: 'Batch not found' });
+    return null;
+  }
+  const lots = lotsUnderCoa(id);
+  if (!lots.length) {
+    res.status(409).json({ error: 'No certificate has been issued for this batch.' });
+    return null;
+  }
+  return { lots, id };
+}
+
+workOrdersRouter.put('/batches/:batchId/coa', requirePermission('qc', 'full'), (req: AuthedRequest, res) => {
+  const found = coaGroup(req, res);
+  if (!found) return;
+  const refused = coaEditError(found.id);
+  if (refused) return res.status(409).json({ error: refused });
+
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  // A field omitted is left alone, the `batch_ids` contract — so a dialog
+  // that only moved the approver cannot blank the date it never showed.
+  const date = body.date === undefined ? null : String(body.date).trim();
+  if (date !== null && !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    return res.status(400).json({ error: 'The certificate date must be a date' });
+  }
+  const approvedBy = body.approved_by === undefined ? null : String(body.approved_by).trim();
+
+  transaction(() => {
+    for (const lot of found.lots) {
+      if (date !== null) db.prepare('UPDATE batches SET coa_date = ? WHERE id = ?').run(date, lot.id);
+      if (approvedBy !== null) {
+        db.prepare('UPDATE batches SET coa_approved_by = ? WHERE id = ?').run(approvedBy, lot.id);
+      }
+    }
+  });
+  res.json(batchById(found.id));
+});
+
+/**
+ * Withdraw it: the lots go back to uncertified.
+ *
+ * **The number is not re-used.** Clearing it leaves the series where it is,
+ * so the next certificate over these lots is drawn fresh — which keeps the
+ * one-certificate rule exactly as it was: no two documents ever share a
+ * number, and nothing that went out is contradicted, because by this guard
+ * nothing went out.
+ *
+ * Everything downstream follows by itself: `qcBlockError` holds the line
+ * again, `despatchBatchError` refuses the lot a lorry, and the register loses
+ * the row — none of them store anything, so none of them has to be told.
+ */
+workOrdersRouter.delete('/batches/:batchId/coa', requirePermission('qc', 'full'), (req: AuthedRequest, res) => {
+  const found = coaGroup(req, res);
+  if (!found) return;
+  const refused = coaEditError(found.id);
+  if (refused) return res.status(409).json({ error: refused });
+
+  transaction(() => {
+    const clear = db.prepare(
+      "UPDATE batches SET coa_no = '', coa_date = '', coa_issued_by = NULL, coa_approved_by = '' WHERE id = ?"
+    );
+    for (const lot of found.lots) clear.run(lot.id);
+  });
+  res.json({ ok: true, withdrawn: found.lots.map((l) => l.number) });
+});
+
 function writeCoa(ids: number[], date: string, userId: number, approvedBy: string, companyId: number): string {
   let number = '';
   transaction(() => {

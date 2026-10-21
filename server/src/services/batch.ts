@@ -303,6 +303,74 @@ export function coaBlockError(id: number): string | null {
 }
 
 /**
+ * Every lot one certificate covers, oldest number first.
+ *
+ * A COA number is what the document is about, not the lot it was opened from
+ * — one number may be written to several — so everything that acts on a
+ * certificate acts on this set. Gathered by number **within the company**,
+ * numbers being per company like every other series here, and ordered by the
+ * lot's own number so a range reads the way the paper writes it.
+ *
+ * One definition, three readers: the PDF gathers what it prints, and the edit
+ * and the withdrawal below change what it describes. A second copy of this
+ * walk is how a certificate would come to be printed over one set and
+ * corrected over another.
+ */
+export function lotsUnderCoa(batchId: number): Batch[] {
+  const b = batchById(batchId);
+  if (!b || !b.cleared) return [];
+  const ids = db.prepare(
+    `SELECT b.id FROM batches b
+       JOIN work_orders w ON w.id = b.work_order_id
+      WHERE b.coa_no = ? AND w.company_id = (SELECT company_id FROM work_orders WHERE id = ?)
+      ORDER BY b.number, b.id`
+  ).all(b.coa_no, b.work_order_id) as { id: number }[];
+  const group = ids.map((r) => batchById(Number(r.id))).filter((x): x is Batch => !!x);
+  return group.length ? group : [b];
+}
+
+/**
+ * Why this certificate can no longer be corrected or withdrawn, or null.
+ *
+ * **Issuing one is an act and correcting one is the same act done again**, so
+ * this is the rule `renameError` states about a lot's own number, read for
+ * the number on the certificate: it is free until it is on paper somewhere
+ * else, and then it is fixed. Two documents can carry it — the **challan**
+ * prints the lots that travelled and the **credit note** the lots that came
+ * back — and once either has, changing the date or the approver would leave
+ * the buyer holding paper that disagrees with this book, while withdrawing it
+ * would leave a challan naming a certificate that no longer exists.
+ *
+ * **Until then there is nothing out in the world**, which is why this exists
+ * at all: a certificate issued with the wrong date or the wrong approver, or
+ * over the wrong lot, would otherwise be permanent — the trap with no way out
+ * that this codebase has built once already and does not intend to build
+ * again. The one-certificate rule is not weakened by it: a withdrawn number
+ * is not re-used, the lots simply go back to uncertified and the next
+ * certificate over them is drawn fresh from the series.
+ *
+ * 409 like its siblings: the record does not support the claim.
+ */
+export function coaEditError(batchId: number): string | null {
+  const lots = lotsUnderCoa(batchId);
+  if (!lots.length) return 'No certificate has been issued for this batch.';
+  const shipped = lots.filter((l) => l.trips.length);
+  if (shipped.length) {
+    const where = [...new Set(shipped.flatMap((l) => l.trips.map((t) => t.reference || t.order_number)))]
+      .filter(Boolean).join(', ');
+    return `Certificate ${lots[0].coa_no} covers goods that have been dispatched`
+      + `${where ? ` on ${where}` : ''}, so it cannot be changed or withdrawn.`;
+  }
+  const returned = lots.filter((l) => l.returns.length);
+  if (returned.length) {
+    const notes = [...new Set(returned.flatMap((l) => l.returns.map((n) => n.number)))].join(', ');
+    return `Certificate ${lots[0].coa_no} covers a lot named as returned on ${notes}, `
+      + 'so it cannot be changed or withdrawn.';
+  }
+  return null;
+}
+
+/**
  * Several lots under **one** certificate (2026-10-16, from Aglo's own
  * paperwork: their cap COA is headed *Batch No: 05032026A+B TO 09032026A+B* —
  * five days of two shifts, certified once).

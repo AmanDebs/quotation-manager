@@ -7,7 +7,7 @@ import { amountInWords } from './amountInWords.js';
 import { round2, isPieceBasis, piecesPerBillingUnit, piecesOrdered, computeTotals } from './totals.js';
 import { invoiceReceivable, proformaAdvance, orderAdvance } from './receivables.js';
 import { specOwner, checksForWorkOrder } from './qc.js';
-import { batchById, batchesOnDespatch, batchesOnCreditNote } from './batch.js';
+import { batchById, lotsUnderCoa, batchesOnDespatch, batchesOnCreditNote } from './batch.js';
 import { getCompany, defaultCompany } from './companies.js';
 
 // The npm package ships fonts only as base64 vfs; decode them for the server printer.
@@ -3474,19 +3474,10 @@ export function buildCoaPdf(batchId: number): TDocumentDefinitions {
    * **Every lot the certificate covers, not only the one it was opened from**
    * (2026-10-16). Aglo issue one COA over a run of lots — *Batch No:
    * 05032026A+B TO 09032026A+B* — so the number, not the batch, is what the
-   * document is about. Gathered by number **within the company**, numbers
-   * being per company like every other series here, and ordered by the lot's
-   * own number so the range reads the way the paper writes it.
+   * document is about. `lotsUnderCoa` owns that walk, so what is printed and
+   * what a correction changes can never be two different sets.
    */
-  const group = (db.prepare(
-    `SELECT b.id FROM batches b
-       JOIN work_orders w ON w.id = b.work_order_id
-      WHERE b.coa_no = ? AND w.company_id = (SELECT company_id FROM work_orders WHERE id = ?)
-      ORDER BY b.number, b.id`
-  ).all(b.coa_no, b.work_order_id) as { id: number }[])
-    .map((r) => batchById(Number(r.id)))
-    .filter((x): x is NonNullable<typeof x> => !!x);
-  const lots = group.length ? group : [b];
+  const lots = lotsUnderCoa(batchId);
 
   const wo = db.prepare(
     `SELECT w.*, o.number AS order_number, o.customer_id, o.company_id, o.po_number,

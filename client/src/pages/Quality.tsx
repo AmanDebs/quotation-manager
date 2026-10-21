@@ -1,11 +1,13 @@
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { QcCheckRow, QcRegisterSummary, CoaRow, CoaSummary, Customer, Product } from '../types';
 import {
-  PageHeader, Card, Select, Input, EmptyState, Pagination, DownloadButton,
-  SegmentedTabs, TH_CLASS,
+  PageHeader, Card, Select, Input, Field, Button, Modal, ErrorText, EmptyState, Pagination,
+  DownloadButton, SegmentedTabs, FIELD_GRID, TH_CLASS,
 } from '../components/ui';
+import { useCan } from '../App';
 import type { ReadyLine } from '../types';
 import { fmtQty } from '../lib/format';
 import { fmtDate } from '../lib/format';
@@ -38,6 +40,62 @@ const verdictPill = (row: QcCheckRow) => {
       </span>
     );
 };
+
+/**
+ * Correct a certificate's date or its approver.
+ *
+ * **The two fields the issue dialog asked for**, which are the only two on a
+ * certificate that are not derived — the number comes from the company's own
+ * series and the lots are what it certifies, so neither is a correction, and
+ * the server refuses both by not reading them.
+ *
+ * It acts on the **group**: the route is given one lot and resolves the rest
+ * by number, so a certificate covering ten lots is corrected once rather than
+ * ten times.
+ */
+function EditCoa({ row, onClose }: { row: CoaRow; onClose: () => void }) {
+  const [form, setForm] = useState({ date: row.coa_date, approved_by: row.approved_by });
+  const queryClient = useQueryClient();
+  const save = useMutation({
+    mutationFn: () => api.put(`/api/work-orders/batches/${row.batch_id}/coa`, form),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['coa-register'] });
+      onClose();
+    },
+  });
+  return (
+    <Modal title={`Certificate ${row.coa_no}`} onClose={onClose}>
+      <p className="mb-3 text-xs text-slate-500">
+        {row.lots > 1
+          ? `Covers ${row.lots} lots — ${row.batch_numbers}. A correction applies to all of them.`
+          : `Covers batch ${row.batch_numbers}.`}
+      </p>
+      <div className={FIELD_GRID}>
+        <Field label="Certificate date">
+          <Input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
+        </Field>
+        <Field label="Approved by">
+          <Input
+            value={form.approved_by}
+            onChange={(e) => setForm({ ...form, approved_by: e.target.value })}
+            placeholder="Who signs it off"
+          />
+        </Field>
+      </div>
+      <p className="mt-3 text-xs text-slate-400">
+        The number and the lots it covers are not corrections — a certificate over different lots is a
+        different certificate. Withdraw this one and issue another.
+      </p>
+      <ErrorText error={save.error} />
+      <div className="mt-3 flex justify-end gap-2">
+        <Button variant="secondary" onClick={onClose}>Cancel</Button>
+        <Button onClick={() => save.mutate()} disabled={save.isPending || !form.date}>
+          {save.isPending ? 'Saving…' : 'Save'}
+        </Button>
+      </div>
+    </Modal>
+  );
+}
 
 /**
  * Every Certificate of Analysis issued — what the desk tracks COAs from
@@ -75,6 +133,19 @@ function Certificates() {
   const { data: customers = [] } = useQuery({
     queryKey: ['customers', ''],
     queryFn: () => api.get<Customer[]>('/api/customers'),
+  });
+  const can = useCan();
+  const mayEdit = can('qc', 'full');
+  const [editing, setEditing] = useState<CoaRow | null>(null);
+  const queryClient = useQueryClient();
+  /*
+   * Withdraw it. The server refuses once the number is on a challan or a
+   * credit note, so this is only ever a certificate that has gone nowhere —
+   * and the lots simply return to uncertified, the number not being re-used.
+   */
+  const withdraw = useMutation({
+    mutationFn: (batchId: number) => api.del(`/api/work-orders/batches/${batchId}/coa`),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['coa-register'] }),
   });
 
   return (
@@ -170,6 +241,31 @@ function Certificates() {
                       rel="noreferrer"
                       className="text-xs font-medium text-brand-700 hover:underline"
                     >PDF</a>
+                    {/*
+                      Drawn on every certificate rather than only the ones the
+                      server would allow: whether it has shipped is on the row
+                      beside them, and a refusal that names the challan says
+                      more than a missing button ever could — the rule the
+                      order's own lot picker follows.
+                    */}
+                    {mayEdit && (
+                      <>
+                        <Button variant="ghost" className="ml-1" onClick={() => setEditing(r)}>Edit</Button>
+                        <Button
+                          variant="ghost"
+                          className="ml-1"
+                          disabled={withdraw.isPending}
+                          title="Clear this certificate — the lots go back to uncertified"
+                          onClick={() => {
+                            if (confirm(`Withdraw ${r.coa_no}? ${r.lots > 1 ? `The ${r.lots} lots it covers go` : 'The lot it covers goes'} back to uncertified, and the number is not re-used.`)) {
+                              withdraw.mutate(r.batch_id);
+                            }
+                          }}
+                        >
+                          Withdraw
+                        </Button>
+                      </>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -180,7 +276,9 @@ function Certificates() {
           page={list.page} pages={list.pages} total={list.total} limit={PAGE_SIZE}
           onPage={list.setPage} noun="certificates"
         />
+        <ErrorText error={withdraw.error} />
       </Card>
+      {editing && <EditCoa row={editing} onClose={() => setEditing(null)} />}
     </>
   );
 }

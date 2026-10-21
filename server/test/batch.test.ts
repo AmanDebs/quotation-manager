@@ -2,7 +2,8 @@ import './helpers/scratch.js';
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { db } from '../src/db/connection.js';
-import { batchesFor, batchById, coaBlockError, renameError } from '../src/services/batch.js';
+import { batchesFor, batchById, coaBlockError, coaEditError, lotsUnderCoa, renameError }
+  from '../src/services/batch.js';
 import { makeCustomer, makeInvoice } from './helpers/factory.js';
 
 /**
@@ -239,5 +240,96 @@ describe('when a lot may be renamed', () => {
     ).get(inv, customerId) as { id: number }).id);
     db.prepare('INSERT INTO credit_note_batches (credit_note_id, batch_id) VALUES (?, ?)').run(n, b);
     assert.match(String(renameError(b, 'B/OTHER')), /named on credit note CN\/26-27\/002/);
+  });
+});
+
+/**
+ * A certificate is correctable and withdrawable until it is on paper
+ * somewhere else — 2026-10-22, the client: *"Add option to edit and delete
+ * COA"*.
+ *
+ * The one-certificate rule is not weakened by it: a withdrawn number is never
+ * re-used, and by this guard nothing has gone out under it. What it prevents
+ * is the trap the rest of this module is careful about from the other side —
+ * a certificate issued with the wrong date or over the wrong lot, permanent
+ * for the life of the book.
+ */
+describe('when a certificate may be corrected or withdrawn', () => {
+  /** A made, passed, certified lot on its own job. */
+  function certified(no = 'COA/26-27/010') {
+    const made = job();
+    const b = batch(made.woId);
+    shift(made.woId, b, 40000);
+    check(made.woId, b, made.paramId, 28.0);
+    db.prepare("UPDATE batches SET coa_no = ?, coa_date = '2026-10-21', coa_approved_by = 'asif' WHERE id = ?")
+      .run(no, b);
+    return { ...made, b };
+  }
+
+  test('freely while the number is on nothing but itself', () => {
+    const { b } = certified();
+    assert.equal(coaEditError(b), null);
+  });
+
+  test('never once a lot it covers has been dispatched, naming the challan', () => {
+    const { b, orderId } = certified('COA/26-27/011');
+    const d = Number((db.prepare(
+      "INSERT INTO despatches (order_id, date, challan_no) VALUES (?, '2026-10-22', 'DC/26-27/009') RETURNING id"
+    ).get(orderId) as { id: number }).id);
+    db.prepare('INSERT INTO despatch_batches (despatch_id, batch_id) VALUES (?, ?)').run(d, b);
+    const refused = String(coaEditError(b));
+    assert.match(refused, /COA\/26-27\/011/);
+    assert.match(refused, /DC\/26-27\/009/);
+    assert.match(refused, /cannot be changed or withdrawn/);
+  });
+
+  test('never once a lot it covers is named as returned', () => {
+    const { b, orderId } = certified('COA/26-27/012');
+    const customerId = Number((db.prepare('SELECT customer_id FROM orders WHERE id = ?')
+      .get(orderId) as { customer_id: number }).customer_id);
+    const inv = makeInvoice({ customerId, currency: 'INR', total: 1000 });
+    db.prepare('UPDATE commercial_invoices SET order_id = ? WHERE id = ?').run(orderId, inv);
+    const n = Number((db.prepare(
+      `INSERT INTO credit_notes (number, date, invoice_id, customer_id, company_id, kind, currency, grand_total, approval_status)
+       VALUES ('CN/26-27/009', '2026-10-22', ?, ?, 1, 'return', 'INR', 100, 'not_submitted') RETURNING id`
+    ).get(inv, customerId) as { id: number }).id);
+    db.prepare('INSERT INTO credit_note_batches (credit_note_id, batch_id) VALUES (?, ?)').run(n, b);
+    assert.match(String(coaEditError(b)), /CN\/26-27\/009/);
+  });
+
+  test('a lot carrying no certificate has none to correct', () => {
+    const { woId } = job();
+    const b = batch(woId);
+    assert.match(String(coaEditError(b)), /No certificate has been issued/);
+    assert.equal(coaEditError(999999), 'No certificate has been issued for this batch.');
+  });
+
+  /**
+   * The whole reason both acts take a lot and resolve the rest: a number may
+   * cover several, and correcting one of them would leave a certificate whose
+   * own lots disagree about when it was issued.
+   */
+  test('the group is every lot sharing the number, from any of them', () => {
+    const made = job();
+    const a = batch(made.woId);
+    const c = batch(made.woId);
+    for (const id of [a, c]) {
+      shift(made.woId, id, 20000);
+      check(made.woId, id, made.paramId, 28.0);
+      db.prepare("UPDATE batches SET coa_no = 'COA/26-27/013', coa_date = '2026-10-21' WHERE id = ?").run(id);
+    }
+    assert.deepEqual(lotsUnderCoa(a).map((l) => l.id).sort(), [a, c].sort(), 'opened from the first lot');
+    assert.deepEqual(lotsUnderCoa(c).map((l) => l.id).sort(), [a, c].sort(), 'opened from the second');
+    // ...and one of them shipping stops the whole certificate moving.
+    const d = Number((db.prepare(
+      "INSERT INTO despatches (order_id, date, challan_no) VALUES (?, '2026-10-22', 'DC/26-27/010') RETURNING id"
+    ).get(made.orderId) as { id: number }).id);
+    db.prepare('INSERT INTO despatch_batches (despatch_id, batch_id) VALUES (?, ?)').run(d, a);
+    assert.match(String(coaEditError(c)), /DC\/26-27\/010/, 'the other lot of the group was not held');
+  });
+
+  test('an uncertified lot is its own group of none', () => {
+    const { woId } = job();
+    assert.deepEqual(lotsUnderCoa(batch(woId)), [], 'an uncertified lot gathered a group');
   });
 });
