@@ -2751,6 +2751,25 @@ function qcReportContent(s: Row, jobs: QcJob[]): Content[] {
           + (inspectors.length ? ` · Inspected by ${inspectors.join(', ')}` : ''),
         fontSize: 8.5, bold: true, color: s.theme, margin: [0, 6, 0, 2] as any,
       });
+      /*
+       * Sectioned where the specification says so (2026-10-21), in the same
+       * three blocks the certificate prints — one layout for the two
+       * documents, so a reading cannot appear under one heading on the
+       * report and another on the certificate. Where nothing is sectioned
+       * this falls through to the flat table below, which is every job on
+       * file today.
+       */
+      const all = list.flatMap((c) => c.results as unknown as QcRow[]);
+      const blocks = qcSectionBlocks(s, all);
+      if (blocks) {
+        out.push(...blocks);
+        const notes = list.map((c) => c.notes).filter(Boolean);
+        for (const n of notes) {
+          out.push({ text: `Note: ${n}`, fontSize: 7.5, italics: true, color: '#555555', margin: [0, 3, 0, 0] as any });
+        }
+        continue;
+      }
+
       const body: any[][] = [
         ['Parameter', 'Spec', 'Reading', 'Result'].map((t) => ({ text: t, fontSize: 7.5, bold: true })),
       ];
@@ -2783,6 +2802,14 @@ function qcReportContent(s: Row, jobs: QcJob[]): Content[] {
       // column that wraps — several on a preform spec run to three lines.
       out.push({ table: { headerRows: 1, widths: ['*', 70, 55, 55], body }, layout: gridLayout });
     }
+
+    /*
+     * The stamp their paper closes on, **once per job** rather than once per
+     * shift: a certificate covers a lot and carries one verdict, and a report
+     * that stamped every group would print it three times for one job. Over
+     * every reading on the job, so it cannot say less than the rows above it.
+     */
+    out.push(qcVerdictLine(checks.flatMap((c) => c.results as unknown as QcRow[])));
   }
   return out;
 }
@@ -3151,6 +3178,187 @@ export function readingText(r: {
   return `${fmtNum(Number(r.value), 3)}${tail}`;
 }
 
+
+/* ---------------- the sectioned quality tables ---------------- */
+
+/**
+ * Aglo's own certificates print **three tables of different shapes** rather
+ * than one flat list (2026-10-21, the client having sent their 48mm cap COA:
+ * *"The format should be like this"*): the defects looked for by eye, the
+ * dimensions measured against a window, and the fitment tests answered in
+ * words. Each wants different columns, which is why this is not a layout
+ * tweak — until `product_qc_params.section` existed nothing could say which
+ * table a characteristic belonged in.
+ *
+ * **A specification that says nothing is drawn exactly as it always was.**
+ * `section` is blank on every parameter on file, so `sectioned()` answers
+ * false and both documents fall back to the single table they have always
+ * printed — no certificate already issued changes, and a desk adopts the
+ * blocks one product at a time.
+ */
+type QcRow = Record<string, unknown>;
+
+const sectionOf = (r: QcRow) => String(r.section ?? '').trim().toLowerCase();
+
+/** Whether this set of readings has anything to section by. */
+function sectioned(rows: QcRow[]): boolean {
+  return rows.some((r) => SECTION_ORDER.includes(sectionOf(r)));
+}
+
+// Eye, then measurement, then fitment — the order the paper prints them in.
+const SECTION_ORDER = ['visual', 'dimensional', 'fitment'];
+
+const SECTION_TITLE: Record<string, string> = {
+  visual: 'VISUAL CHECKS',
+  dimensional: 'DIMENSIONAL CHECKS',
+  fitment: 'FITMENT CHECK',
+  // Anything the specification did not place. Printed last and named rather
+  // than dropped: a reading that exists must appear somewhere, and silently
+  // leaving it off a certificate is the one failure this cannot have.
+  '': 'OTHER CHECKS',
+};
+
+/** The verdict a result carries, in the words both documents already use. */
+function verdictOf(r: QcRow): string {
+  if (r.na) return 'N/A';
+  const ok = (r as { ok?: boolean | null }).ok;
+  return ok === null || ok === undefined ? 'Not measured' : ok ? 'Pass' : 'Fail';
+}
+
+const qth = (t: string, s: Row, extra: Record<string, unknown> = {}) => ({
+  text: t, fontSize: 7.5, bold: true, color: '#ffffff', fillColor: s.theme, ...extra,
+});
+const qtd = (t: string, align: 'left' | 'center' | 'right' = 'left') => ({
+  text: t, fontSize: 8, alignment: align,
+});
+
+/**
+ * One block, in the shape its own kind of check wants.
+ *
+ * Visual and fitment are *parameter, what was asked, what was seen*; a
+ * dimension is a window and an observation, each with a low and a high end,
+ * which is the two-row banner their paper draws and the only one of the three
+ * that needs it.
+ */
+function qcSectionTable(s: Row, section: string, rows: QcRow[]): Content {
+  const name = (r: QcRow) => String(r.name ?? '');
+
+  if (section === 'dimensional') {
+    const cell = (v: unknown, unit: string) =>
+      v == null || v === '' ? '—' : `${fmtNum(Number(v), 3)}${unit ? ` ${unit}` : ''}`;
+    return {
+      table: {
+        headerRows: 2,
+        widths: ['*', 62, 62, 62, 62],
+        body: [
+          [
+            qth('Parameter', s, { rowSpan: 2 }),
+            qth('Specification', s, { colSpan: 2, alignment: 'center' }), {},
+            qth('Actual', s, { colSpan: 2, alignment: 'center' }), {},
+          ],
+          [
+            {},
+            qth('Minimum', s, { alignment: 'center' }), qth('Maximum', s, { alignment: 'center' }),
+            qth('Minimum', s, { alignment: 'center' }), qth('Maximum', s, { alignment: 'center' }),
+          ],
+          ...rows.map((r) => {
+            const unit = String(r.unit ?? '').trim();
+            return [
+              qtd(name(r)),
+              qtd(cell(r.min_value, unit), 'center'),
+              qtd(cell(r.max_value, unit), 'center'),
+              // An N/A is an answer, and it is the answer to both ends.
+              qtd(r.na ? 'N/A' : cell(r.value, unit), 'center'),
+              // A characteristic observed as a single reading has no highest
+              // piece distinct from its lowest, so the cell is an em-dash —
+              // an absence rather than a blank, and never the same figure
+              // repeated, which would claim a range nobody took.
+              qtd(r.na ? '—' : r.value_max == null ? '—' : cell(r.value_max, unit), 'center'),
+            ];
+          }),
+        ],
+      },
+      layout: gridLayout,
+    };
+  }
+
+  if (section === 'fitment') {
+    return {
+      table: {
+        headerRows: 1,
+        widths: ['*', 180],
+        body: [
+          [qth('Parameter', s), qth('Observation', s)],
+          ...rows.map((r) => [qtd(name(r)), qtd(readingText(r), 'center')]),
+        ],
+      },
+      layout: gridLayout,
+    };
+  }
+
+  // Visual, and anything the specification did not place: what was asked for
+  // beside what was seen, which is the shape their paper uses for the eye.
+  return {
+    table: {
+      headerRows: 1,
+      widths: ['*', 110, 90, 62],
+      body: [
+        [qth('Parameter', s), qth('Specification', s), qth('Observation', s), qth('Result', s)],
+        ...rows.map((r) => [
+          qtd(name(r)),
+          qtd(toleranceText(r), 'center'),
+          qtd(readingText(r), 'center'),
+          qtd(verdictOf(r), 'center'),
+        ]),
+      ],
+    },
+    layout: gridLayout,
+  };
+}
+
+/**
+ * Every block this set of readings has, in order, each under its own heading.
+ *
+ * Returns `null` where nothing is sectioned, so the caller prints the single
+ * table it always did rather than this deciding for it.
+ */
+function qcSectionBlocks(s: Row, rows: QcRow[]): Content[] | null {
+  if (!sectioned(rows)) return null;
+  const out: Content[] = [];
+  const keys = [...SECTION_ORDER, ''];
+  for (const key of keys) {
+    const mine = rows.filter((r) => (key === '' ? !SECTION_ORDER.includes(sectionOf(r)) : sectionOf(r) === key));
+    if (!mine.length) continue;
+    out.push({
+      text: SECTION_TITLE[key],
+      fontSize: 8, bold: true, color: s.theme,
+      margin: [0, out.length ? 8 : 4, 0, 2] as any,
+    });
+    out.push(qcSectionTable(s, key, mine));
+  }
+  return out;
+}
+
+/**
+ * The stamp their paper closes on: **QC PASSED**.
+ *
+ * Derived, never stored — `resultOk` decided each reading and this only adds
+ * them up, so it cannot disagree with the rows above it. A set with nothing
+ * decided says so rather than claiming a pass, which is the distinction this
+ * whole module exists to keep: *not measured* is not a verdict.
+ */
+function qcVerdictLine(rows: QcRow[]): Content {
+  const decided = rows.filter((r) => !r.na && (r as { ok?: unknown }).ok !== null && (r as { ok?: unknown }).ok !== undefined);
+  const failed = decided.some((r) => (r as { ok?: boolean }).ok === false);
+  const text = !decided.length ? 'NOT YET DECIDED' : failed ? 'QC FAILED' : 'QC PASSED';
+  return {
+    text,
+    fontSize: 16, bold: true,
+    color: !decided.length ? '#888888' : failed ? '#a11' : '#186a3b',
+    margin: [0, 10, 0, 0] as any,
+  };
+}
+
 /**
  * The certificate that clears a lot.
  *
@@ -3325,13 +3533,22 @@ export function buildCoaPdf(batchId: number): TDocumentDefinitions {
     ...companyHeader(s, { isExport: false }),
     docTitle(s, 'CERTIFICATE OF ANALYSIS'),
     grid,
-    itemsTable(s, results, specs, {}),
+    /*
+     * Three blocks where the specification says which, one table where it
+     * says nothing — see `qcSectionBlocks`. The flat `specs` list below is
+     * still the fallback, so every certificate issued before 2026-10-21
+     * prints exactly as it did.
+     */
+    ...(qcSectionBlocks(s, results as QcRow[]) ?? [itemsTable(s, results, specs, {})]),
+    // The stamp their own paper closes on, before the sentence that says what
+    // it means. Derived from the readings above, never stored.
+    ...(results.length ? [qcVerdictLine(results as QcRow[])] : []),
     {
       text: results.length
         ? 'We certify that the batch described above has been inspected against the specification '
           + 'stated and conforms to it in every characteristic measured.'
         : 'No measurements are recorded against this batch.',
-      fontSize: 8.5, bold: true, margin: [0, 10, 0, 0] as any,
+      fontSize: 8.5, bold: true, margin: [0, 6, 0, 0] as any,
     },
     ...(check?.inspector
       ? [{ text: `Inspected by: ${check.inspector}`, fontSize: 8, margin: [0, 4, 0, 0] as any }]

@@ -222,6 +222,97 @@ describe('what the report says', () => {
   });
 });
 
+describe('the three blocks the client certificate prints', () => {
+  /*
+   * Aglo own 48mm cap certificate (2026-10-21, *"The format should be like
+   * this"*) prints Visual, Dimensional and Fitment as separate tables of
+   * different shapes. These hold the two halves that could go silently wrong:
+   * a specification that says nothing must print exactly as it always did,
+   * and a result must keep the block it was issued under however the
+   * specification is re-sectioned afterwards.
+   */
+
+  /** A check on this job, with one reading per parameter given. */
+  function record(woId: number, rows: { name: string; section: string; kind?: string; value: number | null; na?: number }[]) {
+    const checkId = Number(db.prepare(
+      "INSERT INTO qc_checks (work_order_id, date, shift, inspector) VALUES (?, '2026-10-20', 'A', 'Aman')"
+    ).run(woId).lastInsertRowid);
+    rows.forEach((r, i) => {
+      db.prepare(
+        `INSERT INTO qc_results (check_id, name, kind, section, unit, value, value_max, na, min_value, max_value, sort_order)
+         VALUES (?, ?, ?, ?, 'mm', ?, NULL, ?, 0.3, 0.5, ?)`
+      ).run(checkId, r.name, r.kind ?? 'numeric', r.section, r.value, r.na ?? 0, i);
+    });
+    return checkId;
+  }
+
+  test('an unsectioned specification prints the single table it always did', () => {
+    const { woId } = chain();
+    const texts = textsOf(buildQcReportPdf(woId));
+    // The flat shape, and none of the three headings.
+    assert.ok(texts.includes('Reading'), 'the flat table is gone');
+    for (const h of ['VISUAL CHECKS', 'DIMENSIONAL CHECKS', 'FITMENT CHECK']) {
+      assert.ok(!texts.includes(h), h);
+    }
+  });
+
+  test('and a sectioned one prints a block per section, in the paper order', () => {
+    const { woId } = chain({ withChecks: false });
+    record(woId, [
+      { name: 'Short Molding', section: 'visual', kind: 'boolean', value: 1 },
+      { name: 'Closure O/D', section: 'dimensional', value: 0.4 },
+      { name: 'TE Band', section: 'fitment', kind: 'boolean', value: 1 },
+    ]);
+    const texts = textsOf(buildQcReportPdf(woId));
+    const at = (t: string) => texts.indexOf(t);
+    assert.ok(at('VISUAL CHECKS') >= 0 && at('DIMENSIONAL CHECKS') >= 0 && at('FITMENT CHECK') >= 0);
+    assert.ok(at('VISUAL CHECKS') < at('DIMENSIONAL CHECKS'), 'visual is not first');
+    assert.ok(at('DIMENSIONAL CHECKS') < at('FITMENT CHECK'), 'fitment is not last');
+    // The dimensional block alone carries the two-row banner.
+    assert.ok(texts.includes('Specification') && texts.includes('Actual'));
+    assert.ok(texts.filter((t) => t === 'Minimum').length === 2, 'the Min columns are not a pair');
+  });
+
+  test('a reading the specification did not place is named, never dropped', () => {
+    /* Silently leaving a recorded reading off a certificate is the one
+       failure this cannot have, so an unplaced row gets its own block. */
+    const { woId } = chain({ withChecks: false });
+    record(woId, [
+      { name: 'Closure O/D', section: 'dimensional', value: 0.4 },
+      { name: 'Something nobody sectioned', section: '', value: 0.35 },
+    ]);
+    const texts = textsOf(buildQcReportPdf(woId));
+    assert.ok(texts.includes('OTHER CHECKS'));
+    assert.ok(texts.includes('Something nobody sectioned'));
+  });
+
+  test('the verdict is derived from the readings, and says so when nothing was decided', () => {
+    const { woId } = chain({ withChecks: false });
+    record(woId, [{ name: 'Closure O/D', section: 'dimensional', value: 0.4 }]);
+    assert.ok(textsOf(buildQcReportPdf(woId)).includes('QC PASSED'));
+
+    const fail = chain({ withChecks: false });
+    record(fail.woId, [{ name: 'Closure O/D', section: 'dimensional', value: 9 }]);
+    assert.ok(textsOf(buildQcReportPdf(fail.woId)).includes('QC FAILED'));
+
+    const none = chain({ withChecks: false });
+    record(none.woId, [{ name: 'Closure O/D', section: 'dimensional', value: null, na: 1 }]);
+    const texts = textsOf(buildQcReportPdf(none.woId));
+    assert.ok(texts.includes('NOT YET DECIDED'), 'an N/A was read as a pass');
+    assert.ok(!texts.includes('QC PASSED'));
+  });
+
+  test('a single reading has no maximum observed, and says so rather than repeating itself', () => {
+    /* Printing the same figure in both Actual cells would claim a range
+       nobody took — the em-dash is the absence it actually is. */
+    const { woId } = chain({ withChecks: false });
+    record(woId, [{ name: 'Closure O/D', section: 'dimensional', value: 0.4 }]);
+    const texts = textsOf(buildQcReportPdf(woId));
+    assert.equal(texts.filter((t) => t === '0.4 mm').length, 1, 'the reading is printed twice');
+    assert.ok(texts.includes('\u2014'), 'the empty Maximum cell is blank rather than dashed');
+  });
+});
+
 describe('the invoice’s own quality summary', () => {
   test('finds the jobs through the order', () => {
     const { invoiceId } = chain();

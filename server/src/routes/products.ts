@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { db, transaction } from '../db/connection.js';
 import { requirePermission } from '../middleware/auth.js';
-import { paramsFor, specOwner } from '../services/qc.js';
+import { paramsFor, qcSectionOf, specOwner } from '../services/qc.js';
 import { IMPORT_FIELDS, buildImport, decodeUpload, identityKey, type BuildOptions } from '../services/productImport.js';
 import { recipeFor } from '../services/recipe.js';
 import { PRODUCT_TYPES, isProductType, guessProductType } from '../services/productType.js';
@@ -224,13 +224,17 @@ productsRouter.put('/:id/qc-params', requirePermission('qc', 'full'), (req, res)
         : 'DELETE FROM product_qc_params WHERE product_id = ? AND customer_id IS NULL'
     ).run(...(customerId ? [id, customerId] : [id]) as never[]);
     const ins = db.prepare(
-      `INSERT INTO product_qc_params (product_id, customer_id, name, kind, ranged, unit, min_value, max_value, notes, sort_order)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO product_qc_params (product_id, customer_id, name, kind, section, ranged, unit, min_value, max_value, notes, sort_order)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     );
     lines.forEach((r, i) => {
       const kind = String(r.kind ?? 'numeric');
       ins.run(
         id, customerId, String(r.name).trim(), kind,
+        // A value this build does not know is read as **no section** rather
+        // than stored â€” the rule a stored vocabulary follows here, so a
+        // renamed block cannot put a characteristic somewhere nothing draws.
+        qcSectionOf(r.section),
         // Observed as a min and a max across the batch. Meaningless on a
         // pass/fail check, so it is not stored on one.
         kind === 'boolean' ? 0 : (r.ranged ? 1 : 0),

@@ -24,7 +24,7 @@ import { Button, Input, Select, Modal, ErrorText, EmptyState, TH_CLASS } from '.
  */
 
 const emptyParam = (): QcParam =>
-  ({ name: '', kind: 'numeric', ranged: 0, unit: '', min_value: null, max_value: null, notes: '' });
+  ({ name: '', kind: 'numeric', section: '', ranged: 0, unit: '', min_value: null, max_value: null, notes: '' });
 
 /*
  * How the characteristic is observed, as one control.
@@ -40,6 +40,22 @@ const KINDS: { value: string; label: string; kind: QcKind; ranged: number }[] = 
   { value: 'boolean', label: 'Pass / fail', kind: 'boolean', ranged: 0 },
 ];
 const kindValue = (p: QcParam) => (p.kind === 'boolean' ? 'boolean' : p.ranged ? 'range' : 'numeric');
+
+/**
+ * Which block of the certificate this check prints under.
+ *
+ * From Aglo's own cap certificate (2026-10-21), which prints three tables of
+ * different shapes rather than one list. **Blank is the honest default and
+ * not a fourth block**: a specification where nothing is set prints the
+ * single table it always did, so nothing already issued changes and a product
+ * is sectioned when somebody sections it.
+ */
+const SECTIONS: { value: string; label: string }[] = [
+  { value: '', label: '— not sectioned —' },
+  { value: 'visual', label: 'Visual' },
+  { value: 'dimensional', label: 'Dimensional' },
+  { value: 'fitment', label: 'Fitment' },
+];
 
 /** Blank must persist as null, not 0 — an open-ended tolerance is not "zero". */
 const numOrNull = (v: string) => (v.trim() === '' || Number.isNaN(Number(v)) ? null : Number(v));
@@ -124,6 +140,7 @@ export default function QcSpecModal({ product, onClose }: { product: Product; on
               <tr className={TH_CLASS}>
                 <th className="pb-2 pr-2">Check</th>
                 <th className="w-32 pb-2 pr-2">Type</th>
+                <th className="w-36 pb-2 pr-2">Section</th>
                 <th className="w-20 pb-2 pr-2">Unit</th>
                 <th className="w-24 pb-2 pr-2 text-right">Min</th>
                 <th className="w-24 pb-2 pr-2 text-right">Max</th>
@@ -153,6 +170,15 @@ export default function QcSpecModal({ product, onClose }: { product: Product; on
                       }}
                     >
                       {KINDS.map((k) => <option key={k.value} value={k.value}>{k.label}</option>)}
+                    </Select>
+                  </td>
+                  <td className="py-1.5 pr-2">
+                    <Select
+                      value={line.section ?? ''}
+                      onChange={(e) => set(i, { section: e.target.value as QcParam['section'] })}
+                      title="Which block of the certificate this check prints under"
+                    >
+                      {SECTIONS.map((x) => <option key={x.value} value={x.value}>{x.label}</option>)}
                     </Select>
                   </td>
                   <td className="py-1.5 pr-2">

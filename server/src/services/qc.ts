@@ -22,11 +22,42 @@ import { db } from '../db/connection.js';
 
 export type QcKind = 'numeric' | 'boolean';
 
+/**
+ * Which block of the certificate a characteristic prints under.
+ *
+ * From Aglo's own 48mm cap certificate (2026-10-21, *"The format should be
+ * like this"*), which prints three tables of different shapes rather than one
+ * flat list: the defects looked for by eye, the dimensions measured against a
+ * window, and the fitment tests answered in words.
+ *
+ * **`''` is silence, not a fourth block.** It is every parameter on file the
+ * day this lands, and both documents read it as *this specification is not
+ * sectioned* and print the single table they always did — so nothing already
+ * issued changes, and a desk adopts the sections one product at a time.
+ */
+export const QC_SECTIONS = ['visual', 'dimensional', 'fitment'] as const;
+export type QcSection = (typeof QC_SECTIONS)[number] | '';
+
+/** What each block is called on the paper. */
+export const QC_SECTION_LABEL: Record<string, string> = {
+  visual: 'Visual Checks',
+  dimensional: 'Dimensional Checks',
+  fitment: 'Fitment Check',
+};
+
+/** A value this build knows, or '' — the rule a stored vocabulary follows. */
+export function qcSectionOf(v: unknown): QcSection {
+  const t = String(v ?? '').trim().toLowerCase();
+  return (QC_SECTIONS as readonly string[]).includes(t) ? (t as QcSection) : '';
+}
+
 export interface QcParam {
   id: number;
   product_id: number;
   name: string;
   kind: QcKind;
+  /** Which block of the certificate it prints under; '' is not sectioned. */
+  section: QcSection;
   unit: string;
   /**
    * 1 when this characteristic is observed as a min and a max across the
@@ -46,6 +77,8 @@ export interface QcResult {
   param_id: number | null;
   name: string;
   kind: QcKind;
+  /** Copied from the parameter, so a certificate keeps the block it was issued under. */
+  section: QcSection;
   unit: string;
   /** The reading, or the **lowest** observed where the characteristic is ranged. */
   value: number | null;

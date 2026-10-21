@@ -1038,16 +1038,19 @@ workOrdersRouter.post('/:id/qc-checks', requirePermission('qc', 'full'), (req: A
     checkId = Number(info.lastInsertRowid);
 
     const ins = db.prepare(
-      `INSERT INTO qc_results (check_id, param_id, name, kind, unit, value, value_max, ranged, na,
+      `INSERT INTO qc_results (check_id, param_id, name, kind, section, unit, value, value_max, ranged, na,
                                min_value, max_value, notes, sort_order)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     );
     recorded.forEach((r, i) => {
       const param = spec.get(Number(r.param_id))!;
       const na = r.na ? 1 : 0;
       const ranged = !na && param.ranged && param.kind !== 'boolean' ? 1 : 0;
       ins.run(
-        checkId, param.id, param.name, param.kind, param.unit,
+        // Copied like the name and the tolerance beside it: a certificate
+        // already issued goes on printing under the block it was issued
+        // under, however the specification is re-sectioned afterwards.
+        checkId, param.id, param.name, param.kind, param.section ?? '', param.unit,
         // A visual check comes in as true/false and is stored as 1/0, so one
         // column holds both kinds and `resultOk` reads them the same way. An
         // NA row carries no reading at all — it is the absence of one, said

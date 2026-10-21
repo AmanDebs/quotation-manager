@@ -1049,6 +1049,23 @@ CREATE TABLE IF NOT EXISTS product_qc_params (
   -- differently, not a different kind of characteristic. Meaningless on a
   -- boolean and ignored there.
   ranged INTEGER NOT NULL DEFAULT 0,
+  -- Which block of the certificate this characteristic belongs under —
+  -- '' , 'visual', 'dimensional' or 'fitment' (2026-10-21, the client having
+  -- sent their own 48mm cap certificate: *"The format should be like this"*).
+  -- Their paper prints three tables of different shapes rather than one flat
+  -- list, and nothing in a specification could say which block a parameter
+  -- was in, so no layout change alone could produce it.
+  --
+  -- **No CHECK constraint**, the rule `products.product_type` states: SQLite
+  -- cannot ALTER one, and a vocabulary that may grow a fourth block must not
+  -- need the table rebuilt. The route validates instead and answers 400
+  -- naming what it accepts.
+  --
+  -- **'' is not a fourth section, it is silence** — every parameter on file
+  -- the day this lands — and the documents read it as such: with nothing
+  -- sectioned they print the single table they always did, so no certificate
+  -- already issued changes.
+  section TEXT NOT NULL DEFAULT '',
   unit TEXT NOT NULL DEFAULT '',
   -- Either end may be open: a wall thickness can have a floor and no ceiling.
   min_value REAL,
@@ -1096,6 +1113,10 @@ CREATE TABLE IF NOT EXISTS qc_results (
   -- Kept so a result still reads after its parameter is renamed or removed.
   name TEXT NOT NULL DEFAULT '',
   kind TEXT NOT NULL DEFAULT 'numeric',
+  -- Copied like the name and the tolerance, and for the same reason: a
+  -- certificate already issued must go on printing under the block it was
+  -- issued under, however the specification is re-sectioned afterwards.
+  section TEXT NOT NULL DEFAULT '',
   unit TEXT NOT NULL DEFAULT '',
   -- The measurement: a dimension, or 1/0 for a visual check. On a ranged
   -- characteristic it is the **lowest** piece observed and `value_max` the

@@ -477,6 +477,16 @@ addColumnIfMissing('qc_results', 'ranged', 'INTEGER NOT NULL DEFAULT 0');
 addColumnIfMissing('qc_results', 'value_max', 'REAL');
 addColumnIfMissing('qc_results', 'na', 'INTEGER NOT NULL DEFAULT 0');
 
+/*
+ * Which block of the certificate a characteristic prints under (2026-10-21).
+ * Additive and blank on every row already on file, which the documents read
+ * as *no sections* and draw the single table they always did — so nothing
+ * already issued changes. Copied onto the result as the tolerance is, so a
+ * certificate goes on printing under the block it was issued under.
+ */
+addColumnIfMissing('product_qc_params', 'section', "TEXT NOT NULL DEFAULT ''");
+addColumnIfMissing('qc_results', 'section', "TEXT NOT NULL DEFAULT ''");
+
 addColumnIfMissing('customers', 'active', 'INTEGER NOT NULL DEFAULT 1');
 addColumnIfMissing('products', 'active', 'INTEGER NOT NULL DEFAULT 1');
 

@@ -559,6 +559,8 @@ export interface QcSpecResponse {
 }
 
 /** What to measure on a product, and what passes. Rewritten whole, like a recipe. */
+export type QcSection = '' | 'visual' | 'dimensional' | 'fitment';
+
 export interface QcParam {
   id?: number;
   product_id?: number;
@@ -566,6 +568,8 @@ export interface QcParam {
   customer_id?: number | null;
   name: string;
   kind: QcKind;
+  /** Which block of the certificate it prints under; blank is not sectioned. */
+  section?: QcSection;
   /**
    * 1 when the characteristic is observed as a **min and a max across the
    * batch** rather than as one reading — how Aglo's cap certificates record
