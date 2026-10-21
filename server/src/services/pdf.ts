@@ -2734,12 +2734,25 @@ function qcReportContent(s: Row, jobs: QcJob[]): Content[] {
 
     for (const [key, list] of groups) {
       const [date, shift] = key.split('|');
+      /*
+       * Who inspected, **in the heading rather than in a column** (2026-10-21,
+       * the client: *"Remove the inspector column"*). It is one fact about the
+       * check, so a column printed it against every parameter — nineteen rows
+       * of the same name on a preform — where the reading beside it changes on
+       * every line. Stated once over the group it belongs to.
+       *
+       * A group is one date and shift and may hold more than one check, so the
+       * distinct names are joined rather than the first taken; where none was
+       * recorded the heading is exactly what it was.
+       */
+      const inspectors = [...new Set(list.map((c) => (c.inspector || '').trim()).filter(Boolean))];
       out.push({
-        text: `${fmtDate(date)}${shift ? ` · Shift ${shift}` : ''}`,
+        text: `${fmtDate(date)}${shift ? ` · Shift ${shift}` : ''}`
+          + (inspectors.length ? ` · Inspected by ${inspectors.join(', ')}` : ''),
         fontSize: 8.5, bold: true, color: s.theme, margin: [0, 6, 0, 2] as any,
       });
       const body: any[][] = [
-        ['Parameter', 'Spec', 'Reading', 'Result', 'Inspector'].map((t) => ({ text: t, fontSize: 7.5, bold: true })),
+        ['Parameter', 'Spec', 'Reading', 'Result'].map((t) => ({ text: t, fontSize: 7.5, bold: true })),
       ];
       for (const c of list) {
         for (const r of c.results) {
@@ -2762,12 +2775,13 @@ function qcReportContent(s: Row, jobs: QcJob[]): Content[] {
               fontSize: 8, alignment: 'center' as const, bold: r.ok === false,
               color: r.ok === false ? '#a11' : r.ok ? '#186a3b' : '#888888',
             },
-            { text: c.inspector || '', fontSize: 8 },
           ]);
         }
-        if (c.notes) body.push([{ text: `Note: ${c.notes}`, fontSize: 7.5, italics: true, colSpan: 5, color: '#555555' }, {}, {}, {}, {}]);
+        if (c.notes) body.push([{ text: `Note: ${c.notes}`, fontSize: 7.5, italics: true, colSpan: 4, color: '#555555' }, {}, {}, {}]);
       }
-      out.push({ table: { headerRows: 1, widths: ['*', 70, 55, 55, 70], body }, layout: gridLayout });
+      // The 70pt the inspector held goes back to the parameter, which is the
+      // column that wraps — several on a preform spec run to three lines.
+      out.push({ table: { headerRows: 1, widths: ['*', 70, 55, 55], body }, layout: gridLayout });
     }
   }
   return out;

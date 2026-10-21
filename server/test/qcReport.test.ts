@@ -184,6 +184,26 @@ describe('what the report says', () => {
     assert.ok(texts.some((t) => t.startsWith('Specification:') && t.includes('own')), 'does not name the customer');
   });
 
+  test('names the inspector once, over the group, not against every reading', () => {
+    /*
+     * Removed as a column 2026-10-21 at the client word: it is one fact about
+     * the check, so a column repeated the same name against every parameter —
+     * nineteen rows of it on a preform — where the reading beside it changes
+     * on every line.
+     */
+    const { woId, product, customerId } = chain();
+    addParam(product, customerId, 'Wall thickness', 0.38, 0.42);
+    const texts = textsOf(buildQcReportPdf(woId));
+    assert.ok(!texts.includes('Inspector'), 'the column heading is back');
+    const named = texts.filter((t) => t.includes('R. Das'));
+    // One per group — a date and a shift — and never on its own in a cell,
+    // which is what a column would have produced.
+    assert.ok(named.length > 0, 'the inspector is not named at all');
+    assert.ok(named.every((t) => t.includes('Inspected by')), 'the inspector appears outside a heading');
+    // ...and the readings keep every column that varies down the page.
+    for (const h of ['Parameter', 'Spec', 'Reading', 'Result']) assert.ok(texts.includes(h), h);
+  });
+
   test('but does not list the specification as a table of its own', () => {
     /*
      * Removed 2026-10-21 at the client word: on a preform that table ran to
