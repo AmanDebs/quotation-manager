@@ -1687,3 +1687,36 @@ export interface PriceHistory {
   incomparable: PricePoint[];
   included: BookDoc[];
 }
+
+/**
+ * One Certificate of Analysis, as the register lists it.
+ *
+ * A row is a **certificate, not a lot** — one number may cover several, which
+ * is what Aglo's own paperwork does — so `lots` is how many it covers and
+ * `batch_id` is any one of them, which is all the PDF route needs: the
+ * document gathers its own group by number.
+ */
+export interface CoaRow {
+  coa_no: string;
+  coa_date: string;
+  batch_id: number;
+  lots: number;
+  batch_numbers: string;
+  issued_by_name: string;
+  approved_by: string;
+  order_id: number;
+  order_number: string;
+  customer_name: string;
+  products: string;
+  qty: number;
+  /** 1 once any lot it covers has been named on a trip. */
+  shipped: number;
+}
+
+/** The figures over the certificate register, measured over the whole filtered set. */
+export interface CoaSummary {
+  certificates: number;
+  lots: number;
+  qty: number;
+  shipped: number;
+}

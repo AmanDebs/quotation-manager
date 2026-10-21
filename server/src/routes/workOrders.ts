@@ -3,6 +3,7 @@ import { db, transaction } from '../db/connection.js';
 import { nextNumber } from '../services/numbering.js';
 import { batchesFor, batchById, coaBlockError, coaGroupError, renameError, dispositionError, isDisposition, DISPOSITIONS }
   from '../services/batch.js';
+import { coaWhere } from '../services/coaRegister.js';
 import { progressFor, progressForMany, LIVE_OK } from '../services/production.js';
 import { despatchedByOrder, lastTripForLine } from '../services/despatch.js';
 import { materialCostByWorkOrder } from '../services/costing.js';
@@ -350,6 +351,69 @@ workOrdersRouter.get('/qc-checks/export', requirePermission('qc'), (req: AuthedR
 workOrdersRouter.get('/qc-pending', requirePermission('qc'), (req: AuthedRequest, res) => {
   const rows = readyLines(req).rows.filter((r) => r.qc_hold);
   res.json({ rows, pending: rows.length });
+});
+
+/**
+ * Every certificate issued, newest first — the register the desk tracks COAs
+ * from (2026-10-22, the client: *"instead of Quality, make it COA tab and
+ * track COA"*).
+ *
+ * Declared **above `/:id`** like `/qc-checks` and `/export` beside it, or
+ * Express reads "coa" as a work order id. Gated on `qc` explicitly rather
+ * than leaning on the mount, which serves three functions — the trap this
+ * router's own comment records from the other side.
+ */
+workOrdersRouter.get('/coa', requirePermission('qc'), (req: AuthedRequest, res) => {
+  const { sql, params } = coaWhere(req);
+  const body = listBody<Record<string, unknown>>(req.query, {
+    sql,
+    // A total ordering: two certificates can share a date, and which lands on
+    // which page would otherwise be undefined — `pagination.ts`'s own rule.
+    order: 'ORDER BY coa_date DESC, coa_no DESC',
+    params,
+  });
+  // Measured over the whole filtered set, never the page.
+  const summary = db.prepare(
+    `WITH f AS (${sql})
+     SELECT COUNT(*) AS certificates,
+            COALESCE(SUM(lots), 0) AS lots,
+            COALESCE(SUM(qty), 0) AS qty,
+            COALESCE(SUM(CASE WHEN shipped = 1 THEN 1 ELSE 0 END), 0) AS shipped
+       FROM f`
+  ).get(...(params as never[]));
+  res.json(Array.isArray(body) ? body : { ...body, summary });
+});
+
+/**
+ * The same register as a spreadsheet.
+ *
+ * Shares `coaWhere`, so the download can never hold rows the table above it
+ * did not, and it exports the **whole filtered set, never a page** — the rule
+ * every export in this app follows. Above `/:id`, and gated like the list.
+ */
+const coaColumns: Column<Record<string, unknown>>[] = [
+  { header: 'Certificate', value: (r) => String(r.coa_no ?? '') },
+  { header: 'Date', value: (r) => String(r.coa_date ?? ''), type: 'date' },
+  { header: 'Batches', value: (r) => String(r.batch_numbers ?? '') },
+  { header: 'Lots', value: (r) => Number(r.lots ?? 0), type: 'number' },
+  { header: 'Product', value: (r) => String(r.products ?? '') },
+  { header: 'Customer', value: (r) => String(r.customer_name ?? '') },
+  { header: 'Sales Order', value: (r) => String(r.order_number ?? '') },
+  { header: 'Quantity certified', value: (r) => Number(r.qty ?? 0), type: 'number' },
+  { header: 'Prepared by', value: (r) => String(r.issued_by_name ?? '') },
+  { header: 'Approved by', value: (r) => String(r.approved_by ?? '') },
+  // A word rather than a flag, which is what somebody reconciling in Excel
+  // filters on — the call the QC register's own verdict column makes.
+  { header: 'Dispatched', value: (r) => (Number(r.shipped) ? 'Yes' : 'No') },
+];
+
+workOrdersRouter.get('/coa/export', requirePermission('qc'), (req: AuthedRequest, res) => {
+  const { sql, params } = coaWhere(req);
+  const rows = db.prepare(`${sql} ORDER BY coa_date DESC, coa_no DESC`)
+    .all(...(params as never[])) as Record<string, unknown>[];
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', `attachment; filename="${attachmentName('Certificates')}"`);
+  res.send(buildXlsx('Certificates', coaColumns, rows));
 });
 
 workOrdersRouter.get('/:id', requirePermission('work_order'), (req: AuthedRequest, res) => {

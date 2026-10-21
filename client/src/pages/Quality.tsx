@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
-import type { QcCheckRow, QcRegisterSummary, Customer, Product } from '../types';
+import type { QcCheckRow, QcRegisterSummary, CoaRow, CoaSummary, Customer, Product } from '../types';
 import {
   PageHeader, Card, Select, Input, EmptyState, Pagination, DownloadButton,
   SegmentedTabs, TH_CLASS,
@@ -38,6 +38,152 @@ const verdictPill = (row: QcCheckRow) => {
       </span>
     );
 };
+
+/**
+ * Every Certificate of Analysis issued — what the desk tracks COAs from
+ * (2026-10-22, the client: *"instead of Quality, make it COA tab and track
+ * COA"*).
+ *
+ * **One row per certificate, not per lot.** A number may be written to
+ * several lots in one act — Aglo's own cap COA covers five days of two shifts
+ * — so a register keyed on the lot would list that consignment ten times
+ * under one number, which is the opposite of what a certificate register is
+ * for. The lots it covers are a column.
+ *
+ * It filters on the **server**, like the inspection register beside it: the
+ * list is paged, so a filter applied here would only ever filter the page in
+ * hand.
+ */
+function Certificates() {
+  const [from, setFrom] = useUrlFilter('from');
+  const [to, setTo] = useUrlFilter('to');
+  const [customer, setCustomer] = useUrlFilter('customer_id');
+  const [shipped, setShipped] = useUrlFilter('shipped');
+
+  const query = new URLSearchParams();
+  if (from) query.set('from', from);
+  if (to) query.set('to', to);
+  if (customer) query.set('customer_id', customer);
+  if (shipped) query.set('shipped', shipped);
+
+  const list = usePagedList<CoaRow, CoaSummary>(
+    ['coa-register', query.toString()],
+    `/api/work-orders/coa?${query.toString()}`
+  );
+  const rows = list.rows;
+  const summary = list.summary;
+  const { data: customers = [] } = useQuery({
+    queryKey: ['customers', ''],
+    queryFn: () => api.get<Customer[]>('/api/customers'),
+  });
+
+  return (
+    <>
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <Input type="date" className="w-40" value={from} onChange={(e) => setFrom(e.target.value)} />
+        <span className="text-xs text-slate-400">to</span>
+        <Input type="date" className="w-40" value={to} onChange={(e) => setTo(e.target.value)} />
+        <Select className="w-56" value={customer} onChange={(e) => setCustomer(e.target.value)}>
+          <option value="">All customers</option>
+          {customers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </Select>
+        {/*
+          The one thing about a certificate that changes after it is issued,
+          and the reason somebody opens this list: has it gone out yet.
+        */}
+        <Select className="w-44" value={shipped} onChange={(e) => setShipped(e.target.value)}>
+          <option value="">Dispatched or not</option>
+          <option value="1">Dispatched</option>
+          <option value="0">Not yet dispatched</option>
+        </Select>
+        {summary && (
+          <span className="ml-auto text-sm text-slate-500">
+            {summary.certificates} certificate{summary.certificates === 1 ? '' : 's'}
+            {' · '}{summary.lots} lot{summary.lots === 1 ? '' : 's'}
+            {' · '}<span className="tabular-nums">{fmtQty(summary.qty)}</span> pcs
+            {!!summary.shipped && <span className="text-slate-400">{' · '}{summary.shipped} dispatched</span>}
+          </span>
+        )}
+        <DownloadButton href={`/api/work-orders/coa/export?${query.toString()}`} />
+      </div>
+
+      <Card className="overflow-x-auto">
+        {list.isPending ? (
+          <div className="py-8 text-center text-sm text-slate-400">Loading…</div>
+        ) : rows.length === 0 ? (
+          <EmptyState message="No certificates yet. A COA is issued from a job's Batches tab, or in one press with Certify (COA)." />
+        ) : (
+          <table className="w-full text-sm">
+            <thead>
+              <tr className={TH_CLASS}>
+                <th className="pb-2 pr-3">Certificate</th>
+                <th className="pb-2 pr-3">Date</th>
+                <th className="pb-2 pr-3">Batches</th>
+                <th className="pb-2 pr-3">Product</th>
+                <th className="pb-2 pr-3">Customer</th>
+                <th className="pb-2 pr-3">Sales Order</th>
+                <th className="pb-2 pr-3 text-right">Certified</th>
+                <th className="pb-2 pr-3">Approved by</th>
+                <th className="pb-2 pr-3">Dispatched</th>
+                <th className="pb-2" />
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={`${r.coa_no}:${r.batch_id}`} className="border-b border-slate-100 last:border-0 hover:bg-slate-50">
+                  <td className="whitespace-nowrap py-2 pr-3 font-medium">{r.coa_no}</td>
+                  <td className="whitespace-nowrap py-2 pr-3">{fmtDate(r.coa_date)}</td>
+                  {/* The lots it covers. More than one is the ordinary shape
+                      of their own paperwork, so the count is said out loud
+                      rather than left to be counted off a long cell. */}
+                  <td className="py-2 pr-3">
+                    {/* The count sits outside the clip, or on a ten-lot
+                        certificate — the shape their own paperwork has — the
+                        truncation eats the one part of the cell that is
+                        readable at a glance. */}
+                    <div className="flex items-center gap-1">
+                      <span className="max-w-[12rem] truncate" title={r.batch_numbers}>{r.batch_numbers}</span>
+                      {r.lots > 1 && <span className="shrink-0 text-xs text-slate-400">({r.lots} lots)</span>}
+                    </div>
+                  </td>
+                  <td className="max-w-[16rem] truncate py-2 pr-3" title={r.products}>{r.products || '—'}</td>
+                  <td className="max-w-[14rem] truncate py-2 pr-3" title={r.customer_name}>{r.customer_name}</td>
+                  <td className="whitespace-nowrap py-2 pr-3">
+                    <Link to={`/orders/${r.order_id}`} className="text-brand-600 hover:underline">{r.order_number}</Link>
+                  </td>
+                  <td className="whitespace-nowrap py-2 pr-3 text-right tabular-nums">{fmtQty(r.qty)}</td>
+                  <td className="max-w-[10rem] truncate py-2 pr-3 text-slate-500" title={r.approved_by}>
+                    {r.approved_by || <span className="text-slate-300">—</span>}
+                  </td>
+                  {/* An absence, not a fault: a certificate is issued *before*
+                      dispatch, so "not yet" is the ordinary state of a fresh
+                      one rather than something to chase. */}
+                  <td className="whitespace-nowrap py-2 pr-3">
+                    {r.shipped
+                      ? <span className="rounded-full bg-green-50 px-2 py-0.5 text-xs text-green-700 ring-1 ring-green-200">dispatched</span>
+                      : <span className="text-xs text-slate-400">not yet</span>}
+                  </td>
+                  <td className="whitespace-nowrap py-2 text-right">
+                    <a
+                      href={`/api/pdf/coa/${r.batch_id}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-xs font-medium text-brand-700 hover:underline"
+                    >PDF</a>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        <Pagination
+          page={list.page} pages={list.pages} total={list.total} limit={PAGE_SIZE}
+          onPage={list.setPage} noun="certificates"
+        />
+      </Card>
+    </>
+  );
+}
 
 function Register() {
   const [from, setFrom] = useUrlFilter('from');
@@ -255,14 +401,25 @@ function Pending() {
 }
 
 /**
- * Two views over one desk: what has been inspected, and what is waiting.
+ * Three views over one desk: the certificates issued, what is waiting for
+ * one, and the inspections behind them.
  *
- * Held in the URL like every other view switch in this app, so a filtered or
- * a pending list is a link somebody can send.
+ * **It opens on the certificates** (2026-10-22, the client: *"instead of
+ * Quality, make it COA tab and track COA"*). The inspection register stays —
+ * it is the record the certificates are issued on, and a page that tracked
+ * the document while hiding the readings behind it would answer half the
+ * question — but it is no longer what the page is *about*, which is why the
+ * page and its sidebar entry now read **COA**.
+ *
+ * `?view=` holds which, like every other view switch in this app, so a
+ * filtered list is a link somebody can send. **Blank is the certificates**,
+ * so a bookmark saved against the old default lands on a list rather than on
+ * nothing; `?view=pending` is unchanged and still what the old Pending tab
+ * and the dashboard's own links point at.
  */
 export default function QualityPage() {
   const [view, setView] = useUrlFilter('view');
-  const pending = view === 'pending';
+  const tab = view === 'pending' || view === 'inspections' ? view : 'coa';
   // Asked whichever tab is open, so the count on the quiet tab is still right
   // — a tab that only counts once you are on it is a tab nobody opens.
   const { data } = useQuery({
@@ -270,28 +427,26 @@ export default function QualityPage() {
     queryFn: () => api.get<{ rows: ReadyLine[]; pending: number }>('/api/work-orders/qc-pending'),
   });
   const waiting = data?.pending ?? 0;
+  const subtitle = tab === 'pending'
+    ? 'Lines that have been made and cannot ship until somebody records a check'
+    : tab === 'inspections'
+      ? 'Every inspection recorded, against the tolerance it was judged by'
+      : 'Every Certificate of Analysis issued, and whether the goods have gone';
   return (
     <div>
-      <PageHeader
-        title="Quality"
-        subtitle={pending
-          ? 'Lines that have been made and cannot ship until somebody records a check'
-          : 'Every inspection recorded, against the tolerance it was judged by'}
-      />
+      <PageHeader title="COA" subtitle={subtitle} />
       <div className="mb-3">
         <SegmentedTabs
-          value={pending ? 'pending' : 'register'}
-          onChange={(v) => setView(v === 'pending' ? 'pending' : '')}
+          value={tab}
+          onChange={(v) => setView(v === 'coa' ? '' : v)}
           tabs={[
-            { key: 'register', label: 'Register' },
-            {
-              key: 'pending',
-              label: waiting ? `Pending · ${waiting}` : 'Pending',
-            },
+            { key: 'coa', label: 'Certificates' },
+            { key: 'pending', label: waiting ? `Pending · ${waiting}` : 'Pending' },
+            { key: 'inspections', label: 'Inspections' },
           ]}
         />
       </div>
-      {pending ? <Pending /> : <Register />}
+      {tab === 'pending' ? <Pending /> : tab === 'inspections' ? <Register /> : <Certificates />}
     </div>
   );
 }

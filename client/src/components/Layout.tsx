@@ -79,7 +79,10 @@ const NAV: { heading: string; items: NavItem[] }[] = [
     heading: 'Factory',
     items: [
       { to: '/work-orders', label: 'Work Orders', icon: 'wrench', needs: 'work_order' },
-      { to: '/quality', label: 'Quality', icon: 'gauge', needs: 'qc' },
+      // The desk tracks certificates from here (2026-10-22); the inspection
+      // register and the pending queue are tabs on it, the route unchanged so
+      // every link already pointing at /quality still lands.
+      { to: '/quality', label: 'COA', icon: 'gauge', needs: 'qc' },
       { to: '/stock', label: 'Stock', icon: 'box', needs: 'material' },
       // Finished goods on the shelf — its own function, since Logistics holds
       // it and holds no `material`.
