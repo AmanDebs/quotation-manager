@@ -22,6 +22,21 @@ import { fmtDate, today } from '../lib/format';
  * Pass and fail are never sent from here or stored anywhere: the server keeps
  * the reading and the tolerance it was taken against, and derives the rest.
  */
+/**
+ * One row's answer.
+ *
+ * `v`/`vmax` are the reading, or its two ends. `mode` says which of the three
+ * shapes was used — a range across the batch, a single figure (an average, or
+ * one taken once), or **complied**, which is a pass with no number behind it.
+ * `said` is the words written in place of the default wording, which is what
+ * Aglo's own fitment block carries (*Ok*, *No leakage found*).
+ */
+type Answer = {
+  v?: string; vmax?: string; na?: boolean;
+  mode?: 'range' | 'value' | 'complied';
+  said?: string;
+};
+
 export default function QcCheckFormPage({ certify }: {
   /**
    * Open a lot, inspect it and certify it in one press (2026-10-21, the
@@ -70,10 +85,21 @@ export default function QcCheckFormPage({ certify }: {
    * answer somebody gives rather than a box left alone: Aglo's own preform
    * certificate carries three of them, and a blank could not say it.
    */
-  const [values, setValues] = useState<Record<number, { v?: string; vmax?: string; na?: boolean }>>({});
+  const [values, setValues] = useState<Record<number, Answer>>({});
   const row = (id: number) => values[id] ?? {};
-  const setRow = (id: number, patch: { v?: string; vmax?: string; na?: boolean }) =>
+  const setRow = (id: number, patch: Answer) =>
     setValues((prev) => ({ ...prev, [id]: { ...(prev[id] ?? {}), ...patch } }));
+  /**
+   * How a measured characteristic was answered.
+   *
+   * Explicit rather than inferred from which boxes are filled, because a
+   * blank *highest* cannot tell a deliberate average from a forgotten one —
+   * and the server's guard, which refuses a half-filled range, is worth
+   * keeping. It defaults to what the specification promises, so a row nobody
+   * touches behaves exactly as it did.
+   */
+  const modeOf = (p: { id?: number; ranged?: number }) =>
+    row(p.id!).mode ?? (p.ranged ? 'range' : 'value');
   const queryClient = useQueryClient();
 
   const { data: full, isLoading } = useQuery({
@@ -94,15 +120,23 @@ export default function QcCheckFormPage({ certify }: {
       sample_size: head.sample_size === '' ? null : Number(head.sample_size),
       results: (full?.qc?.params ?? []).map((p) => {
         const r = row(p.id!);
+        const mode = p.kind === 'boolean' ? 'value' : modeOf(p);
+        const complied = !r.na && mode === 'complied';
         return {
           param_id: p.id,
           // Sent as its own fact: the server writes the row and records the
           // answer, where a blank is still dropped as never looked at.
           na: !!r.na,
+          // Conforms, with no figure — a pass the inspector asserts rather
+          // than one a reading decides.
+          complied,
+          mode,
+          // The words, where words were written; blank leaves the default.
+          observation: (r.said ?? '').trim(),
           // A visual check only counts once a verdict was actually given; "not
           // looked at" and "failed" must not collapse into each other.
-          value: r.na ? '' : p.kind === 'boolean' ? (r.v ? r.v === 'pass' : '') : r.v ?? '',
-          value_max: r.na || p.kind === 'boolean' || !p.ranged ? '' : r.vmax ?? '',
+          value: r.na || complied ? '' : p.kind === 'boolean' ? (r.v ? r.v === 'pass' : '') : r.v ?? '',
+          value_max: r.na || complied || p.kind === 'boolean' || mode !== 'range' ? '' : r.vmax ?? '',
         };
       }),
     }),
@@ -278,7 +312,7 @@ export default function QcCheckFormPage({ certify }: {
                 <tr className={TH_CLASS}>
                   <th className="pb-1 pr-2">Check</th>
                   <th className="pb-1 pr-2">Should be</th>
-                  <th className="w-40 pb-1">Measured</th>
+                  <th className="w-[26rem] pb-1">Measured</th>
                 </tr>
               </thead>
               <tbody>
@@ -287,47 +321,96 @@ export default function QcCheckFormPage({ certify }: {
                     <td className="py-1.5 pr-2">{p.name}</td>
                     <td className="py-1.5 pr-2 text-slate-500">
                       {p.kind === 'boolean' ? 'pass' : tolerance(p)}
-                      {!!p.ranged && p.kind !== 'boolean' && (
+                      {p.kind !== 'boolean' && modeOf(p) === 'range' && (
                         <span className="ml-1 text-xs text-slate-400">· both ends</span>
                       )}
                     </td>
                     <td className="py-1.5">
                       <div className="flex items-center gap-1.5">
                         {p.kind === 'boolean' ? (
-                          <Select
-                            className="w-full"
-                            disabled={!!row(p.id!).na}
-                            value={row(p.id!).v ?? ''}
-                            onChange={(e) => setRow(p.id!, { v: e.target.value })}
-                          >
-                            <option value="">not checked</option>
-                            <option value="pass">pass</option>
-                            <option value="fail">fail</option>
-                          </Select>
-                        ) : (
                           <>
-                            <Input
-                              type="number"
-                              className="w-full"
+                            <Select
+                              className="w-32 shrink-0"
                               disabled={!!row(p.id!).na}
                               value={row(p.id!).v ?? ''}
                               onChange={(e) => setRow(p.id!, { v: e.target.value })}
-                              placeholder={p.ranged ? 'lowest' : p.unit || 'value'}
+                            >
+                              <option value="">not checked</option>
+                              <option value="pass">pass</option>
+                              <option value="fail">fail</option>
+                            </Select>
+                            {/*
+                              The words, where words are what gets written.
+                              Aglo's own fitment block reads *Ok* and *No
+                              leakage found* rather than Pass, Pass — so this
+                              replaces the **wording** on the certificate and
+                              never the verdict, which the select beside it
+                              still decides. Blank prints what it always did.
+                            */}
+                            <Input
+                              className="w-full"
+                              disabled={!!row(p.id!).na}
+                              value={row(p.id!).said ?? ''}
+                              onChange={(e) => setRow(p.id!, { said: e.target.value })}
+                              placeholder={row(p.id!).v === 'fail' ? 'Fail' : 'Pass'}
+                              title="What the certificate should say — leave blank for Pass or Fail"
                             />
-                            {/* Observed across the batch: the highest piece
-                                beside the lowest, and the verdict is taken on
-                                both ends. */}
-                            {!!p.ranged && (
+                          </>
+                        ) : (
+                          <>
+                            {/*
+                              Which of the three answers this is. A
+                              specification can only say what is *usually*
+                              given, so the choice sits on the reading: a run
+                              measured piece by piece carries a range, one
+                              averaged carries a figure, and one checked with
+                              a gauge rather than measured carries Complied.
+                            */}
+                            <Select
+                              className="w-32 shrink-0"
+                              disabled={!!row(p.id!).na}
+                              value={modeOf(p)}
+                              onChange={(e) => setRow(p.id!, { mode: e.target.value as Answer['mode'] })}
+                            >
+                              <option value="range">lowest–highest</option>
+                              <option value="value">single value</option>
+                              <option value="complied">complied</option>
+                            </Select>
+                            {modeOf(p) === 'complied' ? (
+                              <Input
+                                className="w-full"
+                                disabled={!!row(p.id!).na}
+                                value={row(p.id!).said ?? ''}
+                                onChange={(e) => setRow(p.id!, { said: e.target.value })}
+                                placeholder="Complied"
+                                title="What the certificate should say — leave blank for Complied"
+                              />
+                            ) : (
                               <>
-                                <span className="text-xs text-slate-300">–</span>
                                 <Input
                                   type="number"
                                   className="w-full"
                                   disabled={!!row(p.id!).na}
-                                  value={row(p.id!).vmax ?? ''}
-                                  onChange={(e) => setRow(p.id!, { vmax: e.target.value })}
-                                  placeholder="highest"
+                                  value={row(p.id!).v ?? ''}
+                                  onChange={(e) => setRow(p.id!, { v: e.target.value })}
+                                  placeholder={modeOf(p) === 'range' ? 'lowest' : p.unit || 'value'}
                                 />
+                                {/* Observed across the batch: the highest piece
+                                    beside the lowest, and the verdict is taken on
+                                    both ends. */}
+                                {modeOf(p) === 'range' && (
+                                  <>
+                                    <span className="text-xs text-slate-300">–</span>
+                                    <Input
+                                      type="number"
+                                      className="w-full"
+                                      disabled={!!row(p.id!).na}
+                                      value={row(p.id!).vmax ?? ''}
+                                      onChange={(e) => setRow(p.id!, { vmax: e.target.value })}
+                                      placeholder="highest"
+                                    />
+                                  </>
+                                )}
                               </>
                             )}
                           </>
@@ -355,6 +438,8 @@ export default function QcCheckFormPage({ certify }: {
             <div className="mt-2 flex items-center justify-between gap-3">
               <p className="text-xs text-slate-400">
                 Leave a row blank if it was not checked — that is recorded as unmeasured, never as a failure.
+                <span className="font-medium"> Complied</span> is a pass with no figure behind it, and whatever
+                is typed beside an answer is what the certificate prints in place of the usual word.
                 Tick <span className="font-medium">N/A</span> where the characteristic does not apply to this
                 product: that is written down and prints on the certificate, and is neither a pass nor a failure.
               </p>

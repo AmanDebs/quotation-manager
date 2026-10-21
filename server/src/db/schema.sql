@@ -1140,6 +1140,32 @@ CREATE TABLE IF NOT EXISTS qc_results (
   -- as what it was after the specification is rewritten.
   ranged INTEGER NOT NULL DEFAULT 0,
   /*
+   * **Complied** — it conforms, and nobody wrote a figure down (2026-10-21,
+   * the client: *"in some cases we just write complied"*, which is what their
+   * own certificates do on a characteristic checked rather than measured).
+   *
+   * A different claim from both of its neighbours, and the distinction is the
+   * whole reason it is a column of its own. `na` says the characteristic does
+   * not apply and is **no verdict**; a blank says nobody reached it; this says
+   * it applies, it was looked at, and it conforms — so `resultOk` answers
+   * **true** and it is a pass with no number behind it.
+   *
+   * What that hands over, stated rather than implied: a line can clear the QC
+   * gate on somebody's assertion rather than on a measurement. That is what
+   * the paper already did, and the check records who asserted it and when.
+   */
+  complied INTEGER NOT NULL DEFAULT 0,
+  /*
+   * The words, where words are what was written (2026-10-21, the client:
+   * *"add the fitment text too"*). Aglo's own fitment block reads *Ok*, *No
+   * leakage found*, *Ok* — not Pass, Pass, Pass — and the verdict beside it
+   * is still the pass/fail the reading decides.
+   *
+   * It **replaces the wording and never the verdict**: blank prints exactly
+   * what this app always printed, so nothing on file moves.
+   */
+  observation TEXT NOT NULL DEFAULT '',
+  /*
    * **Not applicable** — a recorded answer, and a different claim from a
    * blank. Aglo's preform certificate carries three: acetaldehyde content,
    * overall migration and colour migration are all "NA" for that part.

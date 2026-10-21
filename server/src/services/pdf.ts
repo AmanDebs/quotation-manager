@@ -3180,10 +3180,22 @@ function toleranceText(r: { kind?: unknown; min_value?: unknown; max_value?: unk
  */
 export function readingText(r: {
   kind?: unknown; value?: unknown; value_max?: unknown; unit?: unknown; na?: unknown;
+  complied?: unknown; observation?: unknown;
 }): string {
   if (r.na) return 'N/A';
-  if (r.value == null) return '—';
-  if (String(r.kind) === 'boolean') return Number(r.value) ? 'Pass' : 'Fail';
+  /*
+   * **The words, where words were written** (2026-10-21). Aglo's own fitment
+   * block reads *Ok*, *No leakage found*, *Ok* — not Pass, Pass, Pass — and a
+   * dimension checked rather than measured reads *Complied*.
+   *
+   * It replaces the **wording** and never the verdict, which `resultOk` still
+   * decides from the reading; and blank prints exactly what this printed
+   * before, so no certificate already issued changes.
+   */
+  const said = String(r.observation ?? '').trim();
+  if (r.complied) return said || 'Complied';
+  if (r.value == null) return said || '—';
+  if (String(r.kind) === 'boolean') return said || (Number(r.value) ? 'Pass' : 'Fail');
   const u = String(r.unit ?? '').trim();
   const tail = u ? ` ${u}` : '';
   if (r.value_max != null) return `${fmtNum(Number(r.value), 3)} – ${fmtNum(Number(r.value_max), 3)}${tail}`;
@@ -3275,17 +3287,23 @@ function qcSectionTable(s: Row, section: string, rows: QcRow[]): Content {
           ],
           ...rows.map((r) => {
             const unit = String(r.unit ?? '').trim();
+            const spec = [qtd(name(r)), qtd(cell(r.min_value, unit), 'center'), qtd(cell(r.max_value, unit), 'center')];
+            /*
+             * **One answer spans both ends.** A range fills Minimum and
+             * Maximum; anything else is a single statement about the whole
+             * batch — a figure given as an average, or *Complied* — and
+             * putting it under *Minimum* with an em-dash beside it would have
+             * the certificate claim it was the lowest piece observed, which
+             * it is not. So it is written once, across the pair.
+             */
+            if (!r.na && r.value_max == null) {
+              return [...spec, { ...qtd(readingText(r), 'center'), colSpan: 2 }, {}];
+            }
             return [
-              qtd(name(r)),
-              qtd(cell(r.min_value, unit), 'center'),
-              qtd(cell(r.max_value, unit), 'center'),
+              ...spec,
               // An N/A is an answer, and it is the answer to both ends.
               qtd(r.na ? 'N/A' : cell(r.value, unit), 'center'),
-              // A characteristic observed as a single reading has no highest
-              // piece distinct from its lowest, so the cell is an em-dash —
-              // an absence rather than a blank, and never the same figure
-              // repeated, which would claim a range nobody took.
-              qtd(r.na ? '—' : r.value_max == null ? '—' : cell(r.value_max, unit), 'center'),
+              qtd(r.na ? '—' : cell(r.value_max, unit), 'center'),
             ];
           }),
         ],

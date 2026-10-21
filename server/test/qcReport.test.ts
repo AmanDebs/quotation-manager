@@ -281,17 +281,39 @@ describe('the three blocks the client certificate prints', () => {
    */
 
   /** A check on this job, with one reading per parameter given. */
-  function record(woId: number, rows: { name: string; section: string; kind?: string; value: number | null; na?: number }[]) {
+  function record(woId: number, rows: {
+    name: string; section: string; kind?: string; value: number | null;
+    na?: number; complied?: number; observation?: string;
+  }[]) {
     const checkId = Number(db.prepare(
       "INSERT INTO qc_checks (work_order_id, date, shift, inspector) VALUES (?, '2026-10-20', 'A', 'Aman')"
     ).run(woId).lastInsertRowid);
     rows.forEach((r, i) => {
       db.prepare(
-        `INSERT INTO qc_results (check_id, name, kind, section, unit, value, value_max, na, min_value, max_value, sort_order)
-         VALUES (?, ?, ?, ?, 'mm', ?, NULL, ?, 0.3, 0.5, ?)`
-      ).run(checkId, r.name, r.kind ?? 'numeric', r.section, r.value, r.na ?? 0, i);
+        `INSERT INTO qc_results (check_id, name, kind, section, unit, value, value_max, na, complied, observation,
+                                 min_value, max_value, sort_order)
+         VALUES (?, ?, ?, ?, 'mm', ?, NULL, ?, ?, ?, 0.3, 0.5, ?)`
+      ).run(checkId, r.name, r.kind ?? 'numeric', r.section, r.value, r.na ?? 0,
+        r.complied ?? 0, r.observation ?? '', i);
     });
     return checkId;
+  }
+
+  /**
+   * Whether this text is written **once across two cells** rather than in one
+   * of them. A `colSpan` is also the thing pdfmake throws on at layout time
+   * rather than definition time, so a case asserting one is a case that has to
+   * be rendered as well as read — see the note on the render in CLAUDE.md.
+   */
+  function spans(node: unknown, text: string): boolean {
+    if (node == null || typeof node !== 'object') return false;
+    const n = node as Record<string, any>;
+    if (n.text === text && Number(n.colSpan) === 2) return true;
+    for (const k of ['stack', 'columns', 'body', 'table', 'content']) {
+      if (n[k] !== undefined && spans(n[k], text)) return true;
+    }
+    if (Array.isArray(node)) return node.some((x) => spans(x, text));
+    return false;
   }
 
   test('an unsectioned specification prints the single table it always did', () => {
@@ -350,14 +372,47 @@ describe('the three blocks the client certificate prints', () => {
     assert.ok(!texts.includes('QC PASSED'));
   });
 
-  test('a single reading has no maximum observed, and says so rather than repeating itself', () => {
-    /* Printing the same figure in both Actual cells would claim a range
-       nobody took — the em-dash is the absence it actually is. */
+  test('a single reading is one statement across both Actual cells', () => {
+    /* It is an average, or a figure taken once over the batch — not the
+       lowest piece observed. Printed under *Minimum* with an em-dash beside
+       it, the certificate would claim it was; so it is written once across
+       the pair, and never the same figure repeated. */
     const { woId } = chain({ withChecks: false });
     record(woId, [{ name: 'Closure O/D', section: 'dimensional', value: 0.4 }]);
-    const texts = textsOf(buildQcReportPdf(woId));
+    const def = buildQcReportPdf(woId);
+    const texts = textsOf(def);
     assert.equal(texts.filter((t) => t === '0.4 mm').length, 1, 'the reading is printed twice');
-    assert.ok(texts.includes('\u2014'), 'the empty Maximum cell is blank rather than dashed');
+    assert.ok(spans(def, '0.4 mm'), 'the reading does not span the two Actual cells');
+  });
+
+  test('complied is a pass with no figure, and the words beat the default wording', () => {
+    /* 2026-10-21, the client: *"in some cases we just write complied"*, then
+       *"add the fitment text too"* — their own fitment block reads *Ok* and
+       *No leakage found* rather than Pass, Pass. */
+    const { woId } = chain({ withChecks: false });
+    record(woId, [
+      { name: 'Closure O/D', section: 'dimensional', value: null, complied: 1 },
+      { name: 'Leakage', section: 'fitment', kind: 'boolean', value: 1, observation: 'No leakage found' },
+    ]);
+    const def = buildQcReportPdf(woId);
+    const texts = textsOf(def);
+    assert.ok(texts.includes('Complied'), 'a complied dimension did not say so');
+    assert.ok(spans(def, 'Complied'), 'Complied did not span the two Actual cells');
+    assert.ok(texts.includes('No leakage found'), 'the fitment wording was dropped');
+    assert.ok(!texts.includes('Pass'), 'the default wording printed over the words written');
+    assert.ok(texts.includes('QC PASSED'), 'complied was not read as a pass');
+  });
+
+  test('and a range still fills both ends rather than spanning them', () => {
+    /* The half that must not move: an observed span is two figures, and this
+       is what every certificate on file carries. */
+    const { woId } = chain({ withChecks: false });
+    const checkId = record(woId, [{ name: 'Closure O/D', section: 'dimensional', value: 0.35 }]);
+    db.prepare('UPDATE qc_results SET value_max = 0.45, ranged = 1 WHERE check_id = ?').run(checkId);
+    const def = buildQcReportPdf(woId);
+    const texts = textsOf(def);
+    assert.ok(texts.includes('0.35 mm') && texts.includes('0.45 mm'), 'the two ends are not both printed');
+    assert.ok(!spans(def, '0.35 mm'), 'a real range was collapsed into one cell');
   });
 });
 

@@ -87,6 +87,10 @@ export interface QcResult {
   ranged: number;
   /** 1 when the answer recorded was *not applicable* — see `schema.sql`. */
   na: number;
+  /** 1 when the answer was *it conforms*, with no figure — a pass. */
+  complied: number;
+  /** The words written in place of the default wording; blank prints as before. */
+  observation: string;
   min_value: number | null;
   max_value: number | null;
   notes: string;
@@ -122,6 +126,7 @@ export function resultOk(r: {
   kind: string; value: number | null; value_max?: number | null;
   min_value: number | null; max_value: number | null;
   na?: number | boolean | null;
+  complied?: number | boolean | null;
 }): boolean | null {
   /*
    * **Not applicable is an answer, not a verdict** (2026-10-16). It is
@@ -131,6 +136,16 @@ export function resultOk(r: {
    * nothing, which is the honest reading of it.
    */
   if (r.na) return null;
+  /*
+   * **Complied is a pass, and the only answer here with no number behind it.**
+   * Asked before the value check because there is no value to ask about: the
+   * inspector has said the characteristic conforms without writing a figure,
+   * which is what their own paper does on a dimension checked with a gauge
+   * rather than measured. Not applicable says the opposite — that it does not
+   * apply at all — and is no verdict, which is why the two are separate
+   * columns rather than one tri-state.
+   */
+  if (r.complied) return true;
   if (r.value === null || r.value === undefined) return null;
   // A visual check is its own verdict: 1 is pass, anything else is not.
   if (r.kind === 'boolean') return Number(r.value) === 1;
@@ -160,11 +175,28 @@ export function resultOk(r: {
  * table aliased `r`.
  */
 export const RESULT_FAILED_SQL = `
-  r.na <> 1 AND r.value IS NOT NULL AND CASE
+  r.na <> 1 AND r.complied <> 1 AND r.value IS NOT NULL AND CASE
     WHEN r.kind = 'boolean' THEN r.value <> 1
     ELSE (r.min_value IS NOT NULL AND r.value < r.min_value)
       OR (r.max_value IS NOT NULL AND COALESCE(r.value_max, r.value) > r.max_value)
   END`;
+
+/**
+ * *Did this row reach a verdict at all* — `resultOk() !== null`, in SQL.
+ *
+ * The register is paged, so it counts and filters in the database; before
+ * `complied` existed "has a reading" was simply `value IS NOT NULL`, written
+ * out at both call sites. A complied row has **no value** and is a pass, so
+ * left alone the register would have called a sheet of them *unmeasured*
+ * while `decorate` called the same check *passed* — two copies of one rule
+ * disagreeing, which is what this file already pays a test to prevent.
+ *
+ * `resultOkMatrix` in `qcRegister.test.ts` runs this against `resultOk` over
+ * every combination and asserts they never differ. Expects `qc_results`
+ * aliased `r`.
+ */
+export const RESULT_DECIDED_SQL = `
+  r.na <> 1 AND (r.complied = 1 OR r.value IS NOT NULL)`;
 
 /**
  * The specification in force for a product, for a given customer.

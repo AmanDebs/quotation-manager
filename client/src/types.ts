@@ -601,6 +601,10 @@ export interface QcResult {
   /** The highest observed; null on anything but a ranged characteristic. */
   value_max?: number | null;
   ranged?: number;
+  /** 1 when the answer was *it conforms*, with no figure — a pass. */
+  complied?: number;
+  /** The words written in place of the default wording; blank prints as before. */
+  observation?: string;
   /** 1 when the recorded answer was *not applicable* — an answer, not a blank. */
   na?: number;
   min_value: number | null;

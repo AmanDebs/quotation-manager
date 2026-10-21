@@ -6,7 +6,9 @@ import { batchesFor, batchById, coaBlockError, coaGroupError, renameError, dispo
 import { progressFor, progressForMany, LIVE_OK } from '../services/production.js';
 import { despatchedByOrder, lastTripForLine } from '../services/despatch.js';
 import { materialCostByWorkOrder } from '../services/costing.js';
-import { paramsFor, checksForWorkOrder, summaryForWorkOrder, specOwner, RESULT_FAILED_SQL } from '../services/qc.js';
+import {
+  paramsFor, checksForWorkOrder, summaryForWorkOrder, specOwner, RESULT_FAILED_SQL, RESULT_DECIDED_SQL,
+} from '../services/qc.js';
 import { requirementForJob, snapshotRecipe, recipeDiffers } from '../services/recipe.js';
 import { insertJob, plannedDateError, type OrderRef } from '../services/orderJobs.js';
 import { syncOrderStatus } from '../services/orderStatus.js';
@@ -201,7 +203,7 @@ workOrdersRouter.get('/facet', requirePermission('work_order'), (req: AuthedRequ
  */
 const RESULT_FAILED = RESULT_FAILED_SQL;
 const HAS_FAILURE = `EXISTS (SELECT 1 FROM qc_results r WHERE r.check_id = q.id AND (${RESULT_FAILED}))`;
-const HAS_READING = 'EXISTS (SELECT 1 FROM qc_results r WHERE r.check_id = q.id AND r.value IS NOT NULL)';
+const HAS_READING = `EXISTS (SELECT 1 FROM qc_results r WHERE r.check_id = q.id AND (${RESULT_DECIDED_SQL}))`;
 
 const registerSql = `
   SELECT q.id, q.work_order_id, q.date, q.shift, q.sample_size, q.inspector, q.notes,
@@ -209,7 +211,7 @@ const registerSql = `
          p.name AS product_name, pr.name AS process_name,
          o.id AS order_id, o.number AS order_number, o.customer_id, c.name AS customer_name,
          (SELECT COUNT(*) FROM qc_results r WHERE r.check_id = q.id) AS readings,
-         (SELECT COUNT(*) FROM qc_results r WHERE r.check_id = q.id AND r.value IS NOT NULL) AS measured,
+         (SELECT COUNT(*) FROM qc_results r WHERE r.check_id = q.id AND (${RESULT_DECIDED_SQL})) AS measured,
          (SELECT COUNT(*) FROM qc_results r WHERE r.check_id = q.id AND (${RESULT_FAILED})) AS failed_count
     FROM qc_checks q
     JOIN work_orders w ON w.id = q.work_order_id
@@ -994,17 +996,37 @@ function checkError(wo: Record<string, unknown>, body: Record<string, unknown>):
   const spec = specFor(wo);
   const rows = Array.isArray(body.results) ? (body.results as Record<string, unknown>[]) : [];
   const given = (v: unknown) => v !== '' && v !== null && v !== undefined;
-  const recorded = rows.filter((r) => given(r.value) || r.na);
-  const measured = recorded.filter((r) => !r.na && given(r.value));
-  if (!measured.length) return 'Record at least one measurement';
+  const recorded = rows.filter((r) => given(r.value) || r.na || r.complied);
+  // A row that reached a verdict: a figure, or *it conforms*. An N/A is an
+  // answer and still not an inspection — `resultOk`'s own rule, read here.
+  const decided = recorded.filter((r) => !r.na && (given(r.value) || r.complied));
+  if (!decided.length) return 'Record at least one measurement';
   if (recorded.some((r) => !spec.has(Number(r.param_id)))) {
     return 'That check is not on the specification for this product';
   }
-  for (const r of measured) {
+  for (const r of decided) {
     const param = spec.get(Number(r.param_id))!;
-    if (!param.ranged || param.kind === 'boolean') continue;
+    // Nothing to check: no figure was claimed.
+    if (r.complied || param.kind === 'boolean') continue;
+    /*
+     * **The range is asked for only where a range was promised**, and the
+     * promise is explicit (2026-10-21, the client: *"in some cases instead of
+     * giving max min values we give avg value"*). Before this a ranged
+     * characteristic was refused outright with one figure, so the only way to
+     * record an average was to untick `ranged` on the specification — which
+     * then applies to every batch and loses the range on the ones that do
+     * carry one.
+     *
+     * `mode` says which answer was given rather than it being inferred from a
+     * blank box, because a blank cannot tell a deliberate average from a
+     * forgotten *highest* — and that is exactly what this guard is worth
+     * keeping for. A caller that sends no mode falls back to the
+     * specification, so nothing that worked before changes.
+     */
+    if (answerMode(r, param) !== 'range') continue;
     if (!given(r.value_max)) {
-      return `${param.name} is observed as a range — record the highest as well as the lowest`;
+      return `${param.name} is observed as a range — record the highest as well as the lowest, `
+        + 'or record it as a single figure instead';
     }
     if (Number(r.value_max) < Number(r.value)) {
       return `${param.name}: the highest observed is below the lowest`;
@@ -1013,12 +1035,20 @@ function checkError(wo: Record<string, unknown>, body: Record<string, unknown>):
   return null;
 }
 
+/** How one row was answered: a range across the batch, or a single figure. */
+function answerMode(r: Record<string, unknown>, param: { ranged?: unknown; kind?: unknown }): 'range' | 'value' {
+  if (String(param.kind) === 'boolean') return 'value';
+  if (r.mode === 'range') return 'range';
+  if (r.mode === 'value') return 'value';
+  return param.ranged ? 'range' : 'value';
+}
+
 /** Write it. Assumes `checkError` has already passed; wrap in a transaction. */
 function insertCheck(req: AuthedRequest, jobId: number, wo: Record<string, unknown>, body: Record<string, unknown>, batchId: number | null): number {
   const spec = specFor(wo);
   const rows = Array.isArray(body.results) ? (body.results as Record<string, unknown>[]) : [];
   const given = (v: unknown) => v !== '' && v !== null && v !== undefined;
-  const recorded = rows.filter((r) => given(r.value) || r.na);
+  const recorded = rows.filter((r) => given(r.value) || r.na || r.complied);
   const info = db.prepare(
     `INSERT INTO qc_checks (work_order_id, batch_id, date, shift, sample_size, inspector, notes, created_by)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
@@ -1027,18 +1057,25 @@ function insertCheck(req: AuthedRequest, jobId: number, wo: Record<string, unkno
   const checkId = Number(info.lastInsertRowid);
   const ins = db.prepare(
     `INSERT INTO qc_results (check_id, param_id, name, kind, section, unit, value, value_max, ranged, na,
-                             min_value, max_value, notes, sort_order)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+                             complied, observation, min_value, max_value, notes, sort_order)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   );
   recorded.forEach((r, i) => {
     const param = spec.get(Number(r.param_id))!;
     const na = r.na ? 1 : 0;
-    const ranged = !na && param.ranged && param.kind !== 'boolean' ? 1 : 0;
+    // Not applicable wins: it says the characteristic does not apply at all,
+    // which no claim about conformity can be made on top of.
+    const complied = !na && r.complied ? 1 : 0;
+    // Stored as a range only where one was actually given, so the certificate
+    // can tell an observed span from a single figure without re-deriving it.
+    const ranged = !na && !complied && param.kind !== 'boolean'
+      && answerMode(r, param) === 'range' ? 1 : 0;
     ins.run(
       checkId, param.id, param.name, param.kind, param.section ?? '', param.unit,
-      na ? null : param.kind === 'boolean' ? (r.value ? 1 : 0) : Number(r.value),
+      na || complied ? null : param.kind === 'boolean' ? (r.value ? 1 : 0) : Number(r.value),
       ranged ? Number(r.value_max) : null,
       ranged, na,
+      complied, String(r.observation ?? '').trim(),
       param.min_value, param.max_value, String(r.notes ?? ''), i
     );
   });

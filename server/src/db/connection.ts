@@ -486,6 +486,9 @@ addColumnIfMissing('qc_results', 'na', 'INTEGER NOT NULL DEFAULT 0');
  */
 addColumnIfMissing('product_qc_params', 'section', "TEXT NOT NULL DEFAULT ''");
 addColumnIfMissing('qc_results', 'section', "TEXT NOT NULL DEFAULT ''");
+// Conforms with no figure, and the words somebody wrote — see `schema.sql`.
+addColumnIfMissing('qc_results', 'complied', 'INTEGER NOT NULL DEFAULT 0');
+addColumnIfMissing('qc_results', 'observation', "TEXT NOT NULL DEFAULT ''");
 
 /*
  * Whether a sales order demands a Certificate of Analysis (2026-10-21).
