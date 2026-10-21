@@ -6,7 +6,7 @@ import { db } from '../db/connection.js';
 import { amountInWords } from './amountInWords.js';
 import { round2, isPieceBasis, piecesPerBillingUnit, piecesOrdered, computeTotals } from './totals.js';
 import { invoiceReceivable, proformaAdvance, orderAdvance } from './receivables.js';
-import { paramsFor, specOwner, checksForWorkOrder } from './qc.js';
+import { specOwner, checksForWorkOrder } from './qc.js';
 import { batchById, batchesOnDespatch, batchesOnCreditNote } from './batch.js';
 import { getCompany, defaultCompany } from './companies.js';
 
@@ -2665,7 +2665,6 @@ function qcReportContent(s: Row, jobs: QcJob[]): Content[] {
 
   const out: Content[] = [];
   for (const [n, job] of jobs.entries()) {
-    const params = paramsFor(job.product_id, job.customer_id);
     const owner = specOwner(job.product_id, job.customer_id);
     const checks = checksForWorkOrder(job.id);
 
@@ -2700,24 +2699,24 @@ function qcReportContent(s: Row, jobs: QcJob[]): Content[] {
       margin: [0, 3, 0, 3] as any,
     });
 
-    if (params.length) {
-      out.push({
-        table: {
-          headerRows: 1,
-          widths: ['*', 55, 55, 45],
-          body: [
-            ['Parameter', 'Min', 'Max', 'Unit'].map((t) => ({ text: t, fontSize: 7.5, bold: true, color: '#ffffff', fillColor: s.theme })),
-            ...params.map((p) => [
-              { text: p.name, fontSize: 8 },
-              { text: p.kind === 'boolean' ? '—' : (p.min_value ?? '—').toString(), fontSize: 8, alignment: 'right' as const },
-              { text: p.kind === 'boolean' ? '—' : (p.max_value ?? '—').toString(), fontSize: 8, alignment: 'right' as const },
-              { text: p.unit || '', fontSize: 8, alignment: 'center' as const },
-            ]),
-          ],
-        },
-        layout: gridLayout,
-      });
-    }
+    /*
+     * **The specification is not listed on its own** (2026-10-21, the client
+     * with a report in front of them: *"This is not required in quality
+     * pdf"*). It was a Parameter / Min / Max / Unit table per job, and on a
+     * preform — twenty-odd parameters, most of them stated as prose — it ran
+     * to most of a page before a single reading appeared.
+     *
+     * What it said is **already on every row below**: the readings table
+     * carries a `Spec` column holding the tolerance each reading was judged
+     * against, and that is the copy stamped onto the result rather than
+     * today's parameter, so it is the stronger statement of the two. The only
+     * thing the table added was the parameters nobody measured, which is an
+     * absence this document does not exist to list.
+     *
+     * The one-line caption above stays: *whose* specification applied —
+     * a customer's own or the product's standard — is a fact nothing else on
+     * the page states, and it is a line rather than a table.
+     */
 
     if (!checks.length) {
       out.push({ text: 'No inspection recorded against this job.', fontSize: 8, italics: true, margin: [0, 4, 0, 0] as any });

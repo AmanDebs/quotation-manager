@@ -183,6 +183,23 @@ describe('what the report says', () => {
     const texts = textsOf(buildQcReportPdf(woId));
     assert.ok(texts.some((t) => t.startsWith('Specification:') && t.includes('own')), 'does not name the customer');
   });
+
+  test('but does not list the specification as a table of its own', () => {
+    /*
+     * Removed 2026-10-21 at the client word: on a preform that table ran to
+     * most of a page before a single reading appeared, and every tolerance it
+     * stated is already on the row it was judged against. The caption stays,
+     * which is what the assertion above holds.
+     */
+    const { woId, product, customerId } = chain();
+    addParam(product, customerId, 'Wall thickness', 0.38, 0.42);
+    const texts = textsOf(buildQcReportPdf(woId));
+    assert.ok(!texts.includes('Min'), 'the Min/Max listing is back');
+    assert.ok(!texts.includes('Max'));
+    assert.ok(!texts.includes('Unit'));
+    // ...while the readings keep the tolerance each was measured against.
+    assert.ok(texts.includes('Spec'), 'the readings lost their Spec column');
+  });
 });
 
 describe('the invoice’s own quality summary', () => {
