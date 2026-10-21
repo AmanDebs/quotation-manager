@@ -75,6 +75,9 @@ export default function WorkOrderDetailPage() {
   const [logging, setLogging] = useState(false);
   const [issuing, setIssuing] = useState(false);
   const [inspecting, setInspecting] = useState(false);
+  // The one-press certificate. Named apart from `certifying`, which is the
+  // Batches tab ticking a set of lots to issue one number over.
+  const [onePress, setOnePress] = useState(false);
   const [openingBatch, setOpeningBatch] = useState(false);
   // The lot a final check is being recorded against, if any.
   const [finalising, setFinalising] = useState<Batch | null>(null);
@@ -220,6 +223,15 @@ export default function WorkOrderDetailPage() {
             )}
             {can('output', 'full') && <Button variant="secondary" onClick={() => setLogging(true)}>Log output</Button>}
             {can('qc', 'full') && <Button variant="secondary" onClick={() => setInspecting(true)}>Record QC check</Button>}
+            {/* One press for the shape this desk works in: only the final
+                COA is issued, so the lot, the inspection and the certificate
+                are one act rather than three. The three routes stay for a job
+                certified in several lots. */}
+            {can('qc', 'full') && (
+              <Button onClick={() => setOnePress(true)} title="Open a lot for everything made so far, inspect it and issue the certificate">
+                Certify (COA)
+              </Button>
+            )}
           </div>
         }
       />
@@ -890,6 +902,7 @@ export default function WorkOrderDetailPage() {
       )}
       {issuing && <IssueModal job={job} onClose={() => setIssuing(false)} onSaved={refresh} />}
       {inspecting && <QcCheckModal job={job} onClose={() => setInspecting(false)} onSaved={refresh} />}
+      {onePress && <QcCheckModal job={job} certify onClose={() => setOnePress(false)} onSaved={refresh} />}
     </div>
   );
 }

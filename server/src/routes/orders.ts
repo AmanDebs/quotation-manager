@@ -224,7 +224,7 @@ function getFull(id: number, req?: AuthedRequest) {
 }
 
 const headerFields = [
-  'date', 'customer_id', 'quotation_id', 'is_export', 'order_through', 'spoc', 'po_number', 'po_date',
+  'date', 'customer_id', 'quotation_id', 'is_export', 'coa_required', 'order_through', 'spoc', 'po_number', 'po_date',
   'currency', 'tax_type', 'payment_terms', 'freight', 'insurance', 'inco_terms', 'container_count',
   'advance_due', 'advance_amount', 'advance_received_date', 'destination', 'port_of_discharge', 'transport', 'freight_terms',
   'promised_date', 'scheduled_date', 'revised_date', 'actual_production_date', 'remarks', 'notes',
@@ -237,6 +237,11 @@ function headerValues(body: Record<string, unknown>, existing?: Record<string, u
     customer_id: Number(v('customer_id', 0)),
     quotation_id: v('quotation_id', null) ? Number(v('quotation_id')) : null,
     is_export: Number(v('is_export', 0)) ? 1 : 0,
+    // Read on a domestic order only — an export one always needs a
+    // certificate, so the tick is not offered there and the gate does not
+    // consult it. Stored all the same, so flipping an order to domestic
+    // does not silently lose what somebody set.
+    coa_required: Number(v('coa_required', 0)) ? 1 : 0,
     order_through: String(v('order_through')),
     spoc: String(v('spoc')),
     po_number: String(v('po_number')),

@@ -35,6 +35,13 @@ interface Draft {
   pi_id?: number;
   date: string;
   is_export: number;
+  /**
+   * Whether a Certificate of Analysis is demanded before these goods may go.
+   * Read on a domestic order only — an export one always needs one — but
+   * **carried either way**, so flipping an order to domestic does not lose
+   * what somebody set.
+   */
+  coa_required?: number;
   order_through: string;
   spoc: string;
   po_number: string;
@@ -65,7 +72,7 @@ interface Draft {
 }
 
 const emptyDraft = (): Draft => ({
-  customer_id: '', quotation_id: null, date: today(), is_export: 0,
+  customer_id: '', quotation_id: null, date: today(), is_export: 0, coa_required: 0,
   order_through: 'Phone', spoc: '', po_number: '', po_date: '',
   currency: 'INR', tax_type: 'igst', payment_terms: '', freight: 0, insurance: 0,
   inco_terms: '', container_count: '', advance_due: 0, advance_amount: 0, advance_received_date: '',
@@ -390,6 +397,40 @@ export default function OrderFormPage() {
                 value={draft.payment_terms}
                 onChange={(v) => set({ payment_terms: v })}
               />
+            </Field>
+            {/*
+              Whether a Certificate of Analysis is demanded before these goods
+              may go (2026-10-21, the client: *"COA is compulsory for only
+              export order. It is required for only some specific domestic
+              orders so for domestic I was thinking we can add a option when
+              creating sale order whether COA is required."*).
+              **A tick on a domestic order and a statement on an export one**:
+              an export order always needs one, so a box there could only ever
+              be wrong — and the server reads the flag on a domestic order
+              alone for the same reason. It has teeth: a line whose product
+              carries a QC specification cannot be dispatched or invoiced
+              until one of its lots is certified.
+            */}
+            <Field label="Certificate of Analysis" className="sm:col-span-2">
+              {draft.is_export ? (
+                <p className="pt-1.5 text-sm text-slate-600">
+                  Required — this is an export order.
+                </p>
+              ) : (
+                <label className="flex items-center gap-2 pt-1.5 text-sm text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={!!draft.coa_required}
+                    onChange={(e) => set({ coa_required: e.target.checked ? 1 : 0 })}
+                  />
+                  <span>
+                    Required for this order
+                    <span className="ml-2 text-xs text-slate-400">
+                      goods will be held until a lot carries a COA
+                    </span>
+                  </span>
+                </label>
+              )}
             </Field>
             {/* Export-only, as they were in the card these came from. */}
             {!!draft.is_export && (

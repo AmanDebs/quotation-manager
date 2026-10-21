@@ -362,8 +362,22 @@ export function qcBlockError(
   ).all(orderId) as { pos: number; product_id: number | null; description: string; is_charge: number; made_here: number }[];
 
   // Judged against this customer's own tolerances where they have some.
-  const owner = db.prepare('SELECT customer_id FROM orders WHERE id = ?').get(orderId) as
-    { customer_id: number } | undefined;
+  const owner = db.prepare('SELECT customer_id, is_export, coa_required FROM orders WHERE id = ?').get(orderId) as
+    { customer_id: number; is_export: number; coa_required: number } | undefined;
+
+  /*
+   * **Whether a certificate is demanded at all** (2026-10-21, the client:
+   * *"COA is compulsory for only export order. It is required for only some
+   * specific domestic orders."*). An export order always needs one; a
+   * domestic one needs it where somebody ticked it on the order.
+   *
+   * Where it is demanded, a passing job check is **not** enough: the line
+   * must have a lot carrying a COA. Everywhere else the rule is exactly what
+   * it was — a cleared lot where there are lots, the job-level pass where
+   * there are none — so no domestic order on file changes its answer, and
+   * the imported backlog is untouched.
+   */
+  const needsCoa = !!(Number(owner?.is_export) || Number(owner?.coa_required));
 
   const wanted = new Set<number>();
   for (const l of lines) {
@@ -415,6 +429,16 @@ export function qcBlockError(
           + 'Issue a COA against a batch that has passed its final check.';
       }
       continue;
+    }
+    /*
+     * ...unless this order demands a certificate, where a job-level pass is
+     * not the evidence asked for. The sentence names **why** it is demanded,
+     * since an export order needs no tick and a domestic one carries one.
+     */
+    if (needsCoa) {
+      return `${name} needs a Certificate of Analysis before it can be ${verb} — `
+        + `${Number(owner?.is_export) ? 'this is an export order' : 'this order is marked COA required'}. `
+        + 'Open a lot on its work order, record a final check against it and issue the COA.';
     }
     const passed = jobs
       .filter((j) => Number(j.order_line) === pos)

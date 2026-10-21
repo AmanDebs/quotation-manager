@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Batch, WorkOrder } from '../types';
-import { Button, Input, Select, Field, Modal, ErrorText, EmptyState, TH_CLASS } from './ui';
+import { Button, Input, Select, Field, Modal, ErrorText, EmptyState, TH_CLASS, FIELD_GRID } from './ui';
 import { fmtDate, today } from '../lib/format';
 
 /**
@@ -17,7 +17,7 @@ import { fmtDate, today } from '../lib/format';
  * Pass and fail are never sent from here or stored anywhere: the server keeps
  * the reading and the tolerance it was taken against, and derives the rest.
  */
-export default function QcCheckModal({ job, batch, onClose, onSaved }: {
+export default function QcCheckModal({ job, batch, certify, onClose, onSaved }: {
   job: WorkOrder;
   /**
    * The lot this check finalises, if it is a final one.
@@ -28,9 +28,19 @@ export default function QcCheckModal({ job, batch, onClose, onSaved }: {
    * the server draws the same distinction over one column.
    */
   batch?: Batch;
+  /**
+   * Open a lot, inspect it and certify it in one press (2026-10-21, the
+   * client: *"Since our company is small only final COA is required and is
+   * issued"*). The lot covers everything the job has made and nobody has
+   * lotted, so there is nothing to choose — which is why this is a flag
+   * rather than a second dialog: it is the same inspection, with the two
+   * fields a certificate needs and no batch to pick.
+   */
+  certify?: boolean;
   onClose: () => void; onSaved: () => void;
 }) {
   const [head, setHead] = useState({ date: today(), shift: '', sample_size: '', inspector: '', notes: '' });
+  const [coa, setCoa] = useState({ coa_date: today(), approved_by: '' });
   /*
    * Three facts per parameter since 2026-10-16, where there was one string.
    *
@@ -55,8 +65,9 @@ export default function QcCheckModal({ job, batch, onClose, onSaved }: {
     onSaved();
   };
   const add = useMutation({
-    mutationFn: () => api.post(`/api/work-orders/${job.id}/qc-checks`, {
+    mutationFn: () => api.post(`/api/work-orders/${job.id}/${certify ? 'certify' : 'qc-checks'}`, {
       ...head,
+      ...(certify ? coa : {}),
       batch_id: batch?.id ?? null,
       sample_size: head.sample_size === '' ? null : Number(head.sample_size),
       results: (full?.qc?.params ?? []).map((p) => {
@@ -101,7 +112,7 @@ export default function QcCheckModal({ job, batch, onClose, onSaved }: {
         : <span className="font-semibold text-red-600">fail</span>;
 
   return (
-    <Modal title={`Quality — ${job.number}`} onClose={onClose} wide>
+    <Modal title={certify ? `Certify — ${job.number}` : `Quality — ${job.number}`} onClose={onClose} wide>
       {summary && !summary.has_spec ? (
         <EmptyState message="No quality checks are defined for this product. Set them under Products → QC, then come back." />
       ) : (
@@ -158,6 +169,32 @@ export default function QcCheckModal({ job, batch, onClose, onSaved }: {
                 <Input value={head.inspector} onChange={(e) => setHead({ ...head, inspector: e.target.value })} />
               </Field>
             </div>
+
+            {/*
+              The two things a certificate needs that an inspection does not.
+              Shown only in the one-press shape — on an ordinary check there
+              is no certificate to date or to have approved.
+            */}
+            {certify && (
+              <div className="mb-3 rounded-lg bg-slate-50 p-3 ring-1 ring-slate-200">
+                <p className="mb-2 text-xs text-slate-500">
+                  This opens a lot covering everything this job has made and not yet lotted,
+                  records the inspection against it, and issues the certificate.
+                </p>
+                <div className={FIELD_GRID}>
+                  <Field label="Certificate date">
+                    <Input type="date" value={coa.coa_date} onChange={(e) => setCoa({ ...coa, coa_date: e.target.value })} />
+                  </Field>
+                  <Field label="Approved by">
+                    <Input
+                      value={coa.approved_by}
+                      onChange={(e) => setCoa({ ...coa, approved_by: e.target.value })}
+                      placeholder="Who signs it off"
+                    />
+                  </Field>
+                </div>
+              </div>
+            )}
 
             <table className="w-full text-sm">
               <thead>

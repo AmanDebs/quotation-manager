@@ -348,6 +348,14 @@ CREATE TABLE IF NOT EXISTS quotation_items (
 
 -- The order book: what the customer has committed to buy, tracked from intake
 -- through production to dispatch. Sits between quotation and proforma invoice.
+-- `coa_required` (2026-10-21, the client: *"COA is compulsory for only export
+-- order. It is required for only some specific domestic orders so for domestic
+-- I was thinking we can add a option when creating sale order whether COA is
+-- required."*) is read **only on a domestic order**: an export one always
+-- requires a certificate, so a tick there would be a control that can only be
+-- wrong. Additive and 0 by default, which is every order on file — and since
+-- an export order needs no tick to be covered, nothing already booked for
+-- export escapes the rule by predating the column.
 CREATE TABLE IF NOT EXISTS orders (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   number TEXT NOT NULL,
@@ -357,6 +365,11 @@ CREATE TABLE IF NOT EXISTS orders (
   -- The group entity issuing this document. Fixed at creation.
   company_id INTEGER NOT NULL DEFAULT 1 REFERENCES companies(id),
   is_export INTEGER NOT NULL DEFAULT 0,
+  -- Whether a Certificate of Analysis is demanded before these goods may go.
+  -- Read on a **domestic** order only: an export one always needs one, so a
+  -- tick there would be a control that can only ever be wrong. See the note
+  -- above the table.
+  coa_required INTEGER NOT NULL DEFAULT 0,
   order_through TEXT NOT NULL DEFAULT '',
   spoc TEXT NOT NULL DEFAULT '',
   po_number TEXT NOT NULL DEFAULT '',

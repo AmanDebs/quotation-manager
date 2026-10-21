@@ -872,14 +872,25 @@ function issueCoa(req: AuthedRequest, res: Response, ids: number[]) {
   const date = String(req.body?.date ?? '').trim() || new Date().toISOString().slice(0, 10);
   const approvedBy = String(req.body?.approved_by ?? '').trim();
 
+  writeCoa(ids, date, req.user!.id, approvedBy, companyId);
+  res.status(201).json(ids.map((id) => batchById(id)));
+}
+
+/**
+ * One number written to every lot named, in one transaction — the act itself,
+ * split out when `certify` became its second caller. A lot is certified once,
+ * so this is the only place that writes `coa_no`.
+ */
+function writeCoa(ids: number[], date: string, userId: number, approvedBy: string, companyId: number): string {
+  let number = '';
   transaction(() => {
-    const number = nextNumber('coa', { companyId, date });
+    number = nextNumber('coa', { companyId, date });
     const set = db.prepare(
       'UPDATE batches SET coa_no = ?, coa_date = ?, coa_issued_by = ?, coa_approved_by = ? WHERE id = ?'
     );
-    for (const id of ids) set.run(number, date, req.user!.id, approvedBy, id);
+    for (const id of ids) set.run(number, date, userId, approvedBy, id);
   });
-  res.status(201).json(ids.map((id) => batchById(id)));
+  return number;
 }
 
 /**
@@ -962,58 +973,85 @@ workOrdersRouter.post('/:id/recipe-snapshot', requirePermission('work_order', 'f
   res.json(getFull(req, id));
 });
 
+/** The tolerances in force for this job's customer, by parameter id. */
+function specFor(wo: Record<string, unknown>) {
+  const specCustomer = (db.prepare('SELECT customer_id FROM orders WHERE id = ?')
+    .get(Number(wo.order_id)) as { customer_id: number } | undefined)?.customer_id ?? null;
+  return new Map(paramsFor(wo.product_id as number | null, specCustomer).map((p) => [p.id, p]));
+}
+
+/**
+ * What a check has to be before it is one, in words — the guard shape this
+ * codebase uses for every rule somebody has to be told about.
+ *
+ * **Extracted when `certify` became its second caller** (2026-10-21). Two
+ * copies of *what counts as an inspection* is how the shortcut would come to
+ * accept a check the ordinary route refuses, which on a document that clears
+ * goods is the worst way for two things to disagree.
+ */
+function checkError(wo: Record<string, unknown>, body: Record<string, unknown>): string | null {
+  if (!String(body.date ?? '').trim()) return 'Date is required';
+  const spec = specFor(wo);
+  const rows = Array.isArray(body.results) ? (body.results as Record<string, unknown>[]) : [];
+  const given = (v: unknown) => v !== '' && v !== null && v !== undefined;
+  const recorded = rows.filter((r) => given(r.value) || r.na);
+  const measured = recorded.filter((r) => !r.na && given(r.value));
+  if (!measured.length) return 'Record at least one measurement';
+  if (recorded.some((r) => !spec.has(Number(r.param_id)))) {
+    return 'That check is not on the specification for this product';
+  }
+  for (const r of measured) {
+    const param = spec.get(Number(r.param_id))!;
+    if (!param.ranged || param.kind === 'boolean') continue;
+    if (!given(r.value_max)) {
+      return `${param.name} is observed as a range — record the highest as well as the lowest`;
+    }
+    if (Number(r.value_max) < Number(r.value)) {
+      return `${param.name}: the highest observed is below the lowest`;
+    }
+  }
+  return null;
+}
+
+/** Write it. Assumes `checkError` has already passed; wrap in a transaction. */
+function insertCheck(req: AuthedRequest, jobId: number, wo: Record<string, unknown>, body: Record<string, unknown>, batchId: number | null): number {
+  const spec = specFor(wo);
+  const rows = Array.isArray(body.results) ? (body.results as Record<string, unknown>[]) : [];
+  const given = (v: unknown) => v !== '' && v !== null && v !== undefined;
+  const recorded = rows.filter((r) => given(r.value) || r.na);
+  const info = db.prepare(
+    `INSERT INTO qc_checks (work_order_id, batch_id, date, shift, sample_size, inspector, notes, created_by)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(jobId, batchId, String(body.date), String(body.shift ?? ''), numOrNull(body.sample_size),
+    String(body.inspector ?? ''), String(body.notes ?? ''), req.user!.id);
+  const checkId = Number(info.lastInsertRowid);
+  const ins = db.prepare(
+    `INSERT INTO qc_results (check_id, param_id, name, kind, section, unit, value, value_max, ranged, na,
+                             min_value, max_value, notes, sort_order)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  );
+  recorded.forEach((r, i) => {
+    const param = spec.get(Number(r.param_id))!;
+    const na = r.na ? 1 : 0;
+    const ranged = !na && param.ranged && param.kind !== 'boolean' ? 1 : 0;
+    ins.run(
+      checkId, param.id, param.name, param.kind, param.section ?? '', param.unit,
+      na ? null : param.kind === 'boolean' ? (r.value ? 1 : 0) : Number(r.value),
+      ranged ? Number(r.value_max) : null,
+      ranged, na,
+      param.min_value, param.max_value, String(r.notes ?? ''), i
+    );
+  });
+  return checkId;
+}
+
 workOrdersRouter.post('/:id/qc-checks', requirePermission('qc', 'full'), (req: AuthedRequest, res) => {
   const id = Number(req.params.id);
   const wo = accessible(req, id);
   if (!wo) return res.status(404).json({ error: 'Work order not found' });
   const body = req.body ?? {};
-  const date = String(body.date ?? '').trim();
-  if (!date) return res.status(400).json({ error: 'Date is required' });
-
-  // Recorded against the tolerances in force for *this* job's customer — and
-  // copied onto the result below, so a batch stays readable when a spec moves.
-  const specCustomer = (db.prepare('SELECT customer_id FROM orders WHERE id = ?')
-    .get(Number(wo.order_id)) as { customer_id: number } | undefined)?.customer_id ?? null;
-  const spec = new Map(paramsFor(wo.product_id as number | null, specCustomer).map((p) => [p.id, p]));
-  const rows = Array.isArray(body.results) ? (body.results as Record<string, unknown>[]) : [];
-  const given = (v: unknown) => v !== '' && v !== null && v !== undefined;
-  /*
-   * Three states per parameter now, where there were two (2026-10-16).
-   *
-   * A row left **blank** was not looked at: it is not a failure, it is not
-   * recorded, and nothing about that changed. A row marked **not applicable**
-   * is an answer somebody gave — it is written, it prints on the certificate,
-   * and `resultOk` reads it as no verdict. Aglo's own preform certificate
-   * carries three of them, and until this they were indistinguishable from
-   * the parameters nobody reached.
-   *
-   * So `recorded` is what gets written and `measured` is what counts as an
-   * inspection: a check of nothing but NA is still refused, since recording
-   * that four things do not apply is not an inspection of anything.
-   */
-  const recorded = rows.filter((r) => given(r.value) || r.na);
-  const measured = recorded.filter((r) => !r.na && given(r.value));
-  if (!measured.length) {
-    return res.status(400).json({ error: 'Record at least one measurement' });
-  }
-  const stray = recorded.find((r) => !spec.has(Number(r.param_id)));
-  if (stray) return res.status(400).json({ error: 'That check is not on the specification for this product' });
-  /*
-   * A ranged characteristic takes both ends or neither. The upper is refused
-   * below the lower rather than quietly swapped: which way round somebody
-   * meant them is not for this route to decide, and a silently reordered pair
-   * is a reading nobody typed.
-   */
-  for (const r of measured) {
-    const param = spec.get(Number(r.param_id))!;
-    if (!param.ranged || param.kind === 'boolean') continue;
-    if (!given(r.value_max)) {
-      return res.status(400).json({ error: `${param.name} is observed as a range — record the highest as well as the lowest` });
-    }
-    if (Number(r.value_max) < Number(r.value)) {
-      return res.status(400).json({ error: `${param.name}: the highest observed is below the lowest` });
-    }
-  }
+  const refused = checkError(wo, body);
+  if (refused) return res.status(400).json({ error: refused });
 
   /*
    * Naming a batch is what makes this a **final** check rather than an
@@ -1028,41 +1066,95 @@ workOrdersRouter.post('/:id/qc-checks', requirePermission('qc', 'full'), (req: A
     if (!owned) return res.status(400).json({ error: 'That batch is not on this work order' });
   }
 
-  let checkId = 0;
-  transaction(() => {
-    const info = db.prepare(
-      `INSERT INTO qc_checks (work_order_id, batch_id, date, shift, sample_size, inspector, notes, created_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(id, batchId, date, String(body.shift ?? ''), numOrNull(body.sample_size),
-      String(body.inspector ?? ''), String(body.notes ?? ''), req.user!.id);
-    checkId = Number(info.lastInsertRowid);
-
-    const ins = db.prepare(
-      `INSERT INTO qc_results (check_id, param_id, name, kind, section, unit, value, value_max, ranged, na,
-                               min_value, max_value, notes, sort_order)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    );
-    recorded.forEach((r, i) => {
-      const param = spec.get(Number(r.param_id))!;
-      const na = r.na ? 1 : 0;
-      const ranged = !na && param.ranged && param.kind !== 'boolean' ? 1 : 0;
-      ins.run(
-        // Copied like the name and the tolerance beside it: a certificate
-        // already issued goes on printing under the block it was issued
-        // under, however the specification is re-sectioned afterwards.
-        checkId, param.id, param.name, param.kind, param.section ?? '', param.unit,
-        // A visual check comes in as true/false and is stored as 1/0, so one
-        // column holds both kinds and `resultOk` reads them the same way. An
-        // NA row carries no reading at all — it is the absence of one, said
-        // out loud.
-        na ? null : param.kind === 'boolean' ? (r.value ? 1 : 0) : Number(r.value),
-        ranged ? Number(r.value_max) : null,
-        ranged, na,
-        param.min_value, param.max_value, String(r.notes ?? ''), i
-      );
-    });
-  });
+  transaction(() => { insertCheck(req, id, wo, body, batchId); });
   res.status(201).json(getFull(req, id));
+});
+
+/**
+ * Open a lot, inspect it and certify it, in one press.
+ *
+ * Asked for 2026-10-21 (*"Since our company is small only final COA is
+ * required and is issued"*). The three steps exist for a plant that runs many
+ * lots per job and certifies them separately; on a desk that runs one lot per
+ * job, opening the batch by hand is pure overhead between the inspection and
+ * the certificate.
+ *
+ * **It is the three routes, not a fourth way of doing what they do.** The
+ * check goes through `checkError` and `insertCheck` — the same pair the
+ * ordinary route uses, extracted for this — and the certificate through
+ * `coaGroupError` and `writeCoa`. Two definitions of *what counts as an
+ * inspection*, on a document that clears goods, is the worst way for two
+ * things to disagree.
+ *
+ * **The lot covers what the job has made and nobody has lotted**, which is
+ * the only answer that cannot be wrong: it is every shift booked and not yet
+ * assigned, so a job already part-lotted is refused rather than quietly
+ * certified twice, and a job with nothing booked has nothing to certify.
+ *
+ * **`qc: full`, not `output: full`.** Opening a lot is ordinarily a
+ * production act and keeps that cell on its own route; the lot opened *here*
+ * is not a plan but the scope of a certificate — derived entirely from output
+ * already booked, by the team that certifies. Requiring both cells would
+ * leave this usable by the super admin alone, since Production holds no `qc`
+ * and Quality no `output`.
+ *
+ * **A failing inspection keeps the lot and the check and issues nothing.**
+ * Rolling back would destroy the record of an inspection that really
+ * happened; what it leaves is a failed lot awaiting a disposition, which is
+ * exactly the state `dispositionError` exists for.
+ */
+workOrdersRouter.post('/:id/certify', requirePermission('qc', 'full'), (req: AuthedRequest, res) => {
+  const id = Number(req.params.id);
+  const wo = accessible(req, id);
+  if (!wo) return res.status(404).json({ error: 'Work order not found' });
+  const body = (req.body ?? {}) as Record<string, unknown>;
+
+  const loose = db.prepare(
+    `SELECT COUNT(*) AS n, MAX(date) AS last FROM production_entries
+      WHERE work_order_id = ? AND batch_id IS NULL`
+  ).get(id) as { n: number; last: string | null };
+  if (!Number(loose.n)) {
+    return res.status(409).json({
+      error: 'Nothing here to certify: every shift booked on this job is already in a lot. '
+        + 'Issue the certificate from the lot itself.',
+    });
+  }
+
+  const refused = checkError(wo, body);
+  if (refused) return res.status(400).json({ error: refused });
+
+  const order = db.prepare('SELECT company_id, customer_id FROM orders WHERE id = ?')
+    .get(Number(wo.order_id)) as { company_id: number; customer_id: number };
+  const companyId = resolveCompanyId(order.company_id, order.customer_id);
+  const lotDate = String(loose.last ?? body.date);
+
+  let batchId = 0;
+  transaction(() => {
+    const number = String(body.batch_number ?? '').trim() || nextNumber('batch', { companyId, date: lotDate });
+    batchId = Number(db.prepare(
+      'INSERT INTO batches (number, work_order_id, date, notes, created_by) VALUES (?, ?, ?, ?, ?)'
+    ).run(number, id, lotDate, String(body.batch_notes ?? ''), req.user!.id).lastInsertRowid);
+    // What the certificate is about: every shift not already spoken for.
+    db.prepare(
+      'UPDATE production_entries SET batch_id = ? WHERE work_order_id = ? AND batch_id IS NULL'
+    ).run(batchId, id);
+    insertCheck(req, id, wo, body, batchId);
+  });
+
+  // Asked rather than assumed, so the one definition of what may be certified
+  // decides here too — notably a reading that failed.
+  const cannot = coaGroupError([batchId]);
+  if (cannot) {
+    return res.status(409).json({
+      error: cannot,
+      batch: batchById(batchId),
+      certified: false,
+    });
+  }
+
+  const date = String(body.coa_date ?? '').trim() || String(body.date);
+  writeCoa([batchId], date, req.user!.id, String(body.approved_by ?? '').trim(), companyId);
+  res.status(201).json({ batch: batchById(batchId), certified: true });
 });
 
 workOrdersRouter.delete('/qc-checks/:checkId', requirePermission('qc', 'full'), (req: AuthedRequest, res) => {

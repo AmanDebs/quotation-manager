@@ -487,6 +487,14 @@ addColumnIfMissing('qc_results', 'na', 'INTEGER NOT NULL DEFAULT 0');
 addColumnIfMissing('product_qc_params', 'section', "TEXT NOT NULL DEFAULT ''");
 addColumnIfMissing('qc_results', 'section', "TEXT NOT NULL DEFAULT ''");
 
+/*
+ * Whether a sales order demands a Certificate of Analysis (2026-10-21).
+ * Additive and 0 on every order on file — and an export order needs no tick
+ * to be covered, so nothing already booked for export escapes the rule by
+ * predating the column.
+ */
+addColumnIfMissing('orders', 'coa_required', 'INTEGER NOT NULL DEFAULT 0');
+
 addColumnIfMissing('customers', 'active', 'INTEGER NOT NULL DEFAULT 1');
 addColumnIfMissing('products', 'active', 'INTEGER NOT NULL DEFAULT 1');
 

@@ -192,3 +192,110 @@ describe('the line position', () => {
     assert.match(String(qcBlockError(order, [{}])), /must say which order line/);
   });
 });
+
+describe('where a certificate is demanded rather than a passing check', () => {
+  /*
+   * 2026-10-21, the client: *"COA is compulsory for only export order. It is
+   * required for only some specific domestic orders so for domestic I was
+   * thinking we can add a option when creating sale order whether COA is
+   * required."* — and, asked whether the flag should hold goods or only
+   * record the requirement, *"Hold them — no COA, no dispatch."*
+   *
+   * Most of these assert what must **not** change: the domestic book is the
+   * imported backlog, and holding it would stop work that ships today.
+   */
+
+  const mark = (orderId: number, cols: { is_export?: number; coa_required?: number }) => {
+    for (const [k, v] of Object.entries(cols)) {
+      db.prepare(`UPDATE orders SET ${k} = ? WHERE id = ?`).run(v, orderId);
+    }
+  };
+
+  /** A job on line 0 with a passing in-process check and no lot. */
+  function passedJob(orderId: number, productId: number) {
+    const woId = Number((db.prepare(
+      `INSERT INTO work_orders (number, order_id, order_line, product_id, description, qty_planned, status)
+       VALUES (?, ?, 0, ?, 'Goods', 1000, 'released') RETURNING id`
+    ).get(`WO/G/${++seq}`, orderId, productId) as { id: number }).id);
+    const checkId = Number((db.prepare(
+      "INSERT INTO qc_checks (work_order_id, date, shift) VALUES (?, '2026-09-06', 'A') RETURNING id"
+    ).get(woId) as { id: number }).id);
+    db.prepare(
+      `INSERT INTO qc_results (check_id, name, kind, unit, value, min_value, max_value, sort_order)
+       VALUES (?, 'Wall', 'numeric', 'mm', 0.4, 0.3, 0.5, 0)`
+    ).run(checkId);
+    return woId;
+  }
+
+  /** ...and the lot that carries a certificate. */
+  function certify(woId: number) {
+    const batchId = Number((db.prepare(
+      "INSERT INTO batches (number, work_order_id, date, coa_no, coa_date) VALUES (?, ?, '2026-09-06', 'COA/T/1', '2026-09-07') RETURNING id"
+    ).get(`B/G/${++seq}`, woId) as { id: number }).id);
+    db.prepare(
+      `INSERT INTO production_entries (work_order_id, batch_id, date, shift, qty_ok, qty_reject)
+       VALUES (?, ?, '2026-09-06', 'A', 1000, 0)`
+    ).run(woId, batchId);
+    const checkId = Number((db.prepare(
+      "INSERT INTO qc_checks (work_order_id, batch_id, date, shift) VALUES (?, ?, '2026-09-06', 'A') RETURNING id"
+    ).get(woId, batchId) as { id: number }).id);
+    db.prepare(
+      `INSERT INTO qc_results (check_id, name, kind, unit, value, min_value, max_value, sort_order)
+       VALUES (?, 'Wall', 'numeric', 'mm', 0.4, 0.3, 0.5, 0)`
+    ).run(checkId);
+    return batchId;
+  }
+
+  test('an export order is not cleared by a passing job check alone', () => {
+    const p = makeProduct(true);
+    const o = makeOrder([p]);
+    mark(o, { is_export: 1 });
+    passedJob(o, p);
+    const refused = qcBlockError(o, [{ order_line: 0 }]);
+    assert.match(refused ?? '', /Certificate of Analysis/);
+    assert.match(refused ?? '', /export order/);
+  });
+
+  test('and is cleared by a certified lot', () => {
+    const p = makeProduct(true);
+    const o = makeOrder([p]);
+    mark(o, { is_export: 1 });
+    certify(passedJob(o, p));
+    assert.equal(qcBlockError(o, [{ order_line: 0 }]), null);
+  });
+
+  test('a domestic order is cleared by the job check, exactly as before', () => {
+    /* The imported backlog. Holding this would stop work that ships today. */
+    const p = makeProduct(true);
+    const o = makeOrder([p]);
+    passedJob(o, p);
+    assert.equal(qcBlockError(o, [{ order_line: 0 }]), null);
+  });
+
+  test('unless somebody ticked it on the order, which names itself in the refusal', () => {
+    const p = makeProduct(true);
+    const o = makeOrder([p]);
+    mark(o, { coa_required: 1 });
+    passedJob(o, p);
+    const refused = qcBlockError(o, [{ order_line: 0 }]);
+    assert.match(refused ?? '', /Certificate of Analysis/);
+    assert.match(refused ?? '', /marked COA required/);
+  });
+
+  test('a product nobody has specified is never asked, export or not', () => {
+    /* `has_spec: false` means nobody has said what to measure — the rule this
+       module states twice about itself, and the one that stopped the gate
+       blocking every despatch on the day it shipped. */
+    const p = makeProduct(false);
+    const o = makeOrder([p]);
+    mark(o, { is_export: 1 });
+    assert.equal(qcBlockError(o, [{ order_line: 0 }]), null);
+  });
+
+  test('and neither is a charge line on an export order', () => {
+    const p = makeProduct(true);
+    const o = makeOrder([null, p]);
+    mark(o, { is_export: 1 });
+    assert.equal(qcBlockError(o, [{ order_line: 0 }]), null, 'the freight line was asked for a COA');
+  });
+});
