@@ -2775,11 +2775,20 @@ function qcReportContent(s: Row, jobs: QcJob[]): Content[] {
       ];
       for (const c of list) {
         for (const r of c.results) {
-          const spec = r.kind === 'boolean'
-            ? 'pass / fail'
-            : [r.min_value ?? '', r.max_value ?? ''].some((v) => v !== '')
-              ? `${r.min_value ?? ''} – ${r.max_value ?? ''}`
-              : '—';
+          /*
+           * `toleranceText`, not a second formatter (2026-10-21, read off the
+           * client's own printed report). This file had grown its own, and it
+           * was wrong in two ways visible on that page: a tolerance open at
+           * one end printed as **" – 1.5"**, which reads as a negative number
+           * or a range with its start missing rather than *max 1.5 mm*; and
+           * it dropped the **unit**, so the Spec column said `9 – 11` beside
+           * a Reading of `9.5 – 10.5 gm`.
+           *
+           * Two copies of one rule is how the two come to disagree, which is
+           * exactly what happened — the certificate has been asking
+           * `toleranceText` all along and printing it correctly.
+           */
+          const spec = toleranceText(r);
           body.push([
             { text: r.name, fontSize: 8 },
             { text: spec, fontSize: 8, alignment: 'center' as const },
@@ -3146,7 +3155,10 @@ export function buildDeliveryChallanPdf(id: number): TDocumentDefinitions {
 
 /** A tolerance as somebody reads it, with either end allowed to be open. */
 function toleranceText(r: { kind?: unknown; min_value?: unknown; max_value?: unknown; unit?: unknown }): string {
-  if (String(r.kind) === 'boolean') return 'Pass';
+  // What is allowed, not what happened: a Specification column saying
+  // "Pass" reads as the verdict rather than the question it was judged by,
+  // and the Result column beside it is where a verdict belongs.
+  if (String(r.kind) === 'boolean') return 'pass / fail';
   const u = String(r.unit ?? '').trim();
   const lo = r.min_value == null ? null : Number(r.min_value);
   const hi = r.max_value == null ? null : Number(r.max_value);

@@ -222,6 +222,54 @@ describe('what the report says', () => {
   });
 });
 
+describe('the Spec column states the window, in full', () => {
+  /*
+   * Read off the client's own printed report (2026-10-21). This file had its
+   * own tolerance formatter beside the certificate's, and it was wrong in two
+   * ways visible on that page: a window open at one end, and the unit.
+   */
+
+  function withTolerance(min: number | null, max: number | null, unit = 'mm') {
+    const { woId } = chain({ withChecks: false });
+    const checkId = Number((db.prepare(
+      "INSERT INTO qc_checks (work_order_id, date, shift, inspector) VALUES (?, '2026-10-20', 'A', 'Aman') RETURNING id"
+    ).get(woId) as { id: number }).id);
+    db.prepare(
+      `INSERT INTO qc_results (check_id, name, kind, unit, value, min_value, max_value, sort_order)
+       VALUES (?, 'Perpendicularity', 'numeric', ?, 0.7, ?, ?, 0)`
+    ).run(checkId, unit, min, max);
+    return textsOf(buildQcReportPdf(woId));
+  }
+
+  test('a window open at the bottom reads as a maximum, not as a missing number', () => {
+    const texts = withTolerance(null, 1.5);
+    assert.ok(texts.includes('max 1.5 mm'), 'the one-sided tolerance is not named');
+    // The shape it used to print, which reads as a negative or a broken range.
+    assert.ok(!texts.some((t) => t.trim().startsWith('–')), 'a bare dash is back');
+  });
+
+  test('and one open at the top reads as a minimum', () => {
+    assert.ok(withTolerance(0.4, null).includes('min 0.4 mm'));
+  });
+
+  test('a two-sided window carries its unit, like the reading beside it', () => {
+    const texts = withTolerance(9, 11, 'gm');
+    assert.ok(texts.includes('9 – 11 gm'), 'the Spec column dropped the unit');
+  });
+
+  test('and a pass/fail check states what is allowed rather than a verdict', () => {
+    const { woId } = chain({ withChecks: false });
+    const checkId = Number((db.prepare(
+      "INSERT INTO qc_checks (work_order_id, date, shift, inspector) VALUES (?, '2026-10-20', 'A', 'Aman') RETURNING id"
+    ).get(woId) as { id: number }).id);
+    db.prepare(
+      `INSERT INTO qc_results (check_id, name, kind, unit, value, sort_order)
+       VALUES (?, 'Appearance', 'boolean', '', 1, 0)`
+    ).run(checkId);
+    assert.ok(textsOf(buildQcReportPdf(woId)).includes('pass / fail'));
+  });
+});
+
 describe('the three blocks the client certificate prints', () => {
   /*
    * Aglo own 48mm cap certificate (2026-10-21, *"The format should be like
