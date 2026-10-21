@@ -3243,12 +3243,6 @@ const SECTION_TITLE: Record<string, string> = {
 };
 
 /** The verdict a result carries, in the words both documents already use. */
-function verdictOf(r: QcRow): string {
-  if (r.na) return 'N/A';
-  const ok = (r as { ok?: boolean | null }).ok;
-  return ok === null || ok === undefined ? 'Not measured' : ok ? 'Pass' : 'Fail';
-}
-
 const qth = (t: string, s: Row, extra: Record<string, unknown> = {}) => ({
   text: t, fontSize: 7.5, bold: true, color: '#ffffff', fillColor: s.theme, ...extra,
 });
@@ -3326,19 +3320,30 @@ function qcSectionTable(s: Row, section: string, rows: QcRow[]): Content {
     };
   }
 
-  // Visual, and anything the specification did not place: what was asked for
-  // beside what was seen, which is the shape their paper uses for the eye.
+  /*
+   * Visual, and anything the specification did not place: what was asked for
+   * beside what was seen, which is the shape their paper uses for the eye.
+   *
+   * **Three columns, not four** (2026-10-21, the client with the block in
+   * front of them: *"Observation and result are same thing, result not
+   * required"*). On a pass/fail characteristic the verdict **is** the
+   * observation — nine rows reading *Pass · Pass* said one thing twice — and
+   * where words are written instead (*Absent*, *Ok*) the fitment block beside
+   * this one already prints them with no verdict column at all, so a fourth
+   * column here would make the two blocks disagree about their own shape.
+   * The verdict of the set is the **QC PASSED** line the page closes on,
+   * which is where their paper puts it.
+   */
   return {
     table: {
       headerRows: 1,
-      widths: ['*', 110, 90, 62],
+      widths: ['*', 120, 120],
       body: [
-        [qth('Parameter', s), qth('Specification', s), qth('Observation', s), qth('Result', s)],
+        [qth('Parameter', s), qth('Specification', s), qth('Observation', s)],
         ...rows.map((r) => [
           qtd(name(r)),
           qtd(toleranceText(r), 'center'),
           qtd(readingText(r), 'center'),
-          qtd(verdictOf(r), 'center'),
         ]),
       ],
     },

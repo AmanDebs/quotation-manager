@@ -343,6 +343,30 @@ describe('the three blocks the client certificate prints', () => {
     assert.ok(texts.filter((t) => t === 'Minimum').length === 2, 'the Min columns are not a pair');
   });
 
+  test('the visual block says it once, not twice', () => {
+    /* 2026-10-21, the client with nine rows reading *Pass · Pass*:
+       *"Observation and result are same thing, result not required"*. On a
+       pass/fail characteristic the verdict **is** the observation, and the
+       fitment block beside it already prints words with no verdict column —
+       a fourth column here would make the two disagree about their shape. */
+    const { woId } = chain({ withChecks: false });
+    record(woId, [{ name: 'Short Moulding', section: 'visual', kind: 'boolean', value: 1 }]);
+    const texts = textsOf(buildQcReportPdf(woId));
+    assert.ok(texts.includes('Observation'), 'the visual block lost its Observation column');
+    assert.ok(!texts.includes('Result'), 'the visual block still carries a Result column');
+    assert.equal(texts.filter((t) => t === 'Pass').length, 1, 'the verdict is printed twice');
+  });
+
+  test('...and a failure still reads, because the observation is the verdict', () => {
+    /* The half that must not move: dropping a column must not drop the only
+       place a failed visual check says so. */
+    const { woId } = chain({ withChecks: false });
+    record(woId, [{ name: 'Black Spots', section: 'visual', kind: 'boolean', value: 0 }]);
+    const texts = textsOf(buildQcReportPdf(woId));
+    assert.ok(texts.includes('Fail'), 'a failed visual check says nothing on the page');
+    assert.ok(texts.includes('QC FAILED'), 'the set was not read as failed');
+  });
+
   test('a reading the specification did not place is named, never dropped', () => {
     /* Silently leaving a recorded reading off a certificate is the one
        failure this cannot have, so an unplaced row gets its own block. */
