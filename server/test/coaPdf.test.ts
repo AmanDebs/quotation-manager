@@ -155,6 +155,78 @@ describe('a certificate over one lot is unchanged', () => {
   });
 });
 
+describe('where the lots went, once they have gone', () => {
+  /*
+   * The client asked for the consignment facts their own certificate carries
+   * (2026-10-21, *"Add the invoice details to the COA header"*). A COA is
+   * required **before** dispatch, so these are blank at the moment it is
+   * issued — which is why the row is absent rather than three em-dashes, and
+   * why both states are held here.
+   */
+
+  let invSeq = 188;
+  /** A trip carrying these lots, billed under an invoice. */
+  function ship(batchIds: number[], opts: { invoice?: boolean; packs?: number; qty?: number } = {}) {
+    const invoiceId = opts.invoice === false ? null : Number((db.prepare(
+      `INSERT INTO commercial_invoices (number, date, customer_id, company_id, currency, consignee, is_export)
+       VALUES (?, '2026-03-19', ?, 1, 'USD', 'AFRICA INDUSTRIAS LDA', 1) RETURNING id`
+    ).get(`AP/EX/${++invSeq}/25-26`, customerId) as { id: number }).id);
+    const dId = Number((db.prepare(
+      `INSERT INTO despatches (order_id, invoice_id, date, destination)
+       VALUES (?, ?, '2026-03-19', 'Nacala') RETURNING id`
+    ).get(orderId, invoiceId) as { id: number }).id);
+    db.prepare(
+      'INSERT INTO despatch_items (despatch_id, order_line, qty, packs) VALUES (?, 0, ?, ?)'
+    ).run(dId, opts.qty ?? 340000, opts.packs ?? 136);
+    for (const b of batchIds) {
+      db.prepare('INSERT INTO despatch_batches (despatch_id, batch_id) VALUES (?, ?)').run(dId, b);
+    }
+    return dId;
+  }
+
+  test('a certificate issued before dispatch draws no consignment row at all', () => {
+    /* The ordinary case at issue: the goods cannot go until this exists, so
+       there is no trip and no invoice to name. Three em-dashes would be a
+       dead box on a document. */
+    const texts = textsOf(buildCoaPdf(lots[0]));
+    // lv() uppercases its labels, so these are the strings on the page.
+    for (const label of ['INVOICE NO.  /  DATE', 'CONSIGNEE', 'DISPATCHED']) {
+      assert.ok(!texts.includes(label), label);
+    }
+  });
+
+  test('and the same certificate states them once the goods have gone', () => {
+    ship(lots);
+    const texts = textsOf(buildCoaPdf(lots[0]));
+    assert.ok(texts.includes('INVOICE NO.  /  DATE'));
+    assert.ok(texts.some((t) => t.includes('AP/EX/189/25-26')), 'the invoice is not named');
+    assert.ok(texts.includes('AFRICA INDUSTRIAS LDA'), 'the consignee is not named');
+    assert.ok(texts.some((t) => t.includes('3,40,000 pcs') && t.includes('136 boxes')), 'the figures are wrong');
+  });
+
+  test('counting only the lines these lots are on, never the whole lorry', () => {
+    /* A trip carries lines this certificate says nothing about; summing them
+       would overstate what was certified. */
+    const d = ship([lots[1]], { packs: 10, qty: 1000 });
+    db.prepare(
+      'INSERT INTO despatch_items (despatch_id, order_line, qty, packs) VALUES (?, 7, 99999, 999)'
+    ).run(d);
+    const texts = textsOf(buildCoaPdf(lots[1]));
+    assert.ok(!texts.some((t) => t.includes('999 boxes')), 'another line was counted in');
+  });
+
+  test('a trip that left before its paperwork names no invoice and still reports the load', () => {
+    /* `despatches.invoice_id` is nullable precisely because a lorry can go
+       first — so this is the record being honest, not a fault. */
+    const other = lot('10032026A', '2026-03-10');
+    db.prepare("UPDATE batches SET coa_no = 'COA/25-26/009', coa_date = '2026-03-20' WHERE id = ?").run(other);
+    ship([other], { invoice: false, packs: 12, qty: 2000 });
+    const texts = textsOf(buildCoaPdf(other));
+    assert.ok(texts.includes('INVOICE NO.  /  DATE'), 'the row is missing');
+    assert.ok(texts.some((t) => t.includes('12 boxes')), 'the load is not reported');
+  });
+});
+
 describe('what a group certificate refuses', () => {
   test('nothing named', () => {
     assert.equal(coaGroupError([]), 'Name at least one batch to certify.');

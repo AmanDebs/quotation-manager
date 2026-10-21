@@ -3458,6 +3458,63 @@ export function buildCoaPdf(batchId: number): TDocumentDefinitions {
       WHERE pm.product_id = (SELECT product_id FROM work_orders WHERE id = ?)
       ORDER BY pm.sort_order, pm.id`
   ).all(b.work_order_id) as { name: string }[]).map((r) => r.name).join(', ');
+  /*
+   * **Where these lots actually went** (2026-10-21, the client: *"Add the
+   * invoice details to the COA header"*). Their own certificate states the
+   * consignee, the invoice and its date, and the boxes — facts about a
+   * *consignment*, where this document is issued against a **batch**.
+   *
+   * They are reachable, and only one way: `despatch_batches` says which lots
+   * travelled on which trip, and a trip names the invoice it was billed
+   * under. Read rather than stored, like every other header fact here, so
+   * correcting a trip or re-pointing an invoice corrects the certificate.
+   *
+   * **Blank at the moment it matters most, and that is correct rather than a
+   * gap.** A COA is required *before* dispatch — it is what `qcBlockError`
+   * looks for — so at issue there is no trip and no invoice, and the row is
+   * **not drawn at all** rather than printing three em-dashes. A dead box on
+   * a document is the rule the notify parties already follow. Reprint the
+   * same certificate after the goods have gone and it fills in.
+   */
+  const trips = db.prepare(
+    `SELECT DISTINCT d.id AS despatch_id, ci.number AS invoice_number, ci.date AS invoice_date,
+            ci.consignee AS consignee
+       FROM despatch_batches dbx
+       JOIN despatches d ON d.id = dbx.despatch_id
+       LEFT JOIN commercial_invoices ci ON ci.id = d.invoice_id
+      WHERE dbx.batch_id IN (${holes})
+      ORDER BY d.date, d.id`
+  ).all(...(ids as never[])) as
+    { despatch_id: number; invoice_number: string | null; invoice_date: string | null; consignee: string | null }[];
+
+  /*
+   * The boxes and pieces of **these lots' own lines**, not of the whole trip:
+   * a lorry carries lines this certificate says nothing about, and summing
+   * them would overstate what was certified. The lot names no line itself —
+   * its work order does, the chain's own index rule.
+   */
+  const lotLines = (db.prepare(
+    `SELECT DISTINCT w.order_line FROM batches bb
+       JOIN work_orders w ON w.id = bb.work_order_id
+      WHERE bb.id IN (${holes})`
+  ).all(...(ids as never[])) as { order_line: number }[]).map((r) => Number(r.order_line));
+
+  const shipped = trips.length && lotLines.length
+    ? db.prepare(
+      `SELECT COALESCE(SUM(di.packs), 0) AS boxes, COALESCE(SUM(di.qty), 0) AS pcs
+         FROM despatch_items di
+        WHERE di.despatch_id IN (${trips.map(() => '?').join(', ')})
+          AND di.order_line IN (${lotLines.map(() => '?').join(', ')})`
+    ).get(...(trips.map((t) => t.despatch_id) as never[]), ...(lotLines as never[])) as { boxes: number; pcs: number }
+    : { boxes: 0, pcs: 0 };
+
+  // One invoice is the ordinary case; a lot split across two consignments is
+  // not, so the numbers are joined and the **date is stated only where it is
+  // unambiguous** rather than one of them being picked to stand for both.
+  const invNumbers = [...new Set(trips.map((t) => (t.invoice_number ?? '').trim()).filter(Boolean))];
+  const invDates = [...new Set(trips.map((t) => (t.invoice_date ?? '').trim()).filter(Boolean))];
+  const consignees = [...new Set(trips.map((t) => (t.consignee ?? '').trim()).filter(Boolean))];
+
   const colour = String((db.prepare(
     `SELECT COALESCE(NULLIF(oi.color, ''), p.color, '') AS color
        FROM work_orders w
@@ -3499,6 +3556,20 @@ export function buildCoaPdf(batchId: number): TDocumentDefinitions {
           lv("Buyer's Order", [String(wo.order_number ?? ''), wo.po_number ? `PO: ${wo.po_number}` : '']
             .filter(Boolean).join('\n')),
         ],
+        // Drawn only once the goods have gone — see the read above.
+        ...(trips.length ? [[
+          lv('Invoice No.  /  Date', [
+            invNumbers.join(', ') || '—',
+            // A trip can leave before its paperwork, so a blank invoice here
+            // is the lorry having gone unbilled rather than a fault.
+            invDates.length === 1 ? fmtDate(invDates[0]) : '',
+          ].filter(Boolean).join('   ')),
+          lv('Consignee', consignees.join('\n') || '—'),
+          lv('Dispatched', [
+            shipped.pcs ? `${fmtNum(shipped.pcs, 0)} pcs` : '',
+            shipped.boxes ? `${fmtNum(shipped.boxes, 0)} boxes` : '',
+          ].filter(Boolean).join('  ·  ') || '—'),
+        ]] : []),
       ],
     },
     layout: boxedLayout,
