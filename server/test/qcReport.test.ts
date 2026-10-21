@@ -328,11 +328,15 @@ describe('the three blocks the client certificate prints', () => {
 
   test('and a sectioned one prints a block per section, in the paper order', () => {
     const { woId } = chain({ withChecks: false });
-    record(woId, [
+    const checkId = record(woId, [
       { name: 'Short Molding', section: 'visual', kind: 'boolean', value: 1 },
-      { name: 'Closure O/D', section: 'dimensional', value: 0.4 },
+      { name: 'Closure O/D', section: 'dimensional', value: 0.35 },
       { name: 'TE Band', section: 'fitment', kind: 'boolean', value: 1 },
     ]);
+    // The pair of sub-columns is what a **range** needs; a block of single
+    // figures is headed differently, which is the case below.
+    db.prepare("UPDATE qc_results SET value_max = 0.45, ranged = 1 WHERE check_id = ? AND name = 'Closure O/D'")
+      .run(checkId);
     const texts = textsOf(buildQcReportPdf(woId));
     const at = (t: string) => texts.indexOf(t);
     assert.ok(at('VISUAL CHECKS') >= 0 && at('DIMENSIONAL CHECKS') >= 0 && at('FITMENT CHECK') >= 0);
@@ -396,17 +400,41 @@ describe('the three blocks the client certificate prints', () => {
     assert.ok(!texts.includes('QC PASSED'));
   });
 
-  test('a single reading is one statement across both Actual cells', () => {
-    /* It is an average, or a figure taken once over the batch — not the
-       lowest piece observed. Printed under *Minimum* with an em-dash beside
-       it, the certificate would claim it was; so it is written once across
-       the pair, and never the same figure repeated. */
+  test('a block of single figures is headed Average Value, not Minimum / Maximum', () => {
+    /* 2026-10-21, the client reading four averages under a *Minimum /
+       Maximum* banner: *"When we choose single value then write Average value
+       instead of max min"*. A header is per table and an answer is per row,
+       so where **no** row carries a range there is nothing for the pair to
+       hold and the side is one column saying what the figures are. */
     const { woId } = chain({ withChecks: false });
-    record(woId, [{ name: 'Closure O/D', section: 'dimensional', value: 0.4 }]);
+    record(woId, [
+      { name: 'Closure O/D', section: 'dimensional', value: 0.4 },
+      { name: 'Cap Weight', section: 'dimensional', value: 0.35 },
+    ]);
+    const texts = textsOf(buildQcReportPdf(woId));
+    assert.ok(texts.includes('Average Value'), 'the Actual side is not headed by what is under it');
+    assert.ok(!texts.includes('Actual'), 'the pair banner is still drawn over one column');
+    assert.equal(texts.filter((t) => t === 'Minimum').length, 1, 'Minimum is still a pair');
+    assert.equal(texts.filter((t) => t === '0.4 mm').length, 1, 'the reading is printed twice');
+  });
+
+  test('...and a mixed block keeps the pair, with the single answer spanning it', () => {
+    /* The header can only describe what every row has, so one range is
+       enough to keep Minimum and Maximum — and the average beside it is still
+       written once across the two, never under *Minimum* claiming to be the
+       lowest piece observed. */
+    const { woId } = chain({ withChecks: false });
+    const checkId = record(woId, [
+      { name: 'Closure O/D', section: 'dimensional', value: 0.35 },
+      { name: 'Cap Weight', section: 'dimensional', value: 0.4 },
+    ]);
+    db.prepare("UPDATE qc_results SET value_max = 0.45, ranged = 1 WHERE check_id = ? AND name = 'Closure O/D'")
+      .run(checkId);
     const def = buildQcReportPdf(woId);
     const texts = textsOf(def);
-    assert.equal(texts.filter((t) => t === '0.4 mm').length, 1, 'the reading is printed twice');
-    assert.ok(spans(def, '0.4 mm'), 'the reading does not span the two Actual cells');
+    assert.ok(texts.includes('Actual'), 'the pair banner was dropped on a block that has a range');
+    assert.equal(texts.filter((t) => t === 'Minimum').length, 2, 'the Min columns are not a pair');
+    assert.ok(spans(def, '0.4 mm'), 'the single answer does not span the two Actual cells');
   });
 
   test('complied is a pass with no figure, and the words beat the default wording', () => {
@@ -418,10 +446,15 @@ describe('the three blocks the client certificate prints', () => {
       { name: 'Closure O/D', section: 'dimensional', value: null, complied: 1 },
       { name: 'Leakage', section: 'fitment', kind: 'boolean', value: 1, observation: 'No leakage found' },
     ]);
-    const def = buildQcReportPdf(woId);
-    const texts = textsOf(def);
+    const texts = textsOf(buildQcReportPdf(woId));
     assert.ok(texts.includes('Complied'), 'a complied dimension did not say so');
-    assert.ok(spans(def, 'Complied'), 'Complied did not span the two Actual cells');
+    // Nothing numeric under it, so *Average Value* would describe nothing —
+    // it takes the word the blocks either side of it already use.
+    // Not *Average Value*: nothing numeric is under it. Not the pair banner
+    // either — `Actual` over Minimum/Maximum would be two sub-columns with
+    // one word to put in them.
+    assert.ok(!texts.includes('Average Value'), 'a block with no figures is headed Average Value');
+    assert.ok(!texts.includes('Actual'), 'the pair banner was drawn over a single word');
     assert.ok(texts.includes('No leakage found'), 'the fitment wording was dropped');
     assert.ok(!texts.includes('Pass'), 'the default wording printed over the words written');
     assert.ok(texts.includes('QC PASSED'), 'complied was not read as a pass');

@@ -3264,6 +3264,52 @@ function qcSectionTable(s: Row, section: string, rows: QcRow[]): Content {
   if (section === 'dimensional') {
     const cell = (v: unknown, unit: string) =>
       v == null || v === '' ? '—' : `${fmtNum(Number(v), 3)}${unit ? ` ${unit}` : ''}`;
+    const specCells = (r: QcRow) => {
+      const unit = String(r.unit ?? '').trim();
+      return [qtd(name(r)), qtd(cell(r.min_value, unit), 'center'), qtd(cell(r.max_value, unit), 'center')];
+    };
+
+    /*
+     * **The Actual side is headed by what is actually under it** (2026-10-21,
+     * the client, reading a block of averages under a *Minimum / Maximum*
+     * banner: *"When we choose single value then write Average value instead
+     * of max min"*).
+     *
+     * A header is per table and an answer is per row, so the two can only be
+     * reconciled one way: where **no** row carries a range, there is nothing
+     * for a pair of sub-columns to hold and the side is one column saying
+     * what the figures are. Where any row does, the pair stays and the single
+     * answers span it — which is the mixed block, and reads correctly without
+     * the header having to claim anything untrue of half its rows.
+     */
+    const anyRange = rows.some((r) => !r.na && r.value_max != null);
+    if (!anyRange) {
+      // *Average value* only where there are figures to average; a block
+      // answered entirely in words is an observation, the word the two blocks
+      // either side of this one already use.
+      const anyNumber = rows.some((r) => !r.na && !r.complied && r.value != null);
+      return {
+        table: {
+          headerRows: 2,
+          widths: ['*', 62, 62, 124],
+          body: [
+            [
+              qth('Parameter', s, { rowSpan: 2 }),
+              qth('Specification', s, { colSpan: 2, alignment: 'center' }), {},
+              qth(anyNumber ? 'Average Value' : 'Observation', s, { rowSpan: 2, alignment: 'center' }),
+            ],
+            [
+              {},
+              qth('Minimum', s, { alignment: 'center' }), qth('Maximum', s, { alignment: 'center' }),
+              {},
+            ],
+            ...rows.map((r) => [...specCells(r), qtd(readingText(r), 'center')]),
+          ],
+        },
+        layout: gridLayout,
+      };
+    }
+
     return {
       table: {
         headerRows: 2,
@@ -3281,7 +3327,6 @@ function qcSectionTable(s: Row, section: string, rows: QcRow[]): Content {
           ],
           ...rows.map((r) => {
             const unit = String(r.unit ?? '').trim();
-            const spec = [qtd(name(r)), qtd(cell(r.min_value, unit), 'center'), qtd(cell(r.max_value, unit), 'center')];
             /*
              * **One answer spans both ends.** A range fills Minimum and
              * Maximum; anything else is a single statement about the whole
@@ -3291,10 +3336,10 @@ function qcSectionTable(s: Row, section: string, rows: QcRow[]): Content {
              * it is not. So it is written once, across the pair.
              */
             if (!r.na && r.value_max == null) {
-              return [...spec, { ...qtd(readingText(r), 'center'), colSpan: 2 }, {}];
+              return [...specCells(r), { ...qtd(readingText(r), 'center'), colSpan: 2 }, {}];
             }
             return [
-              ...spec,
+              ...specCells(r),
               // An N/A is an answer, and it is the answer to both ends.
               qtd(r.na ? 'N/A' : cell(r.value, unit), 'center'),
               qtd(r.na ? '—' : cell(r.value_max, unit), 'center'),
