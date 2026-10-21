@@ -1,8 +1,13 @@
 import { useState } from 'react';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
-import type { Batch, WorkOrder } from '../types';
-import { Button, Input, Select, Field, Modal, ErrorText, EmptyState, TH_CLASS, FIELD_GRID } from './ui';
+import type { WorkOrder } from '../types';
+import {
+  Button, Input, Select, Field, Card, PageHeader, ErrorText, EmptyState, TH_CLASS, FIELD_GRID,
+} from '../components/ui';
+import { PdfLink } from '../components/PdfLink';
+import { useUnsavedChanges } from '../lib/useUnsavedChanges';
 import { fmtDate, today } from '../lib/format';
 
 /**
@@ -17,28 +22,33 @@ import { fmtDate, today } from '../lib/format';
  * Pass and fail are never sent from here or stored anywhere: the server keeps
  * the reading and the tolerance it was taken against, and derives the rest.
  */
-export default function QcCheckModal({ job, batch, certify, onClose, onSaved }: {
-  job: WorkOrder;
-  /**
-   * The lot this check finalises, if it is a final one.
-   *
-   * Naming a batch is the whole difference between the specification's two QC
-   * levels: without it this is an in-process check against the job, with it
-   * this is the final check a certificate may be issued on. One prop, because
-   * the server draws the same distinction over one column.
-   */
-  batch?: Batch;
+export default function QcCheckFormPage({ certify }: {
   /**
    * Open a lot, inspect it and certify it in one press (2026-10-21, the
    * client: *"Since our company is small only final COA is required and is
    * issued"*). The lot covers everything the job has made and nobody has
    * lotted, so there is nothing to choose — which is why this is a flag
-   * rather than a second dialog: it is the same inspection, with the two
+   * rather than a second screen: it is the same inspection, with the two
    * fields a certificate needs and no batch to pick.
+   *
+   * It comes from the **route** (`/work-orders/:id/certify`) rather than from
+   * a prop somebody passes, so the address bar says which of the two acts is
+   * being performed.
    */
   certify?: boolean;
-  onClose: () => void; onSaved: () => void;
 }) {
+  const { id } = useParams();
+  const navigate = useNavigate();
+  const [params] = useSearchParams();
+  /*
+   * The lot this check finalises, if it is a final one — `?batch=N`.
+   *
+   * Naming a batch is the whole difference between the specification's two QC
+   * levels: without it this is an in-process check against the job, with it
+   * this is the final check a certificate may be issued on. The server draws
+   * the same distinction over one nullable column.
+   */
+  const batchId = Number(params.get('batch')) || null;
   const [head, setHead] = useState({ date: today(), shift: '', sample_size: '', inspector: '', notes: '' });
   /*
    * What the certificate needs and the record cannot supply.
@@ -66,17 +76,18 @@ export default function QcCheckModal({ job, batch, certify, onClose, onSaved }: 
     setValues((prev) => ({ ...prev, [id]: { ...(prev[id] ?? {}), ...patch } }));
   const queryClient = useQueryClient();
 
-  const { data: full } = useQuery({
-    queryKey: ['work-order', String(job.id)],
-    queryFn: () => api.get<WorkOrder>(`/api/work-orders/${job.id}`),
+  const { data: full, isLoading } = useQuery({
+    queryKey: ['work-order', String(id)],
+    queryFn: () => api.get<WorkOrder>(`/api/work-orders/${id}`),
   });
+  const job = full;
+  const batch = (full?.batches ?? []).find((b) => b.id === batchId);
 
   const after = () => {
-    queryClient.invalidateQueries({ queryKey: ['work-order', String(job.id)] });
-    onSaved();
+    queryClient.invalidateQueries({ queryKey: ['work-order', String(id)] });
   };
   const add = useMutation({
-    mutationFn: () => api.post(`/api/work-orders/${job.id}/${certify ? 'certify' : 'qc-checks'}`, {
+    mutationFn: () => api.post(`/api/work-orders/${id}/${certify ? 'certify' : 'qc-checks'}`, {
       ...head,
       ...(certify ? coa : {}),
       batch_id: batch?.id ?? null,
@@ -95,14 +106,43 @@ export default function QcCheckModal({ job, batch, certify, onClose, onSaved }: 
         };
       }),
     }),
-    onSuccess: () => { setValues({}); after(); },
+    /*
+     * **Back to the job, not back to a blank form.** The dialog this replaced
+     * stayed open and cleared itself, which is right for a thing floating over
+     * the page you came from; a page that silently emptied after Save would
+     * read as one that had lost the reading. The job's own Quality tab is
+     * where the inspection now is — or the Batches tab, where a lot just
+     * certified needs looking at.
+     */
+    onSuccess: () => {
+      setValues({});
+      markSaved();
+      after();
+      navigate(`/work-orders/${id}?tab=${certify || batchId ? 'batches' : 'quality'}`);
+    },
   });
   const removeCheck = useMutation({
     mutationFn: (checkId: number) => api.del(`/api/work-orders/qc-checks/${checkId}`),
     onSuccess: after,
   });
 
-  const params = full?.qc?.params ?? [];
+  /*
+   * The same contract every form page in this app has, and the reason this is
+   * worth being a page at all: a dialog cannot be navigated away from, so it
+   * never had to answer the question. A page can — and a half-typed inspection
+   * is exactly the thing somebody would be annoyed to lose to a stray click on
+   * the sidebar.
+   *
+   * The readings are what counts as dirty; the header fields carry defaults
+   * and are not a change by themselves.
+   */
+  const { markSaved, pdf, prompt } = useUnsavedChanges(values, {
+    run: () => add.mutateAsync(),
+    can: Object.keys(values).length > 0,
+    message: 'This inspection has not been recorded yet.',
+  });
+
+  const specParams = full?.qc?.params ?? [];
   const checks = full?.qc?.checks ?? [];
   const summary = full?.qc?.summary;
   const specOwner = full?.qc?.spec_owner;
@@ -122,8 +162,29 @@ export default function QcCheckModal({ job, batch, certify, onClose, onSaved }: 
         ? <span className="font-semibold text-green-700">pass</span>
         : <span className="font-semibold text-red-600">fail</span>;
 
+  if (isLoading) return <p className="text-sm text-slate-500">Loading…</p>;
+  if (!job) return <p className="text-sm text-slate-500">Work order not found.</p>;
+
+  const title = certify
+    ? `Certify — ${job.number}`
+    : batch ? `Final check — ${batch.number}` : `Quality check — ${job.number}`;
+
   return (
-    <Modal title={certify ? `Certify — ${job.number}` : `Quality — ${job.number}`} onClose={onClose} wide>
+    <div>
+      <PageHeader
+        title={title}
+        subtitle={
+          <>
+            {job.product_name || job.description}
+            {job.customer_name ? ` · ${job.customer_name}` : ''}
+            {job.order_number ? <> · <Link to={`/orders/${job.order_id}`} className="hover:underline">{job.order_number}</Link></> : null}
+          </>
+        }
+        actions={
+          <Button variant="secondary" onClick={() => navigate(`/work-orders/${id}`)}>Back to job</Button>
+        }
+      />
+      <Card title={certify ? 'Inspection and certificate' : 'Inspection'}>
       {summary && !summary.has_spec ? (
         <EmptyState message="No quality checks are defined for this product. Set them under Products → QC, then come back." />
       ) : (
@@ -141,12 +202,9 @@ export default function QcCheckModal({ job, batch, certify, onClose, onSaved }: 
                 ? <>Measured against <b>{full?.customer_name}</b>&rsquo;s own specification.</>
                 : <>Measured against the product&rsquo;s standard specification.</>}
             </span>
-            <a
-              href={`/api/pdf/qc-report/${job.id}`}
-              target="_blank"
-              rel="noreferrer"
-              className="text-xs font-medium text-brand-700 hover:underline"
-            >Quality report (PDF)</a>
+            <PdfLink href={`/api/pdf/qc-report/${job.id}`} guard={pdf} title="Quality report">
+              Quality report (PDF)
+            </PdfLink>
           </div>
 
           {!!summary && summary.checks > 0 && (
@@ -224,7 +282,7 @@ export default function QcCheckModal({ job, batch, certify, onClose, onSaved }: 
                 </tr>
               </thead>
               <tbody>
-                {params.map((p) => (
+                {specParams.map((p) => (
                   <tr key={p.id} className="border-b border-slate-100 last:border-0">
                     <td className="py-1.5 pr-2">{p.name}</td>
                     <td className="py-1.5 pr-2 text-slate-500">
@@ -300,7 +358,7 @@ export default function QcCheckModal({ job, batch, certify, onClose, onSaved }: 
                 Tick <span className="font-medium">N/A</span> where the characteristic does not apply to this
                 product: that is written down and prints on the certificate, and is neither a pass nor a failure.
               </p>
-              <Button onClick={() => add.mutate()} disabled={add.isPending}>
+              <Button className="shrink-0 whitespace-nowrap" onClick={() => add.mutate()} disabled={add.isPending}>
                 {add.isPending ? 'Saving…' : 'Record inspection'}
               </Button>
             </div>
@@ -363,6 +421,8 @@ export default function QcCheckModal({ job, batch, certify, onClose, onSaved }: 
           )}
         </>
       )}
-    </Modal>
+      </Card>
+      {prompt}
+    </div>
   );
 }

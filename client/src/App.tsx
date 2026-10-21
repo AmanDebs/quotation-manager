@@ -29,6 +29,7 @@ import PackingListFormPage from './pages/PackingListForm';
 import FollowupsPage from './pages/Followups';
 import WorkOrdersPage from './pages/WorkOrders';
 import WorkOrderDetailPage from './pages/WorkOrderDetail';
+import QcCheckFormPage from './pages/QcCheckForm';
 import QualityPage from './pages/Quality';
 import DespatchesPage from './pages/Despatches';
 import DespatchFormPage from './pages/DespatchForm';
@@ -222,6 +223,19 @@ export const routes: RouteObject[] = [
       { path: '/payments', element: <Needs fn="payment"><PaymentsPage /></Needs> },
       { path: '/work-orders', element: <Needs fn="work_order"><WorkOrdersPage /></Needs> },
       { path: '/work-orders/:id', element: <Needs fn="work_order"><WorkOrderDetailPage /></Needs> },
+      /*
+       * Recording an inspection is a page rather than a dialog (2026-10-21,
+       * the client: *"Make it a whole page instead of pop up"*) — the call
+       * the dispatch form and the purchase order both already record. Gated
+       * on `qc: full`, which is what the two routes behind them require, so
+       * the screen is never offered to somebody the save would refuse.
+       *
+       * Two entries over one component: `?batch=N` makes the inspection a
+       * **final** check on that lot, and `/certify` is the one press that
+       * opens a lot, inspects it and issues the certificate.
+       */
+      { path: '/work-orders/:id/qc', element: <Needs fn="qc" level="full"><QcCheckFormPage /></Needs> },
+      { path: '/work-orders/:id/certify', element: <Needs fn="qc" level="full"><QcCheckFormPage certify /></Needs> },
       { path: '/quality', element: <Needs fn="qc"><QualityPage /></Needs> },
       { path: '/despatches', element: <Needs fn="dispatch"><DespatchesPage /></Needs> },
       { path: '/despatches/new', element: <Needs fn="dispatch" level="full"><DespatchFormPage /></Needs> },

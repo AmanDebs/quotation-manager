@@ -9,10 +9,10 @@ import {
 } from '../components/ui';
 import { LogOutput } from '../components/LogOutputModal';
 import { IssueModal } from '../components/IssueMaterialModal';
-import QcCheckModal from '../components/QcCheckModal';
 import BatchDispositionModal from '../components/BatchDispositionModal';
 import { PdfLink } from '../components/PdfLink';
 import { useUnsavedChanges } from '../lib/useUnsavedChanges';
+import { useUrlFilter } from '../lib/useUrlFilter';
 import { useCan } from '../App';
 import { fmtDate, fmtMoney, fmtQty, today } from '../lib/format';
 import { offeredWorkOrderStatuses, workOrderStatusLabel, workOrderStatusStyle } from './WorkOrders';
@@ -70,15 +70,16 @@ export default function WorkOrderDetailPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const can = useCan();
-  const [tab, setTab] = useState<Tab>('details');
+  /*
+   * In the URL rather than in state, so a form can send you back to the tab
+   * you left from — the inspection pages do exactly that — and so a tab can
+   * be linked to at all. `useUrlFilter`'s own rule: blank deletes the key, so
+   * the ordinary address stays clean.
+   */
+  const [tabParam, setTab] = useUrlFilter('tab', 'details');
+  const tab = tabParam as Tab;
   const [logging, setLogging] = useState(false);
   const [issuing, setIssuing] = useState(false);
-  const [inspecting, setInspecting] = useState(false);
-  // The one-press certificate. Named apart from `certifying`, which is the
-  // Batches tab ticking a set of lots to issue one number over.
-  const [onePress, setOnePress] = useState(false);
-  // The lot a final check is being recorded against, if any.
-  const [finalising, setFinalising] = useState<Batch | null>(null);
   // The lot being ruled on, and which way — see BatchDispositionModal.
   const [deciding, setDeciding] = useState<{ batch: Batch; disposition: 'rework' | 'scrapped' } | null>(null);
 
@@ -230,13 +231,15 @@ export default function WorkOrderDetailPage() {
               </PdfLink>
             )}
             {can('output', 'full') && <Button variant="secondary" onClick={() => setLogging(true)}>Log output</Button>}
-            {can('qc', 'full') && <Button variant="secondary" onClick={() => setInspecting(true)}>Record QC check</Button>}
+            {can('qc', 'full') && (
+              <Button variant="secondary" onClick={() => navigate(`/work-orders/${id}/qc`)}>Record QC check</Button>
+            )}
             {/* One press for the shape this desk works in: only the final
                 COA is issued, so the lot, the inspection and the certificate
                 are one act rather than three. The three routes stay for a job
                 certified in several lots. */}
             {can('qc', 'full') && (
-              <Button onClick={() => setOnePress(true)} title="Open a lot for everything made so far, inspect it and issue the certificate">
+              <Button onClick={() => navigate(`/work-orders/${id}/certify`)} title="Open a lot for everything made so far, inspect it and issue the certificate">
                 Certify (COA)
               </Button>
             )}
@@ -646,7 +649,7 @@ export default function WorkOrderDetailPage() {
                           <>
                             {can('qc', 'full') && (
                           <>
-                            <Button variant="ghost" onClick={() => setFinalising(b)}>Final check</Button>
+                            <Button variant="ghost" onClick={() => navigate(`/work-orders/${id}/qc?batch=${b.id}`)}>Final check</Button>
                             {/*
                               Rework and scrap are offered on a lot that has
                               actually failed — they are what a failed check
@@ -828,7 +831,9 @@ export default function WorkOrderDetailPage() {
               <PdfLink href={`/api/pdf/qc-report/${job.id}`} guard={pdf} title="Grouped by date and shift, each reading beside the tolerance it was judged against">
                 📄 QC Report
               </PdfLink>
-              {can('qc', 'full') && <Button variant="secondary" onClick={() => setInspecting(true)}>Record check</Button>}
+              {can('qc', 'full') && (
+                <Button variant="secondary" onClick={() => navigate(`/work-orders/${id}/qc`)}>Record check</Button>
+              )}
             </div>
           }
         >
@@ -939,12 +944,7 @@ export default function WorkOrderDetailPage() {
         />
       )}
 
-      {finalising && (
-        <QcCheckModal job={job} batch={finalising} onClose={() => setFinalising(null)} onSaved={refresh} />
-      )}
       {issuing && <IssueModal job={job} onClose={() => setIssuing(false)} onSaved={refresh} />}
-      {inspecting && <QcCheckModal job={job} onClose={() => setInspecting(false)} onSaved={refresh} />}
-      {onePress && <QcCheckModal job={job} certify onClose={() => setOnePress(false)} onSaved={refresh} />}
     </div>
   );
 }
