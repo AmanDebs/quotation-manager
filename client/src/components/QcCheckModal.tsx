@@ -40,7 +40,18 @@ export default function QcCheckModal({ job, batch, certify, onClose, onSaved }: 
   onClose: () => void; onSaved: () => void;
 }) {
   const [head, setHead] = useState({ date: today(), shift: '', sample_size: '', inspector: '', notes: '' });
-  const [coa, setCoa] = useState({ coa_date: today(), approved_by: '' });
+  /*
+   * What the certificate needs and the record cannot supply.
+   *
+   * `batch_number` is blank by default, which the server reads as *take the
+   * next one from the series* — but this desk names a lot by its production
+   * date rather than by a counter (their own certificate reads
+   * *05032026A+B TO 09032026A+B*), and this is the moment somebody knows what
+   * to call it. **The lot's date is deliberately not asked**: the server takes
+   * it from the last shift booked into the lot, which cannot disagree with the
+   * output underneath it, where a typed one could.
+   */
+  const [coa, setCoa] = useState({ coa_date: today(), approved_by: '', batch_number: '' });
   /*
    * Three facts per parameter since 2026-10-16, where there was one string.
    *
@@ -179,9 +190,17 @@ export default function QcCheckModal({ job, batch, certify, onClose, onSaved }: 
               <div className="mb-3 rounded-lg bg-slate-50 p-3 ring-1 ring-slate-200">
                 <p className="mb-2 text-xs text-slate-500">
                   This opens a lot covering everything this job has made and not yet lotted,
-                  records the inspection against it, and issues the certificate.
+                  records the inspection against it, and issues the certificate. The lot is
+                  dated by the last shift in it.
                 </p>
                 <div className={FIELD_GRID}>
+                  <Field label="Batch number">
+                    <Input
+                      value={coa.batch_number}
+                      placeholder="next in the series"
+                      onChange={(e) => setCoa({ ...coa, batch_number: e.target.value })}
+                    />
+                  </Field>
                   <Field label="Certificate date">
                     <Input type="date" value={coa.coa_date} onChange={(e) => setCoa({ ...coa, coa_date: e.target.value })} />
                   </Field>

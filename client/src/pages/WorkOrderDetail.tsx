@@ -11,7 +11,6 @@ import { LogOutput } from '../components/LogOutputModal';
 import { IssueModal } from '../components/IssueMaterialModal';
 import QcCheckModal from '../components/QcCheckModal';
 import BatchDispositionModal from '../components/BatchDispositionModal';
-import OpenBatchModal from '../components/OpenBatchModal';
 import { PdfLink } from '../components/PdfLink';
 import { useUnsavedChanges } from '../lib/useUnsavedChanges';
 import { useCan } from '../App';
@@ -78,7 +77,6 @@ export default function WorkOrderDetailPage() {
   // The one-press certificate. Named apart from `certifying`, which is the
   // Batches tab ticking a set of lots to issue one number over.
   const [onePress, setOnePress] = useState(false);
-  const [openingBatch, setOpeningBatch] = useState(false);
   // The lot a final check is being recorded against, if any.
   const [finalising, setFinalising] = useState<Batch | null>(null);
   // The lot being ruled on, and which way — see BatchDispositionModal.
@@ -166,6 +164,16 @@ export default function WorkOrderDetailPage() {
    * only for a decision being *made* — withdrawing one asks nothing, because
    * there is nothing to explain about undoing a mistake.
    */
+  /*
+   * Clear an empty lot. The server holds every guard — dispatched, returned,
+   * certified, or carrying output — so this does not keep a copy of them; the
+   * row simply does not draw the button where one would fire.
+   */
+  const removeBatch = useMutation({
+    mutationFn: (batchId: number) => api.del(`/api/work-orders/batches/${batchId}`),
+    onSuccess: refresh,
+  });
+
   const decide = useMutation({
     mutationFn: ({ batchId, disposition, note }: { batchId: number; disposition: string; note: string }) =>
       api.post(`/api/work-orders/batches/${batchId}/disposition`, { disposition, note }),
@@ -480,22 +488,29 @@ export default function WorkOrderDetailPage() {
       )}
 
       {tab === 'batches' && (
-        <Card
-          title="Batches"
-          actions={can('output', 'full')
-            ? <Button variant="secondary" onClick={() => setOpeningBatch(true)}>Open a batch</Button>
-            : undefined}
-        >
+        <Card title="Batches">
           {/*
-            The lot is where the two halves of this page meet: Production opens
-            it and books shifts into it, Quality finalises it and issues the
-            certificate. Neither team can do the other's part, which is what a
-            certificate is for.
+            **A lot is born at certification**, and there is no second way to
+            open one (2026-10-21, the client having opened an empty one and
+            asked why it read zero). Nothing on this client can file a shift
+            into a lot — `LogOutput` offers no picker — so *Open a batch* could
+            only ever produce a number with no goods under it, which `Issue
+            COA` then refuses. **Certify (COA)** sweeps every shift nobody has
+            lotted into a lot of its own, so the scope is always *everything
+            made since the last certificate*, which is what this desk does:
+            *"only final COA is required and is issued"*.
+
+            Part-certifying is not lost by it — book, certify, book more,
+            certify again, and the second press takes only the later shifts.
+            And the tab keeps its own controls for the case the one press
+            deliberately leaves behind: a failing inspection keeps the lot and
+            issues nothing, so Rework → Final check → Issue COA happens here.
           */}
           <p className="mb-3 text-xs text-slate-500">
             A batch is what an invoice line traces back to. Its quantity is the output booked
             into it, and it is cleared by a <em>final</em> check — one recorded against the batch
-            itself, rather than the shift-wise checks on the Quality tab.
+            itself, rather than the shift-wise checks on the Quality tab. Lots are opened by
+            <strong> Certify (COA)</strong>, which covers everything made and not yet certified.
           </p>
 
           {/*
@@ -627,7 +642,9 @@ export default function WorkOrderDetailPage() {
                           <PdfLink href={`/api/pdf/coa/${b.id}`} guard={pdf} title="Certificate of Analysis">
                             📄 COA
                           </PdfLink>
-                        ) : can('qc', 'full') ? (
+                        ) : (
+                          <>
+                            {can('qc', 'full') && (
                           <>
                             <Button variant="ghost" onClick={() => setFinalising(b)}>Final check</Button>
                             {/*
@@ -668,7 +685,33 @@ export default function WorkOrderDetailPage() {
                               </Button>
                             )}
                           </>
-                        ) : null}
+                            )}
+                            {/*
+                              The way back out for a lot with nothing under it.
+                              Only drawn where the server would allow it —
+                              nothing booked, nothing shipped, nothing returned
+                              and no certificate (this branch) — so it is never
+                              a button that only produces a refusal. It exists
+                              because removing *Open a batch* would otherwise
+                              strand every empty lot already on file with no
+                              screen left to clear it from.
+                            */}
+                            {can('output', 'full') && b.entries === 0
+                              && !b.trips?.length && !b.returns?.length && (
+                              <Button
+                                variant="ghost"
+                                className="ml-1"
+                                disabled={removeBatch.isPending}
+                                title="Nothing has been booked into this lot"
+                                onClick={() => {
+                                  if (confirm(`Delete empty batch ${b.number}?`)) removeBatch.mutate(b.id);
+                                }}
+                              >
+                                Delete
+                              </Button>
+                            )}
+                          </>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -676,7 +719,7 @@ export default function WorkOrderDetailPage() {
               </table>
             </div>
           )}
-          <ErrorText error={issueCoa.error || decide.error} />
+          <ErrorText error={issueCoa.error || decide.error || removeBatch.error} />
         </Card>
       )}
 
@@ -848,7 +891,6 @@ export default function WorkOrderDetailPage() {
       {/* Renders nothing until a navigation is actually blocked. */}
       {prompt}
       {logging && <LogOutput job={job} onClose={() => setLogging(false)} onSaved={refresh} />}
-      {openingBatch && <OpenBatchModal job={job} onClose={() => setOpeningBatch(false)} onSaved={refresh} />}
       {/*
         * What the certificate cannot derive. Everything else on it — the
         * customer, the product, the quantity, the resin from the recipe, the
