@@ -646,8 +646,12 @@ const statusColors: Record<string, string> = {
   final: 'bg-blue-50 text-blue-700 ring-blue-200',
   dispatched: 'bg-purple-50 text-purple-700 ring-purple-200',
   paid: 'bg-green-50 text-green-700 ring-green-200',
-  // Not a decision anybody made — a date that passed. It says so by staying grey.
-  expired: 'bg-slate-100 text-slate-500 ring-slate-200',
+  // A date that passed rather than a decision anybody made — and the row that
+  // most needs acting on, so it is orange rather than grey (2026-10-22:
+  // *"expired colour coding to be red / orange"*). Not red: that is `rejected`
+  // and `cancelled` on the same lists, which are decisions and final, where a
+  // lapse is undone by extending the validity.
+  expired: 'bg-orange-50 text-orange-700 ring-orange-200',
   // The approval states, worn as a status by the one document that has no
   // other: a credit note is issued once, and approval is the whole of its life.
   // `pending` is also a sales-order status, and the customer page badges one

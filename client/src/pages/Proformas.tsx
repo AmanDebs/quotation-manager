@@ -32,7 +32,7 @@ import { usePagedList, PAGE_SIZE } from '../lib/usePagedList';
  */
 export const STATUSES = ['draft', 'sent', 'order_confirmed', 'advance_received', 'in_production', 'cancelled', 'expired'];
 /** What the list shows with no status asked for — the server's `SHOWN_BY_DEFAULT`, ticked in the picker. */
-export const OPEN_STATUSES = ['draft', 'sent', 'order_confirmed', 'advance_received'];
+export const OPEN_STATUSES = ['draft', 'sent', 'order_confirmed', 'advance_received', 'expired'];
 
 /**
  * The five a person records. The other two are observations:
@@ -70,7 +70,9 @@ const statusTint: Record<string, string> = {
   advance_received: 'bg-green-50 text-green-700 border-green-300',
   in_production: 'bg-amber-50 text-amber-800 border-amber-300',
   cancelled: 'bg-red-50 text-red-700 border-red-300',
-  expired: 'bg-slate-100 text-slate-500 border-slate-300',
+  // Orange, the quotation list's own reasoning: red is `cancelled` here and
+  // amber is `in_production`, and a lapsed proforma must read as neither.
+  expired: 'bg-orange-50 text-orange-700 border-orange-300',
 };
 
 const label = proformaStatusLabel;
@@ -207,13 +209,13 @@ export default function ProformasPage() {
         )}
         {/* Tick boxes, as the quotations list has (2026-09-20: "add check
             boxes in proforma status"), opening with the four offers still in
-            play ticked; a linked-in comma list from the Reports page reads
-            as its ticks. */}
+            play ticked and Expired beside them (2026-10-22); a linked-in
+            comma list from the Reports page reads as its ticks. */}
         <MultiSelectFilter
           options={STATUSES.map((s) => ({ key: s, label: label(s) }))}
           value={statusFilter}
           onChange={setStatusFilter}
-          defaultLabel="Open offers"
+          defaultLabel="Open & expired"
           defaultKeys={OPEN_STATUSES}
           allLabel="All statuses"
         />
@@ -242,7 +244,7 @@ export default function ProformasPage() {
                 ? 'Nothing matches those filters.'
                 // Only the open offers show with no filter set, so an empty
                 // table is not proof the book is empty.
-                : 'No open proforma invoices. Booked, cancelled and expired ones are hidden — pick “All statuses” to include them.'
+                : 'No open or expired proforma invoices. Booked and cancelled ones are hidden — pick “All statuses” to include them.'
             }
           />
         ) : (

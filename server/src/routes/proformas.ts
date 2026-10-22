@@ -208,11 +208,18 @@ function headerValues(body: Record<string, unknown>, existing?: Record<string, u
  * The statuses the list shows unless somebody asks for others — the offers
  * still in play: draft, sent, order confirmed, advance received (2026-09-20,
  * the client: *"by default draft, sent, order confirmed, advance received
- * should be selected"*). A booked, cancelled or lapsed proforma is a click
- * away under *All statuses*. Applied only when nothing was asked for, as on
- * the quotations list: a named status shows exactly that, `all` everything.
+ * should be selected"*) — **and `expired` since 2026-10-22**, the quotation
+ * list's own change on the same instruction and for the reason recorded
+ * there: a lapsed offer is the row that needs acting on, and hidden it was a
+ * job nobody could see. A booked or cancelled proforma is still a click away
+ * under *All statuses*. Applied only when nothing was asked for, as on the
+ * quotations list: a named status shows exactly that, `all` everything.
+ *
+ * `expired` is derived here rather than stored (`STATUS_SQL`) and the filter
+ * below already reads that expression rather than `p.status`, so this needed
+ * no second rule — which is the whole reason that clause was written so.
  */
-export const SHOWN_BY_DEFAULT = ['draft', 'sent', 'order_confirmed', 'advance_received'];
+export const SHOWN_BY_DEFAULT = ['draft', 'sent', 'order_confirmed', 'advance_received', 'expired'];
 
 function proformaListWhere(req: AuthedRequest): { where: string[]; params: unknown[] } {
   // Not named `q`: the alias below is a table, and on invoices `i` is too.

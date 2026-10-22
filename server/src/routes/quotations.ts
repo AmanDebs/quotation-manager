@@ -83,14 +83,23 @@ function saveItems(
  * The statuses the list shows unless somebody asks for others: the live
  * offers — draft, sent, negotiating (2026-09-20, the client with the picker
  * open on exactly those three: *"These 3 status should be selected by
- * default"*). It replaces a default that hid `rejected` alone and kept
- * `expired` on the grounds that a lapsed offer is revived by extending its
- * validity; the client's call is that the working list is what is still in
- * play, and a lapsed or converted one is a click away under *All statuses*.
+ * default"*) — **and `expired` since 2026-10-22** (*"we need to include
+ * expired PI / quotation as default option"*).
+ *
+ * That is the third reading of one question, and the reasoning is worth
+ * keeping. The original default hid `rejected` alone and showed `expired`, on
+ * the grounds that a lapsed offer is revived by extending its validity and is
+ * therefore a job still to do; 2026-09-20 dropped it, the working list being
+ * what is still in play. The client has now asked for it back, and they are
+ * right about their own desk: a lapsed offer is the one row here that **needs
+ * somebody to act** — extend the date, or reject it — where a converted or
+ * rejected one needs nothing. Hidden, it was a job nobody could see. The pill
+ * is drawn in orange rather than grey so it still does not read as live.
+ *
  * Naming what is shown rather than what is hidden means a status added to
  * the CHECK later does not silently land on the working list.
  */
-export const SHOWN_BY_DEFAULT = ['draft', 'sent', 'negotiating'];
+export const SHOWN_BY_DEFAULT = ['draft', 'sent', 'negotiating', 'expired'];
 
 function quotationListWhere(req: AuthedRequest): { where: string[]; params: unknown[] } {
   const status = String(req.query.status ?? '').trim();

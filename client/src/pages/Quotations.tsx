@@ -42,7 +42,7 @@ const approvalBadge: Record<string, { cls: string; label: string }> = {
  */
 export const STATUSES = ['draft', 'sent', 'negotiating', 'accepted', 'rejected', 'expired'];
 /** What the list shows with no status asked for — the server's `SHOWN_BY_DEFAULT`, ticked in the picker. */
-export const OPEN_STATUSES = ['draft', 'sent', 'negotiating'];
+export const OPEN_STATUSES = ['draft', 'sent', 'negotiating', 'expired'];
 
 /**
  * The statuses a person sets. The other three are **observations, not
@@ -86,7 +86,13 @@ const statusTint: Record<string, string> = {
   negotiating: 'bg-amber-50 text-amber-800 border-amber-300',
   accepted: 'bg-green-50 text-green-700 border-green-300',
   rejected: 'bg-red-50 text-red-700 border-red-300',
-  expired: 'bg-slate-100 text-slate-500 border-slate-300',
+  // Orange rather than grey (2026-10-22: *"expired colour coding to be red /
+  // orange"*). Grey said *nobody decided this*, which was true and useless:
+  // the row needs the validity extended or the offer rejected. Orange of the
+  // two the client offered, because red on this list already means `rejected`
+  // — a decision, where a lapse is revivable — and amber already means
+  // `negotiating`, which is the one thing an expired offer must not read as.
+  expired: 'bg-orange-50 text-orange-700 border-orange-300',
 };
 
 /**
@@ -225,11 +231,12 @@ export default function QuotationsPage() {
           options={STATUSES.map((s) => ({ key: s, label: quotationStatusLabel(s) }))}
           value={statusFilter}
           onChange={setStatusFilter}
-          // Names the default rather than sitting blank, and ticks the three
-          // it stands for (2026-09-20: "These 3 status should be selected by
-          // default"): a box saying "All statuses" over a list that is
-          // hiding some would be a small lie.
-          defaultLabel="Open offers"
+          // Names the default rather than sitting blank, and ticks the four
+          // it stands for — the live three (2026-09-20: "These 3 status should
+          // be selected by default") plus Expired (2026-10-22): a box saying
+          // "All statuses" over a list that is hiding some would be a small
+          // lie, and so would "Open offers" over a lapsed one.
+          defaultLabel="Open & expired"
           defaultKeys={OPEN_STATUSES}
           allLabel="All statuses"
         />
@@ -254,7 +261,7 @@ export default function QuotationsPage() {
                 ? 'Nothing matches those filters.'
                 // Only the live offers show with no filter set, so an empty
                 // table here is not proof the book is empty.
-                : 'No open quotations. Converted, rejected and expired ones are hidden — pick “All statuses” to include them.'
+                : 'No open or expired quotations. Converted and rejected ones are hidden — pick “All statuses” to include them.'
             }
           />
         ) : (
