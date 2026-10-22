@@ -209,6 +209,65 @@ describe('how it adds up', () => {
  * also table is going out of frame"* — the two halves of one complaint, since
  * the second is what the first is for).
  */
+/**
+ * A printed order form is ruled to a depth whether or not the order fills it
+ * — stationery rather than a page that stopped, and nothing can be written in
+ * under the last line once it is signed.
+ *
+ * **Six, not twelve** (2026-10-22, the client with a one-line order: *"Remove
+ * 50% blank rows in PO"*). Twelve was set before the signature was anchored
+ * to the foot of the page; with it in the page footer the sheet keeps its
+ * height whether the table reaches it or not, so the extra rules were buying
+ * nothing.
+ */
+describe('how deep the form is ruled', () => {
+  /** The goods table's body rows, found by its header row. */
+  function goodsBody(id: number): unknown[][] {
+    const found: unknown[][][] = [];
+    const walk = (node: unknown) => {
+      if (node == null || typeof node !== 'object') return;
+      if (Array.isArray(node)) { for (const n of node) walk(n); return; }
+      const n = node as Node;
+      if (n.table && Array.isArray(n.table.body)) {
+        if (textsOf(n.table.body[0] ?? []).includes('DESCRIPTION')) found.push(n.table.body);
+      }
+      for (const k of ['stack', 'columns', 'body', 'table', 'content']) if (n[k] !== undefined) walk(n[k]);
+    };
+    walk(buildPurchaseOrderPdf(id));
+    assert.equal(found.length, 1, 'expected exactly one goods table');
+    return found[0];
+  }
+
+  /** A row drawn as empty cells — no text in any of them. */
+  // The ruled cells carry a single space rather than nothing, so pdfmake
+  // gives the row a height to draw its rules at.
+  const isBlank = (r: unknown[]) => {
+    const t = textsOf(r);
+    return t.length > 0 && t.every((x) => x.trim() === '');
+  };
+
+  test('a one-line order is ruled to six, not twelve', () => {
+    const id = makePo({}, [GOODS]);
+    const blanks = goodsBody(id).filter(isBlank).length;
+    assert.equal(blanks, 5, 'the form is not ruled to six rows');
+  });
+
+  test('and an order that fills it is padded with nothing', () => {
+    const id = makePo({}, Array.from({ length: 7 }, () => GOODS));
+    assert.equal(goodsBody(id).filter(isBlank).length, 0, 'a full order was padded');
+  });
+
+  test('...and the blanks are cells, never items, so nothing counts them', () => {
+    /* Drawn as empty cells rather than as blank *items*: no column's `value()`
+       is asked about a row that does not exist — the amount column would have
+       read `NaN` — and no `sum` counts them. */
+    const id = makePo({}, [GOODS]);
+    const texts = textsOf(buildPurchaseOrderPdf(id));
+    assert.ok(!texts.includes('NaN'), 'a blank row was read as an item');
+    assert.ok(texts.some((t) => t.includes('1,40,000')), 'the one real line is not totalled');
+  });
+});
+
 describe('the columns it prints', () => {
   /** The goods table's own `widths`, found by its header row. */
   function goodsWidths(id: number): (number | string)[] {

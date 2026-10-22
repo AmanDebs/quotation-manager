@@ -2549,15 +2549,24 @@ export function buildPurchaseOrderPdf(id: number): TDocumentDefinitions {
     {
       stack: [itemsTable(s, items, specs, cfg, money, {
         ...gridLayout, paddingLeft: () => 3, paddingRight: () => 3, paddingTop: () => 5, paddingBottom: () => 5,
-      // Ruled to twelve rows whatever the order carries (2026-09-23, the client:
-      // *"For PO this is only taking half page, I want the page to look
-      // fuller"*). A one-line order left two thirds of the page blank; a form
-      // ruled to a depth reads as stationery rather than as a page that
-      // stopped, and it is the ordinary anti-tamper shape of a printed order
-      // — nothing can be written in under the last line after it is signed.
-      // An order with twelve lines or more is untouched, and the table still
-      // closes on its TOTAL row.
-      }, 12)],
+      /*
+       * Ruled to a depth whatever the order carries (2026-09-23, the client:
+       * *"For PO this is only taking half page, I want the page to look
+       * fuller"*). A form ruled to a depth reads as stationery rather than as
+       * a page that stopped, and it is the ordinary anti-tamper shape of a
+       * printed order — nothing can be written in under the last line after
+       * it is signed.
+       *
+       * **Twelve became six** (2026-10-22, the client with a one-line order:
+       * *"Remove 50% blank rows in PO"*). Twelve was set before the signature
+       * was anchored to the foot of the page, when the rules were the only
+       * thing holding the sheet open; with the signature in the page footer
+       * the height is kept whether or not the table reaches it, so the extra
+       * six rules were buying nothing and reading as a form mostly empty. An
+       * order with six lines or more is untouched, and the table still closes
+       * on its TOTAL row either way.
+       */
+      }, 6)],
       margin: [0, 8, 0, 0] as [number, number, number, number],
     },
     amountWords(po, cur),
