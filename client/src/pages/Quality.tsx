@@ -54,7 +54,9 @@ const verdictPill = (row: QcCheckRow) => {
  * ten times.
  */
 function EditCoa({ row, onClose }: { row: CoaRow; onClose: () => void }) {
-  const [form, setForm] = useState({ date: row.coa_date, approved_by: row.approved_by });
+  const [form, setForm] = useState({
+    date: row.coa_date, approved_by: row.approved_by, buyer_order: row.buyer_order,
+  });
   const queryClient = useQueryClient();
   const save = useMutation({
     mutationFn: () => api.put(`/api/work-orders/batches/${row.batch_id}/coa`, form),
@@ -79,6 +81,19 @@ function EditCoa({ row, onClose }: { row: CoaRow; onClose: () => void }) {
             value={form.approved_by}
             onChange={(e) => setForm({ ...form, approved_by: e.target.value })}
             placeholder="Who signs it off"
+          />
+        </Field>
+        {/*
+          The buyer's own reference, never ours. Blank is a real answer: the
+          document falls back to the proforma behind the order and then to the
+          customer's PO, and never to the sales order, which means nothing to
+          whoever reads the certificate.
+        */}
+        <Field label="Buyer's order">
+          <Input
+            value={form.buyer_order}
+            onChange={(e) => setForm({ ...form, buyer_order: e.target.value })}
+            placeholder="PI or PO number"
           />
         </Field>
       </div>

@@ -1264,6 +1264,20 @@ CREATE TABLE IF NOT EXISTS batches (
   coa_no TEXT NOT NULL DEFAULT '',
   coa_date TEXT NOT NULL DEFAULT '',
   coa_issued_by INTEGER REFERENCES users(id),
+  /*
+   * **The buyer's own reference for this order** (2026-10-22, the client:
+   * *"Buyer order - Should be editable - capture PI number or PO number (but
+   * no SO number)"*). Their own certificate carries *BUYER'S ORDER NO.:
+   * AGLO/EX/25-26/150*, which is the proforma the buyer ordered against.
+   *
+   * **Stored, because it is a choice rather than an observation**: which of
+   * the two references a given buyer recognises is something the desk knows
+   * and the record does not. Blank falls back to the proforma behind the
+   * order, then to the customer's own PO number — and **never to the sales
+   * order**, which is this company's internal number and means nothing to the
+   * person reading the certificate.
+   */
+  coa_buyer_order TEXT NOT NULL DEFAULT '',
   -- The second signatory. Both of Aglo's certificates carry *Prepared by* and
   -- *Approved by*, and this is the one header fact that cannot be derived from
   -- anything else on file -- the first is the account that issued it, which

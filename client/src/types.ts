@@ -1704,6 +1704,8 @@ export interface CoaRow {
   batch_numbers: string;
   issued_by_name: string;
   approved_by: string;
+  /** The buyer's own reference as typed; blank means the document falls back. */
+  buyer_order: string;
   order_id: number;
   order_number: string;
   customer_name: string;

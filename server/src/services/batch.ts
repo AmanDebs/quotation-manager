@@ -71,6 +71,8 @@ export interface Batch {
   coa_issued_by_name: string | null;
   /** The second signatory, as the certificate prints it. */
   coa_approved_by: string;
+  /** The buyer's own reference, typed; blank falls back — see `schema.sql`. */
+  coa_buyer_order: string;
   /** Derived from the shift entries filed against this lot. */
   made: number;
   rejected: number;
@@ -195,6 +197,7 @@ export function batchesFor(workOrderId: number): Batch[] {
       coa_issued_by: r.coa_issued_by == null ? null : Number(r.coa_issued_by),
       coa_issued_by_name: r.coa_issued_by_name == null ? null : String(r.coa_issued_by_name),
       coa_approved_by: String(r.coa_approved_by ?? ''),
+      coa_buyer_order: String(r.coa_buyer_order ?? ''),
       made: num(made.ok),
       rejected: num(made.rej),
       entries: made.n,

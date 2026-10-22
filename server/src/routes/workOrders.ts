@@ -939,8 +939,11 @@ function issueCoa(req: AuthedRequest, res: Response, ids: number[]) {
   const companyId = resolveCompanyId(order.company_id, order.customer_id);
   const date = String(req.body?.date ?? '').trim() || new Date().toISOString().slice(0, 10);
   const approvedBy = String(req.body?.approved_by ?? '').trim();
+  // Blank is the ordinary case and the document falls back for it — see the
+  // header note in `buildCoaPdf`.
+  const buyerOrder = String(req.body?.buyer_order ?? '').trim();
 
-  writeCoa(ids, date, req.user!.id, approvedBy, companyId);
+  writeCoa(ids, date, req.user!.id, approvedBy, companyId, buyerOrder);
   res.status(201).json(ids.map((id) => batchById(id)));
 }
 
@@ -1001,12 +1004,18 @@ workOrdersRouter.put('/batches/:batchId/coa', requirePermission('qc', 'full'), (
     return res.status(400).json({ error: 'The certificate date must be a date' });
   }
   const approvedBy = body.approved_by === undefined ? null : String(body.approved_by).trim();
+  // Blanked deliberately is a real answer here: it puts the document back on
+  // its own fallback, which is the proforma behind the order.
+  const buyerOrder = body.buyer_order === undefined ? null : String(body.buyer_order).trim();
 
   transaction(() => {
     for (const lot of found.lots) {
       if (date !== null) db.prepare('UPDATE batches SET coa_date = ? WHERE id = ?').run(date, lot.id);
       if (approvedBy !== null) {
         db.prepare('UPDATE batches SET coa_approved_by = ? WHERE id = ?').run(approvedBy, lot.id);
+      }
+      if (buyerOrder !== null) {
+        db.prepare('UPDATE batches SET coa_buyer_order = ? WHERE id = ?').run(buyerOrder, lot.id);
       }
     }
   });
@@ -1041,14 +1050,17 @@ workOrdersRouter.delete('/batches/:batchId/coa', requirePermission('qc', 'full')
   res.json({ ok: true, withdrawn: found.lots.map((l) => l.number) });
 });
 
-function writeCoa(ids: number[], date: string, userId: number, approvedBy: string, companyId: number): string {
+function writeCoa(
+  ids: number[], date: string, userId: number, approvedBy: string, companyId: number, buyerOrder = ''
+): string {
   let number = '';
   transaction(() => {
     number = nextNumber('coa', { companyId, date });
     const set = db.prepare(
-      'UPDATE batches SET coa_no = ?, coa_date = ?, coa_issued_by = ?, coa_approved_by = ? WHERE id = ?'
+      `UPDATE batches SET coa_no = ?, coa_date = ?, coa_issued_by = ?, coa_approved_by = ?,
+                          coa_buyer_order = ? WHERE id = ?`
     );
-    for (const id of ids) set.run(number, date, userId, approvedBy, id);
+    for (const id of ids) set.run(number, date, userId, approvedBy, buyerOrder, id);
   });
   return number;
 }
@@ -1348,7 +1360,8 @@ workOrdersRouter.post('/:id/certify', requirePermission('qc', 'full'), (req: Aut
   }
 
   const date = String(body.coa_date ?? '').trim() || String(body.date);
-  writeCoa([batchId], date, req.user!.id, String(body.approved_by ?? '').trim(), companyId);
+  writeCoa([batchId], date, req.user!.id, String(body.approved_by ?? '').trim(), companyId,
+    String(body.buyer_order ?? '').trim());
   res.status(201).json({ batch: batchById(batchId), certified: true });
 });
 

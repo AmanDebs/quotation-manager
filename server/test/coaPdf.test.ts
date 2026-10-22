@@ -106,9 +106,15 @@ describe('a certificate over several lots', () => {
     assert.deepEqual(textsOf(buildCoaPdf(lots[0])), textsOf(buildCoaPdf(lots[2])));
   });
 
-  test('certifies what every lot made, not what one did', () => {
-    // Three lots at 34,000 apiece.
-    assert.ok(textsOf(buildCoaPdf(lots[0])).includes('1,02,000 pcs'));
+  test('reads as a range over the lots it covers', () => {
+    /* The quantity came off this header on 2026-10-22 (*"Quantity certified
+       — not required"*), so what says the certificate is about all three is
+       the range in its heading and the per-lot readings below. */
+    const texts = textsOf(buildCoaPdf(lots[0]));
+    assert.ok(texts.includes('BATCH NOS.'), 'a group is not headed as a range');
+    assert.ok(texts.some((t) => t.includes('05032026A') && t.includes('09032026B')),
+      'the range does not name both ends');
+    assert.ok(!texts.some((t) => /Quantity Certified/i.test(t)), 'the quantity is still on the header');
   });
 
   test('says which lot each reading came from', () => {
@@ -149,9 +155,67 @@ describe('a certificate over one lot is unchanged', () => {
 
   test('reads as itself, with no range and no Batch column', () => {
     const texts = textsOf(buildCoaPdf(alone));
-    assert.ok(texts.includes('BATCH NO.  /  DATE'), 'the single-lot heading is gone');
+    // The lot's own date came off the heading on 2026-10-22 — *"Batch date —
+    // not required"* — so the cell is the number alone.
+    assert.ok(texts.includes('BATCH NO.'), 'the single-lot heading is gone');
+    assert.ok(!texts.includes('BATCH NO.  /  DATE'), 'the lot date is still on the heading');
     assert.ok(!texts.includes('BATCH NOS.'), 'a single lot is being described as a range');
     assert.ok(!texts.includes('Batch'), 'the per-lot column is drawn where it says nothing');
+  });
+
+  /**
+   * Four cells came off this header at the client's word (2026-10-22): the
+   * batch date, the **work order**, the **quantity certified** and **inspected
+   * on**. Each was derivable and none is a fact the buyer needs — the job is
+   * an internal instruction, the quantity is on the invoice, and when it was
+   * inspected is what the readings are dated by.
+   */
+  test('and carries none of the four cells the client took off it', () => {
+    const texts = textsOf(buildCoaPdf(alone));
+    for (const gone of ['WORK ORDER', 'QUANTITY CERTIFIED', 'INSPECTED ON']) {
+      assert.ok(!texts.includes(gone), `${gone} is still on the header`);
+    }
+    // ...and the ones that stayed.
+    for (const kept of ['CERTIFICATE NO.  /  DATE', 'PRODUCT', 'COLOUR', 'RESIN', 'CUSTOMER']) {
+      assert.ok(texts.includes(kept), `${kept} was taken off with them`);
+    }
+  });
+
+  /**
+   * *"Buyer order — should be editable, capture PI number or PO number (but
+   * no SO number)"*. Ours is not theirs: the sales order is this company's
+   * internal number and means nothing to whoever reads the certificate.
+   */
+  test("the buyer's order is theirs, never our sales order", () => {
+    const texts = textsOf(buildCoaPdf(alone));
+    assert.ok(texts.includes("BUYER'S ORDER"), 'the cell is gone');
+    assert.ok(!texts.some((t) => /^SO[-/]/.test(t)), 'the sales order number is being printed as the buyer\'s');
+  });
+
+  test('...and a typed one beats every fallback', () => {
+    db.prepare("UPDATE batches SET coa_buyer_order = 'PO-9981/B' WHERE id = ?").run(alone);
+    assert.ok(textsOf(buildCoaPdf(alone)).includes('PO-9981/B'), 'what was typed is not what printed');
+    db.prepare("UPDATE batches SET coa_buyer_order = '' WHERE id = ?").run(alone);
+  });
+
+  /**
+   * The fallback chain, in the order the client named it: *"capture PI number
+   * or PO number (but no SO number)"*. Their own certificate carries
+   * *AGLO/EX/25-26/150*, which is the proforma — so the proforma leads, the
+   * customer's own PO follows, and the sales order is in neither position.
+   */
+  test('blank falls back to the customer PO, then to the proforma over it', () => {
+    db.prepare("UPDATE orders SET po_number = 'PO/BUYER/7781' WHERE id = ?").run(orderId);
+    assert.ok(textsOf(buildCoaPdf(alone)).includes('PO/BUYER/7781'), 'the PO fallback did not print');
+
+    // The proforma behind the order is the more specific answer and wins.
+    db.prepare(
+      `INSERT INTO proforma_invoices (number, date, customer_id, company_id, order_id, currency, tax_type)
+       VALUES ('AGLO/EX/25-26/150', '2026-02-01', ?, 1, ?, 'USD', 'none')`
+    ).run(customerId, orderId);
+    const texts = textsOf(buildCoaPdf(alone));
+    assert.ok(texts.includes('AGLO/EX/25-26/150'), 'the proforma does not beat the PO');
+    assert.ok(!texts.includes('PO/BUYER/7781'), 'both references printed');
   });
 });
 

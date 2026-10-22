@@ -3595,6 +3595,40 @@ export function buildCoaPdf(batchId: number): TDocumentDefinitions {
       WHERE w.id = ?`
   ).get(b.work_order_id) as { color?: string } | undefined)?.color ?? '');
 
+  /*
+   * **The buyer's own reference, never ours** (2026-10-22, the client: *"Buyer
+   * order — should be editable, capture PI number or PO number (but no SO
+   * number)"*). The sales order is this company's internal number and means
+   * nothing to the person reading the certificate; their own paper carries
+   * *AGLO/EX/25-26/150*, which is the proforma the buyer ordered against.
+   *
+   * Typed where somebody typed it, then the proforma behind the order —
+   * reached by the back-pointer, `dispatchProgress`'s own walk — then the
+   * customer's own PO. An em-dash where the record is silent, rather than
+   * falling through to a number that would be wrong.
+   */
+  const buyerOrder = b.coa_buyer_order
+    || String((db.prepare('SELECT number FROM proforma_invoices WHERE order_id = ? ORDER BY id LIMIT 1')
+      .get(Number(wo.order_id)) as { number?: string } | undefined)?.number ?? '')
+    || String(wo.po_number ?? '');
+
+  const period = span.lo
+    ? (span.lo === span.hi ? fmtDate(span.lo) : `${fmtDate(span.lo)} – ${fmtDate(String(span.hi))}`)
+    : '';
+
+  /*
+   * **Four cells came off this header** (2026-10-22, the client, reading a
+   * certificate against their own: the batch *date*, the **work order**, the
+   * **quantity certified** and **inspected on** are *"not required"*). Each
+   * was derivable and none of them is a fact the buyer needs — the work order
+   * is an internal instruction, the quantity is on the invoice, and when it
+   * was inspected is what the readings below are dated by.
+   *
+   * **Production period is optional**, so it is drawn only where the shift
+   * book has one and Resin takes the width where it does not — a dead cell on
+   * a document being the rule the notify parties already follow, rather than
+   * a box with an em-dash in it.
+   */
   const grid: Content = {
     table: {
       widths: ['*', '*', '*'],
@@ -3603,29 +3637,18 @@ export function buildCoaPdf(batchId: number): TDocumentDefinitions {
           lv('Certificate No.  /  Date', `${b.coa_no}   ${fmtDate(b.coa_date)}`),
           // A run of lots reads as a range, the way the paper writes it; one
           // lot still reads as itself, so nothing already issued changes.
-          lv(many ? 'Batch Nos.' : 'Batch No.  /  Date', many
+          lv(many ? 'Batch Nos.' : 'Batch No.', many
             ? `${lots[0].number} to ${lots[lots.length - 1].number}`
-            : `${b.number}   ${fmtDate(b.date)}`),
-          lv('Work Order', String(wo.number ?? '')),
-        ],
-        [
+            : b.number),
           lv('Product', String(wo.product_name || wo.description || '—')),
-          // Across every lot the certificate covers.
-          lv('Quantity Certified', `${fmtNum(lots.reduce((t, l) => t + l.made, 0), 0)} pcs`),
-          lv('Production Period', span.lo
-            ? (span.lo === span.hi ? fmtDate(span.lo) : `${fmtDate(span.lo)} – ${fmtDate(String(span.hi))}`)
-            : '—'),
         ],
-        [
-          lv('Colour', colour || '—'),
-          lv('Resin', resin || '—'),
-          lv('Inspected On', check ? `${fmtDate(String(check.date))}${check.shift ? `   Shift ${check.shift}` : ''}` : '—'),
-        ],
+        period
+          ? [lv('Colour', colour || '—'), lv('Resin', resin || '—'), lv('Production Period', period)]
+          : [lv('Colour', colour || '—'), { ...lv('Resin', resin || '—'), colSpan: 2 }, {}],
         [
           { ...lv('Customer', [c?.name, c?.address].filter(Boolean).join('\n')), colSpan: 2 },
           {},
-          lv("Buyer's Order", [String(wo.order_number ?? ''), wo.po_number ? `PO: ${wo.po_number}` : '']
-            .filter(Boolean).join('\n')),
+          lv("Buyer's Order", buyerOrder || '—'),
         ],
         // Drawn only once the goods have gone — see the read above.
         ...(trips.length ? [[

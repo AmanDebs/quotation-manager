@@ -36,6 +36,8 @@ export interface CoaRow {
   batch_numbers: string;
   issued_by_name: string;
   approved_by: string;
+  /** The buyer's own reference as typed; blank means the document falls back. */
+  buyer_order: string;
   order_id: number;
   order_number: string;
   customer_name: string;
@@ -61,6 +63,7 @@ const coaSql = `
          GROUP_CONCAT(b.number, ', ') AS batch_numbers,
          COALESCE(MAX(u.name), '') AS issued_by_name,
          COALESCE(MAX(b.coa_approved_by), '') AS approved_by,
+         COALESCE(MAX(b.coa_buyer_order), '') AS buyer_order,
          MAX(o.id) AS order_id, MAX(o.number) AS order_number, MAX(c.name) AS customer_name,
          COALESCE(GROUP_CONCAT(DISTINCT COALESCE(NULLIF(p.name, ''), w.description)), '') AS products,
          COALESCE(SUM((SELECT COALESCE(SUM(pe.qty_ok), 0) FROM production_entries pe

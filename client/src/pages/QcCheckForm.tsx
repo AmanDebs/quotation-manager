@@ -76,7 +76,9 @@ export default function QcCheckFormPage({ certify }: {
    * it from the last shift booked into the lot, which cannot disagree with the
    * output underneath it, where a typed one could.
    */
-  const [coa, setCoa] = useState({ coa_date: today(), approved_by: '', batch_number: '' });
+  const [coa, setCoa] = useState({
+    coa_date: today(), approved_by: '', batch_number: '', buyer_order: '',
+  });
   /*
    * Three facts per parameter since 2026-10-16, where there was one string.
    *
@@ -301,6 +303,19 @@ export default function QcCheckFormPage({ certify }: {
                       value={coa.approved_by}
                       onChange={(e) => setCoa({ ...coa, approved_by: e.target.value })}
                       placeholder="Who signs it off"
+                    />
+                  </Field>
+                  {/*
+                    The buyer's own reference. Blank is the ordinary answer —
+                    the certificate falls back to the proforma behind the
+                    order, then the customer's PO, and never to the sales
+                    order, which is ours rather than theirs.
+                  */}
+                  <Field label="Buyer's order">
+                    <Input
+                      value={coa.buyer_order}
+                      onChange={(e) => setCoa({ ...coa, buyer_order: e.target.value })}
+                      placeholder="PI or PO number"
                     />
                   </Field>
                 </div>
