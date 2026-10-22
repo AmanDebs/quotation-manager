@@ -2577,11 +2577,24 @@ export function buildPurchaseOrderPdf(id: number): TDocumentDefinitions {
   ];
   /*
    * The signature sits on the foot of the page rather than under the goods.
-   * 118pt is the block's own height (a label, the 42pt signing space, the
-   * line under it) plus the page number and a little air; measured against a
-   * stamped signature, which is the taller of the two shapes.
+   * The block's own height is about 118pt (a label, the 42pt signing space,
+   * the line under it) plus the page number and a little air, measured
+   * against a stamped signature, which is the taller of the two shapes.
+   *
+   * **150, not 118** (2026-10-22, the client with the six-row form in front
+   * of them: *"Move the stamp a little bit up"*). pdfmake draws a footer at
+   * the top of the bottom margin band, so this figure is where the block
+   * starts rather than how tall it is: the 32pt above its own height lift it
+   * clear of the page edge. Measured, the label's baseline moves 110.58pt
+   * from the foot of the sheet to 142.58pt.
+   *
+   * What it costs, stated rather than discovered: the bottom margin is taken
+   * out of the content area, so a long order breaks to a new page 32pt —
+   * about one ruled row — sooner. The air *under* the signature grows and the
+   * air above it shrinks, which is the whole point; a full-page order simply
+   * gets more clearance between its last line and the block.
    */
-  return baseDoc(content, { block: signatureBlock(s, {}), height: 118 });
+  return baseDoc(content, { block: signatureBlock(s, {}), height: 150 });
 }
 
 /* ------------------------------------------------------------------ *
