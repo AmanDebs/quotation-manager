@@ -328,7 +328,13 @@ quotationsRouter.post('/', (req: AuthedRequest, res) => {
       Number(body.insurance ?? 0),
       String(body.inco_terms ?? ''),
       String(body.container_count ?? ''),
-      String(body.prepared_by ?? req.user!.name),
+      // The desk name, then the account's own, which is the order the form's
+      // own `useDefaultOnce` reads them in (2026-10-22). `orders.spoc` and the
+      // column funnels match a desk name by **exact value**, so a full name
+      // written here reads as a seventh person and then carries down the whole
+      // chain — quotation → proforma → order → invoice — since every prefill
+      // copies this field verbatim. A caller that states one still wins.
+      String(body.prepared_by ?? (req.user!.desk_name || req.user!.name)),
       taxType,
       isExport,
       req.user!.id,
