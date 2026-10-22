@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
@@ -31,6 +31,42 @@ import { fmtDate, today } from '../lib/format';
  * `said` is the words written in place of the default wording, which is what
  * Aglo's own fitment block carries (*Ok*, *No leakage found*).
  */
+/**
+ * The three blocks the certificate prints, in the order their paper has them,
+ * with the unsectioned remainder last.
+ *
+ * The labels are the certificate's own (`QC_SECTION_LABEL` on the server), and
+ * they are repeated here rather than fetched because the page only ever *draws*
+ * them — the server decides which block a result belongs in, from the section
+ * copied onto the result itself.
+ */
+const SECTIONS: { key: string; label: string; adj: string }[] = [
+  { key: 'visual', label: 'Visual Checks', adj: 'visual' },
+  { key: 'dimensional', label: 'Dimensional Checks', adj: 'dimensional' },
+  { key: 'fitment', label: 'Fitment Check', adj: 'fitment' },
+  { key: '', label: 'Other Checks', adj: '' },
+];
+
+/**
+ * A check nobody specified, added to one inspection (2026-10-22, the client:
+ * *"divide the checks into sections … and also give option to add a custom
+ * check in that section"*).
+ *
+ * It is **not an edit to the product's specification** — that is the Products
+ * page, and a parameter added there applies to every batch from then on. This
+ * is one certificate's own row: an ad-hoc dimension, a one-off visual, a test
+ * a particular buyer asked for. It carries everything a result needs to read
+ * back, which is why the server stores it with no `param_id` and nothing
+ * downstream has to know it was custom.
+ *
+ * Its `id` is **negative**, so it shares the answer map with the specified
+ * checks without ever colliding with a real parameter id.
+ */
+type CustomCheck = {
+  id: number; name: string; section: string; kind: string;
+  unit: string; min: string; max: string;
+};
+
 type Answer = {
   v?: string; vmax?: string; na?: boolean;
   mode?: 'range' | 'value' | 'complied';
@@ -120,12 +156,26 @@ export default function QcCheckFormPage({ certify }: {
       ...(certify ? coa : {}),
       batch_id: batch?.id ?? null,
       sample_size: head.sample_size === '' ? null : Number(head.sample_size),
-      results: (full?.qc?.params ?? []).map((p) => {
+      results: [
+        ...(full?.qc?.params ?? []).map((p) => ({ ...p, custom: false, name: p.name, unit: p.unit, min: '', max: '' })),
+        // A custom row with no name is a blank line somebody opened and did
+        // not fill in, which the server refuses — so it is dropped here
+        // rather than sent to produce a refusal about itself.
+        ...custom.filter((c) => c.name.trim()).map((c) => ({ ...c, custom: true, ranged: 0 })),
+      ].map((p) => {
         const r = row(p.id!);
         const mode = p.kind === 'boolean' ? 'value' : modeOf(p);
         const complied = !r.na && mode === 'complied';
         return {
-          param_id: p.id,
+          // Null for a custom check: it points at no parameter and carries
+          // its own description instead.
+          param_id: p.custom ? null : p.id,
+          name: p.name,
+          kind: p.kind,
+          section: p.section ?? '',
+          unit: p.unit ?? '',
+          min_value: p.custom ? ((p as CustomCheck).min === '' ? null : Number((p as CustomCheck).min)) : null,
+          max_value: p.custom ? ((p as CustomCheck).max === '' ? null : Number((p as CustomCheck).max)) : null,
           // Sent as its own fact: the server writes the row and records the
           // answer, where a blank is still dropped as never looked at.
           na: !!r.na,
@@ -178,8 +228,52 @@ export default function QcCheckFormPage({ certify }: {
     message: 'This inspection has not been recorded yet.',
   });
 
+  /*
+   * Custom checks, and the blocks everything is drawn in.
+   *
+   * `sectioned` follows the **specification**, not the custom rows: a product
+   * nobody has sectioned draws the one flat list it always did, and the add
+   * button under it has no block to name — the same fallback the certificate
+   * takes, so the page and the document agree about what this product's
+   * checks look like.
+   */
+  const [custom, setCustom] = useState<CustomCheck[]>([]);
+  const [nextCustom, setNextCustom] = useState(-1);
+  const addCustom = (section: string) => {
+    setCustom((prev) => [...prev, {
+      id: nextCustom, name: '', section, kind: 'boolean', unit: '', min: '', max: '',
+    }]);
+    setNextCustom((n) => n - 1);
+  };
+  const patchCustom = (id: number, patch: Partial<CustomCheck>) =>
+    setCustom((prev) => prev.map((c) => (c.id === id ? { ...c, ...patch } : c)));
+  const dropCustom = (id: number) => {
+    setCustom((prev) => prev.filter((c) => c.id !== id));
+    setValues((prev) => { const next = { ...prev }; delete next[id]; return next; });
+  };
+
   const specParams = full?.qc?.params ?? [];
   const checks = full?.qc?.checks ?? [];
+  const sectioned = specParams.some((p) => !!p.section);
+  /** What each block draws: its specified checks, then the ones added to it. */
+  const blocks = (sectioned ? SECTIONS : [{ key: '', label: 'Checks', adj: '' }])
+    .map((b) => ({
+      ...b,
+      checks: [
+        ...specParams
+          .filter((p) => (sectioned ? (p.section ?? '') === b.key : true))
+          .map((p) => ({ ...p, custom: false as const, min: '', max: '' })),
+        ...custom.filter((c) => (sectioned ? c.section === b.key : true))
+          .map((c) => ({
+            ...c, custom: true as const, ranged: 0,
+            min_value: c.min === '' ? null : Number(c.min),
+            max_value: c.max === '' ? null : Number(c.max),
+          })),
+      ],
+    }))
+    // A block with nothing specified and nothing added is not drawn — a
+    // heading over an empty list is a heading people stop reading.
+    .filter((b) => b.checks.length > 0 || b.key !== '');
   const summary = full?.qc?.summary;
   const specOwner = full?.qc?.spec_owner;
 
@@ -331,13 +425,91 @@ export default function QcCheckFormPage({ certify }: {
                 </tr>
               </thead>
               <tbody>
-                {specParams.map((p) => (
+                {blocks.map((b) => (
+                  <Fragment key={b.key}>
+                    {/*
+                      A heading per block, drawn only where the specification
+                      says which block a characteristic belongs in — the same
+                      fallback the certificate takes, so a product nobody has
+                      sectioned is the one flat list it always was.
+                    */}
+                    {sectioned && (
+                      <tr>
+                        <td colSpan={3} className="pb-1 pt-3 text-xs font-semibold uppercase tracking-wide text-brand-700">
+                          {b.label}
+                        </td>
+                      </tr>
+                    )}
+                    {b.checks.map((p) => (
                   <tr key={p.id} className="border-b border-slate-100 last:border-0">
-                    <td className="py-1.5 pr-2">{p.name}</td>
+                    {/*
+                      A specified check states its name and its tolerance; a
+                      custom one is typed here, which is the only part of the
+                      row that differs. Everything to the right of it — the
+                      three answers, the wording and N/A — is the same control
+                      for both, because a check nobody specified is still a
+                      check and is judged by the same rule.
+                    */}
+                    <td className="py-1.5 pr-2">
+                      {p.custom ? (
+                        <div className="flex items-center gap-1">
+                          <Input
+                            className="w-full"
+                            value={p.name}
+                            onChange={(e) => patchCustom(p.id, { name: e.target.value })}
+                            placeholder="What was checked"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => dropCustom(p.id)}
+                            className="shrink-0 px-1 text-slate-300 hover:text-red-500"
+                            title="Remove this check"
+                          >✕</button>
+                        </div>
+                      ) : p.name}
+                    </td>
                     <td className="py-1.5 pr-2 text-slate-500">
-                      {p.kind === 'boolean' ? 'pass' : tolerance(p)}
-                      {p.kind !== 'boolean' && modeOf(p) === 'range' && (
-                        <span className="ml-1 text-xs text-slate-400">· both ends</span>
+                      {p.custom ? (
+                        <div className="flex items-center gap-1">
+                          <Select
+                            className="w-28 shrink-0"
+                            value={p.kind}
+                            onChange={(e) => patchCustom(p.id, { kind: e.target.value })}
+                          >
+                            <option value="boolean">pass / fail</option>
+                            <option value="numeric">measurement</option>
+                          </Select>
+                          {/* A tolerance is optional on a custom check, and
+                              one left open is judged on the end it has — the
+                              rule `resultOk` already applies to a specified
+                              parameter with a one-sided window. */}
+                          {p.kind === 'numeric' && (
+                            <>
+                              <Input
+                                type="number" className="w-16 shrink-0" value={p.min ?? ''}
+                                onChange={(e) => patchCustom(p.id, { min: e.target.value })}
+                                placeholder="min"
+                              />
+                              <Input
+                                type="number" className="w-16 shrink-0" value={p.max ?? ''}
+                                onChange={(e) => patchCustom(p.id, { max: e.target.value })}
+                                placeholder="max"
+                              />
+                              <Input
+                                className="w-16 shrink-0" value={p.unit}
+                                onChange={(e) => patchCustom(p.id, { unit: e.target.value })}
+                                placeholder="unit"
+                              />
+                            </>
+                          )}
+                        </div>
+                      ) : (
+                        <>
+                          {p.kind === 'boolean' ? 'pass' : tolerance(p)}
+                          {p.kind !== 'boolean' && modeOf(p) === 'range' && (
+                            <span className="ml-1 text-xs text-slate-400">· both ends</span>
+                          )}
+                        </>
                       )}
                     </td>
                     <td className="py-1.5">
@@ -446,6 +618,27 @@ export default function QcCheckFormPage({ certify }: {
                       </div>
                     </td>
                   </tr>
+                    ))}
+                    {/*
+                      A check nobody specified, added to this block. It is one
+                      inspection's own row rather than an edit to the product's
+                      specification: `qc_results.param_id` is nullable, so the
+                      result simply points at no parameter and carries its own
+                      name, kind, section and tolerance — which is why nothing
+                      downstream has to be told about it.
+                    */}
+                    <tr>
+                      <td colSpan={3} className="py-1.5">
+                        <button
+                          type="button"
+                          onClick={() => addCustom(b.key)}
+                          className="text-xs font-medium text-brand-700 hover:underline"
+                        >
+                          + Add a{b.adj ? ` ${b.adj}` : ''} check
+                        </button>
+                      </td>
+                    </tr>
+                  </Fragment>
                 ))}
               </tbody>
             </table>

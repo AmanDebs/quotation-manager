@@ -371,6 +371,48 @@ describe('the three blocks the client certificate prints', () => {
     assert.ok(texts.includes('QC FAILED'), 'the set was not read as failed');
   });
 
+  test('a check nobody specified prints in the block it was added to', () => {
+    /* 2026-10-22, the client: *"give option to add a custom check in that
+       section"*. `qc_results.param_id` has always been nullable, so a check
+       nobody specified is a result that points at no parameter and carries
+       its own name, kind, section and tolerance — which is the whole reason
+       nothing downstream has to be told about it. This asserts that: the
+       report groups it by the section on the **result**, exactly as it groups
+       a specified one. */
+    const { woId } = chain({ withChecks: false });
+    const checkId = record(woId, [
+      { name: 'Closure O/D', section: 'dimensional', value: 0.4 },
+    ]);
+    db.prepare(
+      `INSERT INTO qc_results (check_id, param_id, name, kind, section, unit, value, value_max, na,
+                               complied, observation, min_value, max_value, sort_order)
+       VALUES (?, NULL, 'Neck Finish O/D', 'numeric', 'dimensional', 'mm', 22, NULL, 0, 0, '', 21.8, 22.2, 1)`
+    ).run(checkId);
+    const texts = textsOf(buildQcReportPdf(woId));
+    const at = (t: string) => texts.indexOf(t);
+    assert.ok(texts.includes('Neck Finish O/D'), 'the custom check is not on the page');
+    // In the dimensional block, which on this fixture is the only one drawn.
+    assert.ok(at('DIMENSIONAL CHECKS') < at('Neck Finish O/D'), 'it was not placed in its block');
+    // The dimensional block splits a window into its two cells, so the
+    // custom row's own tolerance reads as a pair like any other.
+    assert.ok(texts.includes('21.8 mm') && texts.includes('22.2 mm'), 'its own tolerance is not printed');
+    assert.ok(texts.includes('QC PASSED'), 'a custom check was not judged');
+  });
+
+  test('...and one that fails is a failure like any other', () => {
+    /* It counts. A custom row that could not fail would be decoration on a
+       document that clears goods. */
+    const { woId } = chain({ withChecks: false });
+    const checkId = record(woId, [{ name: 'Closure O/D', section: 'dimensional', value: 0.4 }]);
+    db.prepare(
+      `INSERT INTO qc_results (check_id, param_id, name, kind, section, unit, value, value_max, na,
+                               complied, observation, min_value, max_value, sort_order)
+       VALUES (?, NULL, 'Neck Finish O/D', 'numeric', 'dimensional', 'mm', 25, NULL, 0, 0, '', 21.8, 22.2, 1)`
+    ).run(checkId);
+    const texts = textsOf(buildQcReportPdf(woId));
+    assert.ok(texts.includes('QC FAILED'), 'a custom check that failed did not fail the set');
+  });
+
   test('a reading the specification did not place is named, never dropped', () => {
     /* Silently leaving a recorded reading off a certificate is the one
        failure this cannot have, so an unplaced row gets its own block. */

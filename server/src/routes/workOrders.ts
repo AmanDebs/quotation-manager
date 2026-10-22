@@ -10,7 +10,8 @@ import { progressFor, progressForMany, LIVE_OK } from '../services/production.js
 import { despatchedByOrder, lastTripForLine } from '../services/despatch.js';
 import { materialCostByWorkOrder } from '../services/costing.js';
 import {
-  paramsFor, checksForWorkOrder, summaryForWorkOrder, specOwner, RESULT_FAILED_SQL, RESULT_DECIDED_SQL,
+  paramsFor, checksForWorkOrder, summaryForWorkOrder, specOwner, qcSectionOf,
+  RESULT_FAILED_SQL, RESULT_DECIDED_SQL,
 } from '../services/qc.js';
 import { requirementForJob, snapshotRecipe, recipeDiffers } from '../services/recipe.js';
 import { insertJob, plannedDateError, type OrderRef } from '../services/orderJobs.js';
@@ -1171,11 +1172,18 @@ function checkError(wo: Record<string, unknown>, body: Record<string, unknown>):
   // answer and still not an inspection — `resultOk`'s own rule, read here.
   const decided = recorded.filter((r) => !r.na && (given(r.value) || r.complied));
   if (!decided.length) return 'Record at least one measurement';
-  if (recorded.some((r) => !spec.has(Number(r.param_id)))) {
-    return 'That check is not on the specification for this product';
+  for (const r of recorded) {
+    const pid = Number(r.param_id);
+    if (Number.isFinite(pid) && pid > 0) {
+      if (!spec.has(pid)) return 'That check is not on the specification for this product';
+      continue;
+    }
+    // A row that names no parameter is a custom check, and a custom check
+    // with no name is a blank line in the editor rather than an inspection.
+    if (!String(r.name ?? '').trim()) return 'A custom check needs a name';
   }
   for (const r of decided) {
-    const param = spec.get(Number(r.param_id))!;
+    const param = paramOf(r, spec)!;
     // Nothing to check: no figure was claimed.
     if (r.complied || param.kind === 'boolean') continue;
     /*
@@ -1205,6 +1213,54 @@ function checkError(wo: Record<string, unknown>, body: Record<string, unknown>):
   return null;
 }
 
+/**
+ * What this row is a check **of** — a parameter on the specification, or one
+ * the inspector wrote on the spot.
+ *
+ * **A custom check needs no table of its own**, which is the whole reason it
+ * is cheap: `qc_results.param_id` has been nullable since it was written (the
+ * spec is rewritten whole on every edit and a result has to survive that), and
+ * the row already copies the name, the kind, the section, the unit and the
+ * tolerance — everything needed to read it back. So a check nobody specified
+ * is simply a result that points at no parameter, and every reader of one —
+ * `resultOk`, `decorate`, the register, the report and the certificate —
+ * already handles it without being told.
+ *
+ * 2026-10-22, the client: *"give option to add a custom check in that
+ * section"*. It carries a **section**, so it lands in the right block of the
+ * certificate by the same rule a specified one does.
+ *
+ * Asked by both `checkError` and `insertCheck`, or the two would come to
+ * disagree about which rows are checks at all — on a document that clears
+ * goods, the worst way for two things to differ.
+ */
+function paramOf(r: Record<string, unknown>, spec: Map<number | undefined, QcParamish>): QcParamish | null {
+  const pid = Number(r.param_id);
+  if (Number.isFinite(pid) && pid > 0) return spec.get(pid) ?? null;
+  const name = String(r.name ?? '').trim();
+  if (!name) return null;
+  return {
+    id: null,
+    name,
+    kind: String(r.kind) === 'numeric' ? 'numeric' : 'boolean',
+    // An unknown section reads as none rather than being trusted, the rule a
+    // stored vocabulary follows everywhere here.
+    section: qcSectionOf(r.section),
+    unit: String(r.unit ?? '').trim(),
+    // A custom check is answered as one figure or as pass/fail; a range is a
+    // property of a parameter somebody specified.
+    ranged: 0,
+    min_value: numOrNull(r.min_value),
+    max_value: numOrNull(r.max_value),
+  };
+}
+
+/** A parameter, or the shape of one a custom check declares for itself. */
+type QcParamish = {
+  id: number | null; name: string; kind: string; section: string; unit: string;
+  ranged: number | boolean; min_value: number | null; max_value: number | null;
+};
+
 /** How one row was answered: a range across the batch, or a single figure. */
 function answerMode(r: Record<string, unknown>, param: { ranged?: unknown; kind?: unknown }): 'range' | 'value' {
   if (String(param.kind) === 'boolean') return 'value';
@@ -1231,7 +1287,7 @@ function insertCheck(req: AuthedRequest, jobId: number, wo: Record<string, unkno
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   );
   recorded.forEach((r, i) => {
-    const param = spec.get(Number(r.param_id))!;
+    const param = paramOf(r, spec)!;
     const na = r.na ? 1 : 0;
     // Not applicable wins: it says the characteristic does not apply at all,
     // which no claim about conformity can be made on top of.
@@ -1241,7 +1297,8 @@ function insertCheck(req: AuthedRequest, jobId: number, wo: Record<string, unkno
     const ranged = !na && !complied && param.kind !== 'boolean'
       && answerMode(r, param) === 'range' ? 1 : 0;
     ins.run(
-      checkId, param.id, param.name, param.kind, param.section ?? '', param.unit,
+      // Null for a custom check — nothing on the specification to point at.
+      checkId, param.id ?? null, param.name, param.kind, param.section ?? '', param.unit,
       na || complied ? null : param.kind === 'boolean' ? (r.value ? 1 : 0) : Number(r.value),
       ranged ? Number(r.value_max) : null,
       ranged, na,
