@@ -64,9 +64,15 @@ export interface Batch {
   work_order_id: number;
   date: string;
   notes: string;
-  /** Blank until a COA has been issued. Never re-issued once it is not. */
+  /** Blank until a COA has been drawn for this lot. */
   coa_no: string;
   coa_date: string;
+  /**
+   * `'draft'` while a certificate has been withdrawn but kept, `''` otherwise
+   * — and `''` on every row that predates the column, so silence means
+   * issued. See `schema.sql`; the pair is read through `cleared` below.
+   */
+  coa_status: string;
   coa_issued_by: number | null;
   coa_issued_by_name: string | null;
   /** The second signatory, as the certificate prints it. */
@@ -89,8 +95,16 @@ export interface Batch {
    * measured is not a verdict at all — `decorate`'s rule, not a second one.
    */
   qc: BatchQc;
-  /** A COA has been issued. The spec's *QC_PASSED with a valid COA attached*. */
+  /**
+   * A COA has been **issued** for this lot — the spec's *QC_PASSED with a
+   * valid COA attached*, and the one definition every rule about goods
+   * leaving reads. A lot under a **draft** certificate is not cleared: the QC
+   * gate holds it, no lorry takes it and no invoice bills it, or draft mode
+   * would be a way around the Hard Stop.
+   */
   cleared: boolean;
+  /** A certificate has been drawn for this lot and withdrawn, not discarded. */
+  coa_draft: boolean;
   /**
    * What was decided about a lot that failed: '' , 'rework' or 'scrapped'.
    * Blank on every lot that never failed, and on one that failed and is still
@@ -194,6 +208,7 @@ export function batchesFor(workOrderId: number): Batch[] {
       notes: String(r.notes ?? ''),
       coa_no: String(r.coa_no ?? ''),
       coa_date: String(r.coa_date ?? ''),
+      coa_status: String(r.coa_status ?? ''),
       coa_issued_by: r.coa_issued_by == null ? null : Number(r.coa_issued_by),
       coa_issued_by_name: r.coa_issued_by_name == null ? null : String(r.coa_issued_by_name),
       coa_approved_by: String(r.coa_approved_by ?? ''),
@@ -203,7 +218,10 @@ export function batchesFor(workOrderId: number): Batch[] {
       entries: made.n,
       final_checks: mine,
       qc: qc as BatchQc,
-      cleared: String(r.coa_no ?? '') !== '',
+      // The TypeScript half of `certifiedSql` — one rule, two spellings, with
+      // a case asserting they agree over every state a lot can be in.
+      cleared: String(r.coa_no ?? '') !== '' && String(r.coa_status ?? '') !== 'draft',
+      coa_draft: String(r.coa_no ?? '') !== '' && String(r.coa_status ?? '') === 'draft',
       disposition,
       disposition_date: String(r.disposition_date ?? ''),
       disposition_by_name: r.disposition_by_name == null ? null : String(r.disposition_by_name),
@@ -244,8 +262,9 @@ export function renameError(id: number, newNumber: unknown): string | null {
   if (!b) return 'Batch not found.';
   const after = String(newNumber).trim();
   if (!after || after === b.number) return null;
-  if (b.cleared) {
-    return `Batch ${b.number} is named on certificate ${b.coa_no}, so its number cannot be changed.`;
+  if (b.cleared || b.coa_draft) {
+    return `Batch ${b.number} is named on ${b.coa_draft ? 'draft ' : ''}certificate ${b.coa_no}, `
+      + 'so its number cannot be changed.';
   }
   if (b.trips.length) {
     return `Batch ${b.number} is named on ${b.trips[0].reference}, so its number cannot be changed.`;
@@ -263,16 +282,13 @@ export function renameError(id: number, newNumber: unknown): string | null {
  * returning the sentence to refuse with, so the rule is testable without the
  * HTTP harness this codebase does not have.
  *
- * Four refusals, and the order matters: the most specific reason is the one
- * worth reading. **A lot already certified is never certified again**, the
- * rule every issued number in this app follows — the certificate may be with
- * the customer, and a second one under a new number would make "which COA
- * covers this box" unanswerable. **A lot nothing was booked into** is a number
- * with no goods under it. **A lot never finally checked** is not a failure and
- * is not a pass — the silence-is-not-a-verdict rule this module states about
- * itself — so it is refused with what to do rather than with a verdict. And a
- * lot whose final check **failed** is refused outright: re-testing it is what
- * changes that, and the latest decided check is the one read.
+ * The order matters: the most specific reason is the one worth reading. **A
+ * lot already certified is never certified again**, the rule every issued
+ * number in this app follows — the certificate may be with the customer, and
+ * a second one under a new number would make "which COA covers this box"
+ * unanswerable. **A lot on a draft** is spoken for by that number. The rest
+ * are about the lot's own state and are `lotNotCertifiable`'s, re-issuing a
+ * draft being their second caller.
  */
 export function coaBlockError(id: number): string | null {
   const b = batchById(id);
@@ -281,12 +297,43 @@ export function coaBlockError(id: number): string | null {
     return `Batch ${b.number} was already certified as ${b.coa_no}. A certificate is issued once.`;
   }
   /*
+   * **A lot on a withdrawn certificate is spoken for** (2026-10-24). A draft
+   * still carries its number, and that number is what holds its group
+   * together — so writing a second one over this lot would silently split the
+   * draft, leaving a certificate that no longer covers what it says it does.
+   * The way on is to issue that draft or discard it, which the register
+   * offers on the row, so this names both.
+   */
+  if (b.coa_draft) {
+    return `Batch ${b.number} is on draft certificate ${b.coa_no}. `
+      + 'Issue that certificate or discard it before certifying this batch again.';
+  }
+  return lotNotCertifiable(b);
+}
+
+/**
+ * The three refusals that are about the **state of the lot** rather than
+ * about a number already on it — nothing booked, nothing decided, or decided
+ * against.
+ *
+ * Split out when re-issuing a draft became a second caller (2026-10-24).
+ * `coaBlockError` asks it after its own two, and `coaReissueError` asks it
+ * alone, because a draft's lots are already carrying the number those two
+ * branches are about. One definition of *may this lot be certified at all*,
+ * or the two doors would come to disagree about a scrapped lot.
+ */
+function lotNotCertifiable(b: Batch): string | null {
+  /*
    * **Condemned is final while it stands.** A scrapped lot may not be
    * certified however its checks later read — which matters, because a lot's
    * verdict is its *latest decided* check, so re-inspecting a scrapped lot
    * would otherwise walk it straight back to a certificate. The way out is to
    * withdraw the scrap decision, which is a thing somebody does on purpose and
    * which the trail records, not a thing a fresh reading does silently.
+   *
+   * It is asked **before** the three below for the same reason it used to be
+   * asked first here: a scrapped lot with a passing check reads fine to every
+   * other test in this function.
    */
   if (b.scrapped) {
     return `Batch ${b.number} was scrapped, so it cannot be certified. `
@@ -314,14 +361,21 @@ export function coaBlockError(id: number): string | null {
  * numbers being per company like every other series here, and ordered by the
  * lot's own number so a range reads the way the paper writes it.
  *
- * One definition, three readers: the PDF gathers what it prints, and the edit
- * and the withdrawal below change what it describes. A second copy of this
- * walk is how a certificate would come to be printed over one set and
- * corrected over another.
+ * One definition, four readers: the PDF gathers what it prints, and the edit,
+ * the withdrawal and the re-issue below change what it describes. A second
+ * copy of this walk is how a certificate would come to be printed over one set
+ * and corrected over another.
+ *
+ * **Gathered on the number, not on `cleared`** (2026-10-24): a withdrawn
+ * certificate is a draft that still carries its number, and every one of
+ * those four has to reach its lots — a draft nobody could gather is a draft
+ * nobody could issue or discard, which is the trap this whole state exists to
+ * avoid. The state is uniform across a group, both moves acting on the whole
+ * of it, so the set is the same either way.
  */
 export function lotsUnderCoa(batchId: number): Batch[] {
   const b = batchById(batchId);
-  if (!b || !b.cleared) return [];
+  if (!b || !b.coa_no) return [];
   const ids = db.prepare(
     `SELECT b.id FROM batches b
        JOIN work_orders w ON w.id = b.work_order_id
@@ -369,6 +423,35 @@ export function coaEditError(batchId: number): string | null {
     const notes = [...new Set(returned.flatMap((l) => l.returns.map((n) => n.number)))].join(', ');
     return `Certificate ${lots[0].coa_no} covers a lot named as returned on ${notes}, `
       + 'so it cannot be changed or withdrawn.';
+  }
+  return null;
+}
+
+/**
+ * Why this draft cannot be issued, or null.
+ *
+ * **The number is not drawn again** — it was drawn when the certificate was
+ * first issued and nothing else can have taken it, the series not having been
+ * rewound — so this is the same document going back out rather than a new
+ * one. That is what keeps *withdraw, correct, issue* readable as one history
+ * instead of two certificates over the same goods.
+ *
+ * What it does re-ask is each lot's own state, through `lotNotCertifiable`:
+ * a lot can be scrapped, or re-inspected to a failing reading, while the
+ * certificate sits in draft — and a certificate that went back out over a
+ * condemned lot would be exactly the clearance the Hard Stop refuses.
+ * `coaBlockError`'s first two branches are deliberately not asked, the lots
+ * being on this draft's own number by construction.
+ */
+export function coaReissueError(batchId: number): string | null {
+  const lots = lotsUnderCoa(batchId);
+  if (!lots.length) return 'No certificate has been issued for this batch.';
+  if (!lots.some((l) => l.coa_draft)) {
+    return `Certificate ${lots[0].coa_no} has already been issued.`;
+  }
+  for (const lot of lots) {
+    const refused = lotNotCertifiable(lot);
+    if (refused) return refused;
   }
   return null;
 }
@@ -558,10 +641,11 @@ export function despatchBatchError(orderId: number, batchIds: unknown[]): string
   }
   for (const id of uniqueIds(raw)) {
     const row = db.prepare(
-      `SELECT b.number, b.coa_no, b.disposition, w.order_id
+      `SELECT b.number, b.coa_no, b.coa_status, b.disposition, w.order_id
          FROM batches b JOIN work_orders w ON w.id = b.work_order_id
         WHERE b.id = ?`
-    ).get(id) as { number: string; coa_no: string; disposition: string; order_id: number } | undefined;
+    ).get(id) as
+      { number: string; coa_no: string; coa_status: string; disposition: string; order_id: number } | undefined;
     if (!row) return 'One of the batches named is not on file — it may have been deleted since.';
     if (Number(row.order_id) !== Number(orderId)) {
       return `Batch ${row.number} was made against another order, so it cannot be dispatched on this one.`;
@@ -574,6 +658,17 @@ export function despatchBatchError(orderId: number, batchIds: unknown[]): string
      */
     if (String(row.disposition) === 'scrapped') {
       return `Batch ${row.number} was scrapped, so it cannot be dispatched.`;
+    }
+    /*
+     * **A draft is not a certificate** (2026-10-24), and is refused in its own
+     * words: somebody looking at a number on the register and told the lot
+     * "has no Certificate of Analysis" would reasonably conclude the app had
+     * lost it. The lot carries a number and the document has not gone out,
+     * which is a different fact and a different thing to do about it.
+     */
+    if (String(row.coa_status) === 'draft') {
+      return `Batch ${row.number} is on draft certificate ${row.coa_no}, which has not been issued, `
+        + 'so it cannot be dispatched. Issue that certificate first.';
     }
     if (!String(row.coa_no)) {
       return `Batch ${row.number} has no Certificate of Analysis, so it cannot be dispatched. `

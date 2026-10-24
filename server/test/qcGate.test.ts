@@ -264,6 +264,30 @@ describe('where a certificate is demanded rather than a passing check', () => {
     assert.equal(qcBlockError(o, [{ order_line: 0 }]), null);
   });
 
+  /**
+   * The paged half of the rule, read where it is most expensive to be wrong
+   * (2026-10-24). A withdrawn certificate is a **draft** that still carries
+   * its number, so the gate's own `cleared` count — which is SQL, the invoice
+   * never loading a batch row — has to tell a drafted lot from an issued one.
+   * If it cannot, withdrawing a certificate would leave the goods invoiceable
+   * on a document nobody has issued, which is the Hard Stop walked around.
+   */
+  test('a drafted certificate clears nothing, and issuing it again does', () => {
+    const p = makeProduct(true);
+    const o = makeOrder([p]);
+    mark(o, { is_export: 1 });
+    const batchId = certify(passedJob(o, p));
+    assert.equal(qcBlockError(o, [{ order_line: 0 }]), null, 'the certified lot did not clear the line');
+    db.prepare("UPDATE batches SET coa_status = 'draft' WHERE id = ?").run(batchId);
+    const held = qcBlockError(o, [{ order_line: 0 }]) ?? '';
+    assert.match(held, /Certificate of Analysis/, 'a withdrawn certificate went on clearing the line');
+    // Named rather than denied: the number is on the register, and telling
+    // somebody no batch carries a certificate sends them to issue a second.
+    assert.match(held, /withdrawn and not issued again/);
+    db.prepare("UPDATE batches SET coa_status = '' WHERE id = ?").run(batchId);
+    assert.equal(qcBlockError(o, [{ order_line: 0 }]), null);
+  });
+
   test('a domestic order is cleared by the job check, exactly as before', () => {
     /* The imported backlog. Holding this would stop work that ships today. */
     const p = makeProduct(true);

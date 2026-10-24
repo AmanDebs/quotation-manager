@@ -285,6 +285,8 @@ export interface Batch {
   notes: string;
   coa_no: string;
   coa_date: string;
+  /** `'draft'` while a certificate has been withdrawn but kept; `''` otherwise. */
+  coa_status?: string;
   coa_issued_by_name?: string | null;
   /** The second signatory, as the certificate prints it. */
   coa_approved_by?: string;
@@ -293,7 +295,10 @@ export interface Batch {
   entries: number;
   final_checks: QcCheck[];
   qc: 'none' | 'passed' | 'failed';
+  /** A certificate has been **issued** for this lot. A draft is not cleared. */
   cleared: boolean;
+  /** A certificate was drawn for this lot and withdrawn, not discarded. */
+  coa_draft?: boolean;
   /** '' | 'rework' | 'scrapped' — the spec's two words, and nothing decided yet. */
   disposition: '' | 'rework' | 'scrapped';
   disposition_date: string;
@@ -1713,6 +1718,11 @@ export interface CoaRow {
   qty: number;
   /** 1 once any lot it covers has been named on a trip. */
   shipped: number;
+  /**
+   * 1 while the certificate has been withdrawn and kept — correctable,
+   * printable watermarked, and certifying nothing until it is issued again.
+   */
+  draft: number;
 }
 
 /** The figures over the certificate register, measured over the whole filtered set. */
@@ -1721,4 +1731,5 @@ export interface CoaSummary {
   lots: number;
   qty: number;
   shipped: number;
+  drafts: number;
 }

@@ -2,8 +2,11 @@ import './helpers/scratch.js';
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { db } from '../src/db/connection.js';
-import { batchesFor, batchById, coaBlockError, coaEditError, lotsUnderCoa, renameError }
-  from '../src/services/batch.js';
+import {
+  batchesFor, batchById, coaBlockError, coaEditError, coaReissueError, despatchBatchError,
+  lotsUnderCoa, renameError,
+} from '../src/services/batch.js';
+import { certifiedSql } from '../src/services/qc.js';
 import { makeCustomer, makeInvoice } from './helpers/factory.js';
 
 /**
@@ -331,5 +334,142 @@ describe('when a certificate may be corrected or withdrawn', () => {
   test('an uncertified lot is its own group of none', () => {
     const { woId } = job();
     assert.deepEqual(lotsUnderCoa(batch(woId)), [], 'an uncertified lot gathered a group');
+  });
+});
+
+/**
+ * **A withdrawn certificate is a draft** (2026-10-24, the client: *"When we
+ * withdraw a COA, the COA should go to draft mode so that we can make changes
+ * and do not have to make the whole thing again"*).
+ *
+ * Two things are being protected, and the second is the one that would be
+ * expensive to get wrong. The certificate **survives as a unit** — the number
+ * is what holds a group together, so clearing it dissolved the thing the
+ * client wants to correct. And **a draft certifies nothing**: `cleared` means
+ * *issued*, so the QC gate holds the line and no lorry takes the lot. Most of
+ * these assert that second half, because a draft that cleared goods would be
+ * the specification's own Hard Stop walked around.
+ */
+describe('a withdrawn certificate is a draft', () => {
+  /** A made, passed, certified lot, drafted or not. */
+  function certified(no: string, draft = false) {
+    const made = job();
+    const b = batch(made.woId);
+    shift(made.woId, b, 40000);
+    check(made.woId, b, made.paramId, 28.0);
+    db.prepare(
+      `UPDATE batches SET coa_no = ?, coa_date = '2026-10-21', coa_approved_by = 'asif',
+                          coa_status = ? WHERE id = ?`
+    ).run(no, draft ? 'draft' : '', b);
+    return { ...made, b };
+  }
+
+  test('it keeps its number, its date and its approver — the whole of what it was', () => {
+    const { b } = certified('COA/26-27/020', true);
+    const lot = batchById(b)!;
+    assert.equal(lot.coa_no, 'COA/26-27/020', 'the number was cleared, so the group is gone');
+    assert.equal(lot.coa_date, '2026-10-21');
+    assert.equal(lot.coa_approved_by, 'asif');
+    assert.equal(lot.coa_draft, true);
+  });
+
+  test('and it certifies nothing: the lot is not cleared', () => {
+    const { b } = certified('COA/26-27/021', true);
+    assert.equal(batchById(b)!.cleared, false, 'a draft cleared the lot it covers');
+  });
+
+  test('so no lorry takes it, and the refusal names the draft rather than denying it exists', () => {
+    const { b, orderId } = certified('COA/26-27/022', true);
+    const refused = String(despatchBatchError(orderId, [b]));
+    assert.match(refused, /COA\/26-27\/022/, 'the sentence hid the number the register shows');
+    assert.match(refused, /not been issued/);
+    // And issued, the same lot goes.
+    db.prepare("UPDATE batches SET coa_status = '' WHERE id = ?").run(b);
+    assert.equal(despatchBatchError(orderId, [b]), null);
+  });
+
+  test('a second certificate is refused over a lot already on a draft', () => {
+    const { b } = certified('COA/26-27/023', true);
+    const refused = String(coaBlockError(b));
+    assert.match(refused, /draft certificate COA\/26-27\/023/);
+    assert.match(refused, /Issue that certificate or discard it/);
+  });
+
+  test('its group gathers from any of its lots, so it can be issued or discarded at all', () => {
+    const made = job();
+    const ids = [batch(made.woId), batch(made.woId)];
+    for (const id of ids) {
+      shift(made.woId, id, 20000);
+      check(made.woId, id, made.paramId, 28.0);
+      db.prepare("UPDATE batches SET coa_no = 'COA/26-27/024', coa_status = 'draft' WHERE id = ?").run(id);
+    }
+    assert.deepEqual(lotsUnderCoa(ids[0]).map((l) => l.id).sort(), [...ids].sort());
+    assert.deepEqual(lotsUnderCoa(ids[1]).map((l) => l.id).sort(), [...ids].sort());
+  });
+
+  test('it is correctable — there is nothing out in the world to disagree with', () => {
+    const { b } = certified('COA/26-27/025', true);
+    assert.equal(coaEditError(b), null);
+  });
+
+  test('and issuable, which is what re-asks each lot state rather than the number', () => {
+    const { b } = certified('COA/26-27/026', true);
+    assert.equal(coaReissueError(b), null);
+  });
+
+  test('never issuable while a lot of it is scrapped, however its checks read', () => {
+    const { b } = certified('COA/26-27/027', true);
+    db.prepare("UPDATE batches SET disposition = 'scrapped' WHERE id = ?").run(b);
+    assert.match(String(coaReissueError(b)), /was scrapped/);
+  });
+
+  test('nor once it has been re-inspected to a failing reading', () => {
+    const made = job();
+    const b = batch(made.woId);
+    shift(made.woId, b, 40000);
+    check(made.woId, b, made.paramId, 28.0);
+    db.prepare("UPDATE batches SET coa_no = 'COA/26-27/028', coa_status = 'draft' WHERE id = ?").run(b);
+    assert.equal(coaReissueError(b), null);
+    // The latest decided check is the one read — the rule a lot's verdict
+    // already follows, and the whole reason re-issuing asks again.
+    check(made.woId, b, made.paramId, 30.5);
+    assert.match(String(coaReissueError(b)), /did not pass/);
+  });
+
+  test('an issued certificate is not issued again', () => {
+    const { b } = certified('COA/26-27/029');
+    assert.match(String(coaReissueError(b)), /has already been issued/);
+  });
+
+  test('and a lot under a draft keeps its number, the rule paper already sets', () => {
+    const { b } = certified('COA/26-27/030', true);
+    assert.match(String(renameError(b, 'B/renamed')), /draft certificate COA\/26-27\/030/);
+  });
+
+  /**
+   * The two spellings of one rule, over every state a lot can be in.
+   *
+   * `certifiedSql` answers it for the paged readers — the QC gate and the COA
+   * register, which never load a row — and `cleared` answers it in
+   * TypeScript. If they part, a draft clears goods in one half of the app and
+   * not the other, so this walks the four combinations rather than trusting
+   * that two expressions written a file apart say the same thing.
+   */
+  test('the SQL and the TypeScript halves agree over every state', () => {
+    const made = job();
+    const states: [string, string][] = [
+      ['', ''], ['', 'draft'], ['COA/26-27/031', ''], ['COA/26-27/031', 'draft'],
+    ];
+    for (const [no, status] of states) {
+      const b = batch(made.woId);
+      db.prepare('UPDATE batches SET coa_no = ?, coa_status = ? WHERE id = ?').run(no, status, b);
+      const sql = db.prepare(
+        `SELECT CASE WHEN ${certifiedSql()} THEN 1 ELSE 0 END AS ok FROM batches b WHERE b.id = ?`
+      ).get(b) as { ok: number };
+      assert.equal(
+        Number(sql.ok) === 1, batchById(b)!.cleared,
+        `certifiedSql and cleared disagree about coa_no=${JSON.stringify(no)} status=${JSON.stringify(status)}`,
+      );
+    }
   });
 });

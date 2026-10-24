@@ -352,6 +352,25 @@ export function summaryForWorkOrder(workOrderId: number, productId: number | nul
  * passing means, which is the thing this module says twice about itself.
  */
 /**
+ * **When a lot carries a certificate**, as SQL — a number on it *and* that
+ * certificate issued rather than drafted (2026-10-24).
+ *
+ * One rule in two spellings, the exception `RESULT_FAILED_SQL` already
+ * establishes and paid for the same way: this is the paged half (the QC gate
+ * below and the COA register both ask it of rows they never load), while
+ * `cleared` on a `Batch` is the TypeScript half, and `batch.test.ts` asserts
+ * the two answer identically over every state a lot can be in. If they ever
+ * part, a draft certificate clears goods — which is the specification's own
+ * Hard Stop walked around, so it is worth a test with the reason on it.
+ *
+ * It lives **here rather than in `services/batch.ts`** for the reason
+ * `lotsForLine` does, immediately below: that file imports this one, so a
+ * fact both need has to sit on this side of the circle.
+ */
+export const certifiedSql = (alias = 'b') =>
+  `(${alias}.coa_no <> '' AND ${alias}.coa_status <> 'draft')`;
+
+/**
  * The identified lots on one order line, and how many carry a certificate.
  *
  * Lives here rather than in `services/batch.ts` so that nothing closes a
@@ -360,15 +379,16 @@ export function summaryForWorkOrder(workOrderId: number, productId: number | nul
  * `batches`, no QC arithmetic — whether a lot *passed* is `batch.ts`'s
  * question, and a COA is only ever issued on a pass.
  */
-function lotsForLine(orderId: number, pos: number): { total: number; cleared: number } {
+function lotsForLine(orderId: number, pos: number): { total: number; cleared: number; drafted: number } {
   const r = db.prepare(
     `SELECT COUNT(*) AS total,
-            COALESCE(SUM(CASE WHEN b.coa_no <> '' THEN 1 ELSE 0 END), 0) AS cleared
+            COALESCE(SUM(CASE WHEN ${certifiedSql()} THEN 1 ELSE 0 END), 0) AS cleared,
+            COALESCE(SUM(CASE WHEN b.coa_status = 'draft' THEN 1 ELSE 0 END), 0) AS drafted
        FROM batches b
        JOIN work_orders w ON w.id = b.work_order_id
       WHERE w.order_id = ? AND w.order_line = ? AND w.status <> 'cancelled'`
-  ).get(orderId, pos) as { total: number; cleared: number };
-  return { total: Number(r.total), cleared: Number(r.cleared) };
+  ).get(orderId, pos) as { total: number; cleared: number; drafted: number };
+  return { total: Number(r.total), cleared: Number(r.cleared), drafted: Number(r.drafted) };
 }
 
 export type QcContext = 'dispatch' | 'invoice';
@@ -457,6 +477,18 @@ export function qcBlockError(
     const lots = lotsForLine(orderId, pos);
     if (lots.total > 0) {
       if (lots.cleared === 0) {
+        /*
+         * **A draft is named rather than denied** (2026-10-24). Somebody
+         * looking at a certificate on the COA register and told that no batch
+         * of the line carries one would reasonably conclude the app had lost
+         * it — the number is there, and what is true is that it has not gone
+         * out. Different fact, different thing to do about it.
+         */
+        if (lots.drafted > 0) {
+          return `${name}: its ${lots.drafted === 1 ? 'batch is' : 'batches are'} on a `
+            + `Certificate of Analysis that has been withdrawn and not issued again, so it cannot be `
+            + `${verb}. Issue that certificate from the COA register, or discard it and certify afresh.`;
+        }
         return `${name}: no batch of it carries a Certificate of Analysis, so it cannot be ${verb}. `
           + 'Issue a COA against a batch that has passed its final check.';
       }

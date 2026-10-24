@@ -144,6 +144,19 @@ export default function WorkOrderDetailPage() {
     onSuccess: () => { setCertifying(null); refresh(); },
   });
   /*
+   * A **withdrawn** certificate going back out, under its own number
+   * (2026-10-24). Not the same act as the one above and not the same route:
+   * that one draws a number, this one re-issues the one the certificate
+   * already carries, which is what makes a correction one document rather
+   * than two over the same goods. It asks nothing, the date and the approver
+   * being on the lot already — the COA register's Edit dialog is where those
+   * are changed.
+   */
+  const issueDraft = useMutation({
+    mutationFn: (batchId: number) => api.post(`/api/work-orders/batches/${batchId}/coa/issue`, {}),
+    onSuccess: refresh,
+  });
+  /*
    * Which lots this certificate covers (2026-10-16). Aglo issue one COA over
    * a run of them — *Batch No: 05032026A+B TO 09032026A+B* — so certifying is
    * an act over a **set**, and the one-lot case is that set with one member
@@ -592,9 +605,16 @@ export default function WorkOrderDetailPage() {
                             : <span className="text-slate-400">Not inspected</span>}
                       </td>
                       <td className="py-2 pr-3">
-                        {b.cleared
-                          ? <span className="text-slate-700">{b.coa_no} <span className="text-xs text-slate-400">{fmtDate(b.coa_date)}</span></span>
-                          : <span className="text-slate-300">—</span>}
+                        {b.cleared ? (
+                          <span className="text-slate-700">{b.coa_no} <span className="text-xs text-slate-400">{fmtDate(b.coa_date)}</span></span>
+                        ) : b.coa_draft ? (
+                          /* Withdrawn and kept: the number is still here and
+                             the lot is still not cleared, which is two facts
+                             the cell has to say at once. */
+                          <span className="text-amber-700">
+                            {b.coa_no} <span className="text-xs">(draft)</span>
+                          </span>
+                        ) : <span className="text-slate-300">—</span>}
                       </td>
                       {/*
                         What was decided about a lot that failed. A lot nobody
@@ -647,6 +667,19 @@ export default function WorkOrderDetailPage() {
                           </PdfLink>
                         ) : (
                           <>
+                            {/*
+                              A draft prints too, watermarked — checking the
+                              document before it goes out is the whole reason
+                              the state exists, so refusing the page would
+                              take away the thing a draft is for.
+                            */}
+                            {b.coa_draft && (
+                              <span className="mr-2">
+                                <PdfLink href={`/api/pdf/coa/${b.id}`} guard={pdf} title="Certificate of Analysis (draft)">
+                                  📄 COA
+                                </PdfLink>
+                              </span>
+                            )}
                             {can('qc', 'full') && (
                           <>
                             <Button variant="ghost" onClick={() => navigate(`/work-orders/${id}/qc?batch=${b.id}`)}>Final check</Button>
@@ -674,6 +707,25 @@ export default function WorkOrderDetailPage() {
                                 <Button variant="danger" className="ml-1 border-0" disabled={decide.isPending}
                                   onClick={() => { decide.reset(); setDeciding({ batch: b, disposition: 'scrapped' }); }}>Scrap</Button>
                               </>
+                            ) : b.coa_draft ? (
+                              /*
+                                A withdrawn certificate is issued again under
+                                its own number, so this is the draft route
+                                rather than the dialog above — the dialog
+                                draws a number, and a second number over
+                                these lots is a second document. The date and
+                                the approver are already on the lot; the COA
+                                register's Edit dialog is where they change.
+                              */
+                              <Button
+                                variant="secondary"
+                                className="ml-1"
+                                disabled={issueDraft.isPending}
+                                title={`Issue ${b.coa_no} again — the same certificate, the same number`}
+                                onClick={() => { issueDraft.reset(); issueDraft.mutate(b.id); }}
+                              >
+                                Issue COA
+                              </Button>
                             ) : (
                               <Button
                                 variant="secondary"
@@ -722,7 +774,7 @@ export default function WorkOrderDetailPage() {
               </table>
             </div>
           )}
-          <ErrorText error={issueCoa.error || decide.error || removeBatch.error} />
+          <ErrorText error={issueCoa.error || issueDraft.error || decide.error || removeBatch.error} />
         </Card>
       )}
 

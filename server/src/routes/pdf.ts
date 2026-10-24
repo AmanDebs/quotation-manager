@@ -290,6 +290,20 @@ pdfRouter.get('/:type/:id/:name?', async (req: AuthedRequest, res) => {
       if (missing) return res.status(422).json({ error: `This packing list is not finished: ${missing.message}` });
     }
   }
+  /*
+   * A **draft** certificate prints watermarked (2026-10-24). Checking the
+   * document before it goes out is the whole reason a draft exists, so
+   * refusing it would take away the thing the state is for — and the mark is
+   * this app's own answer to *a draft must never be passed off as final*,
+   * which is what every unapproved document already carries. It clears
+   * itself the moment the certificate is issued, so it is not the mark
+   * nobody can act on that the `— set` rule warns about.
+   */
+  if (type === 'coa') {
+    const lot = db.prepare('SELECT coa_status FROM batches WHERE id = ?').get(id) as
+      { coa_status: string } | undefined;
+    if (lot && String(lot.coa_status) === 'draft') watermark = 'DRAFT — NOT ISSUED';
+  }
   if (entry.approvable) {
     const appr = db.prepare(`SELECT approval_status FROM ${entry.table} WHERE id = ?`).get(id) as { approval_status: string };
     if (appr.approval_status !== 'approved') {

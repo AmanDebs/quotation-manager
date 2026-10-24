@@ -3482,15 +3482,20 @@ function qcVerdictLine(rows: QcRow[]): Content {
  * `resultOk`'s arithmetic over the readings, and the parties come from the
  * order — so a certificate reprinted after a correction prints the correction.
  *
- * It refuses to build for an uncertified lot. A COA is issued by
+ * It refuses to build for a lot that has **no number**. A COA is issued by
  * `POST /work-orders/batches/:id/coa`, which is where `coaBlockError` decides
  * whether it may be; rendering one for a batch that has none would put an
  * unnumbered certificate on a customer's desk.
+ *
+ * **A draft does build** (2026-10-24), and `routes/pdf.ts` watermarks it:
+ * checking the document before it goes out is the whole reason that state
+ * exists, so refusing the page would take away the thing a draft is for. The
+ * test is therefore the number rather than `cleared`, which means *issued*.
  */
 export function buildCoaPdf(batchId: number): TDocumentDefinitions {
   const b = batchById(batchId);
   if (!b) throw new Error('Batch not found');
-  if (!b.cleared) throw new Error('No certificate has been issued for this batch');
+  if (!b.coa_no) throw new Error('No certificate has been issued for this batch');
 
   /*
    * **Every lot the certificate covers, not only the one it was opened from**

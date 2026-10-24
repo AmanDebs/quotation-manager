@@ -2,7 +2,7 @@ import { Router, type Response } from 'express';
 import { db, transaction } from '../db/connection.js';
 import { nextNumber } from '../services/numbering.js';
 import {
-  batchesFor, batchById, coaBlockError, coaGroupError, coaEditError, lotsUnderCoa,
+  batchesFor, batchById, coaBlockError, coaGroupError, coaEditError, coaReissueError, lotsUnderCoa,
   renameError, dispositionError, isDisposition, DISPOSITIONS,
 } from '../services/batch.js';
 import { coaWhere } from '../services/coaRegister.js';
@@ -381,7 +381,8 @@ workOrdersRouter.get('/coa', requirePermission('qc'), (req: AuthedRequest, res) 
      SELECT COUNT(*) AS certificates,
             COALESCE(SUM(lots), 0) AS lots,
             COALESCE(SUM(qty), 0) AS qty,
-            COALESCE(SUM(CASE WHEN shipped = 1 THEN 1 ELSE 0 END), 0) AS shipped
+            COALESCE(SUM(CASE WHEN shipped = 1 THEN 1 ELSE 0 END), 0) AS shipped,
+            COALESCE(SUM(CASE WHEN draft = 1 THEN 1 ELSE 0 END), 0) AS drafts
        FROM f`
   ).get(...(params as never[]));
   res.json(Array.isArray(body) ? body : { ...body, summary });
@@ -397,6 +398,10 @@ workOrdersRouter.get('/coa', requirePermission('qc'), (req: AuthedRequest, res) 
 const coaColumns: Column<Record<string, unknown>>[] = [
   { header: 'Certificate', value: (r) => String(r.coa_no ?? '') },
   { header: 'Date', value: (r) => String(r.coa_date ?? ''), type: 'date' },
+  // Issued or withdrawn-and-kept. A word, like Dispatched below, and on the
+  // file because it is on the screen — a download that showed a draft as an
+  // ordinary certificate would be the one row somebody acts on wrongly.
+  { header: 'Status', value: (r) => (Number(r.draft) ? 'Draft' : 'Issued') },
   { header: 'Batches', value: (r) => String(r.batch_numbers ?? '') },
   { header: 'Lots', value: (r) => Number(r.lots ?? 0), type: 'number' },
   { header: 'Product', value: (r) => String(r.products ?? '') },
@@ -856,6 +861,15 @@ workOrdersRouter.delete('/batches/:batchId', requirePermission('output', 'full')
   if (full.cleared) {
     return res.status(409).json({ error: `Batch ${full.number} has been certified as ${full.coa_no} and cannot be deleted.` });
   }
+  // A lot under a withdrawn certificate is still spoken for by its number
+  // (2026-10-24): deleting it would leave a draft covering less than it says.
+  // The entries guard below would refuse it anyway — a certified lot always
+  // has output behind it — but the specific reason is the useful one.
+  if (full.coa_draft) {
+    return res.status(409).json({
+      error: `Batch ${full.number} is on draft certificate ${full.coa_no} — discard that certificate first.`,
+    });
+  }
   if (full.entries > 0) {
     return res.status(409).json({
       error: `Batch ${full.number} has ${full.entries} production ${full.entries === 1 ? 'entry' : 'entries'} against it — move those off it first.`,
@@ -991,50 +1005,147 @@ function coaGroup(req: AuthedRequest, res: Response): { lots: ReturnType<typeof 
   return { lots, id };
 }
 
+/**
+ * The three fields a certificate carries that were typed rather than derived,
+ * read off a body under the **`batch_ids` contract**: a field omitted is left
+ * alone, so a dialog that only moved the approver cannot blank the date it
+ * never showed. Two callers — the correction below and the re-issue above,
+ * which takes them so the ordinary fix is one press.
+ *
+ * Returns null having already answered 400, the shape every parse in this
+ * router uses.
+ */
+type CoaFields = { date: string | null; approvedBy: string | null; buyerOrder: string | null };
+
+function coaFields(raw: unknown, res: Response): CoaFields | null {
+  const body = (raw ?? {}) as Record<string, unknown>;
+  const date = body.date === undefined ? null : String(body.date).trim();
+  if (date !== null && !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    res.status(400).json({ error: 'The certificate date must be a date' });
+    return null;
+  }
+  return {
+    date,
+    approvedBy: body.approved_by === undefined ? null : String(body.approved_by).trim(),
+    // Blanked deliberately is a real answer here: it puts the document back on
+    // its own fallback, which is the proforma behind the order.
+    buyerOrder: body.buyer_order === undefined ? null : String(body.buyer_order).trim(),
+  };
+}
+
+function applyCoaFields(batchId: number, f: CoaFields): void {
+  if (f.date !== null) db.prepare('UPDATE batches SET coa_date = ? WHERE id = ?').run(f.date, batchId);
+  if (f.approvedBy !== null) {
+    db.prepare('UPDATE batches SET coa_approved_by = ? WHERE id = ?').run(f.approvedBy, batchId);
+  }
+  if (f.buyerOrder !== null) {
+    db.prepare('UPDATE batches SET coa_buyer_order = ? WHERE id = ?').run(f.buyerOrder, batchId);
+  }
+}
+
 workOrdersRouter.put('/batches/:batchId/coa', requirePermission('qc', 'full'), (req: AuthedRequest, res) => {
   const found = coaGroup(req, res);
   if (!found) return;
   const refused = coaEditError(found.id);
   if (refused) return res.status(409).json({ error: refused });
 
-  const body = (req.body ?? {}) as Record<string, unknown>;
-  // A field omitted is left alone, the `batch_ids` contract — so a dialog
-  // that only moved the approver cannot blank the date it never showed.
-  const date = body.date === undefined ? null : String(body.date).trim();
-  if (date !== null && !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-    return res.status(400).json({ error: 'The certificate date must be a date' });
+  const fields = coaFields(req.body, res);
+  if (!fields) return;
+
+  transaction(() => {
+    for (const lot of found.lots) applyCoaFields(lot.id, fields);
+  });
+  res.json(batchById(found.id));
+});
+
+/**
+ * Withdraw it: the certificate goes back to **draft**.
+ *
+ * 2026-10-24, the client: *"When we withdraw a COA, the COA should go to
+ * draft mode so that we can make changes and do not have to make the whole
+ * thing again"*. Withdrawing used to clear the number, the date, the issuer
+ * and the approver off every lot — and because **`coa_no` is what holds a
+ * group together**, clearing it dissolved the certificate: the row left the
+ * register, and putting it back meant finding each lot on its job's Batches
+ * tab, re-ticking them and retyping the header. On a ten-lot group spanning
+ * two jobs that is not a correction, it is building the thing again.
+ *
+ * So nothing is cleared. The number, the date, the issuer, the approver and
+ * the buyer's reference all stay, the group stays, and `coa_status` says the
+ * one thing that is now different: it has not gone out. The register keeps
+ * the row, marked Draft; the Edit dialog works on it exactly as before; and
+ * **Issue** below puts it back **under its own number**.
+ *
+ * **A draft certifies nothing**, which is the half that makes this safe:
+ * `cleared` on a lot means *issued*, so `qcBlockError` holds the line again,
+ * `despatchBatchError` refuses the lot a lorry by name and the invoice gate
+ * blocks — exactly as a full withdrawal did. None of them store anything, so
+ * none of them had to be told; what they read changed instead.
+ */
+workOrdersRouter.post('/batches/:batchId/coa/withdraw', requirePermission('qc', 'full'), (req: AuthedRequest, res) => {
+  const found = coaGroup(req, res);
+  if (!found) return;
+  const refused = coaEditError(found.id);
+  if (refused) return res.status(409).json({ error: refused });
+  if (found.lots.every((l) => l.coa_draft)) {
+    return res.status(409).json({ error: `Certificate ${found.lots[0].coa_no} is already a draft.` });
   }
-  const approvedBy = body.approved_by === undefined ? null : String(body.approved_by).trim();
-  // Blanked deliberately is a real answer here: it puts the document back on
-  // its own fallback, which is the proforma behind the order.
-  const buyerOrder = body.buyer_order === undefined ? null : String(body.buyer_order).trim();
+
+  transaction(() => {
+    const draft = db.prepare("UPDATE batches SET coa_status = 'draft' WHERE id = ?");
+    for (const lot of found.lots) draft.run(lot.id);
+  });
+  res.json({ ok: true, withdrawn: found.lots.map((l) => l.number) });
+});
+
+/**
+ * Issue a draft — the same certificate going back out.
+ *
+ * **No number is drawn.** It was drawn when the certificate was first issued
+ * and the series was never rewound, so nothing else can be holding it: this
+ * is one document corrected, not a second over the same goods, which is what
+ * makes *withdraw → correct → issue* a history somebody can read. The
+ * one-certificate rule is untouched, no two documents ever sharing a number.
+ *
+ * It takes the three editable fields as well, under the `batch_ids` contract
+ * — a field omitted is left alone — so the ordinary correction is one press
+ * and one request rather than Edit followed by Issue, which could leave the
+ * date moved and the certificate still in draft if the second failed.
+ *
+ * `coaReissueError` re-asks each lot's own state: a lot can be scrapped, or
+ * re-inspected to a failing reading, while the certificate sits in draft.
+ */
+workOrdersRouter.post('/batches/:batchId/coa/issue', requirePermission('qc', 'full'), (req: AuthedRequest, res) => {
+  const found = coaGroup(req, res);
+  if (!found) return;
+  const refused = coaReissueError(found.id);
+  if (refused) return res.status(409).json({ error: refused });
+
+  const fields = coaFields(req.body, res);
+  if (!fields) return;
 
   transaction(() => {
     for (const lot of found.lots) {
-      if (date !== null) db.prepare('UPDATE batches SET coa_date = ? WHERE id = ?').run(date, lot.id);
-      if (approvedBy !== null) {
-        db.prepare('UPDATE batches SET coa_approved_by = ? WHERE id = ?').run(approvedBy, lot.id);
-      }
-      if (buyerOrder !== null) {
-        db.prepare('UPDATE batches SET coa_buyer_order = ? WHERE id = ?').run(buyerOrder, lot.id);
-      }
+      applyCoaFields(lot.id, fields);
+      db.prepare("UPDATE batches SET coa_status = '' WHERE id = ?").run(lot.id);
     }
   });
   res.json(batchById(found.id));
 });
 
 /**
- * Withdraw it: the lots go back to uncertified.
+ * Discard it: the lots go back to uncertified and the certificate is gone.
+ *
+ * What withdrawing used to do, and still the way out for a certificate that
+ * should never have existed — a lot certified before its shifts were all
+ * booked, say, where the fix is to clear it, book the rest and certify again.
+ * Withdrawing is for one that wants correcting; this is for one that wants
+ * deleting, and the register offers both on a draft row.
  *
  * **The number is not re-used.** Clearing it leaves the series where it is,
- * so the next certificate over these lots is drawn fresh — which keeps the
- * one-certificate rule exactly as it was: no two documents ever share a
- * number, and nothing that went out is contradicted, because by this guard
- * nothing went out.
- *
- * Everything downstream follows by itself: `qcBlockError` holds the line
- * again, `despatchBatchError` refuses the lot a lorry, and the register loses
- * the row — none of them store anything, so none of them has to be told.
+ * so the next certificate over these lots is drawn fresh — no two documents
+ * ever share a number, and nothing that went out is contradicted, because by
+ * `coaEditError` nothing went out.
  */
 workOrdersRouter.delete('/batches/:batchId/coa', requirePermission('qc', 'full'), (req: AuthedRequest, res) => {
   const found = coaGroup(req, res);
@@ -1044,11 +1155,12 @@ workOrdersRouter.delete('/batches/:batchId/coa', requirePermission('qc', 'full')
 
   transaction(() => {
     const clear = db.prepare(
-      "UPDATE batches SET coa_no = '', coa_date = '', coa_issued_by = NULL, coa_approved_by = '' WHERE id = ?"
+      `UPDATE batches SET coa_no = '', coa_date = '', coa_issued_by = NULL, coa_approved_by = '',
+                          coa_status = '' WHERE id = ?`
     );
     for (const lot of found.lots) clear.run(lot.id);
   });
-  res.json({ ok: true, withdrawn: found.lots.map((l) => l.number) });
+  res.json({ ok: true, discarded: found.lots.map((l) => l.number) });
 });
 
 function writeCoa(

@@ -1,5 +1,6 @@
 import { db } from '../db/connection.js';
 import { scopeClause } from '../middleware/scope.js';
+import { certifiedSql } from './qc.js';
 import type { AuthedRequest } from '../middleware/auth.js';
 
 /**
@@ -47,6 +48,11 @@ export interface CoaRow {
   qty: number;
   /** 1 once any lot of it has been named on a trip. */
   shipped: number;
+  /**
+   * 1 while the certificate has been withdrawn and kept — editable, printable
+   * watermarked, and certifying nothing until it is issued again.
+   */
+  draft: number;
 }
 
 /**
@@ -69,7 +75,8 @@ const coaSql = `
          COALESCE(SUM((SELECT COALESCE(SUM(pe.qty_ok), 0) FROM production_entries pe
                         WHERE pe.batch_id = b.id)), 0) AS qty,
          MAX(CASE WHEN EXISTS (SELECT 1 FROM despatch_batches dbx WHERE dbx.batch_id = b.id)
-                  THEN 1 ELSE 0 END) AS shipped
+                  THEN 1 ELSE 0 END) AS shipped,
+         MAX(CASE WHEN b.coa_status = 'draft' THEN 1 ELSE 0 END) AS draft
     FROM batches b
     JOIN work_orders w ON w.id = b.work_order_id
     JOIN orders o ON o.id = w.order_id
@@ -88,7 +95,15 @@ const coaSql = `
  */
 export function coaWhere(req: AuthedRequest) {
   const scope = scopeClause(req, 'o.customer_id');
-  // A certificate, not a lot: a batch with no number has not been issued one.
+  /*
+   * A certificate, not a lot: a batch with no number has never had one drawn.
+   *
+   * **A withdrawn certificate stays on this list** (2026-10-24) — it is a
+   * draft, not a deletion, and the whole point of the state is that the
+   * certificate survives here as a unit to be corrected and issued again
+   * rather than vanishing off the register and having to be reassembled lot
+   * by lot from the Batches tab.
+   */
   const where: string[] = ["b.coa_no <> ''"];
   const params: unknown[] = [];
   if (scope.sql) { where.push(scope.sql); params.push(...scope.params); }
@@ -119,6 +134,20 @@ export function coaWhere(req: AuthedRequest) {
    */
   const gone = String(req.query.shipped ?? '');
   const having = gone === '1' ? 'HAVING shipped = 1' : gone === '0' ? 'HAVING shipped = 0' : '';
+  /*
+   * Issued or drafted, which is what somebody opening the register to finish a
+   * withdrawn certificate is looking for.
+   *
+   * **A WHERE on the lot is safe here where it would not be for `shipped`**,
+   * and the difference is worth stating: a group's state is uniform by
+   * construction — withdrawing and issuing both act on every lot under the
+   * number, in one transaction — where *shipped* is true of a group when any
+   * one lot has gone, so filtering that on the row would describe the group
+   * wrongly. That is the defect reading the download back found.
+   */
+  const state = String(req.query.state ?? '');
+  if (state === 'draft') where.push("b.coa_status = 'draft'");
+  if (state === 'issued') where.push(certifiedSql());
 
   return {
     sql: `${coaSql} WHERE ${where.join(' AND ')}

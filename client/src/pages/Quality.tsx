@@ -98,8 +98,11 @@ function EditCoa({ row, onClose }: { row: CoaRow; onClose: () => void }) {
         </Field>
       </div>
       <p className="mt-3 text-xs text-slate-400">
-        The number and the lots it covers are not corrections — a certificate over different lots is a
-        different certificate. Withdraw this one and issue another.
+        {row.draft
+          ? 'This certificate has been withdrawn, so it is a draft: it certifies nothing and no lot of it '
+            + 'can be dispatched until it is issued again, under this same number.'
+          : 'The number and the lots it covers are not corrections — a certificate over different lots is a '
+            + 'different certificate. Withdraw this one and issue another.'}
       </p>
       <ErrorText error={save.error} />
       <div className="mt-3 flex justify-end gap-2">
@@ -132,12 +135,16 @@ function Certificates() {
   const [to, setTo] = useUrlFilter('to');
   const [customer, setCustomer] = useUrlFilter('customer_id');
   const [shipped, setShipped] = useUrlFilter('shipped');
+  // Issued or withdrawn-and-kept — what somebody opening the register to
+  // finish a draft is looking for.
+  const [state, setState] = useUrlFilter('state');
 
   const query = new URLSearchParams();
   if (from) query.set('from', from);
   if (to) query.set('to', to);
   if (customer) query.set('customer_id', customer);
   if (shipped) query.set('shipped', shipped);
+  if (state) query.set('state', state);
 
   const list = usePagedList<CoaRow, CoaSummary>(
     ['coa-register', query.toString()],
@@ -153,14 +160,30 @@ function Certificates() {
   const mayEdit = can('qc', 'full');
   const [editing, setEditing] = useState<CoaRow | null>(null);
   const queryClient = useQueryClient();
+  const refresh = () => queryClient.invalidateQueries({ queryKey: ['coa-register'] });
   /*
-   * Withdraw it. The server refuses once the number is on a challan or a
-   * credit note, so this is only ever a certificate that has gone nowhere —
-   * and the lots simply return to uncertified, the number not being re-used.
+   * Withdraw it — to a **draft**, which keeps the number, the date, the
+   * approver and the lots and says only that it has not gone out. The server
+   * refuses once the number is on a challan or a credit note, so this is only
+   * ever a certificate that has gone nowhere.
    */
   const withdraw = useMutation({
+    mutationFn: (batchId: number) => api.post(`/api/work-orders/batches/${batchId}/coa/withdraw`, {}),
+    onSuccess: refresh,
+  });
+  /* The same certificate going back out, under its own number. */
+  const issue = useMutation({
+    mutationFn: (batchId: number) => api.post(`/api/work-orders/batches/${batchId}/coa/issue`, {}),
+    onSuccess: refresh,
+  });
+  /*
+   * And the way out for a certificate that should never have existed: the
+   * lots go back to uncertified and the number is not re-used. What
+   * withdrawing used to do, kept as its own act now that withdrawing drafts.
+   */
+  const discard = useMutation({
     mutationFn: (batchId: number) => api.del(`/api/work-orders/batches/${batchId}/coa`),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['coa-register'] }),
+    onSuccess: refresh,
   });
 
   return (
@@ -182,12 +205,20 @@ function Certificates() {
           <option value="1">Dispatched</option>
           <option value="0">Not yet dispatched</option>
         </Select>
+        <Select className="w-40" value={state} onChange={(e) => setState(e.target.value)}>
+          <option value="">Issued or draft</option>
+          <option value="issued">Issued</option>
+          <option value="draft">Draft</option>
+        </Select>
         {summary && (
           <span className="ml-auto text-sm text-slate-500">
             {summary.certificates} certificate{summary.certificates === 1 ? '' : 's'}
             {' · '}{summary.lots} lot{summary.lots === 1 ? '' : 's'}
             {' · '}<span className="tabular-nums">{fmtQty(summary.qty)}</span> pcs
             {!!summary.shipped && <span className="text-slate-400">{' · '}{summary.shipped} dispatched</span>}
+            {/* Amber, not grey: a draft is a certificate waiting on somebody,
+                which is the one row on this register with something to do. */}
+            {!!summary.drafts && <span className="text-amber-700">{' · '}{summary.drafts} draft{summary.drafts === 1 ? '' : 's'}</span>}
           </span>
         )}
         <DownloadButton href={`/api/work-orders/coa/export?${query.toString()}`} />
@@ -217,7 +248,19 @@ function Certificates() {
             <tbody>
               {rows.map((r) => (
                 <tr key={`${r.coa_no}:${r.batch_id}`} className="border-b border-slate-100 last:border-0 hover:bg-slate-50">
-                  <td className="whitespace-nowrap py-2 pr-3 font-medium">{r.coa_no}</td>
+                  <td className="whitespace-nowrap py-2 pr-3 font-medium">
+                    {r.coa_no}
+                    {/* Said on the row rather than inferred from a missing
+                        button: a draft looks exactly like a certificate from
+                        every other cell, and it is the difference between
+                        goods that may ship and goods that may not. */}
+                    {!!r.draft && (
+                      <span
+                        className="ml-1.5 rounded-full bg-amber-50 px-2 py-0.5 text-xs font-normal text-amber-700 ring-1 ring-amber-200"
+                        title="Withdrawn and kept — it certifies nothing until it is issued again"
+                      >draft</span>
+                    )}
+                  </td>
                   <td className="whitespace-nowrap py-2 pr-3">{fmtDate(r.coa_date)}</td>
                   {/* The lots it covers. More than one is the ordinary shape
                       of their own paperwork, so the count is said out loud
@@ -266,19 +309,54 @@ function Certificates() {
                     {mayEdit && (
                       <>
                         <Button variant="ghost" className="ml-1" onClick={() => setEditing(r)}>Edit</Button>
-                        <Button
-                          variant="ghost"
-                          className="ml-1"
-                          disabled={withdraw.isPending}
-                          title="Clear this certificate — the lots go back to uncertified"
-                          onClick={() => {
-                            if (confirm(`Withdraw ${r.coa_no}? ${r.lots > 1 ? `The ${r.lots} lots it covers go` : 'The lot it covers goes'} back to uncertified, and the number is not re-used.`)) {
-                              withdraw.mutate(r.batch_id);
-                            }
-                          }}
-                        >
-                          Withdraw
-                        </Button>
+                        {/*
+                          A draft's two ways on, and they are different acts.
+                          **Issue** is this certificate going back out under
+                          its own number — the ordinary end of a correction.
+                          **Discard** is for one that should never have
+                          existed, and does what withdrawing used to: the lots
+                          go back to uncertified and the number is spent.
+                        */}
+                        {r.draft ? (
+                          <>
+                            <Button
+                              variant="secondary"
+                              className="ml-1"
+                              disabled={issue.isPending}
+                              title="Issue this certificate again, under the same number"
+                              onClick={() => issue.mutate(r.batch_id)}
+                            >
+                              Issue
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              className="ml-1"
+                              disabled={discard.isPending}
+                              title="Clear this certificate — the lots go back to uncertified"
+                              onClick={() => {
+                                if (confirm(`Discard ${r.coa_no}? ${r.lots > 1 ? `The ${r.lots} lots it covers go` : 'The lot it covers goes'} back to uncertified, and the number is not re-used.`)) {
+                                  discard.mutate(r.batch_id);
+                                }
+                              }}
+                            >
+                              Discard
+                            </Button>
+                          </>
+                        ) : (
+                          <Button
+                            variant="ghost"
+                            className="ml-1"
+                            disabled={withdraw.isPending}
+                            title="Put it back to draft — nothing is lost, and it certifies nothing until issued again"
+                            onClick={() => {
+                              if (confirm(`Withdraw ${r.coa_no}? It becomes a draft — the number, the date and ${r.lots > 1 ? `the ${r.lots} lots it covers stay` : 'the lot it covers stays'} — and nothing of it can be dispatched until you issue it again.`)) {
+                                withdraw.mutate(r.batch_id);
+                              }
+                            }}
+                          >
+                            Withdraw
+                          </Button>
+                        )}
                       </>
                     )}
                   </td>
@@ -291,7 +369,7 @@ function Certificates() {
           page={list.page} pages={list.pages} total={list.total} limit={PAGE_SIZE}
           onPage={list.setPage} noun="certificates"
         />
-        <ErrorText error={withdraw.error} />
+        <ErrorText error={withdraw.error ?? issue.error ?? discard.error} />
       </Card>
       {editing && <EditCoa row={editing} onClose={() => setEditing(null)} />}
     </>

@@ -326,3 +326,28 @@ describe('what a group certificate refuses', () => {
     assert.match(coaGroupError([lots[0]])!, /05032026A was already certified as COA\/25-26\/001/);
   });
 });
+
+/**
+ * A withdrawn certificate still prints, watermarked by `routes/pdf.ts`
+ * (2026-10-24). Checking the document before it goes out is the whole reason
+ * the draft state exists, so refusing the page would take away the thing a
+ * draft is for — and the builder's own test is therefore the **number**
+ * rather than `cleared`, which now means *issued*.
+ */
+describe('a draft certificate', () => {
+  test('still builds, under the same number', () => {
+    const id = lot('DRAFT-A', '2026-03-10');
+    db.prepare("UPDATE batches SET coa_no = 'COA/25-26/090', coa_date = '2026-03-11' WHERE id = ?").run(id);
+    assert.match(textsOf(buildCoaPdf(id)).join(' '), /COA\/25-26\/090/, 'an issued certificate did not print');
+    db.prepare("UPDATE batches SET coa_status = 'draft' WHERE id = ?").run(id);
+    assert.match(
+      textsOf(buildCoaPdf(id)).join(' '), /COA\/25-26\/090/,
+      'a withdrawn certificate could not be looked at before issuing it again',
+    );
+  });
+
+  test('and a lot with no number at all still refuses', () => {
+    const bare = lot('NONE-A', '2026-03-12');
+    assert.throws(() => buildCoaPdf(bare), /No certificate has been issued/);
+  });
+});

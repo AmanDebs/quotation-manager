@@ -1265,6 +1265,29 @@ CREATE TABLE IF NOT EXISTS batches (
   coa_date TEXT NOT NULL DEFAULT '',
   coa_issued_by INTEGER REFERENCES users(id),
   /*
+   * **Whether the certificate has been issued or only drafted** (2026-10-24,
+   * the client: *"When we withdraw a COA, the COA should go to draft mode so
+   * that we can make changes and do not have to make the whole thing
+   * again"*). Withdrawing used to clear the number, the date and the
+   * approver, which dissolved the group -- `coa_no` *is* what holds several
+   * lots together -- so the certificate vanished off the register and had to
+   * be reassembled lot by lot from the Batches tab. A draft keeps all of it
+   * and says only that it has not gone out.
+   *
+   * `'draft'` or `''`, and **silence means issued**: every row already on
+   * file reads `''` beside a number it really was issued under, so a database
+   * that predates this column behaves exactly as it did and there is nothing
+   * to backfill -- the rule `users.token_version` reads version 0 by.
+   *
+   * So a lot carries a certificate when `coa_no <> '' AND coa_status <>
+   * 'draft'`, which is `certifiedSql` in `services/qc.ts` and `cleared` on a
+   * `Batch`. **A draft certifies nothing**: the QC gate holds the line, the
+   * lorry is refused and the invoice is blocked, or draft mode would be a way
+   * around the specification's own Hard Stop. No CHECK, the rule
+   * `products.product_type` states.
+   */
+  coa_status TEXT NOT NULL DEFAULT '',
+  /*
    * **The buyer's own reference for this order** (2026-10-22, the client:
    * *"Buyer order - Should be editable - capture PI number or PO number (but
    * no SO number)"*). Their own certificate carries *BUYER'S ORDER NO.:

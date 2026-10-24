@@ -488,6 +488,21 @@ addColumnIfMissing('product_qc_params', 'section', "TEXT NOT NULL DEFAULT ''");
 addColumnIfMissing('qc_results', 'section', "TEXT NOT NULL DEFAULT ''");
 // Conforms with no figure, and the words somebody wrote — see `schema.sql`.
 addColumnIfMissing('batches', 'coa_buyer_order', "TEXT NOT NULL DEFAULT ''");
+/*
+ * Issued, or only drafted (2026-10-24) — see `schema.sql` for the whole of it.
+ *
+ * **No backfill, deliberately.** `''` means issued, so every certificate on
+ * file reads as issued the moment the column appears, and a database that
+ * predates it behaves exactly as it did — the `token_version` rule, where the
+ * new state is opt-in and silence is the old behaviour. A pass writing
+ * `'issued'` over the book would be a migration that could only ever get the
+ * same answer, with one chance of getting it wrong.
+ *
+ * **And no index**, the `batches.disposition` trap read before it bites: this
+ * table is hundreds of rows, and an index in `schema.sql` naming a column the
+ * migration adds is what killed the boot once.
+ */
+addColumnIfMissing('batches', 'coa_status', "TEXT NOT NULL DEFAULT ''");
 addColumnIfMissing('qc_results', 'complied', 'INTEGER NOT NULL DEFAULT 0');
 addColumnIfMissing('qc_results', 'observation', "TEXT NOT NULL DEFAULT ''");
 
