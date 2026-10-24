@@ -253,7 +253,7 @@ function Certificates() {
                 <th className="pb-2 pr-3">Batches</th>
                 <th className="pb-2 pr-3">Product</th>
                 <th className="pb-2 pr-3">Customer</th>
-                <th className="pb-2 pr-3">Sales Order</th>
+                <th className="pb-2 pr-3">Work Order</th>
                 <th className="pb-2 pr-3 text-right">Certified</th>
                 <th className="pb-2 pr-3">Approved by</th>
                 <th className="pb-2 pr-3">Dispatched</th>
@@ -292,8 +292,37 @@ function Certificates() {
                   </td>
                   <td className="max-w-[16rem] truncate py-2 pr-3" title={r.products}>{r.products || '—'}</td>
                   <td className="max-w-[14rem] truncate py-2 pr-3" title={r.customer_name}>{r.customer_name}</td>
+                  {/*
+                    The job rather than the sales order (2026-10-24, the
+                    client: *"show work order instead of sales order"*), which
+                    is the document this one is issued against: a certificate
+                    covers lots, a lot is made on a job, and the order is one
+                    step further out. Linked only where there is a single job
+                    to link to — a certificate over a split run names both, and
+                    a link on one of two numbers would send somebody to half of
+                    what the row is about. The order is still a click away,
+                    through the job.
+                  */}
                   <td className="whitespace-nowrap py-2 pr-3">
-                    <Link to={`/orders/${r.order_id}`} className="text-brand-600 hover:underline">{r.order_number}</Link>
+                    {r.jobs === 1 ? (
+                      <Link to={`/work-orders/${r.work_order_id}`} className="text-brand-600 hover:underline">
+                        {r.work_order_numbers}
+                      </Link>
+                    ) : (
+                      // SQLite's DISTINCT concat takes no separator, so the
+                      // space is put back here rather than two job numbers
+                      // reading as one — and the cell is clipped with the
+                      // whole value on hover, the rule the Batches and Product
+                      // columns beside it follow: a split run is rare, and
+                      // letting its cell set the table's width would widen
+                      // every other row for it.
+                      <span
+                        className="block max-w-[9rem] truncate"
+                        title={r.work_order_numbers.split(',').join(', ')}
+                      >
+                        {r.work_order_numbers.split(',').join(', ')}
+                      </span>
+                    )}
                   </td>
                   <td className="whitespace-nowrap py-2 pr-3 text-right tabular-nums">{fmtQty(r.qty)}</td>
                   <td className="max-w-[10rem] truncate py-2 pr-3 text-slate-500" title={r.approved_by}>

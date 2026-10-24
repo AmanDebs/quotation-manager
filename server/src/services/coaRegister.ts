@@ -34,6 +34,10 @@ export interface CoaRow {
   batch_id: number;
   /** The job behind that lot — where its readings are corrected. */
   work_order_id: number;
+  /** Every job that made a lot of it, comma-separated as the products are. */
+  work_order_numbers: string;
+  /** How many: more than one means the certificate spans a split run. */
+  jobs: number;
   lots: number;
   /** The lot numbers, as the certificate's own heading reads them. */
   batch_numbers: string;
@@ -83,6 +87,14 @@ const coaSql = `
          COALESCE(MAX(b.coa_approved_by), '') AS approved_by,
          COALESCE(MAX(b.coa_buyer_order), '') AS buyer_order,
          MAX(o.id) AS order_id, MAX(o.number) AS order_number, MAX(c.name) AS customer_name,
+         -- The jobs that made these lots (2026-10-24, the client: *"show work
+         -- order instead of sales order"*). Listed rather than picked, the way
+         -- the lot numbers beside them are: a certificate over a run of lots
+         -- can span two jobs, and naming one of them would describe half of
+         -- what the document covers. The count says when that has happened,
+         -- which is also what decides whether the cell can be a link.
+         COALESCE(GROUP_CONCAT(DISTINCT w.number), '') AS work_order_numbers,
+         COUNT(DISTINCT w.id) AS jobs,
          COALESCE(GROUP_CONCAT(DISTINCT COALESCE(NULLIF(p.name, ''), w.description)), '') AS products,
          COALESCE(SUM((SELECT COALESCE(SUM(pe.qty_ok), 0) FROM production_entries pe
                         WHERE pe.batch_id = b.id)), 0) AS qty,

@@ -406,6 +406,10 @@ const coaColumns: Column<Record<string, unknown>>[] = [
   { header: 'Lots', value: (r) => Number(r.lots ?? 0), type: 'number' },
   { header: 'Product', value: (r) => String(r.products ?? '') },
   { header: 'Customer', value: (r) => String(r.customer_name ?? '') },
+  // The screen shows the job (2026-10-24); the file keeps the sales order
+  // beside it, the call this codebase makes about a column that leaves a view
+  // and stays in its download.
+  { header: 'Work Order', value: (r) => String(r.work_order_numbers ?? '') },
   { header: 'Sales Order', value: (r) => String(r.order_number ?? '') },
   { header: 'Quantity certified', value: (r) => Number(r.qty ?? 0), type: 'number' },
   { header: 'Prepared by', value: (r) => String(r.issued_by_name ?? '') },

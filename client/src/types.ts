@@ -1711,6 +1711,9 @@ export interface CoaRow {
   batch_id: number;
   /** The job behind that lot — where the readings it prints are corrected. */
   work_order_id: number;
+  /** Every job that made a lot of it; more than one is a split run. */
+  work_order_numbers: string;
+  jobs: number;
   lots: number;
   batch_numbers: string;
   issued_by_name: string;
