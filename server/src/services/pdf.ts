@@ -3531,8 +3531,30 @@ export function buildCoaPdf(batchId: number): TDocumentDefinitions {
     return { lot, check: decided[decided.length - 1] };
   });
   const check = perLot[0]?.check;
+  /*
+   * **A reading answered N/A is not printed** (2026-10-24, the client with a
+   * certificate in front of them and the row struck out in pen: *"If I select
+   * NA in COA reading, it should not be present in the pdf"*). A line reading
+   * *N/A* tells the buyer the one thing a certificate has no reason to say —
+   * that there is nothing to say about this characteristic — so on the page
+   * somebody is sent it is noise between the rows that do say something.
+   *
+   * **Dropped from the page, never from the record.** The row is still
+   * stored, still on the inspection screen and still on the quality report,
+   * where *the inspector ruled this out* and *nobody reached it* are
+   * different facts and the internal document is where that difference is
+   * worth keeping. And it is still not a verdict: `resultOk` answered null
+   * and `qcVerdictLine` already passed over it, so the stamp this page closes
+   * on does not move.
+   *
+   * A block left with nothing in it is not drawn either — `qcSectionBlocks`
+   * skips an empty section by construction, so a heading over no rows cannot
+   * appear.
+   */
   const results: Row[] = perLot.flatMap(({ lot, check: ch }) =>
-    ((ch?.results ?? []) as unknown as Row[]).map((r) => ({ ...r, _lot: lot.number })));
+    ((ch?.results ?? []) as unknown as Row[])
+      .filter((r) => !r.na)
+      .map((r) => ({ ...r, _lot: lot.number })));
   const many = lots.length > 1;
 
   /*
@@ -3709,12 +3731,9 @@ export function buildCoaPdf(batchId: number): TDocumentDefinitions {
     {
       key: 'verdict', label: 'Verdict', width: 62, align: 'center', always: true,
       // Not measured is neither a pass nor a failure, and says so — the one
-      // distinction this whole module exists to keep.
-      // Not applicable is its own word: it reads as no verdict like an
-      // unmeasured row, but saying "Not measured" over a line the inspector
-      // deliberately answered would be the certificate contradicting itself.
-      value: (it) => ((it as { na?: unknown }).na ? 'N/A'
-        : it.ok === null || it.ok === undefined ? 'Not measured' : it.ok ? 'Pass' : 'Fail'),
+      // distinction this whole module exists to keep. There is no N/A branch
+      // any more: a row answered that way never reaches this page.
+      value: (it) => (it.ok === null || it.ok === undefined ? 'Not measured' : it.ok ? 'Pass' : 'Fail'),
     },
   ];
 

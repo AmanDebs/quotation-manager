@@ -442,6 +442,25 @@ describe('the three blocks the client certificate prints', () => {
     assert.ok(!texts.includes('QC PASSED'));
   });
 
+  /**
+   * **And the certificate's rule stops at the certificate** (2026-10-24). An
+   * N/A is dropped from the COA, which is the page a buyer is sent and where
+   * a line saying *there is nothing to say* is noise. This is the internal
+   * record of an inspection, where *the inspector ruled this out* and
+   * *nobody reached it* are different facts and the difference is the reason
+   * the column exists.
+   */
+  test('and an N/A still reads as N/A on the report', () => {
+    const { woId } = chain({ withChecks: false });
+    record(woId, [
+      { name: 'Closure O/D', section: 'dimensional', value: 0.4 },
+      { name: 'TE Band', section: 'fitment', value: null, na: 1 },
+    ]);
+    const texts = textsOf(buildQcReportPdf(woId));
+    assert.ok(texts.includes('TE Band'), 'the report dropped a row the inspector answered');
+    assert.ok(texts.includes('N/A'), 'the report no longer says N/A');
+  });
+
   test('a block of single figures is headed Average Value, not Minimum / Maximum', () => {
     /* 2026-10-21, the client reading four averages under a *Minimum /
        Maximum* banner: *"When we choose single value then write Average value

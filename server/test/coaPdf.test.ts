@@ -351,3 +351,83 @@ describe('a draft certificate', () => {
     assert.throws(() => buildCoaPdf(bare), /No certificate has been issued/);
   });
 });
+
+/**
+ * **A reading answered N/A is not on the page** (2026-10-24, the client with
+ * a certificate in front of them and the row struck through in pen: *"If I
+ * select NA in COA reading, it should not be present in the pdf"*).
+ *
+ * Mostly about what must **not** move: the row stays in the record and on the
+ * quality report, the verdict the page closes on is unchanged, and a block is
+ * dropped only once nothing is left in it.
+ */
+describe('a reading the inspector ruled out', () => {
+  type Reading = { name: string; section?: string; value?: number | null; na?: number };
+
+  /** A certified lot of its own, whose final check carries exactly these. */
+  function certified(number: string, rows: Reading[]): number {
+    const id = Number((db.prepare(
+      `INSERT INTO batches (number, work_order_id, date, coa_no, coa_date)
+       VALUES (?, ?, '2026-03-15', ?, '2026-03-16') RETURNING id`
+    ).get(number, woId, `COA/25-26/${number}`) as { id: number }).id);
+    db.prepare(
+      `INSERT INTO production_entries (work_order_id, batch_id, date, shift, qty_ok, qty_reject)
+       VALUES (?, ?, '2026-03-15', 'A', 1000, 0)`
+    ).run(woId, id);
+    const checkId = Number((db.prepare(
+      `INSERT INTO qc_checks (work_order_id, batch_id, date, shift, inspector)
+       VALUES (?, ?, '2026-03-15', 'A', 'ARNAB PALUI') RETURNING id`
+    ).get(woId, id) as { id: number }).id);
+    rows.forEach((r, i) => {
+      db.prepare(
+        `INSERT INTO qc_results (check_id, name, kind, section, unit, value, na, min_value, max_value, sort_order)
+         VALUES (?, ?, 'numeric', ?, 'mm', ?, ?, 50, 51, ?)`
+      ).run(checkId, r.name, r.section ?? '', r.value ?? null, r.na ?? 0, i);
+    });
+    return id;
+  }
+
+  test('is absent, rather than printed as a row saying nothing', () => {
+    const id = certified('NA-1', [
+      { name: 'Closure O/D', section: 'dimensional', value: 50.3 },
+      { name: 'TE Band', section: 'dimensional', na: 1 },
+    ]);
+    const texts = textsOf(buildCoaPdf(id));
+    assert.ok(texts.includes('Closure O/D'), 'the measured row went with it');
+    assert.ok(!texts.includes('TE Band'), 'an N/A row is still on the certificate');
+    assert.ok(!texts.includes('N/A'), `N/A is still printed: ${texts.join(' | ')}`);
+  });
+
+  /** A heading over no rows reads as a fault where an absence reads as one. */
+  test('and a block left with nothing in it is not headed', () => {
+    const id = certified('NA-2', [
+      { name: 'Closure O/D', section: 'dimensional', value: 50.3 },
+      { name: 'TE Band', section: 'fitment', na: 1 },
+      { name: 'Leakage', section: 'fitment', na: 1 },
+    ]);
+    const texts = textsOf(buildCoaPdf(id));
+    assert.ok(texts.includes('DIMENSIONAL CHECKS'), 'the block that had a reading went too');
+    assert.ok(!texts.includes('FITMENT CHECK'), 'a heading is drawn over no rows');
+  });
+
+  /** It was never a verdict, so dropping it cannot have moved one. */
+  test('and the stamp the page closes on does not move', () => {
+    const id = certified('NA-3', [
+      { name: 'Closure O/D', section: 'dimensional', value: 50.3 },
+      { name: 'TE Band', section: 'fitment', na: 1 },
+    ]);
+    assert.ok(textsOf(buildCoaPdf(id)).includes('QC PASSED'), 'an N/A moved the verdict');
+  });
+
+  /** The flat table is still the fallback, and takes the same rule. */
+  test('on an unsectioned specification as much as on the blocks', () => {
+    const id = certified('NA-4', [
+      { name: 'Closure O/D', value: 50.3 },
+      { name: 'TE Band', na: 1 },
+    ]);
+    const texts = textsOf(buildCoaPdf(id));
+    assert.ok(texts.includes('Closure O/D'), 'the measured row went with it');
+    assert.ok(!texts.includes('TE Band'), 'an N/A row survived into the flat table');
+    assert.ok(!texts.includes('N/A'), 'the Verdict column still reads N/A');
+  });
+});
