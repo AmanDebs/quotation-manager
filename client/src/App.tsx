@@ -230,11 +230,14 @@ export const routes: RouteObject[] = [
        * on `qc: full`, which is what the two routes behind them require, so
        * the screen is never offered to somebody the save would refuse.
        *
-       * Two entries over one component: `?batch=N` makes the inspection a
-       * **final** check on that lot, and `/certify` is the one press that
-       * opens a lot, inspects it and issues the certificate.
+       * Three entries over one component: `?batch=N` makes the inspection a
+       * **final** check on that lot, `/certify` is the one press that opens a
+       * lot, inspects it and issues the certificate, and `/qc/:checkId`
+       * **corrects** readings already recorded — which the address bar says,
+       * rather than the page deciding from a prop somebody passes.
        */
       { path: '/work-orders/:id/qc', element: <Needs fn="qc" level="full"><QcCheckFormPage /></Needs> },
+      { path: '/work-orders/:id/qc/:checkId', element: <Needs fn="qc" level="full"><QcCheckFormPage /></Needs> },
       { path: '/work-orders/:id/certify', element: <Needs fn="qc" level="full"><QcCheckFormPage certify /></Needs> },
       { path: '/quality', element: <Needs fn="qc"><QualityPage /></Needs> },
       { path: '/despatches', element: <Needs fn="dispatch"><DespatchesPage /></Needs> },

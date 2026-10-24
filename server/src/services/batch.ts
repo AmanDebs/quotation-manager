@@ -428,6 +428,41 @@ export function coaEditError(batchId: number): string | null {
 }
 
 /**
+ * Why a lot's inspection can no longer be corrected, or null.
+ *
+ * **A reading is corrected in place while the certificate has gone nowhere**
+ * (2026-10-24, the client, looking at a draft: *"i want to change the results
+ * of the tests"*). Re-recording it as a fresh inspection was the only way, and
+ * on a nineteen-parameter specification that is typing the whole certificate
+ * again to move one figure — which is the complaint the draft state was built
+ * from, one level down. A transcription error is not a second inspection, and
+ * saying it was would date eighteen readings to a day nobody measured them.
+ *
+ * **What it may not do is move a reading under a certificate that has been
+ * issued**, and that is the whole of the guard. Everything that lets goods
+ * leave reads `cleared` — the number, not the reading behind it — so a figure
+ * edited to a failing value would leave a lot still clearing an invoice and a
+ * lorry on a certificate its own check no longer supports. A draft certifies
+ * nothing, which is exactly what makes it the state to correct in, and
+ * withdrawing is one press that keeps the number, the date and the lots. So
+ * the way through is named rather than the door simply shut.
+ *
+ * An uncertified lot is free, as is an in-process check, which names no lot at
+ * all and whose delete has always been allowed.
+ *
+ * 409 like its siblings: the record does not support the claim.
+ */
+export function checkEditError(batchId: number): string | null {
+  const b = batchById(batchId);
+  if (!b) return 'Batch not found.';
+  if (b.cleared) {
+    return `Batch ${b.number} is certified under ${b.coa_no}, so its readings cannot be changed. `
+      + 'Withdraw that certificate to a draft, correct the readings, and issue it again.';
+  }
+  return null;
+}
+
+/**
  * Why this draft cannot be issued, or null.
  *
  * **The number is not drawn again** — it was drawn when the certificate was

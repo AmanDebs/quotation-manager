@@ -1,8 +1,8 @@
-import { Fragment, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
-import type { WorkOrder } from '../types';
+import type { QcCheck, WorkOrder } from '../types';
 import {
   Button, Input, Select, Field, Card, PageHeader, ErrorText, EmptyState, TH_CLASS, FIELD_GRID,
 } from '../components/ui';
@@ -88,7 +88,7 @@ export default function QcCheckFormPage({ certify }: {
    */
   certify?: boolean;
 }) {
-  const { id } = useParams();
+  const { id, checkId } = useParams();
   const navigate = useNavigate();
   const [params] = useSearchParams();
   /*
@@ -145,53 +145,75 @@ export default function QcCheckFormPage({ certify }: {
     queryFn: () => api.get<WorkOrder>(`/api/work-orders/${id}`),
   });
   const job = full;
-  const batch = (full?.batches ?? []).find((b) => b.id === batchId);
+  /*
+   * **The inspection being corrected**, where that is what this is —
+   * `/work-orders/:id/qc/:checkId` (2026-10-24, the client, with a draft
+   * certificate in front of them: *"i want to change the results of the
+   * tests"*). It is the same page and the same rules: a correction is this
+   * list of readings written again, so a second screen for it would be two
+   * forms that could come to disagree about what an answer means.
+   */
+  const editing: QcCheck | undefined = checkId
+    ? (full?.qc?.checks ?? []).find((c) => c.id === Number(checkId))
+    : undefined;
+  // The lot in play: the one being inspected, or — on a correction — the one
+  // the stored check already names, which nothing here may change.
+  const batch = (full?.batches ?? []).find((b) => b.id === (editing ? editing.batch_id : batchId));
 
   const after = () => {
     queryClient.invalidateQueries({ queryKey: ['work-order', String(id)] });
   };
-  const add = useMutation({
-    mutationFn: () => api.post(`/api/work-orders/${id}/${certify ? 'certify' : 'qc-checks'}`, {
-      ...head,
-      ...(certify ? coa : {}),
-      batch_id: batch?.id ?? null,
-      sample_size: head.sample_size === '' ? null : Number(head.sample_size),
-      results: [
-        ...(full?.qc?.params ?? []).map((p) => ({ ...p, custom: false, name: p.name, unit: p.unit, min: '', max: '' })),
-        // A custom row with no name is a blank line somebody opened and did
-        // not fill in, which the server refuses — so it is dropped here
-        // rather than sent to produce a refusal about itself.
-        ...custom.filter((c) => c.name.trim()).map((c) => ({ ...c, custom: true, ranged: 0 })),
-      ].map((p) => {
-        const r = row(p.id!);
-        const mode = p.kind === 'boolean' ? 'value' : modeOf(p);
-        const complied = !r.na && mode === 'complied';
-        return {
-          // Null for a custom check: it points at no parameter and carries
-          // its own description instead.
-          param_id: p.custom ? null : p.id,
-          name: p.name,
-          kind: p.kind,
-          section: p.section ?? '',
-          unit: p.unit ?? '',
-          min_value: p.custom ? ((p as CustomCheck).min === '' ? null : Number((p as CustomCheck).min)) : null,
-          max_value: p.custom ? ((p as CustomCheck).max === '' ? null : Number((p as CustomCheck).max)) : null,
-          // Sent as its own fact: the server writes the row and records the
-          // answer, where a blank is still dropped as never looked at.
-          na: !!r.na,
-          // Conforms, with no figure — a pass the inspector asserts rather
-          // than one a reading decides.
-          complied,
-          mode,
-          // The words, where words were written; blank leaves the default.
-          observation: (r.said ?? '').trim(),
-          // A visual check only counts once a verdict was actually given; "not
-          // looked at" and "failed" must not collapse into each other.
-          value: r.na || complied ? '' : p.kind === 'boolean' ? (r.v ? r.v === 'pass' : '') : r.v ?? '',
-          value_max: r.na || complied || p.kind === 'boolean' || mode !== 'range' ? '' : r.vmax ?? '',
-        };
-      }),
+  const payload = () => ({
+    ...head,
+    ...(certify ? coa : {}),
+    batch_id: batch?.id ?? null,
+    sample_size: head.sample_size === '' ? null : Number(head.sample_size),
+    results: [
+      ...(full?.qc?.params ?? []).map((p) => ({ ...p, custom: false, name: p.name, unit: p.unit, min: '', max: '' })),
+      // A custom row with no name is a blank line somebody opened and did
+      // not fill in, which the server refuses — so it is dropped here
+      // rather than sent to produce a refusal about itself.
+      ...custom.filter((c) => c.name.trim()).map((c) => ({ ...c, custom: true, ranged: 0 })),
+    ].map((p) => {
+      const r = row(p.id!);
+      const mode = p.kind === 'boolean' ? 'value' : modeOf(p);
+      const complied = !r.na && mode === 'complied';
+      return {
+        // Null for a custom check: it points at no parameter and carries
+        // its own description instead.
+        param_id: p.custom ? null : p.id,
+        name: p.name,
+        kind: p.kind,
+        section: p.section ?? '',
+        unit: p.unit ?? '',
+        min_value: p.custom ? ((p as CustomCheck).min === '' ? null : Number((p as CustomCheck).min)) : null,
+        max_value: p.custom ? ((p as CustomCheck).max === '' ? null : Number((p as CustomCheck).max)) : null,
+        // Sent as its own fact: the server writes the row and records the
+        // answer, where a blank is still dropped as never looked at.
+        na: !!r.na,
+        // Conforms, with no figure — a pass the inspector asserts rather
+        // than one a reading decides.
+        complied,
+        mode,
+        // The words, where words were written; blank leaves the default.
+        observation: (r.said ?? '').trim(),
+        // A visual check only counts once a verdict was actually given; "not
+        // looked at" and "failed" must not collapse into each other.
+        value: r.na || complied ? '' : p.kind === 'boolean' ? (r.v ? r.v === 'pass' : '') : r.v ?? '',
+        value_max: r.na || complied || p.kind === 'boolean' || mode !== 'range' ? '' : r.vmax ?? '',
+      };
     }),
+  });
+  const add = useMutation({
+    /*
+     * A correction is a PUT on the check itself rather than a fresh POST: the
+     * reading moves and the inspection stays the one that happened, on its own
+     * date, by whoever took it. Recording it again would date every other
+     * reading on it to today.
+     */
+    mutationFn: () => (editing
+      ? api.put(`/api/work-orders/qc-checks/${editing.id}`, payload())
+      : api.post(`/api/work-orders/${id}/${certify ? 'certify' : 'qc-checks'}`, payload())),
     /*
      * **Back to the job, not back to a blank form.** The dialog this replaced
      * stayed open and cleared itself, which is right for a thing floating over
@@ -204,7 +226,7 @@ export default function QcCheckFormPage({ certify }: {
       setValues({});
       markSaved();
       after();
-      navigate(`/work-orders/${id}?tab=${certify || batchId ? 'batches' : 'quality'}`);
+      navigate(`/work-orders/${id}?tab=${certify || batch ? 'batches' : 'quality'}`);
     },
   });
   const removeCheck = useMutation({
@@ -225,7 +247,9 @@ export default function QcCheckFormPage({ certify }: {
   const { markSaved, pdf, prompt } = useUnsavedChanges(values, {
     run: () => add.mutateAsync(),
     can: Object.keys(values).length > 0,
-    message: 'This inspection has not been recorded yet.',
+    message: editing
+      ? 'These corrections to the inspection have not been saved yet.'
+      : 'This inspection has not been recorded yet.',
   });
 
   /*
@@ -252,8 +276,76 @@ export default function QcCheckFormPage({ certify }: {
     setValues((prev) => { const next = { ...prev }; delete next[id]; return next; });
   };
 
+  /*
+   * Fill the form in from the inspection being corrected.
+   *
+   * An effect rather than an initial state, because the job arrives after the
+   * first render — the rule `useDefaultOnce` states about every other default
+   * read off something fetched. It runs **once per check** (`filled` latches
+   * on the id), so a figure typed over is never overwritten by a refetch, and
+   * switching to a different check still fills in.
+   *
+   * A result that points at **no parameter** comes back as a custom row,
+   * carrying the name, section, unit and tolerance that were copied onto it —
+   * which covers both a check added on the spot and a parameter since deleted
+   * from the specification, and is what `qc_results.param_id` being nullable
+   * is for. Negative ids keep those rows out of the way of real parameter
+   * ids, exactly as a freshly added one does.
+   */
+  const [filled, setFilled] = useState(0);
+  useEffect(() => {
+    if (!editing || filled === editing.id) return;
+    setFilled(editing.id);
+    setHead({
+      date: editing.date,
+      shift: editing.shift ?? '',
+      sample_size: editing.sample_size === null ? '' : String(editing.sample_size),
+      inspector: editing.inspector ?? '',
+      notes: editing.notes ?? '',
+    });
+    const answers: Record<number, Answer> = {};
+    const added: CustomCheck[] = [];
+    let next = -1;
+    for (const r of editing.results) {
+      const key = r.param_id ?? next--;
+      if (r.param_id === null) {
+        added.push({
+          id: key,
+          name: r.name,
+          section: r.section ?? '',
+          kind: r.kind,
+          unit: r.unit ?? '',
+          min: r.min_value === null ? '' : String(r.min_value),
+          max: r.max_value === null ? '' : String(r.max_value),
+        });
+      }
+      answers[key] = {
+        na: !!r.na,
+        // Which of the three answers this row was given. N/A rides beside it
+        // rather than being a fourth mode, exactly as the form sends it.
+        mode: r.complied ? 'complied' : r.ranged ? 'range' : 'value',
+        said: r.observation ?? '',
+        v: r.na || r.complied || r.value === null
+          ? ''
+          : r.kind === 'boolean' ? (r.value === 1 ? 'pass' : 'fail') : String(r.value),
+        vmax: r.value_max === null || r.value_max === undefined ? '' : String(r.value_max),
+      };
+    }
+    setValues(answers);
+    setCustom(added);
+    setNextCustom(next);
+  }, [editing, filled]);
+
   const specParams = full?.qc?.params ?? [];
   const checks = full?.qc?.checks ?? [];
+  /*
+   * Whether an inspection's readings can still be corrected — the client's
+   * half of `checkEditError`, so the page does not draw a button that only
+   * ever produces a refusal. The server is what refuses; this only decides
+   * what is offered. An in-process check names no lot and is always free.
+   */
+  const correctable = (c: QcCheck) =>
+    c.batch_id === null || !(full?.batches ?? []).find((b) => b.id === c.batch_id)?.cleared;
   const sectioned = specParams.some((p) => !!p.section);
   /** What each block draws: its specified checks, then the ones added to it. */
   const blocks = (sectioned ? SECTIONS : [{ key: '', label: 'Checks', adj: '' }])
@@ -297,7 +389,9 @@ export default function QcCheckFormPage({ certify }: {
 
   const title = certify
     ? `Certify — ${job.number}`
-    : batch ? `Final check — ${batch.number}` : `Quality check — ${job.number}`;
+    : editing
+      ? `Correct inspection — ${batch ? batch.number : job.number}`
+      : batch ? `Final check — ${batch.number}` : `Quality check — ${job.number}`;
 
   return (
     <div>
@@ -314,7 +408,7 @@ export default function QcCheckFormPage({ certify }: {
           <Button variant="secondary" onClick={() => navigate(`/work-orders/${id}`)}>Back to job</Button>
         }
       />
-      <Card title={certify ? 'Inspection and certificate' : 'Inspection'}>
+      <Card title={certify ? 'Inspection and certificate' : editing ? 'Correct the readings' : 'Inspection'}>
       {summary && !summary.has_spec ? (
         <EmptyState message="No quality checks are defined for this product. Set them under Products → QC, then come back." />
       ) : (
@@ -336,6 +430,27 @@ export default function QcCheckFormPage({ certify }: {
               Quality report (PDF)
             </PdfLink>
           </div>
+
+          {/*
+            What a correction is, said before the readings rather than left to
+            be worked out from the title: the inspection keeps its own date and
+            inspector, because that is when it happened and who took it.
+            Where a draft certificate prints these readings, it says so and
+            names the step left to do — issuing it again is what puts the
+            corrected document out, and nothing here does that.
+          */}
+          {editing && (
+            <p className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              Correcting the inspection of <b>{fmtDate(editing.date)}</b>
+              {editing.shift ? ` · ${editing.shift}` : ''}
+              {editing.inspector ? ` · ${editing.inspector}` : ''}. It keeps that date and inspector — this is a
+              figure being put right, not a second inspection.
+              {batch?.coa_draft && (
+                <> Certificate <b>{batch.coa_no}</b> is a draft and prints these readings, so issue it again
+                  from the COA page once they are right.</>
+              )}
+            </p>
+          )}
 
           {!!summary && summary.checks > 0 && (
             <div className="mb-3 flex flex-wrap gap-4 text-sm">
@@ -652,7 +767,7 @@ export default function QcCheckFormPage({ certify }: {
                 product: that is written down and prints on the certificate, and is neither a pass nor a failure.
               </p>
               <Button className="shrink-0 whitespace-nowrap" onClick={() => add.mutate()} disabled={add.isPending}>
-                {add.isPending ? 'Saving…' : 'Record inspection'}
+                {add.isPending ? 'Saving…' : editing ? 'Save corrections' : 'Record inspection'}
               </Button>
             </div>
             <ErrorText error={add.error} />
@@ -672,7 +787,7 @@ export default function QcCheckFormPage({ certify }: {
                   </tr>
                 </thead>
                 <tbody>
-                  {[...checks].reverse().map((c) => (
+                  {[...checks].reverse().filter((c) => c.id !== editing?.id).map((c) => (
                     <tr key={c.id} className="border-b border-slate-100 align-top last:border-0">
                       <td className="whitespace-nowrap py-1.5 pr-2">{fmtDate(c.date)}</td>
                       <td className="py-1.5 pr-2 text-slate-500">{c.shift || '—'}</td>
@@ -695,7 +810,19 @@ export default function QcCheckFormPage({ certify }: {
                           ))}
                         </div>
                       </td>
-                      <td className="py-1.5 text-right">
+                      <td className="whitespace-nowrap py-1.5 text-right">
+                        {/*
+                          Correct a figure rather than record the whole
+                          inspection again, which on a long specification is
+                          the difference between one box and nineteen.
+                        */}
+                        {correctable(c) && (
+                          <button
+                            onClick={() => navigate(`/work-orders/${id}/qc/${c.id}`)}
+                            className="px-1 text-xs text-slate-400 hover:text-brand-700"
+                            title="Correct these readings"
+                          >Edit</button>
+                        )}
                         <button
                           onClick={() => { if (confirm('Delete this inspection?')) removeCheck.mutate(c.id); }}
                           className="px-1 text-slate-400 hover:text-red-600"

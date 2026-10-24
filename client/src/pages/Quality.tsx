@@ -104,6 +104,21 @@ function EditCoa({ row, onClose }: { row: CoaRow; onClose: () => void }) {
           : 'The number and the lots it covers are not corrections — a certificate over different lots is a '
             + 'different certificate. Withdraw this one and issue another.'}
       </p>
+      {/*
+        The readings are the other half of what somebody means by correcting a
+        certificate, and they are not here: they belong to the inspection, on
+        its own date and by its own inspector, so they are changed where that
+        inspection is. Said with the way there rather than left to be found —
+        the register is where anybody looking at a draft starts.
+      */}
+      <p className="mt-1 text-xs text-slate-400">
+        To change the <b>readings</b> it prints,{' '}
+        <Link to={`/work-orders/${row.work_order_id}?tab=batches`} className="text-brand-700 hover:underline">
+          open the job
+        </Link>{' '}
+        and press <b>Correct readings</b> on the lot
+        {row.draft ? ', then issue this certificate again.' : ' — withdraw this certificate to a draft first.'}
+      </p>
       <ErrorText error={save.error} />
       <div className="mt-3 flex justify-end gap-2">
         <Button variant="secondary" onClick={onClose}>Cancel</Button>

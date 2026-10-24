@@ -32,6 +32,8 @@ export interface CoaRow {
   coa_date: string;
   /** Any lot it covers — what the PDF route is opened with; the document gathers the rest. */
   batch_id: number;
+  /** The job behind that lot — where its readings are corrected. */
+  work_order_id: number;
   lots: number;
   /** The lot numbers, as the certificate's own heading reads them. */
   batch_numbers: string;
@@ -65,6 +67,16 @@ export interface CoaRow {
 const coaSql = `
   SELECT b.coa_no, MAX(b.coa_date) AS coa_date,
          MIN(b.id) AS batch_id,
+         -- The job behind that same lot, so the register can send somebody to
+         -- where the readings are corrected. A subquery rather than MIN(w.id),
+         -- which would name the lowest *job* id and so a different lot's job
+         -- on a group spanning two; it is well defined inside the aggregate
+         -- because coa_no and company_id are the grouping keys, and it picks
+         -- the lot by the same rule batch_id above does.
+         (SELECT bb.work_order_id FROM batches bb
+            JOIN work_orders ww ON ww.id = bb.work_order_id
+           WHERE bb.coa_no = b.coa_no AND ww.company_id = w.company_id
+           ORDER BY bb.id LIMIT 1) AS work_order_id,
          COUNT(*) AS lots,
          GROUP_CONCAT(b.number, ', ') AS batch_numbers,
          COALESCE(MAX(u.name), '') AS issued_by_name,

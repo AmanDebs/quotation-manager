@@ -2,8 +2,8 @@ import { Router, type Response } from 'express';
 import { db, transaction } from '../db/connection.js';
 import { nextNumber } from '../services/numbering.js';
 import {
-  batchesFor, batchById, coaBlockError, coaGroupError, coaEditError, coaReissueError, lotsUnderCoa,
-  renameError, dispositionError, isDisposition, DISPOSITIONS,
+  batchesFor, batchById, coaBlockError, coaGroupError, coaEditError, coaReissueError, checkEditError,
+  lotsUnderCoa, renameError, dispositionError, isDisposition, DISPOSITIONS,
 } from '../services/batch.js';
 import { coaWhere } from '../services/coaRegister.js';
 import { progressFor, progressForMany, LIVE_OK } from '../services/production.js';
@@ -1381,18 +1381,23 @@ function answerMode(r: Record<string, unknown>, param: { ranged?: unknown; kind?
   return param.ranged ? 'range' : 'value';
 }
 
-/** Write it. Assumes `checkError` has already passed; wrap in a transaction. */
-function insertCheck(req: AuthedRequest, jobId: number, wo: Record<string, unknown>, body: Record<string, unknown>, batchId: number | null): number {
+/**
+ * The readings themselves, written against the specification in force.
+ *
+ * **Split out when correcting a check became its second caller** (2026-10-24):
+ * an edit is this list written again, so one function owns what a row means —
+ * that N/A wins over everything, that a range is stored only where one was
+ * actually given, and that the tolerance is copied onto the row. Two
+ * definitions of that, on readings that clear goods, is the worst way for two
+ * things to disagree.
+ *
+ * Assumes `checkError` has already passed; wrap in a transaction.
+ */
+function writeResults(checkId: number, wo: Record<string, unknown>, body: Record<string, unknown>): void {
   const spec = specFor(wo);
   const rows = Array.isArray(body.results) ? (body.results as Record<string, unknown>[]) : [];
   const given = (v: unknown) => v !== '' && v !== null && v !== undefined;
   const recorded = rows.filter((r) => given(r.value) || r.na || r.complied);
-  const info = db.prepare(
-    `INSERT INTO qc_checks (work_order_id, batch_id, date, shift, sample_size, inspector, notes, created_by)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(jobId, batchId, String(body.date), String(body.shift ?? ''), numOrNull(body.sample_size),
-    String(body.inspector ?? ''), String(body.notes ?? ''), req.user!.id);
-  const checkId = Number(info.lastInsertRowid);
   const ins = db.prepare(
     `INSERT INTO qc_results (check_id, param_id, name, kind, section, unit, value, value_max, ranged, na,
                              complied, observation, min_value, max_value, notes, sort_order)
@@ -1418,6 +1423,17 @@ function insertCheck(req: AuthedRequest, jobId: number, wo: Record<string, unkno
       param.min_value, param.max_value, String(r.notes ?? ''), i
     );
   });
+}
+
+/** Write it. Assumes `checkError` has already passed; wrap in a transaction. */
+function insertCheck(req: AuthedRequest, jobId: number, wo: Record<string, unknown>, body: Record<string, unknown>, batchId: number | null): number {
+  const info = db.prepare(
+    `INSERT INTO qc_checks (work_order_id, batch_id, date, shift, sample_size, inspector, notes, created_by)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(jobId, batchId, String(body.date), String(body.shift ?? ''), numOrNull(body.sample_size),
+    String(body.inspector ?? ''), String(body.notes ?? ''), req.user!.id);
+  const checkId = Number(info.lastInsertRowid);
+  writeResults(checkId, wo, body);
   return checkId;
 }
 
@@ -1532,6 +1548,59 @@ workOrdersRouter.post('/:id/certify', requirePermission('qc', 'full'), (req: Aut
   writeCoa([batchId], date, req.user!.id, String(body.approved_by ?? '').trim(), companyId,
     String(body.buyer_order ?? '').trim());
   res.status(201).json({ batch: batchById(batchId), certified: true });
+});
+
+/**
+ * Correct an inspection's readings, in place.
+ *
+ * **A typo is not a second inspection** (2026-10-24, the client, with a draft
+ * certificate in front of them: *"i want to change the results of the
+ * tests"*). Until this the only way to move a figure was to record the check
+ * again — nineteen readings retyped to change one, and eighteen of them then
+ * dated to a day nobody measured them on. `checkEditError` says when that is
+ * allowed; the short version is *while the certificate has gone nowhere*.
+ *
+ * **The lot does not move.** `batch_id` is taken from the stored row and the
+ * body's is ignored: shifting an inspection onto another lot would certify
+ * goods nobody looked at, which is exactly what the create route's own guard
+ * refuses from the other side. An in-process check stays in-process.
+ *
+ * **The readings are re-judged against the specification in force now**, as a
+ * fresh check would be — `checkError` already validates against it, so there
+ * is no second rule here. In the case this exists for, a correction minutes
+ * later, the specification has not moved; and a parameter since deleted from
+ * it reads back as a custom check carrying its own name and tolerance, which
+ * is what `qc_results.param_id` being nullable is for.
+ *
+ * Delete-and-reinsert inside one transaction, the shape `saveItems` uses for
+ * every document's lines, so a refused row leaves the inspection as it was.
+ */
+workOrdersRouter.put('/qc-checks/:checkId', requirePermission('qc', 'full'), (req: AuthedRequest, res) => {
+  const checkId = Number(req.params.checkId);
+  const check = db.prepare('SELECT work_order_id, batch_id FROM qc_checks WHERE id = ?')
+    .get(checkId) as { work_order_id: number; batch_id: number | null } | undefined;
+  // Checked through the parent job, as the delete beside it is, so an employee
+  // cannot reach an inspection on somebody else's order by guessing an id.
+  const wo = check ? accessible(req, check.work_order_id) : null;
+  if (!check || !wo) return res.status(404).json({ error: 'Check not found' });
+
+  if (check.batch_id !== null) {
+    const locked = checkEditError(Number(check.batch_id));
+    if (locked) return res.status(409).json({ error: locked });
+  }
+  const body = req.body ?? {};
+  const refused = checkError(wo, body);
+  if (refused) return res.status(400).json({ error: refused });
+
+  transaction(() => {
+    db.prepare(
+      'UPDATE qc_checks SET date = ?, shift = ?, sample_size = ?, inspector = ?, notes = ? WHERE id = ?'
+    ).run(String(body.date), String(body.shift ?? ''), numOrNull(body.sample_size),
+      String(body.inspector ?? ''), String(body.notes ?? ''), checkId);
+    db.prepare('DELETE FROM qc_results WHERE check_id = ?').run(checkId);
+    writeResults(checkId, wo, body);
+  });
+  res.json(getFull(req, check.work_order_id));
 });
 
 workOrdersRouter.delete('/qc-checks/:checkId', requirePermission('qc', 'full'), (req: AuthedRequest, res) => {

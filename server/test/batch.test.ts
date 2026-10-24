@@ -3,8 +3,8 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { db } from '../src/db/connection.js';
 import {
-  batchesFor, batchById, coaBlockError, coaEditError, coaReissueError, despatchBatchError,
-  lotsUnderCoa, renameError,
+  batchesFor, batchById, checkEditError, coaBlockError, coaEditError, coaReissueError,
+  despatchBatchError, lotsUnderCoa, renameError,
 } from '../src/services/batch.js';
 import { certifiedSql } from '../src/services/qc.js';
 import { makeCustomer, makeInvoice } from './helpers/factory.js';
@@ -471,5 +471,70 @@ describe('a withdrawn certificate is a draft', () => {
         `certifiedSql and cleared disagree about coa_no=${JSON.stringify(no)} status=${JSON.stringify(status)}`,
       );
     }
+  });
+});
+
+/**
+ * Correcting a reading, which is what a draft is for.
+ *
+ * The cases that matter are the two it must **not** refuse — an uncertified
+ * lot and one under a draft — because a figure that cannot be put right is
+ * the whole complaint this answers, and the one it must: a lot whose
+ * certificate has been issued, where everything downstream reads `cleared`
+ * rather than the reading behind it.
+ */
+describe("a lot's readings are corrected while the certificate has gone nowhere", () => {
+  /** A made, passed lot, with whatever certificate state is asked for. */
+  function lot(no = '', status = '') {
+    const made = job();
+    const b = batch(made.woId);
+    shift(made.woId, b, 40000);
+    check(made.woId, b, made.paramId, 28.0);
+    if (no) {
+      db.prepare(
+        "UPDATE batches SET coa_no = ?, coa_date = '2026-10-24', coa_status = ? WHERE id = ?"
+      ).run(no, status, b);
+    }
+    return { ...made, b };
+  }
+
+  test('an uncertified lot is free — nothing has been claimed about it yet', () => {
+    assert.equal(checkEditError(lot().b), null);
+  });
+
+  test('and so is a lot under a draft, which is the case this exists for', () => {
+    assert.equal(checkEditError(lot('COA/26-27/040', 'draft').b), null);
+  });
+
+  test('an issued certificate refuses it, and names the way through', () => {
+    const { b } = lot('COA/26-27/041');
+    const refused = String(checkEditError(b));
+    assert.match(refused, /COA\/26-27\/041/, 'the sentence hid the certificate it is about');
+    assert.match(refused, /Withdraw/, 'refused with no way out — the trap this codebase builds once');
+    // And withdrawing it is exactly that way through.
+    db.prepare("UPDATE batches SET coa_status = 'draft' WHERE id = ?").run(b);
+    assert.equal(checkEditError(b), null);
+  });
+
+  test('a lot that is not there says so rather than being quietly allowed', () => {
+    assert.match(String(checkEditError(999999)), /not found/);
+  });
+
+  /*
+   * The reason the issued case is refused at all, stated as a test rather than
+   * only in a comment: a reading edited to a failing value leaves the lot
+   * still clearing a lorry, because `cleared` reads the number. So the guard
+   * is what stands between a corrected figure and goods going out on a
+   * certificate its own check no longer supports.
+   */
+  test('because an issued certificate clears the lot whatever its readings later say', () => {
+    const { b, orderId, woId, paramId } = lot('COA/26-27/042');
+    assert.equal(despatchBatchError(orderId, [b]), null);
+    check(woId, b, paramId, 30.5);
+    assert.equal(batchById(b)!.qc, 'failed');
+    assert.equal(
+      despatchBatchError(orderId, [b]), null,
+      'a failing re-inspection stopped the lorry, so the edit guard could be dropped',
+    );
   });
 });

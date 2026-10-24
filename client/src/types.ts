@@ -612,6 +612,8 @@ export interface QcResult {
   observation?: string;
   /** 1 when the recorded answer was *not applicable* — an answer, not a blank. */
   na?: number;
+  /** The block it prints under, copied on at the time; blank is not sectioned. */
+  section?: QcSection;
   min_value: number | null;
   max_value: number | null;
   notes: string;
@@ -622,6 +624,8 @@ export interface QcResult {
 export interface QcCheck {
   id: number;
   work_order_id: number;
+  /** The lot this finalises; null is an in-process check against the job. */
+  batch_id: number | null;
   date: string;
   shift: string;
   sample_size: number | null;
@@ -1705,6 +1709,8 @@ export interface CoaRow {
   coa_no: string;
   coa_date: string;
   batch_id: number;
+  /** The job behind that lot — where the readings it prints are corrected. */
+  work_order_id: number;
   lots: number;
   batch_numbers: string;
   issued_by_name: string;

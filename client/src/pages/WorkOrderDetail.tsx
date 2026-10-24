@@ -174,6 +174,16 @@ export default function WorkOrderDetailPage() {
   // already been certified or condemned — the server refuses the rest by name.
   const certifiable = (b: Batch) => b.qc === 'passed' && !b.coa_no && !b.scrapped;
   /*
+   * The check the certificate prints: this lot's latest that reached a
+   * verdict, which is the one `buildCoaPdf` reads. So *Correct readings* lands
+   * on the inspection whose figures are actually on the document, rather than
+   * on whichever was recorded last.
+   */
+  const printed = (b: Batch) => {
+    const decided = (b.final_checks ?? []).filter((ch) => ch.passed !== null);
+    return decided[decided.length - 1];
+  };
+  /*
    * What to do with a lot that failed. The note is asked for on the way, and
    * only for a decision being *made* — withdrawing one asks nothing, because
    * there is nothing to explain about undoing a mistake.
@@ -683,6 +693,26 @@ export default function WorkOrderDetailPage() {
                             {can('qc', 'full') && (
                           <>
                             <Button variant="ghost" onClick={() => navigate(`/work-orders/${id}/qc?batch=${b.id}`)}>Final check</Button>
+                            {/*
+                              Put a figure right, rather than inspect again.
+                              Re-recording is the honest act after rework —
+                              the lot really was measured a second time — but
+                              a mistyped reading is a transcription error, and
+                              correcting it on a long specification is one box
+                              instead of nineteen. Not offered on a certified
+                              lot: `checkEditError` refuses that until the
+                              certificate is withdrawn to a draft.
+                            */}
+                            {printed(b) && (
+                              <Button
+                                variant="ghost"
+                                className="ml-1"
+                                title="Correct the readings this lot's certificate prints"
+                                onClick={() => navigate(`/work-orders/${id}/qc/${printed(b)!.id}`)}
+                              >
+                                Correct readings
+                              </Button>
+                            )}
                             {/*
                               Rework and scrap are offered on a lot that has
                               actually failed — they are what a failed check
