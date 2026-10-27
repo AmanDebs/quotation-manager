@@ -2,10 +2,11 @@ import { Fragment, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
-import type { QcCheck, WorkOrder } from '../types';
+import type { CoaExtra, QcCheck, WorkOrder } from '../types';
 import {
   Button, Input, Select, Field, Card, PageHeader, ErrorText, EmptyState, TH_CLASS, FIELD_GRID,
 } from '../components/ui';
+import { CoaExtraFields } from '../components/CoaExtraFields';
 import { PdfLink } from '../components/PdfLink';
 import { useUnsavedChanges } from '../lib/useUnsavedChanges';
 import { fmtDate, today } from '../lib/format';
@@ -113,7 +114,14 @@ export default function QcCheckFormPage({ certify }: {
    * output underneath it, where a typed one could.
    */
   const [coa, setCoa] = useState({
-    coa_date: today(), approved_by: '', batch_number: '', buyer_order: '',
+    coa_date: today(),
+    approved_by: '',
+    batch_number: '',
+    buyer_order: '',
+    // Whatever this customer asks to see on the page — see `CoaExtraFields`.
+    // Empty on every certificate that asks for nothing extra, which the server
+    // reads as nothing to print.
+    extra: [] as CoaExtra[],
   });
   /*
    * Three facts per parameter since 2026-10-16, where there was one string.
@@ -527,6 +535,9 @@ export default function QcCheckFormPage({ certify }: {
                       placeholder="PI or PO number"
                     />
                   </Field>
+                </div>
+                <div className="mt-3 border-t border-slate-200 pt-3">
+                  <CoaExtraFields rows={coa.extra} onChange={(extra) => setCoa({ ...coa, extra })} />
                 </div>
               </div>
             )}

@@ -1,6 +1,7 @@
 import { db } from '../db/connection.js';
 import { scopeClause } from '../middleware/scope.js';
 import { certifiedSql } from './qc.js';
+import type { CoaExtra } from './batch.js';
 import type { AuthedRequest } from '../middleware/auth.js';
 
 /**
@@ -45,6 +46,12 @@ export interface CoaRow {
   approved_by: string;
   /** The buyer's own reference as typed; blank means the document falls back. */
   buyer_order: string;
+  /**
+   * Whatever this buyer asked to see on the page, parsed at the route
+   * boundary — the dialog that corrects a certificate needs what is on it,
+   * or saving would blank details nobody meant to remove.
+   */
+  extra: CoaExtra[];
   order_id: number;
   order_number: string;
   customer_name: string;
@@ -86,6 +93,8 @@ const coaSql = `
          COALESCE(MAX(u.name), '') AS issued_by_name,
          COALESCE(MAX(b.coa_approved_by), '') AS approved_by,
          COALESCE(MAX(b.coa_buyer_order), '') AS buyer_order,
+         -- Read whole and parsed in the route; see CoaRow.extra above.
+         COALESCE(MAX(b.coa_extra), '') AS extra_json,
          MAX(o.id) AS order_id, MAX(o.number) AS order_number, MAX(c.name) AS customer_name,
          -- The jobs that made these lots (2026-10-24, the client: *"show work
          -- order instead of sales order"*). Listed rather than picked, the way

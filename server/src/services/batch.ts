@@ -58,6 +58,111 @@ export function isDisposition(v: unknown): v is Disposition {
   return v === '' || (DISPOSITIONS as readonly unknown[]).includes(v);
 }
 
+/*
+ * **A certificate can carry what a particular buyer asks for** (2026-10-27,
+ * the client: *"COA - optional field to be add : Customer may want specific
+ * details to be added like Purchase order"*). Every other cell in that header
+ * is derived from the record or is one of the three somebody types, and that
+ * is the right default — a header assembled from the book cannot disagree
+ * with it. What it cannot do is answer a requirement nobody here invented:
+ * one buyer wants their own order number on the page, the next their material
+ * code, the next a shelf life. Those are facts about the agreement rather
+ * than about the lot, so nothing in this database holds them and no amount of
+ * deriving will.
+ *
+ * **Label and value, not a block of text.** The header is a grid of labelled
+ * cells, so an addition has to be one too or it reads as a note stuck to a
+ * table; and a label is what makes the value mean anything to whoever reads
+ * the certificate. Capped at six, which is two more rows of that grid — past
+ * that it is a second document rather than a few details.
+ *
+ * Stored as JSON on the batch, the `bank_accounts` and `column_config` rule:
+ * it is a list whose length nobody can predict, parsed at the boundary, and a
+ * table of two strings keyed on a certificate would be a join to maintain for
+ * a thing that is only ever read whole.
+ */
+export type CoaExtra = { label: string; value: string };
+
+/** Two more rows of the certificate's three-column header. */
+export const MAX_COA_EXTRA = 6;
+
+const str = (v: unknown) => (v == null ? '' : String(v)).trim();
+
+/**
+ * Read the stored column back. **Never throws**: a row hand-written, restored
+ * from a backup or left by an older client is data rather than vocabulary, so
+ * anything that is not a usable pair is passed over — the rule the permission
+ * loader states about a level it does not know. A certificate printing one
+ * detail short is survivable; a PDF route answering 500 is not.
+ */
+export function parseCoaExtra(raw: unknown): CoaExtra[] {
+  let rows: unknown = raw;
+  // The stored column is a string; a request body and an already-parsed row
+  // are the list itself. One function for both, so there is one definition of
+  // what a usable pair is — and it is idempotent, which is what lets a reader
+  // ask it without first knowing which of the two it is holding.
+  if (raw == null || typeof raw === 'string') {
+    const text = str(raw);
+    if (!text) return [];
+    try {
+      rows = JSON.parse(text);
+    } catch {
+      return [];
+    }
+  }
+  if (!Array.isArray(rows)) return [];
+  return rows
+    .map((r) => {
+      const o = (r ?? {}) as Record<string, unknown>;
+      return { label: str(o.label), value: str(o.value) };
+    })
+    .filter((r) => r.label && r.value)
+    .slice(0, MAX_COA_EXTRA);
+}
+
+/**
+ * Refuse what was sent, in the shape every guard in this module has — a
+ * function returning the sentence to refuse with, so the rule is testable
+ * without the HTTP harness this codebase does not have.
+ *
+ * **A row with nothing in it is dropped and a half-filled one is refused**,
+ * which is `despatchBatchError`'s own split read for a different shape: the
+ * form carries an empty pair the moment somebody presses *add*, so dropping
+ * that loses nothing anybody meant, where dropping a label whose value was
+ * forgotten would print a certificate missing the detail it was being added
+ * for, with nothing afterwards to say so. A labelled cell with no value is
+ * also a dead box on the page, which the notify parties' own rule refuses.
+ */
+export function coaExtraError(rows: unknown): string | null {
+  if (!Array.isArray(rows)) return 'Extra certificate details must be a list.';
+  if (rows.length > MAX_COA_EXTRA) {
+    return `A certificate carries at most ${MAX_COA_EXTRA} extra details; ${rows.length} were sent.`;
+  }
+  const seen = new Set<string>();
+  for (const r of rows) {
+    const o = (r ?? {}) as Record<string, unknown>;
+    const label = str(o.label);
+    const value = str(o.value);
+    if (!label && !value) continue;
+    if (!label) return `"${value}" has no label, so there is nothing to call it on the certificate.`;
+    if (!value) return `"${label}" has no value, and a labelled cell with nothing in it prints as a blank box.`;
+    if (label.length > 60) return `"${label.slice(0, 20)}…" is too long for a label on the certificate.`;
+    if (value.length > 200) return `The value under "${label}" is too long to print in one cell.`;
+    // Two cells reading the same label leave *which of these is it* unanswerable
+    // — the question a repeated reference always raises here.
+    const key = label.toLowerCase();
+    if (seen.has(key)) return `"${label}" is named twice.`;
+    seen.add(key);
+  }
+  return null;
+}
+
+/** What gets written, once `coaExtraError` has passed it. */
+export function cleanCoaExtra(rows: unknown): string {
+  const kept = parseCoaExtra(rows);
+  return kept.length ? JSON.stringify(kept) : '';
+}
+
 export interface Batch {
   id: number;
   number: string;
@@ -79,6 +184,8 @@ export interface Batch {
   coa_approved_by: string;
   /** The buyer's own reference, typed; blank falls back — see `schema.sql`. */
   coa_buyer_order: string;
+  /** Whatever this buyer asked to see on the page — see `CoaExtra`. */
+  coa_extra: CoaExtra[];
   /** Derived from the shift entries filed against this lot. */
   made: number;
   rejected: number;
@@ -213,6 +320,7 @@ export function batchesFor(workOrderId: number): Batch[] {
       coa_issued_by_name: r.coa_issued_by_name == null ? null : String(r.coa_issued_by_name),
       coa_approved_by: String(r.coa_approved_by ?? ''),
       coa_buyer_order: String(r.coa_buyer_order ?? ''),
+      coa_extra: parseCoaExtra(r.coa_extra),
       made: num(made.ok),
       rejected: num(made.rej),
       entries: made.n,

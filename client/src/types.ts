@@ -1705,6 +1705,17 @@ export interface PriceHistory {
  * `batch_id` is any one of them, which is all the PDF route needs: the
  * document gathers its own group by number.
  */
+
+/**
+ * One extra cell on a certificate's header: what to call it, and what it says.
+ *
+ * Every other cell up there is derived from the record or is one of the three
+ * somebody types. These answer a requirement nobody here invented — one buyer
+ * wants their own order number on the page, the next a material code — so
+ * they are typed per certificate and nothing can derive them.
+ */
+export type CoaExtra = { label: string; value: string };
+
 export interface CoaRow {
   coa_no: string;
   coa_date: string;
@@ -1720,6 +1731,8 @@ export interface CoaRow {
   approved_by: string;
   /** The buyer's own reference as typed; blank means the document falls back. */
   buyer_order: string;
+  /** Whatever this buyer asked to see on the certificate — see `CoaExtra`. */
+  extra: CoaExtra[];
   order_id: number;
   order_number: string;
   customer_name: string;

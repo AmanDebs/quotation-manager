@@ -431,3 +431,109 @@ describe('a reading the inspector ruled out', () => {
     assert.ok(!texts.includes('N/A'), 'the Verdict column still reads N/A');
   });
 });
+
+/**
+ * **What a particular buyer asked to see** (2026-10-27, the client: *"COA -
+ * optional field to be add : Customer may want specific details to be added
+ * like Purchase order"*). Every other cell in the header is derived or is one
+ * of the three somebody types; these answer a requirement nothing in this
+ * database holds, so they are typed per certificate.
+ *
+ * The **layout** is what these cases are mostly about: the header grid is
+ * three columns wide, so a row of one or two details has to span out — and a
+ * `colSpan` mismatch is what pdfmake throws on at *layout* time rather than
+ * definition time, which is why the group below also renders.
+ */
+describe('extra details on a certificate', () => {
+  const own = lot('EXTRA-1', '2026-05-02');
+  db.prepare("UPDATE batches SET coa_no = 'COA/25-26/300', coa_date = '2026-05-03' WHERE id = ?").run(own);
+  const setExtra = (json: string) =>
+    db.prepare('UPDATE batches SET coa_extra = ? WHERE id = ?').run(json, own);
+
+  /** Every row of the header grid, as its cells' `colSpan`s. */
+  function headerSpans(id: number): number[][] {
+    const def = buildCoaPdf(id) as unknown as { content: Node[] };
+    const grid = (def.content as Node[]).find((c) => c?.table && Array.isArray(c.table.body)
+      && String(c.table.widths?.[0]) === '*');
+    return (grid!.table.body as Node[][]).map((row) => row.map((c) => Number(c?.colSpan ?? 1)));
+  }
+
+  test('nothing at all is drawn where nothing was asked for', () => {
+    setExtra('');
+    const texts = textsOf(buildCoaPdf(own));
+    // The cells that are always there, so this is the absence of an addition
+    // rather than the absence of a header.
+    assert.ok(texts.includes('CERTIFICATE NO.  /  DATE'), 'the header itself is gone');
+    assert.ok(!texts.some((t) => /CUSTOMER'S PO/.test(t)), 'an extra cell is drawn on a certificate with none');
+    // Every row of the grid still has its three cells — a spanned cell is
+    // followed by an empty placeholder, which is what pdfmake throws on at
+    // layout time if the count is wrong.
+    for (const row of headerSpans(own)) {
+      assert.equal(row.length, 3, 'the grid stopped being three columns wide');
+    }
+  });
+
+  test('a label and its value print, after the derived header', () => {
+    setExtra(JSON.stringify([{ label: "Customer's PO", value: '4500123456' }]));
+    const texts = textsOf(buildCoaPdf(own));
+    assert.ok(texts.includes("CUSTOMER'S PO"), 'the label did not print');
+    assert.ok(texts.includes('4500123456'), 'the value did not print');
+    // Last, so the certificate's own shape is what it has always been: the
+    // addition comes after the cell that closes the derived header.
+    assert.ok(texts.indexOf("CUSTOMER'S PO") > texts.indexOf('CUSTOMER'),
+      'an addition is being drawn above the details the document works out for itself');
+  });
+
+  /**
+   * One detail spans all three columns and two share the row, rather than the
+   * row ending in empty boxes — a dead cell on a document reads as a fault,
+   * the notify parties' own rule.
+   */
+  test('a part row spans out rather than ending in blank boxes', () => {
+    setExtra(JSON.stringify([{ label: 'Shelf life', value: '24 months' }]));
+    assert.deepEqual(headerSpans(own).slice(-1), [[3, 1, 1]], 'one detail did not span the row');
+
+    setExtra(JSON.stringify([
+      { label: 'Shelf life', value: '24 months' },
+      { label: 'Material code', value: 'M80064' },
+    ]));
+    assert.deepEqual(headerSpans(own).slice(-1), [[1, 2, 1]], 'two details did not span the row');
+
+    setExtra(JSON.stringify([
+      { label: 'A', value: '1' }, { label: 'B', value: '2' }, { label: 'C', value: '3' },
+    ]));
+    assert.deepEqual(headerSpans(own).slice(-1), [[1, 1, 1]], 'three details are not a plain row');
+  });
+
+  test('six fill two rows and every row is still three columns wide', () => {
+    setExtra(JSON.stringify([1, 2, 3, 4, 5, 6].map((n) => ({ label: `L${n}`, value: `V${n}` }))));
+    const spans = headerSpans(own);
+    assert.deepEqual(spans.slice(-2), [[1, 1, 1], [1, 1, 1]], 'six details are not two full rows');
+    for (const row of spans) assert.equal(row.length, 3, 'the grid stopped being three columns wide');
+  });
+
+  /**
+   * A row hand-written, restored from a backup or left by an older client is
+   * **data, not vocabulary** — so anything unusable is passed over rather than
+   * throwing. A certificate one detail short is survivable; a PDF route
+   * answering 500 is not.
+   */
+  test('a stored value that makes no sense is passed over, not thrown on', () => {
+    for (const junk of ['not json', '{"label":"x"}', '[]', '[null]', '[{"label":"","value":"v"}]']) {
+      setExtra(junk);
+      const texts = textsOf(buildCoaPdf(own));
+      assert.ok(texts.includes('CERTIFICATE NO.  /  DATE'), `${junk} broke the header`);
+      for (const row of headerSpans(own)) assert.equal(row.length, 3, `${junk} broke the grid`);
+    }
+    setExtra('');
+  });
+
+  /** The whole certificate is one document whichever lot it is printed from. */
+  test('and a group prints the same details from either end of it', () => {
+    db.prepare("UPDATE batches SET coa_extra = ? WHERE coa_no = 'COA/25-26/001'")
+      .run(JSON.stringify([{ label: "Customer's PO", value: 'PO-77/2026' }]));
+    assert.deepEqual(textsOf(buildCoaPdf(lots[0])), textsOf(buildCoaPdf(lots[2])));
+    assert.ok(textsOf(buildCoaPdf(lots[0])).includes('PO-77/2026'), 'the group lost its details');
+    db.prepare("UPDATE batches SET coa_extra = '' WHERE coa_no = 'COA/25-26/001'").run();
+  });
+});

@@ -8,6 +8,7 @@ import {
   DownloadButton, SegmentedTabs, FIELD_GRID, TH_CLASS,
 } from '../components/ui';
 import { useCan } from '../App';
+import { CoaExtraFields } from '../components/CoaExtraFields';
 import type { ReadyLine } from '../types';
 import { fmtQty } from '../lib/format';
 import { fmtDate } from '../lib/format';
@@ -55,7 +56,12 @@ const verdictPill = (row: QcCheckRow) => {
  */
 function EditCoa({ row, onClose }: { row: CoaRow; onClose: () => void }) {
   const [form, setForm] = useState({
-    date: row.coa_date, approved_by: row.approved_by, buyer_order: row.buyer_order,
+    date: row.coa_date,
+    approved_by: row.approved_by,
+    buyer_order: row.buyer_order,
+    // Opened on what is actually on the certificate: the whole list is sent on
+    // save, so a dialog that did not know about these would blank them.
+    extra: row.extra ?? [],
   });
   const queryClient = useQueryClient();
   const save = useMutation({
@@ -96,6 +102,9 @@ function EditCoa({ row, onClose }: { row: CoaRow; onClose: () => void }) {
             placeholder="PI or PO number"
           />
         </Field>
+      </div>
+      <div className="mt-3 border-t border-slate-100 pt-3">
+        <CoaExtraFields rows={form.extra} onChange={(extra) => setForm({ ...form, extra })} />
       </div>
       <p className="mt-3 text-xs text-slate-400">
         {row.draft

@@ -4,6 +4,7 @@ import { nextNumber } from '../services/numbering.js';
 import {
   batchesFor, batchById, coaBlockError, coaGroupError, coaEditError, coaReissueError, checkEditError,
   lotsUnderCoa, renameError, dispositionError, isDisposition, DISPOSITIONS,
+  coaExtraError, cleanCoaExtra, parseCoaExtra,
 } from '../services/batch.js';
 import { coaWhere } from '../services/coaRegister.js';
 import { progressFor, progressForMany, LIVE_OK } from '../services/production.js';
@@ -374,7 +375,11 @@ workOrdersRouter.get('/coa', requirePermission('qc'), (req: AuthedRequest, res) 
     // which page would otherwise be undefined — `pagination.ts`'s own rule.
     order: 'ORDER BY coa_date DESC, coa_no DESC',
     params,
-  });
+  // The extra details, parsed at the boundary like `bank_accounts` — the row
+  // carries them so the correction dialog opens on what is actually on the
+  // certificate rather than blanking it. Not in the **download**: a label
+  // somebody typed per certificate cannot be a spreadsheet column.
+  }, (rows) => rows.map((r) => ({ ...r, extra: parseCoaExtra(r.extra_json) })));
   // Measured over the whole filtered set, never the page.
   const summary = db.prepare(
     `WITH f AS (${sql})
@@ -961,8 +966,13 @@ function issueCoa(req: AuthedRequest, res: Response, ids: number[]) {
   // Blank is the ordinary case and the document falls back for it — see the
   // header note in `buildCoaPdf`.
   const buyerOrder = String(req.body?.buyer_order ?? '').trim();
+  // Whatever this buyer asked to see on the page. Nothing to leave alone on a
+  // certificate being issued, so a missing key is blank.
+  const extra = coaExtraJson(req.body, res);
+  if (!extra) return;
 
-  writeCoa(ids, date, req.user!.id, approvedBy, companyId, buyerOrder);
+  writeCoa(ids, date, req.user!.id, companyId,
+    { approvedBy, buyerOrder, extra: extra.json ?? '' });
   res.status(201).json(ids.map((id) => batchById(id)));
 }
 
@@ -1019,7 +1029,31 @@ function coaGroup(req: AuthedRequest, res: Response): { lots: ReturnType<typeof 
  * Returns null having already answered 400, the shape every parse in this
  * router uses.
  */
-type CoaFields = { date: string | null; approvedBy: string | null; buyerOrder: string | null };
+/**
+ * The extra details a buyer asked for, off a body: the JSON to store, or null
+ * having already answered 400.
+ *
+ * `json: null` means the body said **nothing** about them, which under the
+ * `batch_ids` contract leaves what is stored alone; `[]` means *clear them*,
+ * which is a real answer and is how a detail is taken off a certificate. The
+ * two issue paths read a missing key as blank, there being nothing yet to
+ * leave alone. The rule itself is `batch.ts`'s, asked here rather than
+ * restated.
+ */
+function coaExtraJson(raw: unknown, res: Response): { json: string | null } | null {
+  const body = (raw ?? {}) as Record<string, unknown>;
+  if (body.extra === undefined) return { json: null };
+  const refused = coaExtraError(body.extra);
+  if (refused) {
+    res.status(400).json({ error: refused });
+    return null;
+  }
+  return { json: cleanCoaExtra(body.extra) };
+}
+
+type CoaFields = {
+  date: string | null; approvedBy: string | null; buyerOrder: string | null; extra: string | null;
+};
 
 function coaFields(raw: unknown, res: Response): CoaFields | null {
   const body = (raw ?? {}) as Record<string, unknown>;
@@ -1028,12 +1062,15 @@ function coaFields(raw: unknown, res: Response): CoaFields | null {
     res.status(400).json({ error: 'The certificate date must be a date' });
     return null;
   }
+  const extra = coaExtraJson(raw, res);
+  if (!extra) return null;
   return {
     date,
     approvedBy: body.approved_by === undefined ? null : String(body.approved_by).trim(),
     // Blanked deliberately is a real answer here: it puts the document back on
     // its own fallback, which is the proforma behind the order.
     buyerOrder: body.buyer_order === undefined ? null : String(body.buyer_order).trim(),
+    extra: extra.json,
   };
 }
 
@@ -1044,6 +1081,9 @@ function applyCoaFields(batchId: number, f: CoaFields): void {
   }
   if (f.buyerOrder !== null) {
     db.prepare('UPDATE batches SET coa_buyer_order = ? WHERE id = ?').run(f.buyerOrder, batchId);
+  }
+  if (f.extra !== null) {
+    db.prepare('UPDATE batches SET coa_extra = ? WHERE id = ?').run(f.extra, batchId);
   }
 }
 
@@ -1167,17 +1207,27 @@ workOrdersRouter.delete('/batches/:batchId/coa', requirePermission('qc', 'full')
   res.json({ ok: true, discarded: found.lots.map((l) => l.number) });
 });
 
+/**
+ * The three header facts somebody types, as one argument rather than three
+ * more positional ones — which is also what made the compiler name every
+ * caller when the extra details were added rather than leaving a fourth to be
+ * found later.
+ */
+type CoaHead = { approvedBy: string; buyerOrder: string; extra: string };
+
 function writeCoa(
-  ids: number[], date: string, userId: number, approvedBy: string, companyId: number, buyerOrder = ''
+  ids: number[], date: string, userId: number, companyId: number, head: CoaHead
 ): string {
   let number = '';
   transaction(() => {
     number = nextNumber('coa', { companyId, date });
     const set = db.prepare(
       `UPDATE batches SET coa_no = ?, coa_date = ?, coa_issued_by = ?, coa_approved_by = ?,
-                          coa_buyer_order = ? WHERE id = ?`
+                          coa_buyer_order = ?, coa_extra = ? WHERE id = ?`
     );
-    for (const id of ids) set.run(number, date, userId, approvedBy, buyerOrder, id);
+    for (const id of ids) {
+      set.run(number, date, userId, head.approvedBy, head.buyerOrder, head.extra, id);
+    }
   });
   return number;
 }
@@ -1519,6 +1569,13 @@ workOrdersRouter.post('/:id/certify', requirePermission('qc', 'full'), (req: Aut
   const refused = checkError(wo, body);
   if (refused) return res.status(400).json({ error: refused });
 
+  // Read **before** the transaction below, which opens the lot and records the
+  // inspection: a detail refused afterwards would leave both written with no
+  // certificate over them.
+  const extra = coaExtraJson(body, res);
+  if (!extra) return;
+  const extraJson = extra.json ?? '';
+
   const order = db.prepare('SELECT company_id, customer_id FROM orders WHERE id = ?')
     .get(Number(wo.order_id)) as { company_id: number; customer_id: number };
   const companyId = resolveCompanyId(order.company_id, order.customer_id);
@@ -1549,8 +1606,11 @@ workOrdersRouter.post('/:id/certify', requirePermission('qc', 'full'), (req: Aut
   }
 
   const date = String(body.coa_date ?? '').trim() || String(body.date);
-  writeCoa([batchId], date, req.user!.id, String(body.approved_by ?? '').trim(), companyId,
-    String(body.buyer_order ?? '').trim());
+  writeCoa([batchId], date, req.user!.id, companyId, {
+    approvedBy: String(body.approved_by ?? '').trim(),
+    buyerOrder: String(body.buyer_order ?? '').trim(),
+    extra: extraJson,
+  });
   res.status(201).json({ batch: batchById(batchId), certified: true });
 });
 

@@ -5,6 +5,7 @@ import { db } from '../src/db/connection.js';
 import {
   batchesFor, batchById, checkEditError, coaBlockError, coaEditError, coaReissueError,
   despatchBatchError, lotsUnderCoa, renameError,
+  cleanCoaExtra, coaExtraError, parseCoaExtra, MAX_COA_EXTRA,
 } from '../src/services/batch.js';
 import { certifiedSql } from '../src/services/qc.js';
 import { makeCustomer, makeInvoice } from './helpers/factory.js';
@@ -536,5 +537,81 @@ describe("a lot's readings are corrected while the certificate has gone nowhere"
       despatchBatchError(orderId, [b]), null,
       'a failing re-inspection stopped the lorry, so the edit guard could be dropped',
     );
+  });
+});
+
+/**
+ * **The extra details a particular buyer asks for** (2026-10-27, the client:
+ * *"COA - optional field to be add : Customer may want specific details to be
+ * added like Purchase order"*).
+ *
+ * Mostly about the split between **refusing** and **dropping**, which is
+ * `despatchBatchError`'s own rule read for a different shape: a row with
+ * nothing in it is the empty pair the form carries the moment somebody presses
+ * *add*, so dropping it loses nothing anybody meant — where dropping a label
+ * whose value was forgotten would print a certificate missing the very detail
+ * it was being added for, with nothing afterwards to say so.
+ */
+describe('the extra details on a certificate', () => {
+  test('a pair is kept, and the stored form reads back as it went in', () => {
+    const sent = [{ label: "Customer's PO", value: '4500123456' }];
+    assert.equal(coaExtraError(sent), null);
+    const stored = cleanCoaExtra(sent);
+    assert.deepEqual(parseCoaExtra(stored), sent);
+  });
+
+  test('an empty row is dropped rather than refused', () => {
+    const sent = [{ label: 'Shelf life', value: '24 months' }, { label: '', value: '' }];
+    assert.equal(coaExtraError(sent), null, 'the form\'s own empty row was refused');
+    assert.deepEqual(parseCoaExtra(cleanCoaExtra(sent)), [{ label: 'Shelf life', value: '24 months' }]);
+  });
+
+  test('...but a half-filled one is refused, not quietly lost', () => {
+    assert.match(String(coaExtraError([{ label: 'Shelf life', value: '' }])), /no value/);
+    assert.match(String(coaExtraError([{ label: '', value: '24 months' }])), /no label/);
+  });
+
+  test('a repeated label is refused — two cells, one name, no answer', () => {
+    assert.match(
+      String(coaExtraError([{ label: 'PO', value: 'A' }, { label: 'po', value: 'B' }])),
+      /named twice/,
+      'the same label twice was accepted',
+    );
+  });
+
+  test('more than the header has room for is refused by the count', () => {
+    const many = Array.from({ length: MAX_COA_EXTRA + 1 }, (_, i) => ({ label: `L${i}`, value: `V${i}` }));
+    assert.match(String(coaExtraError(many)), new RegExp(`at most ${MAX_COA_EXTRA}`));
+    assert.equal(coaExtraError(many.slice(0, MAX_COA_EXTRA)), null, 'the cap itself was refused');
+  });
+
+  test('and so is anything that is not a list of details', () => {
+    assert.match(String(coaExtraError('Customer PO: 4500123456')), /must be a list/);
+    assert.match(String(coaExtraError({ label: 'PO', value: 'A' })), /must be a list/);
+    assert.ok(coaExtraError([{ label: 'x'.repeat(61), value: 'v' }]), 'a label too long to print was accepted');
+    assert.ok(coaExtraError([{ label: 'L', value: 'v'.repeat(201) }]), 'a value too long to print was accepted');
+  });
+
+  /**
+   * What is **stored** is data rather than vocabulary — a row hand-written, a
+   * backup restored, an older client — so reading it back never throws. A
+   * certificate one detail short is survivable; a PDF route answering 500 is
+   * not. The rule the permission loader states about a level it does not know.
+   */
+  test('a stored value that makes no sense reads back as nothing', () => {
+    for (const junk of ['', 'not json', '{"label":"x"}', '[]', '[null]', '["PO"]', '[{"value":"v"}]']) {
+      assert.deepEqual(parseCoaExtra(junk), [], `${junk} came back as a detail`);
+    }
+  });
+
+  test('nothing to say is stored as nothing, not as an empty list', () => {
+    assert.equal(cleanCoaExtra([]), '', 'a blank column would read as JSON');
+    assert.equal(cleanCoaExtra([{ label: '', value: '' }]), '');
+  });
+
+  /** Asked by a reader that does not know which of the two it is holding. */
+  test('the parse is idempotent, so a parsed row can be asked again', () => {
+    const rows = parseCoaExtra(cleanCoaExtra([{ label: 'PO', value: 'A' }]));
+    assert.deepEqual(parseCoaExtra(rows), rows);
   });
 });

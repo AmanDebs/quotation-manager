@@ -1301,6 +1301,10 @@ CREATE TABLE IF NOT EXISTS batches (
    * person reading the certificate.
    */
   coa_buyer_order TEXT NOT NULL DEFAULT '',
+  -- What this buyer asked to see on the page: a JSON list of {label, value},
+  -- parsed at the boundary like `bank_accounts`. Blank on every certificate
+  -- that asks for nothing extra, which is every one issued before 2026-10-27.
+  coa_extra TEXT NOT NULL DEFAULT '',
   -- The second signatory. Both of Aglo's certificates carry *Prepared by* and
   -- *Approved by*, and this is the one header fact that cannot be derived from
   -- anything else on file -- the first is the account that issued it, which

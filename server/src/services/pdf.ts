@@ -3666,6 +3666,33 @@ export function buildCoaPdf(batchId: number): TDocumentDefinitions {
     : '';
 
   /*
+   * **Whatever this buyer asked to see** (2026-10-27) — see `CoaExtra`. Every
+   * other cell above is derived or is one of the three somebody types; these
+   * are facts about the agreement rather than about the lot, so nothing here
+   * can derive them.
+   *
+   * They come **last**, after the derived header, so the certificate's own
+   * shape is what it has always been and the additions read as additions. Laid
+   * out three to a row like the grid above, the last row spanning out rather
+   * than ending in empty boxes — a dead cell on a document reads as a fault,
+   * the notify parties' own rule. Nothing at all is drawn where nothing was
+   * asked for, which is every certificate issued before this.
+   */
+  // Already parsed on the row — `batchById` reads the column at the boundary.
+  const extra = b.coa_extra;
+  const extraRows: Content[][] = [];
+  for (let i = 0; i < extra.length; i += 3) {
+    const row = extra.slice(i, i + 3);
+    if (row.length === 3) {
+      extraRows.push(row.map((x) => lv(x.label, x.value)));
+    } else if (row.length === 2) {
+      extraRows.push([lv(row[0].label, row[0].value), { ...lv(row[1].label, row[1].value), colSpan: 2 }, {}]);
+    } else {
+      extraRows.push([{ ...lv(row[0].label, row[0].value), colSpan: 3 }, {}, {}]);
+    }
+  }
+
+  /*
    * **Four cells came off this header** (2026-10-22, the client, reading a
    * certificate against their own: the batch *date*, the **work order**, the
    * **quantity certified** and **inspected on** are *"not required"*). Each
@@ -3713,6 +3740,7 @@ export function buildCoaPdf(batchId: number): TDocumentDefinitions {
             shipped.boxes ? `${fmtNum(shipped.boxes, 0)} boxes` : '',
           ].filter(Boolean).join('  ·  ') || '—'),
         ]] : []),
+        ...extraRows,
       ],
     },
     layout: boxedLayout,

@@ -488,6 +488,7 @@ addColumnIfMissing('product_qc_params', 'section', "TEXT NOT NULL DEFAULT ''");
 addColumnIfMissing('qc_results', 'section', "TEXT NOT NULL DEFAULT ''");
 // Conforms with no figure, and the words somebody wrote — see `schema.sql`.
 addColumnIfMissing('batches', 'coa_buyer_order', "TEXT NOT NULL DEFAULT ''");
+addColumnIfMissing('batches', 'coa_extra', "TEXT NOT NULL DEFAULT ''");
 /*
  * Issued, or only drafted (2026-10-24) — see `schema.sql` for the whole of it.
  *
