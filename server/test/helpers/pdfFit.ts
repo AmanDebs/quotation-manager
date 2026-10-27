@@ -20,8 +20,16 @@
  */
 import assert from 'node:assert/strict';
 
-/** A4 less `baseDoc`'s 40pt margins. */
-export const CONTENT_WIDTH = 595.28 - 40 - 40;
+/*
+ * The page width and the Description floor come from the builder itself since
+ * 2026-10-27, when `fitWidths` started reading them to decide whether to take
+ * headroom back from the fixed columns: a copy here would be a second opinion
+ * about the same page. The padding and rule arithmetic below stays local, so
+ * what this asserts is still measured independently of what produced it.
+ */
+import { CONTENT_WIDTH, MIN_DESCRIPTION } from '../../src/services/pdf.js';
+
+export { CONTENT_WIDTH, MIN_DESCRIPTION };
 
 /**
  * What one column costs besides its declared width: `gridLayout` leaves
@@ -31,13 +39,6 @@ export const CONTENT_WIDTH = 595.28 - 40 - 40;
  */
 const PADDING_PER_COLUMN = 8;
 const RULE_WIDTH = 0.5;
-
-/**
- * The longest word these catalogues actually produce in a Description —
- * *preform-700gm*, measured at 55.6pt. 60 keeps headroom without pretending to
- * a precision a test cannot measure.
- */
-export const MIN_DESCRIPTION = 60;
 
 /** The items table is the one table on the page with a header row. */
 export function itemsTable(def: unknown): { widths: (number | string)[] } {

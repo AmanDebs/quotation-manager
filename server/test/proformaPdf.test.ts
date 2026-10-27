@@ -5,6 +5,7 @@ import { buildProformaPdf } from '../src/services/pdf.js';
 import { proformaAdvance } from '../src/services/receivables.js';
 import { db } from '../src/db/connection.js';
 import { makeCustomer, makeProforma, makePayment } from './helpers/factory.js';
+import { assertFits, descriptionShare, itemsTable } from './helpers/pdfFit.js';
 
 /**
  * The buyer pays the advance against the proforma, so a proforma that states a
@@ -174,5 +175,60 @@ describe('the delivery basis on the total band', () => {
   test('and CIF still takes it, that being the port CIF names', () => {
     const texts = withPorts('CIF', 'Nhava Sheva Port', 'Nacala, Mozambique');
     assert.equal(texts.find((t) => t.startsWith('TOTAL PRICE')), 'TOTAL PRICE INR CIF NACALA');
+  });
+});
+
+/**
+ * What the extra columns cost, and who pays for it (2026-10-27, the client
+ * with the export proforma below in front of them: *"In cases where there are
+ * a lot of extra columns in proforma table, we should not decrease description
+ * width, instead decrease width of other columns like Total Qty, USD/1000 Pcs
+ * etc."*).
+ *
+ * Measured on that document before anything changed, Description was left
+ * **31.78pt** against the 60 it needs — the two custom columns cost 127pt
+ * between them and the `'*'` column paid the whole bill, so *Preform - 36/29
+ * Snap On/CTC Neck Weight : ( 50.5 ± 1 ) gm* wrapped onto eight lines. These
+ * assert the share rather than the individual widths: how the headroom is
+ * shared out is `fitWidths`'s business, that Description gets its floor is the
+ * client's rule.
+ */
+describe('a proforma carrying extra columns', () => {
+  /** The client's own document: an export proforma with two custom columns. */
+  const withCustom = (...custom: string[]): number => {
+    const pi = proformaWith(267194.84, 0);
+    db.prepare(
+      `UPDATE proforma_invoices
+          SET is_export = 1, tax_type = 'none', inco_terms = 'CIF', port_of_discharge = 'Nacala Port',
+              column_config = ?
+        WHERE id = ?`
+    ).run(JSON.stringify({ custom }), pi);
+    db.prepare(
+      "UPDATE pi_items SET tax_pct = 0, color = 'Natural', pcs_per_pack = 530, custom1 = ?, custom2 = ? WHERE pi_id = ?"
+    ).run('98495.20', '2.22', pi);
+    return pi;
+  };
+
+  test('the extras are paid for by the columns beside them, not by Description', () => {
+    assertFits(buildProformaPdf(withCustom('Quantity in KGS', 'USD per KG')), "the client's own proforma");
+  });
+
+  test('a document with room to spare is not touched at all', () => {
+    // The ordinary proforma already leaves Description 158.8pt, so every
+    // column keeps the width it was declared at and the page prints exactly
+    // as it did. This is what makes the squeeze safe to leave switched on.
+    const pi = proformaWith(91420, 0);
+    db.prepare("UPDATE pi_items SET color = 'Natural', pcs_per_pack = 530 WHERE pi_id = ?").run(pi);
+    const widths = itemsTable(buildProformaPdf(pi)).widths;
+    assert.deepEqual(widths, [20, '*', 38, 30, 40, 52, 50, 28, 58]);
+  });
+
+  test('and three extras still leave it wider than one squeezed off the page', () => {
+    // Three custom columns are 190pt of a 515pt page and do not fit whatever
+    // these floors are set to — the Columns picker is the answer, as it is for
+    // the order's eleven. What this asserts is that it is no longer *worse*
+    // than having nothing to give: Description keeps more than it would have.
+    const def = buildProformaPdf(withCustom('Quantity in KGS', 'USD per KG', 'Pallets'));
+    assert.ok(descriptionShare(def) > 40, `three extras leave ${descriptionShare(def).toFixed(2)}pt`);
   });
 });

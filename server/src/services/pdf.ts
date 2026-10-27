@@ -682,6 +682,18 @@ export interface ColumnSpec {
   key: string;
   label: string;
   width: number | '*';
+  /**
+   * The narrowest this column can be drawn at and still say what it says —
+   * its longest unbreakable header word or widest realistic value, measured,
+   * plus a point or two. Omitted means *this column never shrinks*.
+   *
+   * `width` is what the column would like; `min` is what it can live with, and
+   * the difference is headroom `fitWidths` may take back when the flexible
+   * Description column would otherwise be squeezed off the page. A column with
+   * no `min` keeps its width whatever happens, which is why an image column
+   * declares none.
+   */
+  min?: number;
   align?: 'left' | 'right' | 'center';
   /** Cell text for an item; return '' to count as empty for auto-hide. */
   value: (it: Row, index: number) => string;
@@ -757,6 +769,75 @@ const ORDER_FORCED = ['amount', 'color'];
  */
 const PURCHASE_FORCED = ['qty', 'amount'];
 
+/** A4 less `baseDoc`'s 40pt margins — every items table is drawn into this. */
+export const CONTENT_WIDTH = 595.28 - 40 - 40;
+
+/**
+ * The narrowest a Description column may be drawn at.
+ *
+ * pdfmake will not break a word, so a column narrower than its own longest
+ * unbreakable run makes the **whole table** grow past the right margin rather
+ * than wrap. *preform-700gm*, the longest word these catalogues produce,
+ * measures 55.6pt; 60 keeps headroom without pretending to a precision this
+ * can measure.
+ */
+export const MIN_DESCRIPTION = 60;
+
+/**
+ * Give the flexible column its floor by taking back the headroom the fixed
+ * columns declared — never the other way about.
+ *
+ * 2026-10-27, the client with an export proforma carrying two custom columns
+ * (*Quantity in KGS*, *USD per KG*) and a description wrapping onto eight
+ * lines: *"In cases where there are a lot of extra columns in proforma table,
+ * we should not decrease description width, instead decrease width of other
+ * columns like Total Qty, USD/1000 Pcs etc."* Measured on that document,
+ * Description was left **31.78pt** — half what it needs — because every other
+ * column held the width it was declared at and the `'*'` column absorbed the
+ * whole cost of the two extras.
+ *
+ * The rule is the client's, stated once: **Description is the column that
+ * never gives.** Each fixed column declares a `min` it was measured at, the
+ * gap between `width` and `min` is its headroom, and when Description falls
+ * short that headroom is taken **in proportion to how much each column has**,
+ * so no column is squeezed to its floor while another beside it keeps all of
+ * its own. Nothing is taken beyond the shortfall, and nothing is taken from a
+ * column that declares no floor.
+ *
+ * **A document that fits today prints exactly as it did**, which is what makes
+ * this safe to turn on for every builder at once: the squeeze fires only where
+ * the table would otherwise hang off the page. Where even every floor is not
+ * enough — eleven columns on an order, three custom columns on a proforma —
+ * Description still ends up wider than it was, and the Columns picker is still
+ * the answer.
+ *
+ * The padding and rule widths are read from the table's own `layout` rather
+ * than assumed: the purchase order pads 3pt a side where everything else pads
+ * pdfmake's default 4, and a figure copied here would quietly stop matching it.
+ */
+function fitWidths(columns: ColumnSpec[], layout: TableLayout): (number | '*')[] {
+  const widths = columns.map((c) => c.width);
+  if (widths.filter((w) => w === '*').length !== 1) return widths;
+
+  const pad = (k: 'paddingLeft' | 'paddingRight') => Number((layout as any)[k]?.(0, null) ?? 4);
+  const rule = Number((layout as any).vLineWidth?.(0, null) ?? 1);
+  const fixed = widths.reduce<number>((t, w) => t + (typeof w === 'number' ? w : 0), 0);
+  const share = CONTENT_WIDTH
+    - fixed
+    - columns.length * (pad('paddingLeft') + pad('paddingRight'))
+    - (columns.length + 1) * rule;
+
+  const short = MIN_DESCRIPTION - share;
+  if (short <= 0) return widths;
+
+  const slack = columns.map((c) => (typeof c.width === 'number' && c.min != null ? Math.max(0, c.width - c.min) : 0));
+  const total = slack.reduce((a, b) => a + b, 0);
+  if (total <= 0) return widths;
+
+  const take = Math.min(short, total);
+  return widths.map((w, i) => (slack[i] > 0 ? (w as number) - (take * slack[i]) / total : w));
+}
+
 /**
  * Builds the line-items table honouring the document's column_config:
  * explicitly hidden columns are dropped, columns with no data anywhere are
@@ -794,6 +875,12 @@ function itemsTable(s: Row, items: Row[], specs: ColumnSpec[], cfg: ColumnConfig
       key,
       label: name,
       width: 55,
+      // Both the heading and the values are somebody's own text, so there is
+      // nothing to measure a floor against — 40 holds an eight-figure number
+      // (*98495.20* is 33.6pt) and all but the longest single heading word,
+      // which wraps anyway. An extra column asked for after the document was
+      // designed gives up headroom like the ones it was added beside.
+      min: 40,
       align: 'center',
       value: (it) => String(it[key] ?? ''),
       always: true,
@@ -923,7 +1010,7 @@ function itemsTable(s: Row, items: Row[], specs: ColumnSpec[], cfg: ColumnConfig
   ];
 
   return {
-    table: { headerRows: headers.length, widths: columns.map((c) => c.width), body },
+    table: { headerRows: headers.length, widths: fitWidths(columns, layout), body },
     layout,
   } as Content;
 }
@@ -1138,7 +1225,13 @@ export function buildQuotationPdf(id: number): TDocumentDefinitions {
    * no images), and the Columns picker is the answer if somebody turns both on.
    */
   const specs: ColumnSpec[] = [
-    { key: 'sl', label: 'SL', width: 16, align: 'center', always: true, value: (_it, i) => String(i + 1) },
+    // These widths were measured on 2026-09-29 and already sit close to what
+    // each column holds, so the floors below buy a few points apiece rather
+    // than the proforma's dozen — Color (*Transparent* 42.7 against 44) and
+    // Pcs/Box (*10,00,000* 34.6 against 36) have none to give at all, and
+    // Photo declares none because a 40pt image cannot be made to fit a
+    // narrower box.
+    { key: 'sl', label: 'SL', width: 16, min: 12, align: 'center', always: true, value: (_it, i) => String(i + 1) },
     { key: 'description', label: 'Product Description', width: '*', always: true, value: (it) => String(it.description) },
     // Photos are a selling aid, so they appear on the quotation and nowhere
     // else. The column drops out entirely when no line carries one.
@@ -1150,27 +1243,27 @@ export function buildQuotationPdf(id: number): TDocumentDefinitions {
     // No HSN: a quotation is not a tax document. The value is still stored and
     // still carries forward to the proforma and invoice, which do print it.
     { key: 'pcs_per_pack', label: 'Pcs/Box', width: 36, align: 'right', value: (it) => (it.pcs_per_pack != null ? fmtNum(it.pcs_per_pack, 0) : '') },
-    { key: 'packs', label: 'Boxes', width: 32, align: 'right', value: (it) => (it.packs != null ? fmtNum(it.packs, 0) : '') },
+    { key: 'packs', label: 'Boxes', width: 32, min: 26, align: 'right', value: (it) => (it.packs != null ? fmtNum(it.packs, 0) : '') },
     // Loadability, the way the real Aglo quotations state it. Export only: a
     // domestic GST buyer is not shipping in containers. Both still auto-hide
     // when no line has the figures.
     ...(q.is_export
       ? [
-        { key: 'qty_20ft', label: 'Boxes/20ft', width: 40, align: 'right' as const, value: (it: Row) => (it.qty_20ft != null ? fmtNum(it.qty_20ft, 0) : '') },
-        { key: 'qty_40ft', label: 'Boxes/40ft HC', width: 44, align: 'right' as const, value: (it: Row) => (it.qty_40ft != null ? fmtNum(it.qty_40ft, 0) : '') },
+        { key: 'qty_20ft', label: 'Boxes/20ft', width: 40, min: 39, align: 'right' as const, value: (it: Row) => (it.qty_20ft != null ? fmtNum(it.qty_20ft, 0) : '') },
+        { key: 'qty_40ft', label: 'Boxes/40ft HC', width: 44, min: 39, align: 'right' as const, value: (it: Row) => (it.qty_40ft != null ? fmtNum(it.qty_40ft, 0) : '') },
       ]
       : []),
-    { key: 'total_pcs', label: 'Total Qty', width: 46, align: 'right', value: (it) => (it.total_pcs != null ? fmtNum(it.total_pcs, 0) : '') },
+    { key: 'total_pcs', label: 'Total Qty', width: 46, min: 42, align: 'right', value: (it) => (it.total_pcs != null ? fmtNum(it.total_pcs, 0) : '') },
     // No Qty column: Total Qty already says how much is being quoted, and the
     // billing quantity restates it in whatever the rate basis is ("12 per
     // 1000"). It is still entered in the editor — qty x unit_price is the
     // amount — it just does not print.
     { key: 'color', label: 'Color', width: 44, align: 'center', value: (it) => String(it.color || '') },
-    { key: 'unit_price', label: 'Unit Price', width: 40, align: 'right', always: true, value: (it) => fmtRate(it.unit_price) },
+    { key: 'unit_price', label: 'Unit Price', width: 40, min: 37, align: 'right', always: true, value: (it) => fmtRate(it.unit_price) },
     // A charge is priced outright, so it has no basis to state.
-    { key: 'uom', label: 'UOM', width: 38, align: 'center', always: true, value: (it) => (it.is_charge ? '' : uomLabel(cur, it.unit)) },
-    ...(showTax ? [{ key: 'tax', label: 'Tax %', width: 22, align: 'right' as const, value: (it: Row) => `${it.tax_pct ?? 0}%` }] : []),
-    { key: 'amount', label: `Total (${cur})`, width: 62, align: 'right', always: true, value: (it) => (it.qty != null ? fmtMoney(it.amount, cur) : 'price only') },
+    { key: 'uom', label: 'UOM', width: 38, min: 37, align: 'center', always: true, value: (it) => (it.is_charge ? '' : uomLabel(cur, it.unit)) },
+    ...(showTax ? [{ key: 'tax', label: 'Tax %', width: 22, min: 16, align: 'right' as const, value: (it: Row) => `${it.tax_pct ?? 0}%` }] : []),
+    { key: 'amount', label: `Total (${cur})`, width: 62, min: 58, align: 'right', always: true, value: (it) => (it.qty != null ? fmtMoney(it.amount, cur) : 'price only') },
   ];
 
   /*
@@ -1261,24 +1354,27 @@ export function buildOrderPdf(id: number): TDocumentDefinitions {
    */
 
   const specs: ColumnSpec[] = [
-    { key: 'sl', label: 'SL', width: 16, align: 'center', always: true, value: (_it, i) => String(i + 1) },
+    // Measured on 2026-09-29 like the quotation's, so again a few points
+    // apiece. Code (*PRF-28-SPEC* 47.4 against 48) and Colour (*Transparent*
+    // 42.7 against 44) are already at their floors and declare none.
+    { key: 'sl', label: 'SL', width: 16, min: 12, align: 'center', always: true, value: (_it, i) => String(i + 1) },
     { key: 'description', label: 'Description of Goods', width: '*', always: true, value: (it) => it.description },
     { key: 'code', label: 'Code', width: 48, align: 'center', value: (it) => it.code || '' },
-    { key: 'hsn', label: 'HSN', width: 38, align: 'center', value: (it) => it.hsn_code || '' },
+    { key: 'hsn', label: 'HSN', width: 38, min: 37, align: 'center', value: (it) => it.hsn_code || '' },
     { key: 'color', label: 'Colour', width: 44, align: 'center', value: (it) => it.color || '' },
     // A charge line is a fee, not something to make: no quantity, no rate.
-    { key: 'qty', label: 'Quantity', width: 44, align: 'right', value: (it) => (!it.is_charge && it.qty != null ? `${fmtNum(it.qty)} ${it.unit}` : '') },
-    { key: 'unit_price', label: `Rate ${cur}`, width: 40, align: 'right', value: (it) => (it.is_charge ? '' : fmtRate(it.unit_price)) },
-    { key: 'supplier', label: 'Supplier', width: 44, align: 'center', value: (it) => it.supplier || '' },
+    { key: 'qty', label: 'Quantity', width: 44, min: 42, align: 'right', value: (it) => (!it.is_charge && it.qty != null ? `${fmtNum(it.qty)} ${it.unit}` : '') },
+    { key: 'unit_price', label: `Rate ${cur}`, width: 40, min: 37, align: 'right', value: (it) => (it.is_charge ? '' : fmtRate(it.unit_price)) },
+    { key: 'supplier', label: 'Supplier', width: 44, min: 43, align: 'center', value: (it) => it.supplier || '' },
     // When this line in particular falls due, as against the order's own
     // Promised Delivery in the header. `itemsTable` drops a column with no
     // data anywhere, so an order that does not use per-line dates prints
     // exactly what it printed before. Despatched-on is deliberately not
     // here: this document is an instruction going out, not a record of
     // what came back, and the figure is derived rather than stored.
-    { key: 'scheduled_date', label: 'Promised', width: 44, align: 'center', value: (it) => fmtDate(it.scheduled_date) },
-    { key: 'tax', label: 'Tax %', width: 22, align: 'right', value: (it) => (showTax ? `${it.tax_pct ?? 0}%` : '') },
-    { key: 'amount', label: `Amount (${cur})`, width: 62, align: 'right', always: true, value: (it) => fmtMoney(it.amount, cur) },
+    { key: 'scheduled_date', label: 'Promised', width: 44, min: 42, align: 'center', value: (it) => fmtDate(it.scheduled_date) },
+    { key: 'tax', label: 'Tax %', width: 22, min: 16, align: 'right', value: (it) => (showTax ? `${it.tax_pct ?? 0}%` : '') },
+    { key: 'amount', label: `Amount (${cur})`, width: 62, min: 58, align: 'right', always: true, value: (it) => fmtMoney(it.amount, cur) },
   ];
 
   const detail = (rows: [string, string][]): Cell => ({
@@ -1523,7 +1619,15 @@ export function buildProformaPdf(id: number): TDocumentDefinitions {
   const rateLabel = rateLabelFor(items, cur);
 
   const specs: ColumnSpec[] = [
-    { key: 'sl', label: 'SL No.', width: 20, align: 'center', always: true, value: (_it, i) => String(i + 1) },
+    // The floors below were measured at the header's bold 7.5 and the cell's
+    // regular 8 (the widest realistic value, or the longest unbreakable word
+    // of the heading, whichever is larger): SL *No.* 11.7, CTN. *12,345* 24.5,
+    // PCS./CTN. *10,00,000* 34.6, TOTAL QTY *1,20,00,000* 41.7, the rate
+    // *1,234.567* 35.2, Tax *18%* 14.9. COLOR (*Transparent* 42.7) and TOTAL
+    // AMOUNT (the bold *1,23,45,678.00* at 57.2) are already at their floors
+    // and declare none, and IMAGE declares none because a 40pt image cannot
+    // be made to fit a narrower box.
+    { key: 'sl', label: 'SL No.', width: 20, min: 13, align: 'center', always: true, value: (_it, i) => String(i + 1) },
     // No per-line HSN: Aglo's proformas carry the HS code once, in the customs
     // block above (`hs_code`). The value is still stored and still reaches the
     // commercial invoice, which prints it.
@@ -1538,19 +1642,19 @@ export function buildProformaPdf(id: number): TDocumentDefinitions {
     { key: 'color', label: 'COLOR', width: 38, align: 'center', value: (it) => String(it.color || '') },
     // How it packs, banded under one QUANTITY heading as the real document does.
     {
-      key: 'packs', label: 'CTN.', width: 30, align: 'right', group: 'QUANTITY',
+      key: 'packs', label: 'CTN.', width: 30, min: 26, align: 'right', group: 'QUANTITY',
       value: (it) => (it.packs != null ? fmtNum(it.packs, 0) : ''),
       sum: (rows) => fmtNum(goodsOnly(rows).reduce((t, it) => t + (Number(it.packs) || 0), 0), 0),
     },
     // Pcs per carton is deliberately not summed: adding box sizes across
     // different products gives a number with no meaning.
-    { key: 'pcs_per_pack', label: 'PCS. / CTN.', width: 40, align: 'right', group: 'QUANTITY', value: (it) => (it.pcs_per_pack != null ? fmtNum(it.pcs_per_pack, 0) : '') },
+    { key: 'pcs_per_pack', label: 'PCS. / CTN.', width: 40, min: 36, align: 'right', group: 'QUANTITY', value: (it) => (it.pcs_per_pack != null ? fmtNum(it.pcs_per_pack, 0) : '') },
     // One quantity column, not two. Total Qty is what the form now captures —
     // pieces against a per-1000 rate, kilos against a per-kg one — but a
     // proforma raised before the Qty field went away has only `qty`, so fall
     // back to it (with its unit) rather than printing a blank quantity.
     {
-      key: 'total_pcs', label: 'TOTAL QTY', width: 52, align: 'right', always: true,
+      key: 'total_pcs', label: 'TOTAL QTY', width: 52, min: 43, align: 'right', always: true,
       // Pieces are whole; a weight is not, so half a kilo must not round away
       // here while the closing total keeps it. A charge has no quantity to
       // state — its billed 1 is an artefact of the arithmetic, not a count.
@@ -1563,8 +1667,8 @@ export function buildProformaPdf(id: number): TDocumentDefinitions {
       // existed still totals to something.
       sum: qtyTotal,
     },
-    { key: 'unit_price', label: rateLabel, width: 50, align: 'right', always: true, value: per1000Rate },
-    ...(showTax ? [{ key: 'tax', label: 'Tax %', width: 28, align: 'right' as const, value: (it: Row) => `${it.tax_pct ?? 0}%` }] : []),
+    { key: 'unit_price', label: rateLabel, width: 50, min: 37, align: 'right', always: true, value: per1000Rate },
+    ...(showTax ? [{ key: 'tax', label: 'Tax %', width: 28, min: 16, align: 'right' as const, value: (it: Row) => `${it.tax_pct ?? 0}%` }] : []),
     {
       key: 'amount', label: `TOTAL AMOUNT (${pi.inco_terms || cur})`, width: 58, align: 'right', always: true,
       value: (it) => fmtMoney(it.amount, cur),
@@ -1864,23 +1968,26 @@ export function buildInvoicePdf(id: number): TDocumentDefinitions {
   });
 
   const specs: ColumnSpec[] = [
-    { key: 'sl', label: 'SL', width: 16, align: 'center', always: true, value: (_it, i) => String(i + 1) },
+    // Floors measured as the proforma's are. This table was never tightened
+    // the way the quotation's and the order's were on 2026-09-29, so it has
+    // the most headroom of the four and gives it up first.
+    { key: 'sl', label: 'SL', width: 16, min: 12, align: 'center', always: true, value: (_it, i) => String(i + 1) },
     { key: 'description', label: 'Description of Goods', width: '*', always: true, value: (it) => String(it.description) },
     // The order is the client's (2026-09-20: "Descp >> Color >> HSN >> Boxes
     // >> Quantity >> Rate >> Amount"): what the goods are, then how they are
     // packed, then what they cost. A charge line (freight, insurance) states
     // its amount and nothing else — its billed quantity of 1 is arithmetic,
     // not a count of anything shipped.
-    { key: 'color', label: 'Color', width: 46, align: 'center', value: (it) => String(it.color || '') },
-    { key: 'hsn', label: 'HSN Code', width: 45, align: 'center', value: (it) => String(it.hsn_code || '') },
-    { key: 'packs', label: 'Boxes', width: 40, align: 'right', value: (it) => (it.packs != null ? fmtNum(it.packs, 0) : '') },
+    { key: 'color', label: 'Color', width: 46, min: 44, align: 'center', value: (it) => String(it.color || '') },
+    { key: 'hsn', label: 'HSN Code', width: 45, min: 37, align: 'center', value: (it) => String(it.hsn_code || '') },
+    { key: 'packs', label: 'Boxes', width: 40, min: 26, align: 'right', value: (it) => (it.packs != null ? fmtNum(it.packs, 0) : '') },
     // Pieces on a piece basis, in the proforma's words, and the proforma's own
     // per-1000 rate beside them (2026-09-17): the two documents describe one
     // shipment. A weight-billed line still states its kilos and its own price.
-    { key: 'qty', label: 'Quantity', width: 58, align: 'right', always: true, value: (it) => (it.is_charge ? '' : piecesOf(it) != null ? `${fmtNum(piecesOf(it), 0)} Pcs` : it.qty != null ? `${fmtNum(it.qty)} ${it.unit}` : '—') },
-    { key: 'unit_price', label: rateLabelFor(items, cur), width: 55, align: 'right', always: true, value: per1000Rate },
-    ...(showTax ? [{ key: 'tax', label: 'Tax %', width: 28, align: 'right' as const, value: (it: Row) => `${it.tax_pct ?? 0}%` }] : []),
-    { key: 'amount', label: `Amount ${cur}${inv.inco_terms ? ` (${String(inv.inco_terms).split(' ')[0]})` : ''}`, width: 62, align: 'right', always: true, value: (it) => fmtMoney(it.amount, cur) },
+    { key: 'qty', label: 'Quantity', width: 58, min: 42, align: 'right', always: true, value: (it) => (it.is_charge ? '' : piecesOf(it) != null ? `${fmtNum(piecesOf(it), 0)} Pcs` : it.qty != null ? `${fmtNum(it.qty)} ${it.unit}` : '—') },
+    { key: 'unit_price', label: rateLabelFor(items, cur), width: 55, min: 37, align: 'right', always: true, value: per1000Rate },
+    ...(showTax ? [{ key: 'tax', label: 'Tax %', width: 28, min: 16, align: 'right' as const, value: (it: Row) => `${it.tax_pct ?? 0}%` }] : []),
+    { key: 'amount', label: `Amount ${cur}${inv.inco_terms ? ` (${String(inv.inco_terms).split(' ')[0]})` : ''}`, width: 62, min: 58, align: 'right', always: true, value: (it) => fmtMoney(it.amount, cur) },
   ];
 
   const grandLabel = inv.inco_terms && inv.port_of_discharge
