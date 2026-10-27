@@ -40,7 +40,7 @@ export default function BatchDispositionModal({ batch, disposition, saving, erro
           </>
         ) : (
           <>
-            The lot goes back to the floor. Nothing about its figures changes; it is cleared the ordinary
+            The batch goes back to the floor. Nothing about its figures changes; it is cleared the ordinary
             way, by recording a final check against it that passes.
           </>
         )}

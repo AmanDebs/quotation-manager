@@ -502,7 +502,7 @@ export function qcBlockError(
     if (needsCoa) {
       return `${name} needs a Certificate of Analysis before it can be ${verb} — `
         + `${Number(owner?.is_export) ? 'this is an export order' : 'this order is marked COA required'}. `
-        + 'Open a lot on its work order, record a final check against it and issue the COA.';
+        + 'Press Certify on the Quality queue, or inspect the batch on the job and issue its COA.';
     }
     const passed = jobs
       .filter((j) => Number(j.order_line) === pos)

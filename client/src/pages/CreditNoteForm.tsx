@@ -310,7 +310,7 @@ export default function CreditNoteFormPage() {
           * whether or not it can be re-offered.
           */}
         {draft.kind === 'return' && lots.length > 0 && (
-          <Card title="Lots returned">
+          <Card title="Batches returned">
             <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
               {lots.map((b) => {
                 const on = draft.batch_ids.includes(b.id);
@@ -344,7 +344,7 @@ export default function CreditNoteFormPage() {
               })}
             </div>
             <p className="mt-2 text-xs text-slate-400">
-              Once this credit note is approved, a lot named here can be scrapped or reworked on its job.
+              Once this credit note is approved, a batch named here can be scrapped or reworked on its job.
             </p>
           </Card>
         )}

@@ -408,7 +408,9 @@ const coaColumns: Column<Record<string, unknown>>[] = [
   // ordinary certificate would be the one row somebody acts on wrongly.
   { header: 'Status', value: (r) => (Number(r.draft) ? 'Draft' : 'Issued') },
   { header: 'Batches', value: (r) => String(r.batch_numbers ?? '') },
-  { header: 'Lots', value: (r) => Number(r.lots ?? 0), type: 'number' },
+  // Named apart from the column above it: two headings reading *Batches* in
+  // one sheet, over a list and a count, is a filter nobody can read.
+  { header: 'No. of batches', value: (r) => Number(r.lots ?? 0), type: 'number' },
   { header: 'Product', value: (r) => String(r.products ?? '') },
   { header: 'Customer', value: (r) => String(r.customer_name ?? '') },
   // The screen shows the job (2026-10-24); the file keeps the sales order
@@ -1561,8 +1563,8 @@ workOrdersRouter.post('/:id/certify', requirePermission('qc', 'full'), (req: Aut
   ).get(id) as { n: number; last: string | null };
   if (!Number(loose.n)) {
     return res.status(409).json({
-      error: 'Nothing here to certify: every shift booked on this job is already in a lot. '
-        + 'Issue the certificate from the lot itself.',
+      error: 'Nothing here to certify: every shift booked on this job is already in a batch. '
+        + 'Issue the certificate from that batch, on the job\'s Certificates tab.',
     });
   }
 

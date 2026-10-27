@@ -122,7 +122,7 @@ export default function FinishedGoodsPage() {
             </table>
           )}
           <p className="mt-2 text-xs text-slate-400">
-            Made is live output from the shift log (a scrapped lot is not stock); Dispatched is every trip line, placed against
+            Made is live output from the shift log (a scrapped batch is not stock); Dispatched is every trip line, placed against
             the order line’s product; Returned is what an approved credit note brought back. A figure below zero means more left
             than the record says was made — usually stock made before this app — and an opening balance is the correction.
           </p>

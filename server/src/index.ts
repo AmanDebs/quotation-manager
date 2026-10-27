@@ -170,6 +170,28 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
       error: 'This record is still referenced by another document and cannot be deleted.',
     });
   }
+  /*
+   * A body this server could not parse is the **caller's** mistake, not a
+   * fault here — found 2026-10-27 walking the work-order process, where a
+   * malformed request read back as *Internal server error* and sent somebody
+   * looking at the wrong end of it. `express.json()` throws with a `status` of
+   * 400 and a `type` of `entity.parse.failed` already; this only stops the
+   * catch-all below from overwriting it. The same goes for a body over the
+   * 12mb limit, which is a real thing on this app — logos, signatures and
+   * spreadsheets all arrive base64 in the JSON — and which a client can act on
+   * only if it is told.
+   *
+   * The rule `routes/masters.ts` records about a CHECK constraint, read one
+   * layer up: an error the user can act on must not read as a fault.
+   */
+  const status = Number((err as { status?: unknown }).status);
+  if (status === 400 || status === 413) {
+    return res.status(status).json({
+      error: status === 413
+        ? 'That upload is too large. The limit is 12 MB, and base64 adds about a third.'
+        : 'That request could not be read — the body is not valid JSON.',
+    });
+  }
   res.status(500).json({ error: 'Internal server error' });
 });
 

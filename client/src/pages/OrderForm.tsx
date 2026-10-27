@@ -426,7 +426,7 @@ export default function OrderFormPage() {
                   <span>
                     Required for this order
                     <span className="ml-2 text-xs text-slate-400">
-                      goods will be held until a lot carries a COA
+                      goods will be held until a batch carries a COA
                     </span>
                   </span>
                 </label>

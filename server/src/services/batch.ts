@@ -864,7 +864,7 @@ export function dispositionError(id: number, disposition: Disposition): string |
     const where = b.trips.map((t) => t.reference || t.order_number).filter(Boolean).join(', ');
     const drafted = b.returns.length ? ' A return naming it is drafted but not yet approved.' : '';
     return `Batch ${b.number} has already been dispatched${where ? ` on ${where}` : ''}, `
-      + 'so it cannot be reworked or scrapped here. If the goods came back, name the lot on the '
+      + 'so it cannot be reworked or scrapped here. If the goods came back, name the batch on the '
       + `credit note for that return and approve it first.${drafted}`;
   }
   return null;
@@ -946,7 +946,7 @@ export function returnBatchError(invoiceId: number, kind: string, batchIds: unkn
   if (!raw.length) return null;
   if (kind !== 'return') {
     return 'An adjustment credits money and moves no goods, so it cannot name a batch as returned. '
-      + 'Record the credit as goods returned if a lot actually came back.';
+      + 'Record the credit as goods returned if a batch actually came back.';
   }
   if (raw.some((v) => !Number.isInteger(Number(v)) || Number(v) <= 0)) {
     return 'One of the batches named is not on file — it may have been deleted since.';
