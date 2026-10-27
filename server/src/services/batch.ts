@@ -529,7 +529,7 @@ export function coaEditError(batchId: number): string | null {
   const returned = lots.filter((l) => l.returns.length);
   if (returned.length) {
     const notes = [...new Set(returned.flatMap((l) => l.returns.map((n) => n.number)))].join(', ');
-    return `Certificate ${lots[0].coa_no} covers a lot named as returned on ${notes}, `
+    return `Certificate ${lots[0].coa_no} covers a batch named as returned on ${notes}, `
       + 'so it cannot be changed or withdrawn.';
   }
   return null;
@@ -945,7 +945,7 @@ export function returnBatchError(invoiceId: number, kind: string, batchIds: unkn
   const raw = (batchIds ?? []) as unknown[];
   if (!raw.length) return null;
   if (kind !== 'return') {
-    return 'An adjustment credits money and moves no goods, so it cannot name a lot as returned. '
+    return 'An adjustment credits money and moves no goods, so it cannot name a batch as returned. '
       + 'Record the credit as goods returned if a lot actually came back.';
   }
   if (raw.some((v) => !Number.isInteger(Number(v)) || Number(v) <= 0)) {

@@ -766,8 +766,14 @@ export interface ReadyLine {
   product_name: string | null;
   description: string;
   color: string;
-  /** The live jobs that made it. Never empty: output implies a live job. */
-  jobs: { id: number; number: string; status: string }[];
+  /**
+   * The live jobs that made it. Never empty: output implies a live job.
+   *
+   * `unlotted` is output not yet in a batch, which is what decides whether the
+   * Quality queue can offer *Certify* on the row — see `ReadyJob` on the
+   * server. Zero means the next act is on the job itself.
+   */
+  jobs: { id: number; number: string; status: string; unlotted: number }[];
   /** All in pieces. */
   ordered: number;
   made: number;

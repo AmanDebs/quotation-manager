@@ -79,10 +79,13 @@ const NAV: { heading: string; items: NavItem[] }[] = [
     heading: 'Factory',
     items: [
       { to: '/work-orders', label: 'Work Orders', icon: 'wrench', needs: 'work_order' },
-      // The desk tracks certificates from here (2026-10-22); the inspection
-      // register and the pending queue are tabs on it, the route unchanged so
-      // every link already pointing at /quality still lands.
-      { to: '/quality', label: 'COA', icon: 'gauge', needs: 'qc' },
+      // The whole of quality in one entry: the queue of what is made and not
+      // yet certified (which is what it opens on), the certificate register,
+      // and the inspection history. Labelled *COA* from 2026-10-22 until
+      // 2026-10-27, when the queue became where the work is done — the
+      // certificates are a tab, not the page. The route is unchanged, so every
+      // link already pointing at /quality still lands.
+      { to: '/quality', label: 'Quality', icon: 'gauge', needs: 'qc' },
       { to: '/stock', label: 'Stock', icon: 'box', needs: 'material' },
       // Finished goods on the shelf — its own function, since Logistics holds
       // it and holds no `material`.

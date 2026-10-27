@@ -174,6 +174,15 @@ export default function WorkOrderDetailPage() {
   // already been certified or condemned — the server refuses the rest by name.
   const certifiable = (b: Batch) => b.qc === 'passed' && !b.coa_no && !b.scrapped;
   /*
+   * Ticking is a question only where there is more than one batch that could
+   * join a certificate (2026-10-27). One press of *Certify (COA)* sweeps every
+   * unbatched shift into a single batch, so on this desk a job ordinarily has
+   * exactly one certifiable batch and a column of single ticks would be a
+   * control that asks nothing — the group case arrives only on a job certified
+   * in parts, which is what the bar below is for.
+   */
+  const grouping = can('qc', 'full') && (job?.batches ?? []).filter(certifiable).length > 1;
+  /*
    * The check the certificate prints: this lot's latest that reached a
    * verdict, which is the one `buildCoaPdf` reads. So *Correct readings* lands
    * on the inspection whose figures are actually on the document, rather than
@@ -254,15 +263,22 @@ export default function WorkOrderDetailPage() {
               </PdfLink>
             )}
             {can('output', 'full') && <Button variant="secondary" onClick={() => setLogging(true)}>Log output</Button>}
+            {/*
+              **One quality button, not two** (2026-10-27). *Record QC check*
+              used to sit beside this one and recorded an **in-process** check —
+              an inspection against the job with no batch, which certifies
+              nothing. The client confirmed they never record one, so the
+              entry point is gone and with it the question *which of these two
+              do I press*. `POST /:id/qc-checks` and the `/qc` route stay as the
+              API, retired rather than removed, so nothing already on file
+              changes and nothing is unreachable by URL.
+
+              What is left is the act this desk performs: only the final COA is
+              issued, so the batch, the inspection and the certificate are one
+              press rather than three.
+            */}
             {can('qc', 'full') && (
-              <Button variant="secondary" onClick={() => navigate(`/work-orders/${id}/qc`)}>Record QC check</Button>
-            )}
-            {/* One press for the shape this desk works in: only the final
-                COA is issued, so the lot, the inspection and the certificate
-                are one act rather than three. The three routes stay for a job
-                certified in several lots. */}
-            {can('qc', 'full') && (
-              <Button onClick={() => navigate(`/work-orders/${id}/certify`)} title="Open a lot for everything made so far, inspect it and issue the certificate">
+              <Button onClick={() => navigate(`/work-orders/${id}/certify`)} title="Inspect everything made and not yet certified, open a batch for it and issue the certificate">
                 Certify (COA)
               </Button>
             )}
@@ -325,9 +341,18 @@ export default function WorkOrderDetailPage() {
         tabs={[
           { key: 'details', label: 'Details' },
           { key: 'production', label: 'Production', badge: job.entries?.length || undefined },
-          { key: 'batches', label: 'Batches', badge: job.batches?.length || undefined },
+          /*
+            **Certificates** rather than *Batches* (2026-10-27). A batch is born
+            at certification and is one-to-one with its certificate in practice,
+            so the number people act on is the COA and the batch is a detail
+            under it. The `?tab=batches` key is unchanged, so every link lands.
+
+            The *Quality* tab went with it: it listed this job's inspections,
+            which on a desk that records only final checks is the same set the
+            rows below already carry a verdict for — one fact in two places.
+          */
+          { key: 'batches', label: 'Certificates', badge: job.batches?.length || undefined },
           { key: 'material', label: 'Material' },
-          { key: 'quality', label: 'Quality', badge: job.qc?.checks.length || undefined },
         ]}
       />
 
@@ -514,29 +539,48 @@ export default function WorkOrderDetailPage() {
       )}
 
       {tab === 'batches' && (
-        <Card title="Batches">
+        <Card title="Certificates">
           {/*
-            **A lot is born at certification**, and there is no second way to
+            The QC report stays in the page header, where it has always been
+            and where it is reachable from any tab — the render caught it being
+            drawn twice when this card grew its own copy.
+          */}
+          {/*
+            **A batch is born at certification**, and there is no second way to
             open one (2026-10-21, the client having opened an empty one and
             asked why it read zero). Nothing on this client can file a shift
-            into a lot — `LogOutput` offers no picker — so *Open a batch* could
-            only ever produce a number with no goods under it, which `Issue
-            COA` then refuses. **Certify (COA)** sweeps every shift nobody has
-            lotted into a lot of its own, so the scope is always *everything
-            made since the last certificate*, which is what this desk does:
-            *"only final COA is required and is issued"*.
+            into a batch — `LogOutput` offers no picker — so *Open a batch*
+            could only ever produce a number with no goods under it. **Certify
+            (COA)** sweeps every shift nobody has batched into one of its own,
+            so the scope is always *everything made since the last
+            certificate*, which is what this desk does: *"only final COA is
+            required and is issued"*.
 
             Part-certifying is not lost by it — book, certify, book more,
             certify again, and the second press takes only the later shifts.
-            And the tab keeps its own controls for the case the one press
-            deliberately leaves behind: a failing inspection keeps the lot and
-            issues nothing, so Rework → Final check → Issue COA happens here.
+            The tab keeps its own controls for what the one press deliberately
+            leaves behind: a failing inspection keeps the batch and issues
+            nothing, so Rework → Final check → Issue COA happens here.
+
+            **The rows lead with the certificate** (2026-10-27): it is the
+            number people act on and the one that reaches the customer, so the
+            batch sits under it as the detail it is. Three columns went in the
+            same change — Started and Batch folded into that cell, and the
+            paragraph explaining *final* against *shift-wise* checks went with
+            the in-process check itself.
+          */}
+          {/*
+            Whose specification applies is part of the answer rather than a
+            detail: the same part is measured to different tolerances for
+            different buyers, and `none` is no opinion at all rather than
+            everything passing. It moved here from the Quality tab.
           */}
           <p className="mb-3 text-xs text-slate-500">
-            A batch is what an invoice line traces back to. Its quantity is the output booked
-            into it, and it is cleared by a <em>final</em> check — one recorded against the batch
-            itself, rather than the shift-wise checks on the Quality tab. Lots are opened by
-            <strong> Certify (COA)</strong>, which covers everything made and not yet certified.
+            {job.qc?.spec_owner === 'customer'
+              ? `Inspected against ${job.customer_name}'s own specification.`
+              : job.qc?.spec_owner === 'default'
+                ? 'Inspected against the product’s default specification.'
+                : 'No specification recorded for this product — nothing here has an opinion, which is not the same as passing.'}
           </p>
 
           {/*
@@ -547,7 +591,7 @@ export default function WorkOrderDetailPage() {
           {can('qc', 'full') && ticked.size > 0 && (
             <div className="mb-3 flex items-center gap-3 rounded-lg bg-brand-50 px-3 py-2 text-sm ring-1 ring-inset ring-brand-200">
               <span className="text-brand-900">
-                <span className="font-medium">{ticked.size} lot{ticked.size === 1 ? '' : 's'}</span> ticked
+                <span className="font-medium">{ticked.size} batch{ticked.size === 1 ? '' : 'es'}</span> ticked
               </span>
               <Button
                 className="ml-auto"
@@ -561,22 +605,24 @@ export default function WorkOrderDetailPage() {
             </div>
           )}
           {(job.batches ?? []).length === 0 ? (
-            <EmptyState message="No batches on this job. Output booked without one still counts towards the job — a batch is how a lot is identified and certified, not how it is counted." />
+            <EmptyState message="Nothing certified on this job yet. Output still counts towards the job without a batch — a batch is how goods are identified on a certificate, not how they are counted." />
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className={TH_CLASS}>
-                    {/* Ticking several and certifying them once is the shape
-                        their own paperwork has; the column is drawn only for
-                        somebody who may issue one. */}
-                    {can('qc', 'full') && <th className="pb-2 pr-2" />}
-                    <th className="pb-2 pr-3">Batch</th>
-                    <th className="pb-2 pr-3">Started</th>
+                    {/*
+                      Ticking several and certifying them once is the shape
+                      their own paperwork has — and it is only a question where
+                      there is more than one batch to choose between (2026-10-27).
+                      With one, the row's own button is the whole answer and a
+                      column of single ticks is a control that asks nothing.
+                    */}
+                    {grouping && <th className="pb-2 pr-2" />}
+                    <th className="pb-2 pr-3">Certificate</th>
                     <th className="pb-2 pr-3 text-right">Made</th>
                     <th className="pb-2 pr-3 text-right">Rejected</th>
-                    <th className="pb-2 pr-3">Final check</th>
-                    <th className="pb-2 pr-3">Certificate</th>
+                    <th className="pb-2 pr-3">Inspection</th>
                     <th className="pb-2 pr-3">Outcome</th>
                     <th className="pb-2 pr-3">Dispatched</th>
                     <th className="pb-2" />
@@ -585,15 +631,15 @@ export default function WorkOrderDetailPage() {
                 <tbody>
                   {(job.batches ?? []).map((b) => (
                     <tr key={b.id} className="border-b border-slate-100 last:border-0">
-                      {can('qc', 'full') && (
+                      {grouping && (
                         <td className="py-2 pr-2">
                           <input
                             type="checkbox"
                             disabled={!certifiable(b)}
                             checked={ticked.has(b.id)}
                             title={certifiable(b)
-                              ? 'Include this lot on one certificate with the others ticked'
-                              : 'Only a lot whose final check passed, and which is not already certified, can join a certificate'}
+                              ? 'Include this batch on one certificate with the others ticked'
+                              : 'Only a batch whose inspection passed, and which is not already certified, can join a certificate'}
                             onChange={(e) => setTicked((prev) => {
                               const next = new Set(prev);
                               if (e.target.checked) next.add(b.id); else next.delete(b.id);
@@ -602,8 +648,31 @@ export default function WorkOrderDetailPage() {
                           />
                         </td>
                       )}
-                      <td className="py-2 pr-3 font-medium">{b.number}</td>
-                      <td className="py-2 pr-3 whitespace-nowrap">{fmtDate(b.date)}</td>
+                      {/*
+                        The certificate leads and the batch is the line under
+                        it. Where there is none the cell says what the row is
+                        waiting for rather than printing a dash: this tab is
+                        read to find out what still needs doing.
+                      */}
+                      <td className="py-2 pr-3">
+                        {b.cleared ? (
+                          <span className="font-medium text-slate-800">{b.coa_no}</span>
+                        ) : b.coa_draft ? (
+                          /* Withdrawn and kept: the number is still here and
+                             the batch is still not cleared, which is two facts
+                             the cell has to say at once. */
+                          <span className="font-medium text-amber-700">
+                            {b.coa_no} <span className="text-xs font-normal">(draft)</span>
+                          </span>
+                        ) : (
+                          <span className="font-medium text-slate-400">
+                            {b.scrapped ? 'Scrapped' : b.qc === 'passed' ? 'Not certified yet' : b.qc === 'failed' ? 'Failed' : 'Not inspected'}
+                          </span>
+                        )}
+                        <div className="text-xs text-slate-400">
+                          Batch {b.number} · {fmtDate(b.cleared || b.coa_draft ? b.coa_date : b.date)}
+                        </div>
+                      </td>
                       <td className="py-2 pr-3 text-right tabular-nums">{fmtQty(b.made)}</td>
                       <td className="py-2 pr-3 text-right tabular-nums">
                         {b.rejected ? fmtQty(b.rejected) : <span className="text-slate-300">—</span>}
@@ -613,18 +682,6 @@ export default function WorkOrderDetailPage() {
                         {b.qc === 'passed' ? <span className="text-green-700">Passed</span>
                           : b.qc === 'failed' ? <span className="text-rose-700">Failed</span>
                             : <span className="text-slate-400">Not inspected</span>}
-                      </td>
-                      <td className="py-2 pr-3">
-                        {b.cleared ? (
-                          <span className="text-slate-700">{b.coa_no} <span className="text-xs text-slate-400">{fmtDate(b.coa_date)}</span></span>
-                        ) : b.coa_draft ? (
-                          /* Withdrawn and kept: the number is still here and
-                             the lot is still not cleared, which is two facts
-                             the cell has to say at once. */
-                          <span className="text-amber-700">
-                            {b.coa_no} <span className="text-xs">(draft)</span>
-                          </span>
-                        ) : <span className="text-slate-300">—</span>}
                       </td>
                       {/*
                         What was decided about a lot that failed. A lot nobody
@@ -692,7 +749,7 @@ export default function WorkOrderDetailPage() {
                             )}
                             {can('qc', 'full') && (
                           <>
-                            <Button variant="ghost" onClick={() => navigate(`/work-orders/${id}/qc?batch=${b.id}`)}>Final check</Button>
+                            <Button variant="ghost" onClick={() => navigate(`/work-orders/${id}/qc?batch=${b.id}`)}>Inspect</Button>
                             {/*
                               Put a figure right, rather than inspect again.
                               Re-recording is the honest act after rework —
@@ -707,7 +764,7 @@ export default function WorkOrderDetailPage() {
                               <Button
                                 variant="ghost"
                                 className="ml-1"
-                                title="Correct the readings this lot's certificate prints"
+                                title="Correct the readings this batch's certificate prints"
                                 onClick={() => navigate(`/work-orders/${id}/qc/${printed(b)!.id}`)}
                               >
                                 Correct readings
@@ -787,7 +844,7 @@ export default function WorkOrderDetailPage() {
                                 variant="ghost"
                                 className="ml-1"
                                 disabled={removeBatch.isPending}
-                                title="Nothing has been booked into this lot"
+                                title="Nothing has been booked into this batch"
                                 onClick={() => {
                                   if (confirm(`Delete empty batch ${b.number}?`)) removeBatch.mutate(b.id);
                                 }}
@@ -798,6 +855,51 @@ export default function WorkOrderDetailPage() {
                           </>
                         )}
                       </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {/*
+            **Retired, not removed** (2026-10-27). The *Quality* tab that used
+            to list this job's inspections is gone — the client records only
+            final checks, so every row it drew already has a verdict in the
+            table above and the tab was one fact in two places. An inspection
+            against the job with **no batch** is the one thing that table
+            cannot show, so it is listed here instead, and only where there is
+            one: on a book that has none this draws nothing, and on a job that
+            carries one the record stays visible rather than being readable
+            only from the Quality page's History tab.
+          */}
+          {(job.qc?.checks ?? []).some((c) => c.batch_id == null) && (
+            <div className="mt-4 border-t border-slate-100 pt-3">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Inspections not on a certificate
+              </p>
+              <p className="mb-2 text-xs text-slate-400">
+                Recorded against the job rather than a batch, so they certify nothing. Nothing on
+                this app records one any more.
+              </p>
+              <table className="w-full text-sm">
+                <tbody>
+                  {(job.qc?.checks ?? []).filter((c) => c.batch_id == null).map((c) => (
+                    <tr key={c.id} className="border-b border-slate-100 last:border-0">
+                      <td className="py-1.5 pr-3 whitespace-nowrap">{fmtDate(c.date)}</td>
+                      <td className="py-1.5 pr-3 text-slate-500">{c.shift || '—'}</td>
+                      <td className="py-1.5 pr-3 text-slate-500">{c.inspector || '—'}</td>
+                      <td className="py-1.5 pr-3">
+                        <span className={c.passed == null ? 'text-slate-400' : c.passed ? 'text-green-700' : 'text-rose-700'}>
+                          {c.passed == null ? 'Not measured' : c.passed ? 'Pass' : 'Fail'}
+                        </span>
+                      </td>
+                      {can('qc', 'full') && (
+                        <td className="py-1.5 text-right">
+                          <Button variant="ghost" onClick={() => navigate(`/work-orders/${id}/qc/${c.id}`)}>
+                            Correct readings
+                          </Button>
+                        </td>
+                      )}
                     </tr>
                   ))}
                 </tbody>
@@ -902,79 +1004,6 @@ export default function WorkOrderDetailPage() {
         </Card>
       )}
 
-      {tab === 'quality' && (
-        <Card
-          title="Quality"
-          actions={
-            <div className="flex items-center gap-2">
-              {/* Beside the checks it prints, which is where somebody looking
-                  at them thinks to ask for it — the header carries it too, for
-                  the same reason every document form carries its own. */}
-              <PdfLink href={`/api/pdf/qc-report/${job.id}`} guard={pdf} title="Grouped by date and shift, each reading beside the tolerance it was judged against">
-                📄 QC Report
-              </PdfLink>
-              {can('qc', 'full') && (
-                <Button variant="secondary" onClick={() => navigate(`/work-orders/${id}/qc`)}>Record check</Button>
-              )}
-            </div>
-          }
-        >
-          {/*
-            Whose specification applies is part of the answer, not a detail: the
-            same part is measured to different tolerances for different buyers,
-            and `none` is no opinion at all rather than everything passing.
-          */}
-          <p className="mb-3 text-xs text-slate-500">
-            {job.qc?.spec_owner === 'customer'
-              ? `Measured against ${job.customer_name}'s own specification.`
-              : job.qc?.spec_owner === 'default'
-                ? 'Measured against the product’s default specification.'
-                : 'No specification recorded for this product — nothing here has an opinion, which is not the same as passing.'}
-          </p>
-
-          {(job.qc?.checks ?? []).length === 0 ? (
-            <EmptyState message="No checks recorded. An inspection stores the reading and the tolerance it was judged against, so tightening the spec later cannot fail a batch that met the spec of the day." />
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className={TH_CLASS}>
-                    <th className="pb-2 pr-3">Date</th>
-                    <th className="pb-2 pr-3">Shift</th>
-                    <th className="pb-2 pr-3">Inspector</th>
-                    <th className="pb-2 pr-3 text-right">Sample</th>
-                    <th className="pb-2 pr-3">Verdict</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(job.qc?.checks ?? []).map((c) => (
-                    <tr key={c.id} className="border-b border-slate-100 last:border-0">
-                      <td className="py-2 pr-3">{fmtDate(c.date)}</td>
-                      <td className="py-2 pr-3">{c.shift || '—'}</td>
-                      <td className="py-2 pr-3">{c.inspector || '—'}</td>
-                      <td className="py-2 pr-3 text-right tabular-nums">{c.sample_size || '—'}</td>
-                      <td className="py-2 pr-3">
-                        {/* Nothing measured is not a pass, and is not a failure
-                            either — the distinction services/qc.ts insists on. */}
-                        <span className={`rounded-full px-2 py-0.5 text-xs font-medium ring-1 ${
-                          c.passed == null
-                            ? 'bg-slate-50 text-slate-500 ring-slate-200'
-                            : c.passed
-                              ? 'bg-green-50 text-green-700 ring-green-200'
-                              : 'bg-red-50 text-red-700 ring-red-200'
-                        }`}>
-                          {c.passed == null ? 'Not measured' : c.passed ? 'Pass' : 'Fail'}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </Card>
-      )}
-
       {/* Renders nothing until a navigation is actually blocked. */}
       {prompt}
       {logging && <LogOutput job={job} onClose={() => setLogging(false)} onSaved={refresh} />}
@@ -985,7 +1014,7 @@ export default function WorkOrderDetailPage() {
         * line — is read at print time, so a correction reaches the reprint.
         */}
       {certifying && (
-        <Modal title={`Certificate of Analysis — ${certifying.length} lot${certifying.length === 1 ? '' : 's'}`} onClose={() => setCertifying(null)}>
+        <Modal title={`Certificate of Analysis — ${certifying.length} batch${certifying.length === 1 ? '' : 'es'}`} onClose={() => setCertifying(null)}>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <Field label="Date of issue">
               <Input type="date" value={coaHead.date} onChange={(e) => setCoaHead({ ...coaHead, date: e.target.value })} />
@@ -1000,7 +1029,7 @@ export default function WorkOrderDetailPage() {
           </div>
           <p className="mt-2 text-xs text-slate-500">
             {(job.batches ?? []).filter((b) => certifying.includes(b.id)).map((b) => b.number).join(', ')}
-            {' — '}one number, written to every lot named. A lot is certified once, so this cannot be undone.
+            {' — '}one number, written to every batch named. A batch is certified once, so this cannot be undone.
           </p>
           <ErrorText error={issueCoa.error} />
           <div className="mt-3 flex justify-end gap-2">

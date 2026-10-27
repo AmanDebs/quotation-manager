@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { QcCheckRow, QcRegisterSummary, CoaRow, CoaSummary, Customer, Product } from '../types';
@@ -43,18 +43,34 @@ const verdictPill = (row: QcCheckRow) => {
 };
 
 /**
- * Correct a certificate's date or its approver.
+ * Correct a certificate — one verb over what used to be four.
  *
- * **The two fields the issue dialog asked for**, which are the only two on a
- * certificate that are not derived — the number comes from the company's own
- * series and the lots are what it certifies, so neither is a correction, and
- * the server refuses both by not reading them.
+ * 2026-10-27, from a review the client approved: a row carried *Edit ·
+ * Withdraw · Issue · Discard* beside its PDF, which is four ways to touch one
+ * document and three of them only mean anything in a particular state.
+ * Somebody correcting a certificate does not think *"withdraw it, edit it,
+ * issue it"*; they think *"this says the wrong thing"*.
  *
- * It acts on the **group**: the route is given one lot and resolves the rest
- * by number, so a certificate covering ten lots is corrected once rather than
- * ten times.
+ * So the row offers **Correct** and this dialog decides what that means:
+ *
+ * - the **header fields** (date, approver, the buyer's reference, the extra
+ *   details) are a plain `PUT`, which the server allows on an issued
+ *   certificate — nothing has to be withdrawn to fix a date, and the old
+ *   row-button made people withdraw first for no reason;
+ * - the **readings** cannot move under an issued certificate (`checkEditError`
+ *   refuses it, since everything that lets goods leave reads the number rather
+ *   than the reading behind it), so that button **withdraws and opens the job**
+ *   in one press, which is the whole of the old three-step path;
+ * - a **draft** can be saved as a draft or saved and issued, which is the
+ *   ordinary end of a correction and is why *Issue* no longer needs a row of
+ *   its own.
+ *
+ * It acts on the **group**: the route is given one batch and resolves the rest
+ * by number, so a certificate covering ten batches is corrected once rather
+ * than ten times.
  */
 function EditCoa({ row, onClose }: { row: CoaRow; onClose: () => void }) {
+  const navigate = useNavigate();
   const [form, setForm] = useState({
     date: row.coa_date,
     approved_by: row.approved_by,
@@ -64,18 +80,37 @@ function EditCoa({ row, onClose }: { row: CoaRow; onClose: () => void }) {
     extra: row.extra ?? [],
   });
   const queryClient = useQueryClient();
+  const refresh = () => queryClient.invalidateQueries({ queryKey: ['coa-register'] });
   const save = useMutation({
     mutationFn: () => api.put(`/api/work-orders/batches/${row.batch_id}/coa`, form),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['coa-register'] });
-      onClose();
-    },
+    onSuccess: () => { refresh(); onClose(); },
   });
+  /*
+   * Save and send it back out, in **one** request: `/coa/issue` takes the same
+   * fields under the `batch_ids` contract, so there is no window where the date
+   * has moved and the certificate is still a draft.
+   */
+  const issue = useMutation({
+    mutationFn: () => api.post(`/api/work-orders/batches/${row.batch_id}/coa/issue`, form),
+    onSuccess: () => { refresh(); onClose(); },
+  });
+  /*
+   * The readings' own way through. On an issued certificate this withdraws
+   * first — it has to, or the job refuses the correction — and lands on the
+   * batch that prints them; on a draft there is nothing to withdraw.
+   */
+  const toReadings = useMutation({
+    mutationFn: async () => {
+      if (!row.draft) await api.post(`/api/work-orders/batches/${row.batch_id}/coa/withdraw`, {});
+    },
+    onSuccess: () => { refresh(); navigate(`/work-orders/${row.work_order_id}?tab=batches`); },
+  });
+  const busy = save.isPending || issue.isPending || toReadings.isPending;
   return (
-    <Modal title={`Certificate ${row.coa_no}`} onClose={onClose}>
+    <Modal title={`Correct ${row.coa_no}`} onClose={onClose}>
       <p className="mb-3 text-xs text-slate-500">
         {row.lots > 1
-          ? `Covers ${row.lots} lots — ${row.batch_numbers}. A correction applies to all of them.`
+          ? `Covers ${row.lots} batches — ${row.batch_numbers}. A correction applies to all of them.`
           : `Covers batch ${row.batch_numbers}.`}
       </p>
       <div className={FIELD_GRID}>
@@ -108,32 +143,51 @@ function EditCoa({ row, onClose }: { row: CoaRow; onClose: () => void }) {
       </div>
       <p className="mt-3 text-xs text-slate-400">
         {row.draft
-          ? 'This certificate has been withdrawn, so it is a draft: it certifies nothing and no lot of it '
-            + 'can be dispatched until it is issued again, under this same number.'
-          : 'The number and the lots it covers are not corrections — a certificate over different lots is a '
-            + 'different certificate. Withdraw this one and issue another.'}
+          ? 'This one is a draft: it certifies nothing and none of its batches can be dispatched until it '
+            + 'is issued again, under this same number.'
+          : 'Which batches it covers is not a correction — a certificate over different batches is a '
+            + 'different certificate. Discard this one and certify again.'}
       </p>
-      {/*
-        The readings are the other half of what somebody means by correcting a
-        certificate, and they are not here: they belong to the inspection, on
-        its own date and by its own inspector, so they are changed where that
-        inspection is. Said with the way there rather than left to be found —
-        the register is where anybody looking at a draft starts.
-      */}
-      <p className="mt-1 text-xs text-slate-400">
-        To change the <b>readings</b> it prints,{' '}
-        <Link to={`/work-orders/${row.work_order_id}?tab=batches`} className="text-brand-700 hover:underline">
-          open the job
-        </Link>{' '}
-        and press <b>Correct readings</b> on the lot
-        {row.draft ? ', then issue this certificate again.' : ' — withdraw this certificate to a draft first.'}
-      </p>
-      <ErrorText error={save.error} />
-      <div className="mt-3 flex justify-end gap-2">
-        <Button variant="secondary" onClick={onClose}>Cancel</Button>
-        <Button onClick={() => save.mutate()} disabled={save.isPending || !form.date}>
-          {save.isPending ? 'Saving…' : 'Save'}
+      <ErrorText error={save.error || issue.error || toReadings.error} />
+      <div className="mt-3 flex items-center gap-2">
+        {/*
+          The readings are the other half of what somebody means by correcting
+          a certificate, and they belong to the inspection — its own date, its
+          own inspector — so they are changed where that inspection is. What
+          used to be a sentence telling somebody to go and withdraw it first is
+          now the button doing both.
+        */}
+        <Button
+          variant="ghost"
+          disabled={busy}
+          title={row.draft
+            ? 'Open the job, where readings are corrected on the batch itself'
+            : 'Puts it back to a draft and opens the job — readings cannot move under an issued certificate'}
+          onClick={() => {
+            if (row.draft || confirm(
+              `Correct the readings on ${row.coa_no}? It goes back to a draft while you do — nothing is `
+              + 'lost, and nothing of it can be dispatched until you issue it again.'
+            )) toReadings.mutate();
+          }}
+        >
+          {toReadings.isPending ? 'Opening…' : 'Correct the readings…'}
         </Button>
+        <span className="ml-auto" />
+        <Button variant="secondary" onClick={onClose}>Cancel</Button>
+        <Button
+          variant={row.draft ? 'secondary' : 'primary'}
+          onClick={() => save.mutate()}
+          disabled={busy || !form.date}
+        >
+          {save.isPending ? 'Saving…' : row.draft ? 'Save as draft' : 'Save'}
+        </Button>
+        {/* The ordinary end of a correction, which is why *Issue* is no longer
+            a button on the row. */}
+        {!!row.draft && (
+          <Button onClick={() => issue.mutate()} disabled={busy || !form.date}>
+            {issue.isPending ? 'Issuing…' : 'Save & issue'}
+          </Button>
+        )}
       </div>
     </Modal>
   );
@@ -186,24 +240,12 @@ function Certificates() {
   const queryClient = useQueryClient();
   const refresh = () => queryClient.invalidateQueries({ queryKey: ['coa-register'] });
   /*
-   * Withdraw it — to a **draft**, which keeps the number, the date, the
-   * approver and the lots and says only that it has not gone out. The server
-   * refuses once the number is on a challan or a credit note, so this is only
-   * ever a certificate that has gone nowhere.
-   */
-  const withdraw = useMutation({
-    mutationFn: (batchId: number) => api.post(`/api/work-orders/batches/${batchId}/coa/withdraw`, {}),
-    onSuccess: refresh,
-  });
-  /* The same certificate going back out, under its own number. */
-  const issue = useMutation({
-    mutationFn: (batchId: number) => api.post(`/api/work-orders/batches/${batchId}/coa/issue`, {}),
-    onSuccess: refresh,
-  });
-  /*
-   * And the way out for a certificate that should never have existed: the
-   * lots go back to uncertified and the number is not re-used. What
-   * withdrawing used to do, kept as its own act now that withdrawing drafts.
+   * **Three acts on a row, not five** (2026-10-27). *Withdraw* and *Issue*
+   * moved inside the Correct dialog, where they are the shape of the thing
+   * somebody is actually doing rather than two more states to reason about —
+   * see `EditCoa`. What is left is the document itself, the one way to change
+   * it, and the way out for one that should never have existed: the batches go
+   * back to uncertified and the number is **not** re-used.
    */
   const discard = useMutation({
     mutationFn: (batchId: number) => api.del(`/api/work-orders/batches/${batchId}/coa`),
@@ -237,7 +279,7 @@ function Certificates() {
         {summary && (
           <span className="ml-auto text-sm text-slate-500">
             {summary.certificates} certificate{summary.certificates === 1 ? '' : 's'}
-            {' · '}{summary.lots} lot{summary.lots === 1 ? '' : 's'}
+            {' · '}{summary.lots} batch{summary.lots === 1 ? '' : 'es'}
             {' · '}<span className="tabular-nums">{fmtQty(summary.qty)}</span> pcs
             {!!summary.shipped && <span className="text-slate-400">{' · '}{summary.shipped} dispatched</span>}
             {/* Amber, not grey: a draft is a certificate waiting on somebody,
@@ -252,7 +294,7 @@ function Certificates() {
         {list.isPending ? (
           <div className="py-8 text-center text-sm text-slate-400">Loading…</div>
         ) : rows.length === 0 ? (
-          <EmptyState message="No certificates yet. A COA is issued from a job's Batches tab, or in one press with Certify (COA)." />
+          <EmptyState message="No certificates yet. One press of Certify on the To inspect tab inspects a job's output and certifies it." />
         ) : (
           <table className="w-full text-sm">
             <thead>
@@ -296,7 +338,7 @@ function Certificates() {
                         readable at a glance. */}
                     <div className="flex items-center gap-1">
                       <span className="max-w-[12rem] truncate" title={r.batch_numbers}>{r.batch_numbers}</span>
-                      {r.lots > 1 && <span className="shrink-0 text-xs text-slate-400">({r.lots} lots)</span>}
+                      {r.lots > 1 && <span className="shrink-0 text-xs text-slate-400">({r.lots} batches)</span>}
                     </div>
                   </td>
                   <td className="max-w-[16rem] truncate py-2 pr-3" title={r.products}>{r.products || '—'}</td>
@@ -361,55 +403,36 @@ function Certificates() {
                     */}
                     {mayEdit && (
                       <>
-                        <Button variant="ghost" className="ml-1" onClick={() => setEditing(r)}>Edit</Button>
+                        <Button
+                          variant={r.draft ? 'secondary' : 'ghost'}
+                          className="ml-1"
+                          title={r.draft
+                            ? 'Finish this draft — correct it and issue it again'
+                            : 'Change the date, the approver or the readings'}
+                          onClick={() => setEditing(r)}
+                        >
+                          Correct
+                        </Button>
                         {/*
-                          A draft's two ways on, and they are different acts.
-                          **Issue** is this certificate going back out under
-                          its own number — the ordinary end of a correction.
-                          **Discard** is for one that should never have
-                          existed, and does what withdrawing used to: the lots
-                          go back to uncertified and the number is spent.
+                          The way out for a certificate that should never have
+                          existed. Drawn on every row rather than only where the
+                          server would allow it: whether it has shipped is on
+                          the row beside it, and a refusal that names the
+                          challan says more than a missing button ever could.
                         */}
-                        {r.draft ? (
-                          <>
-                            <Button
-                              variant="secondary"
-                              className="ml-1"
-                              disabled={issue.isPending}
-                              title="Issue this certificate again, under the same number"
-                              onClick={() => issue.mutate(r.batch_id)}
-                            >
-                              Issue
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              className="ml-1"
-                              disabled={discard.isPending}
-                              title="Clear this certificate — the lots go back to uncertified"
-                              onClick={() => {
-                                if (confirm(`Discard ${r.coa_no}? ${r.lots > 1 ? `The ${r.lots} lots it covers go` : 'The lot it covers goes'} back to uncertified, and the number is not re-used.`)) {
-                                  discard.mutate(r.batch_id);
-                                }
-                              }}
-                            >
-                              Discard
-                            </Button>
-                          </>
-                        ) : (
-                          <Button
-                            variant="ghost"
-                            className="ml-1"
-                            disabled={withdraw.isPending}
-                            title="Put it back to draft — nothing is lost, and it certifies nothing until issued again"
-                            onClick={() => {
-                              if (confirm(`Withdraw ${r.coa_no}? It becomes a draft — the number, the date and ${r.lots > 1 ? `the ${r.lots} lots it covers stay` : 'the lot it covers stays'} — and nothing of it can be dispatched until you issue it again.`)) {
-                                withdraw.mutate(r.batch_id);
-                              }
-                            }}
-                          >
-                            Withdraw
-                          </Button>
-                        )}
+                        <Button
+                          variant="ghost"
+                          className="ml-1"
+                          disabled={discard.isPending}
+                          title="Clear this certificate — its batches go back to uncertified"
+                          onClick={() => {
+                            if (confirm(`Discard ${r.coa_no}? ${r.lots > 1 ? `The ${r.lots} batches it covers go` : 'The batch it covers goes'} back to uncertified, and the number is not re-used.`)) {
+                              discard.mutate(r.batch_id);
+                            }
+                          }}
+                        >
+                          Discard
+                        </Button>
                       </>
                     )}
                   </td>
@@ -422,7 +445,7 @@ function Certificates() {
           page={list.page} pages={list.pages} total={list.total} limit={PAGE_SIZE}
           onPage={list.setPage} noun="certificates"
         />
-        <ErrorText error={withdraw.error ?? issue.error ?? discard.error} />
+        <ErrorText error={discard.error} />
       </Card>
       {editing && <EditCoa row={editing} onClose={() => setEditing(null)} />}
     </>
@@ -577,7 +600,26 @@ function Register() {
  * rather than by how long the business has been trading, and it is a queue
  * that is meant to empty.
  */
+/**
+ * What is made and cannot ship — **and the press that clears it**.
+ *
+ * 2026-10-27, from a review the client approved. This list has known exactly
+ * which lines are held since it was written, and then sent somebody to the
+ * job, where the action was three more clicks and a paragraph away. The daily
+ * loop is now: open Quality, press *Certify*, type the readings.
+ *
+ * **The button is drawn where it would work.** `POST /:id/certify` refuses a
+ * job whose every shift is already in a batch, so the row offers it only where
+ * that job has unlotted output — the `ReadyJob.unlotted` figure exists for
+ * this. Where it does not, the hold's own sentence is printed instead, since
+ * the next act is then on the job itself (inspect the batch that exists, issue
+ * its certificate, or rule on a failed one) and a button that can only produce
+ * a refusal is worse than none.
+ */
 function Pending() {
+  const navigate = useNavigate();
+  const can = useCan();
+  const mayInspect = can('qc', 'full');
   const { data, isPending } = useQuery({
     queryKey: ['qc-pending'],
     queryFn: () => api.get<{ rows: ReadyLine[]; pending: number }>('/api/work-orders/qc-pending'),
@@ -587,7 +629,7 @@ function Pending() {
   return (
     <Card className="overflow-x-auto">
       {rows.length === 0 ? (
-        <EmptyState message="Nothing is waiting on a check. Every line that has been made either has a passing check or needs none." />
+        <EmptyState message="Nothing is waiting to be inspected. Every line that has been made is either certified or needs no specification." />
       ) : (
         <table className="w-full text-sm">
           <thead>
@@ -599,6 +641,7 @@ function Pending() {
               <th className="pb-2 pr-3">Job</th>
               <th className="pb-2 pr-3 text-right">Made</th>
               <th className="pb-2 pr-3 text-right">To ship</th>
+              {mayInspect && <th className="pb-2" />}
             </tr>
           </thead>
           <tbody>
@@ -608,8 +651,16 @@ function Pending() {
                   <Link to={`/orders/${r.order_id}`} className="text-brand-600 hover:underline">{r.order_number}</Link>
                 </td>
                 <td className="max-w-[12rem] truncate py-2 pr-3" title={r.customer_name}>{r.customer_name}</td>
-                <td className="max-w-[16rem] truncate py-2 pr-3" title={r.description}>
-                  {r.product_name || r.description || '—'}
+                <td className="max-w-[16rem] py-2 pr-3">
+                  <div className="truncate" title={r.description}>{r.product_name || r.description || '—'}</div>
+                  {/*
+                    Why it is held, said only where the row has no button: with
+                    one it is noise on every line, and without one it is the
+                    only thing that says what to do next.
+                  */}
+                  {mayInspect && r.qc_hold && !r.jobs.some((j) => j.unlotted > 0) && (
+                    <div className="text-xs text-amber-700">{r.qc_hold}</div>
+                  )}
                 </td>
                 <td className="whitespace-nowrap py-2 pr-3 text-slate-500">
                   {r.color || <span className="text-slate-300">—</span>}
@@ -635,6 +686,36 @@ function Pending() {
                 <td className="whitespace-nowrap py-2 pr-3 text-right font-medium tabular-nums">
                   {fmtQty(Math.max(0, Math.min(r.made, r.ordered) - r.sent))}
                 </td>
+                {/*
+                  One press per job with something to sweep. A split run is two
+                  jobs and either may be the one to certify, so each gets its
+                  own button carrying its number — rare, and the alternative is
+                  a button that picks one of them silently.
+                */}
+                {mayInspect && (
+                  <td className="whitespace-nowrap py-2 text-right">
+                    {(() => {
+                      const ready = r.jobs.filter((j) => j.unlotted > 0);
+                      if (!ready.length) {
+                        return (
+                          <span className="text-xs text-slate-400" title={r.qc_hold ?? undefined}>
+                            {r.qc_hold ? 'See the job' : '—'}
+                          </span>
+                        );
+                      }
+                      return ready.map((j) => (
+                        <Button
+                          key={j.id}
+                          className="ml-1"
+                          title={`Inspect everything ${j.number} has made and not yet certified, and issue the COA`}
+                          onClick={() => navigate(`/work-orders/${j.id}/certify`)}
+                        >
+                          {ready.length > 1 ? `Certify ${j.number}` : 'Certify'}
+                        </Button>
+                      ));
+                    })()}
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>
@@ -663,7 +744,12 @@ function Pending() {
  */
 export default function QualityPage() {
   const [view, setView] = useUrlFilter('view');
-  const tab = view === 'pending' || view === 'inspections' ? view : 'coa';
+  /*
+   * A blank — or anything unknown — is the **queue** (2026-10-27), which is
+   * where the day's work is now that it carries the Certify press. `pending`
+   * still lands on it, so every link written before this does too.
+   */
+  const tab = view === 'coa' || view === 'inspections' ? view : 'pending';
   // Asked whichever tab is open, so the count on the quiet tab is still right
   // — a tab that only counts once you are on it is a tab nobody opens.
   const { data } = useQuery({
@@ -671,26 +757,39 @@ export default function QualityPage() {
     queryFn: () => api.get<{ rows: ReadyLine[]; pending: number }>('/api/work-orders/qc-pending'),
   });
   const waiting = data?.pending ?? 0;
-  const subtitle = tab === 'pending'
-    ? 'Lines that have been made and cannot ship until somebody records a check'
+  const subtitle = tab === 'coa'
+    ? 'Every Certificate of Analysis issued, and whether the goods have gone'
     : tab === 'inspections'
       ? 'Every inspection recorded, against the tolerance it was judged by'
-      : 'Every Certificate of Analysis issued, and whether the goods have gone';
+      : 'Made and cannot ship until it is inspected and certified';
   return (
     <div>
-      <PageHeader title="COA" subtitle={subtitle} />
+      {/*
+        **Quality, opening on the queue** (2026-10-27, from a review the client
+        approved). It was *COA* opening on the register, which reverses their
+        own instruction of 2026-10-22 — stated rather than slipped in. The
+        reason is that the register is where you *look* and this page is now
+        where you *work*: the queue carries the Certify press, so it is the tab
+        with something to do and the one that reads 0 when there is not. The
+        certificates are one click away and the tab still says so.
+
+        `?view=` is unchanged, so every link already pointing here lands —
+        `pending` still opens the queue, and what moved is only which tab a bare
+        `/quality` shows.
+      */}
+      <PageHeader title="Quality" subtitle={subtitle} />
       <div className="mb-3">
         <SegmentedTabs
-          value={tab}
-          onChange={(v) => setView(v === 'coa' ? '' : v)}
+          value={tab === 'pending' ? '' : tab}
+          onChange={setView}
           tabs={[
+            { key: '', label: waiting ? `To inspect · ${waiting}` : 'To inspect' },
             { key: 'coa', label: 'Certificates' },
-            { key: 'pending', label: waiting ? `Pending · ${waiting}` : 'Pending' },
-            { key: 'inspections', label: 'Inspections' },
+            { key: 'inspections', label: 'History' },
           ]}
         />
       </div>
-      {tab === 'pending' ? <Pending /> : tab === 'inspections' ? <Register /> : <Certificates />}
+      {tab === 'coa' ? <Certificates /> : tab === 'inspections' ? <Register /> : <Pending />}
     </div>
   );
 }

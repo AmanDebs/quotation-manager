@@ -66,6 +66,21 @@ export interface ReadyJob {
   id: number;
   number: string;
   status: string;
+  /**
+   * Output booked against this job that is not in a batch yet.
+   *
+   * It is what decides whether **one press can certify** (2026-10-27): the
+   * Quality queue offers *Certify* on a row only where there is something for
+   * `POST /:id/certify` to sweep, since that route refuses a job whose every
+   * shift is already lotted. A button that can only ever produce a refusal is
+   * the form-offers-what-the-API-refuses trap this codebase records twice, and
+   * this is the one fact that tells the two cases apart.
+   *
+   * Zero therefore means the next act is on the job — inspect the batch that
+   * exists, issue its certificate, or rule on a failed one — so the queue
+   * prints the hold's own sentence there instead of a button.
+   */
+  unlotted: number;
 }
 
 export interface ReadyLine {
@@ -179,15 +194,18 @@ function jobsByLine(orderIds: number[]): Map<string, ReadyJob[]> {
   const out = new Map<string, ReadyJob[]>();
   if (!orderIds.length) return out;
   const rows = db.prepare(
-    `SELECT id, number, status, order_id, order_line FROM work_orders
-     WHERE order_id IN (${orderIds.map(() => '?').join(',')}) AND status <> 'cancelled'
-     ORDER BY order_line, id`
+    `SELECT w.id, w.number, w.status, w.order_id, w.order_line,
+            COALESCE((SELECT SUM(pe.qty_ok) FROM production_entries pe
+                       WHERE pe.work_order_id = w.id AND pe.batch_id IS NULL), 0) AS unlotted
+       FROM work_orders w
+      WHERE w.order_id IN (${orderIds.map(() => '?').join(',')}) AND w.status <> 'cancelled'
+      ORDER BY w.order_line, w.id`
   ).all(...orderIds) as
-    { id: number; number: string; status: string; order_id: number; order_line: number }[];
+    { id: number; number: string; status: string; order_id: number; order_line: number; unlotted: number }[];
   for (const r of rows) {
     const key = `${r.order_id}:${r.order_line}`;
     const list = out.get(key) ?? [];
-    list.push({ id: r.id, number: r.number, status: r.status });
+    list.push({ id: r.id, number: r.number, status: r.status, unlotted: Number(r.unlotted) || 0 });
     out.set(key, list);
   }
   return out;

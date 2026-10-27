@@ -431,8 +431,8 @@ export default function QcCheckFormPage({ certify }: {
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
             <span className="text-xs text-slate-500">
               {specOwner === 'customer'
-                ? <>Measured against <b>{full?.customer_name}</b>&rsquo;s own specification.</>
-                : <>Measured against the product&rsquo;s standard specification.</>}
+                ? <>Inspected against <b>{full?.customer_name}</b>&rsquo;s own specification.</>
+                : <>Inspected against the product&rsquo;s default specification.</>}
             </span>
             <PdfLink href={`/api/pdf/qc-report/${job.id}`} guard={pdf} title="Quality report">
               Quality report (PDF)
@@ -500,9 +500,9 @@ export default function QcCheckFormPage({ certify }: {
             {certify && (
               <div className="mb-3 rounded-lg bg-slate-50 p-3 ring-1 ring-slate-200">
                 <p className="mb-2 text-xs text-slate-500">
-                  This opens a lot covering everything this job has made and not yet lotted,
-                  records the inspection against it, and issues the certificate. The lot is
-                  dated by the last shift in it.
+                  This opens a batch covering everything this job has made and not yet
+                  certified, records the inspection against it, and issues the certificate. The
+                  batch is dated by the last shift in it.
                 </p>
                 <div className={FIELD_GRID}>
                   <Field label="Batch number">
@@ -545,7 +545,7 @@ export default function QcCheckFormPage({ certify }: {
             <table className="w-full text-sm">
               <thead>
                 <tr className={TH_CLASS}>
-                  <th className="pb-1 pr-2">Check</th>
+                  <th className="pb-1 pr-2">Characteristic</th>
                   <th className="pb-1 pr-2">Should be</th>
                   <th className="w-[26rem] pb-1">Measured</th>
                 </tr>

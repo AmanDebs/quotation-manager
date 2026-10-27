@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Customer, Product, QcParam, QcKind, QcSpecResponse } from '../types';
-import { Button, Input, Select, Modal, ErrorText, EmptyState, TH_CLASS } from './ui';
+import { Button, Input, Select, SearchSelect, Modal, ErrorText, EmptyState, TH_CLASS } from './ui';
 
 /**
  * What to check on this product, and what passes.
@@ -63,6 +63,24 @@ const numOrNull = (v: string) => (v.trim() === '' || Number.isNaN(Number(v)) ? n
 export default function QcSpecModal({ product, onClose }: { product: Product; onClose: () => void }) {
   const queryClient = useQueryClient();
   const [lines, setLines] = useState<QcParam[]>([]);
+  /*
+   * **Copied from another product** (2026-10-27, from a review the client
+   * approved). This is the real reason the live catalogue has almost no
+   * specifications in it: a preform's runs to nineteen-odd characteristics and
+   * the next size's is the same list with a few numbers moved, so every product
+   * meant typing the whole thing again. And an empty specification is not
+   * harmless — `has_spec: false` means the QC gate holds nothing up for that
+   * product, and the sectioned certificate their own paper uses only draws
+   * where the specification carries sections.
+   *
+   * It copies the **default** list, never a customer's override: an override is
+   * a statement about one buyer and carrying it onto another product would say
+   * something nobody said. And it is **a fill of the editor, not a save** — the
+   * numbers are what differ between sizes, so the point is to arrive with
+   * nineteen rows to correct rather than nineteen rows to type.
+   */
+  const [copyFrom, setCopyFrom] = useState('');
+  const [copyNote, setCopyNote] = useState('');
   // Empty string is the product's default spec, which is what NULL means in
   // the column — not "no customer chosen yet".
   const [customerId, setCustomerId] = useState('');
@@ -70,6 +88,11 @@ export default function QcSpecModal({ product, onClose }: { product: Product; on
   const { data: customers = [] } = useQuery({
     queryKey: ['customers', ''],
     queryFn: () => api.get<Customer[]>('/api/customers'),
+  });
+  /* The catalogue is the one list long enough to need a searchable picker. */
+  const { data: products = [] } = useQuery({
+    queryKey: ['products', ''],
+    queryFn: () => api.get<Product[]>('/api/products'),
   });
 
   const { data: saved, isLoading } = useQuery({
@@ -104,11 +127,34 @@ export default function QcSpecModal({ product, onClose }: { product: Product; on
 
   const inherited = !!customerId && saved?.owner === 'default';
 
+  /*
+   * Fetched on the press rather than held for every product in the catalogue,
+   * and **nothing is replaced when the source has none**: silently emptying
+   * the editor would read as the copy having worked.
+   */
+  const copy = useMutation({
+    mutationFn: (id: string) => api.get<QcSpecResponse>(`/api/products/${id}/qc-params`),
+    onSuccess: (res, id) => {
+      const from = products.find((pr) => String(pr.id) === id);
+      const items = res.items ?? [];
+      if (!items.length) {
+        setCopyNote(`${from?.name ?? 'That product'} has no specification to copy.`);
+        return;
+      }
+      // The id is the source row's, so it is dropped: these are new rows on
+      // this product until Save writes them.
+      setLines(items.map(({ name, kind, section, ranged, unit, min_value, max_value, notes }) => ({
+        name, kind, section, ranged, unit, min_value, max_value, notes,
+      })));
+      setCopyNote(`${items.length} characteristic${res.items.length === 1 ? '' : 's'} copied from ${from?.name ?? 'that product'} — correct them and Save.`);
+    },
+  });
+
   const set = (i: number, patch: Partial<QcParam>) =>
     setLines((prev) => prev.map((l, idx) => (idx === i ? { ...l, ...patch } : l)));
 
   return (
-    <Modal title={`Quality checks — ${product.name}`} onClose={onClose} wide>
+    <Modal title={`Quality specification — ${product.name}`} onClose={onClose} wide>
       <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 ring-1 ring-slate-200">
         <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Specification for</span>
         <Select
@@ -131,6 +177,35 @@ export default function QcSpecModal({ product, onClose }: { product: Product; on
         )}
       </div>
 
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Copy from</span>
+        <SearchSelect
+          className="w-72"
+          value={copyFrom}
+          placeholder="Another product…"
+          title="Fills the rows below with that product's default specification, for you to correct"
+          onChange={(v) => {
+            setCopyFrom(v);
+            setCopyNote('');
+            if (v) copy.mutate(v);
+          }}
+          options={products
+            .filter((pr) => pr.id !== product.id)
+            .map((pr) => ({
+              value: String(pr.id),
+              label: pr.name,
+              hint: [pr.color, pr.product_type].filter(Boolean).join(' · '),
+            }))}
+        />
+        {copy.isPending && <span className="text-xs text-slate-400">Reading…</span>}
+        {!!copyNote && <span className="text-xs text-slate-500">{copyNote}</span>}
+        {!copy.isPending && !copyNote && (
+          <span className="text-xs text-slate-400">
+            Replaces the rows below with that product’s default list. Nothing is saved until you press Save.
+          </span>
+        )}
+      </div>
+
       {isLoading ? (
         <EmptyState message="Loading…" />
       ) : (
@@ -138,7 +213,7 @@ export default function QcSpecModal({ product, onClose }: { product: Product; on
           <table className="w-full text-sm">
             <thead>
               <tr className={TH_CLASS}>
-                <th className="pb-2 pr-2">Check</th>
+                <th className="pb-2 pr-2">Characteristic</th>
                 <th className="w-32 pb-2 pr-2">Type</th>
                 <th className="w-36 pb-2 pr-2">Section</th>
                 <th className="w-20 pb-2 pr-2">Unit</th>
@@ -176,7 +251,7 @@ export default function QcSpecModal({ product, onClose }: { product: Product; on
                     <Select
                       value={line.section ?? ''}
                       onChange={(e) => set(i, { section: e.target.value as QcParam['section'] })}
-                      title="Which block of the certificate this check prints under"
+                      title="Which block of the certificate this characteristic prints under"
                     >
                       {SECTIONS.map((x) => <option key={x.value} value={x.value}>{x.label}</option>)}
                     </Select>
@@ -213,7 +288,7 @@ export default function QcSpecModal({ product, onClose }: { product: Product; on
                     <button
                       onClick={() => setLines((prev) => prev.filter((_, idx) => idx !== i))}
                       className="px-1 text-slate-400 hover:text-red-600"
-                      title="Remove this check"
+                      title="Remove this characteristic"
                     >✕</button>
                   </td>
                 </tr>
@@ -225,12 +300,12 @@ export default function QcSpecModal({ product, onClose }: { product: Product; on
             A <span className="font-medium">min–max</span> characteristic is recorded as the lowest and
             highest piece seen in the batch, and passes when both ends clear the tolerance.{' '}
             Leave Min or Max empty for a one-sided tolerance — a wall thickness can have a floor and no
-            ceiling. A <b>Pass / fail</b> check is the eye: colour match, flash, short shot.
+            ceiling. A <b>Pass / fail</b> characteristic is the eye: colour match, flash, short shot.
           </p>
 
           <div className="mt-3 flex items-center justify-between">
             <Button variant="secondary" onClick={() => setLines((prev) => [...prev, emptyParam()])}>
-              + Add check
+              + Add characteristic
             </Button>
             <div className="flex items-center gap-2">
               <Button variant="ghost" onClick={onClose}>Cancel</Button>
@@ -239,7 +314,7 @@ export default function QcSpecModal({ product, onClose }: { product: Product; on
               </Button>
             </div>
           </div>
-          <ErrorText error={save.error} />
+          <ErrorText error={save.error || copy.error} />
           <p className="mt-2 text-xs text-slate-400">
             Changing this leaves inspections already recorded exactly as they were — each one keeps the
             tolerance it was judged against.

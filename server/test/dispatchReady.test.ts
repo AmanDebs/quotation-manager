@@ -723,3 +723,72 @@ describe('which refusal is holding the line, on the Quality queue', () => {
     assert.equal(row.held, null);
   });
 });
+
+describe('what one press can certify, on the Quality queue', () => {
+  /*
+   * `unlotted` is the figure the queue's **Certify** button is drawn from
+   * (2026-10-27). `POST /:id/certify` sweeps the shifts nobody has batched and
+   * refuses a job where there are none, so a row may only offer the press
+   * where that figure is above zero — otherwise the button exists solely to
+   * produce a 409, which is the form-offers-what-the-API-refuses trap this
+   * codebase records twice.
+   *
+   * Most of these therefore assert the **zero** cases: it is offering the
+   * press wrongly that costs something, not withholding it.
+   */
+  const batchOn = (jobId: number) => Number(db.prepare(
+    "INSERT INTO batches (number, work_order_id, date) VALUES (?, ?, '2026-10-02')"
+  ).run(`B/T/${++seq}`, jobId).lastInsertRowid);
+
+  test('output nobody has batched is what one press would sweep', () => {
+    const pr = makeProduct({ spec: true });
+    const o = makeOrder([{ productId: pr }]);
+    book(makeJob(o, 0, pr), 12000);
+    assert.deepEqual(forOrder(o)[0].jobs.map((j) => j.unlotted), [12000]);
+  });
+
+  test('a job whose every shift is already batched offers nothing to sweep', () => {
+    const pr = makeProduct({ spec: true });
+    const o = makeOrder([{ productId: pr }]);
+    const j = makeJob(o, 0, pr);
+    book(j, 12000, batchOn(j));
+    assert.deepEqual(forOrder(o)[0].jobs.map((j2) => j2.unlotted), [0],
+      'the press would be refused, so the queue must not offer it');
+  });
+
+  test('...and a job batched in part offers only the part that is not', () => {
+    const pr = makeProduct({ spec: true });
+    const o = makeOrder([{ productId: pr }]);
+    const j = makeJob(o, 0, pr);
+    book(j, 5000, batchOn(j));
+    book(j, 3000);
+    assert.deepEqual(forOrder(o)[0].jobs.map((j2) => j2.unlotted), [3000],
+      'part-certifying is the case the one press deliberately keeps');
+  });
+
+  test('a job with nothing booked at all offers nothing', () => {
+    const pr = makeProduct({ spec: true });
+    const o = makeOrder([{ productId: pr }, { productId: pr }]);
+    const first = makeJob(o, 0, pr);
+    book(first, 9000);
+    makeJob(o, 1, pr);
+    const rows = forOrder(o);
+    assert.deepEqual(rows.find((r) => r.order_line === 0)!.jobs.map((j) => j.unlotted), [9000]);
+    // Line 1 has made nothing, so it is not on the queue at all — which is
+    // `readyLines`' own rule and the reason the figure is never asked for it.
+    assert.equal(rows.find((r) => r.order_line === 1), undefined);
+  });
+
+  test('a split run answers per job, since either may be the one to certify', () => {
+    const pr = makeProduct({ spec: true });
+    const o = makeOrder([{ productId: pr }]);
+    const a = makeJob(o, 0, pr);
+    const b = makeJob(o, 0, pr);
+    book(a, 4000);
+    book(b, 2000, batchOn(b));
+    const jobs = forOrder(o)[0].jobs;
+    assert.equal(jobs.length, 2);
+    assert.deepEqual(jobs.map((j) => j.unlotted), [4000, 0],
+      'one button, on the job that has something to sweep');
+  });
+});
