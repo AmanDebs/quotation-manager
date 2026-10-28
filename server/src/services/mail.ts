@@ -191,8 +191,14 @@ async function post(to: string[], subject: string, text: string): Promise<MailRe
   return { sent: false, reason: `${res.status} ${body.slice(0, 300)}` };
 }
 
-/** Addresses this is willing to send to: non-blank, unique, and plausible. */
-function clean(to: string[]): string[] {
+/**
+ * Addresses this is willing to send to: non-blank, unique, and plausible.
+ *
+ * Exported since 2026-10-28 so `queueMail` can apply it at **queue** time: a
+ * malformed address that reached the outbox would become a row nobody could
+ * ever send, retried until it gave up.
+ */
+export function cleanAddresses(to: string[]): string[] {
   const seen = new Set<string>();
   for (const raw of to) {
     const a = String(raw ?? '').trim();
@@ -217,7 +223,7 @@ export async function sendMail(
 ): Promise<MailResult> {
   const problem = mailProblem();
   if (problem) return { sent: false, reason: problem };
-  const addresses = clean(to);
+  const addresses = cleanAddresses(to);
   if (!addresses.length) return { sent: false, reason: 'Nobody to send to.' };
   try {
     const out = await post(addresses, subject, text);

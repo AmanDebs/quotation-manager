@@ -5,6 +5,7 @@ import { listSeries, setNextNumber } from '../services/numbering.js';
 import { requirePermission } from '../middleware/auth.js';
 import { record } from '../services/audit.js';
 import { mailConfigured, mailProblem, mailProvider, mailVerifies, sendMail, appLink } from '../services/mail.js';
+import { outboxStatus } from '../services/mailShifts.js';
 import type { AuthedRequest } from '../middleware/auth.js';
 
 export const settingsRouter = Router();
@@ -108,6 +109,11 @@ settingsRouter.get('/email', requirePermission('settings', 'full'), (_req, res) 
     problem: mailProblem(),
     // Without this an email can describe a document and not link to it.
     app_url: appLink('/'),
+    // Notifications are batched into shifts since 2026-10-28, so the one
+    // thing the card could not say before is *when* — and, more usefully,
+    // whether anything is stuck in the queue. A digest a provider has refused
+    // five times is exactly the silence this card exists to make visible.
+    outbox: outboxStatus(),
   });
 });
 
@@ -127,6 +133,10 @@ settingsRouter.post('/email/test', async (req: AuthedRequest, res) => {
       'This is the test message from Settings.',
       '',
       'If you are reading it, approval notifications will reach this address.',
+      '',
+      'Notifications themselves are batched and go out at the shift times on',
+      'the Settings page. This test is sent immediately, so that a setting can',
+      'be proved without waiting for one.',
     ].join('\n'),
   );
   res.json({ ...out, to });

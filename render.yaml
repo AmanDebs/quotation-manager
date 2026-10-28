@@ -24,11 +24,16 @@ services:
         generateValue: true # generated once and kept; sessions survive redeploys
       - key: NODE_VERSION
         value: "24"
-      # Approval notifications by email. Leave these unset and the app behaves
-      # exactly as it did — nothing is sent and nothing fails; the sidebar
-      # badges are still right whenever somebody opens the page. Set the key,
-      # the sender and the provider to switch it on, then press "Send a test
-      # email to me" in Settings.
+      # Notifications by email. Leave these unset and the app behaves exactly
+      # as it did — nothing is sent and nothing fails; the sidebar badges are
+      # still right whenever somebody opens the page. Set the key, the sender
+      # and the provider to switch it on, then press "Send a test email to me"
+      # in Settings, which sends immediately rather than waiting for a shift.
+      #
+      # Notifications themselves are batched into two shifts a day (11:00 and
+      # 17:00, Asia/Kolkata). There is no variable for that: the times are
+      # constants in services/mailShifts.ts, since a second place to set them
+      # is a second thing that can disagree with what the desk expects.
       - key: MAIL_API_KEY
         sync: false # the provider key — set it in the dashboard, never here
       - key: MAIL_FROM

@@ -326,6 +326,7 @@ function EmailCard() {
     queryFn: () => api.get<{
       configured: boolean; from: string; app_url: string;
       provider: string; verifies: string; problem: string;
+      outbox: { shifts: string[]; waiting: number; next: string; stuck: number; last_sent: string };
     }>('/api/settings/email'),
   });
   const send = useMutation({
@@ -338,7 +339,8 @@ function EmailCard() {
         <>
           <p className="text-sm text-slate-600">
             On. A document that lands in the approvals queue emails everyone who can approve it,
-            and the person who raised it hears back when it is approved or rejected.
+            the person who raised it hears back when it is approved or rejected, and each desk
+            is told when it is their turn.
           </p>
           <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
             <dt className="text-slate-400">Sent from</dt>
@@ -353,6 +355,31 @@ function EmailCard() {
             </dd>
             <dt className="text-slate-400">Links point at</dt>
             <dd className="text-slate-700">{data.app_url || <span className="text-amber-700">nowhere — set APP_URL, or emails cannot link to the document</span>}</dd>
+            {/* The one thing the card could not say before notifications were
+                batched: when they leave, and whether anything is stuck. A
+                digest the provider has refused is exactly the silence this
+                card exists to make visible. */}
+            <dt className="text-slate-400">Sent at</dt>
+            <dd className="text-slate-700">
+              {data.outbox.shifts.join(' and ')} <span className="text-slate-400">IST, one message per person</span>
+            </dd>
+            <dt className="text-slate-400">Waiting</dt>
+            <dd className="text-slate-700">
+              {data.outbox.waiting === 0
+                ? <span className="text-slate-400">nothing queued</span>
+                : <>{data.outbox.waiting} for the {data.outbox.next} send</>}
+              {data.outbox.last_sent && (
+                <span className="text-slate-400"> · last sent {data.outbox.last_sent}</span>
+              )}
+            </dd>
+            {data.outbox.stuck > 0 && (
+              <>
+                <dt className="text-rose-700">Not sent</dt>
+                <dd className="text-rose-700">
+                  {data.outbox.stuck} the provider refused — the test button below prints why
+                </dd>
+              </>
+            )}
           </dl>
         </>
       ) : (
@@ -371,7 +398,9 @@ function EmailCard() {
         </>
       )}
       {/* The whole point: a button that distinguishes "not set up" from "set up
-          and refused by the provider", which otherwise look the same. */}
+          and refused by the provider", which otherwise look the same — so it
+          is deliberately **not** batched: a test that arrived at five o'clock
+          would prove nothing at the moment somebody needs it proved. */}
       <div className="mt-4 flex items-center gap-3">
         <Button variant="secondary" disabled={send.isPending} onClick={() => send.mutate()}>
           {send.isPending ? 'Sending…' : 'Send a test email to me'}

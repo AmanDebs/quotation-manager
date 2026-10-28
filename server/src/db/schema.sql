@@ -1678,3 +1678,53 @@ CREATE TABLE IF NOT EXISTS audit_log (
 
 CREATE INDEX IF NOT EXISTS idx_audit_entity ON audit_log(entity, entity_id, id);
 CREATE INDEX IF NOT EXISTS idx_audit_at ON audit_log(id DESC);
+
+
+-- Notifications waiting for their shift (2026-10-28, the client: *"I want
+-- Batch processing of emails : Two Shifts — 11am and 5pm"*).
+--
+-- Every notification used to leave the moment the thing happened, so a busy
+-- morning was a dozen separate emails about one order. They are written here
+-- instead and go out together twice a day, one message per person per shift.
+--
+-- **A row is an event, not a state.** The body is composed at the moment it
+-- happens — "submitted by X at 10:42", "released, and these lines are held" —
+-- which is exactly what a digest should carry and exactly what could not be
+-- re-derived at 17:00, a rejection's reason having no current state to read
+-- it back from. The app's own queues and badges are the live answer; this is
+-- the record of what happened since the last send.
+--
+-- `due_at` is **stored rather than derived**, unlike almost everything else
+-- here, and earns it the way `batches.coa_no` and `fg_adjustments` do: it is
+-- a commitment made when the row is written — *this goes out at 17:00* — so
+-- changing the shift times later cannot silently re-date a message already
+-- queued under the old ones. It is also what makes catching up after a
+-- restart one indexed comparison rather than a replay of the clock rule.
+--
+-- Times are UTC text like `audit_log.at`, so `due_at <= datetime('now')` is
+-- the whole of the pending test.
+CREATE TABLE IF NOT EXISTS mail_outbox (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  -- One row per recipient, so a failure to one address cannot lose the others
+  -- and each person's digest is grouped from their own rows.
+  to_email TEXT NOT NULL,
+  subject TEXT NOT NULL,
+  body TEXT NOT NULL,
+  -- Which permission put this in front of them, printed once at the foot of
+  -- the digest rather than once per message.
+  because TEXT NOT NULL DEFAULT '',
+  queued_at TEXT NOT NULL DEFAULT (datetime('now')),
+  due_at TEXT NOT NULL,
+  -- Blank until it has gone. Kept afterwards for a month so the Settings card
+  -- can say when the last shift ran, then pruned.
+  sent_at TEXT NOT NULL DEFAULT '',
+  -- A provider that refuses is retried at the next tick and given up on after
+  -- a few, rather than hammered every five minutes for ever. The row then
+  -- stays unsent with its reason, which the Settings card counts: a
+  -- notification that silently never arrives is the failure this whole
+  -- feature exists to end.
+  attempts INTEGER NOT NULL DEFAULT 0,
+  last_error TEXT NOT NULL DEFAULT ''
+);
+
+CREATE INDEX IF NOT EXISTS idx_mail_outbox_due ON mail_outbox(sent_at, due_at);

@@ -1,7 +1,8 @@
 import { db } from '../db/connection.js';
 import { can } from './accessPolicy.js';
 import { userSeesCustomer } from '../middleware/scope.js';
-import { sendMail, mailConfigured } from './mail.js';
+import { mailConfigured } from './mail.js';
+import { queueMail } from './mailShifts.js';
 import type { Fn } from './permissions.js';
 
 /**
@@ -87,11 +88,29 @@ export function narrowToSpoc(people: Recipient[], spoc: string | null | undefine
 }
 
 /**
- * `void` — fired and forgotten, the way the audit middleware records after the
- * response: a provider being down loses a notification, never a sales order.
- * Silent when nothing is configured, which is what keeps the suite offline.
+ * Hand a notification to the queue, and never let it fail a save.
+ *
+ * **It used to send.** Since 2026-10-28 it writes the message to
+ * `mail_outbox` and `mailShifts.ts` sends it at 11:00 or 17:00, which is the
+ * client's own instruction (*"Batch processing of emails : Two Shifts"*) —
+ * every notification in this app comes through here, so that is one line
+ * rather than six hooks to remember. The callers are unchanged in every other
+ * respect: they still compose the message where the fact is known, which is
+ * what lets a digest carry a rejection's reason six hours later.
+ *
+ * Silent when nothing is configured, which is what keeps the suite offline
+ * and leaves an unconfigured deployment with an empty table rather than a
+ * growing one. Never throws: a queue write failing must lose a notification,
+ * never a sales order — the audit middleware's own shape.
+ *
+ * `because` names the permission that put this in front of them, printed once
+ * at the foot of the digest rather than once per message.
  */
-export function fire(to: string[], subject: string, body: string): void {
+export function fire(to: string[], subject: string, body: string, because = ''): void {
   if (!to.length || !mailConfigured()) return;
-  void sendMail(to, subject, body);
+  try {
+    queueMail(to, subject, body, because);
+  } catch (err) {
+    console.error('[mail] could not queue:', err);
+  }
 }

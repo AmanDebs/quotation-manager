@@ -11,6 +11,7 @@ import { backupRouter } from './routes/backup.js';
 import { startBackupSchedule } from './services/backup.js';
 import { startExpirySchedule } from './services/quotationExpiry.js';
 import { raiseJobsForOpenOrders } from './services/orderJobs.js';
+import { startMailShiftSchedule } from './services/mailShifts.js';
 import { authRouter } from './routes/auth.js';
 import { usersRouter } from './routes/users.js';
 import { permissionsRouter } from './routes/permissions.js';
@@ -202,6 +203,11 @@ app.listen(PORT, () => {
   // anybody is logged in — so this runs on boot as well as daily, since the
   // app may have been down over the day that mattered.
   startExpirySchedule();
+  // Notifications are batched into two shifts (11:00 and 17:00, Asia/Kolkata)
+  // rather than leaving as each thing happens. Each queued message carries its
+  // own due time, so this runs on boot too: a redeploy at 11:30 sends the
+  // 11:00 batch a few minutes late rather than losing it until five.
+  startMailShiftSchedule();
   // Orders booked before the order raised its own jobs, and still open, get
   // theirs now — there is no button left to raise them with. Idempotent: an
   // order with any job is left alone.

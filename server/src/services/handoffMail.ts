@@ -22,7 +22,9 @@ import { peopleWhoCan, narrowToSpoc, fire } from './recipients.js';
  * test suite or on a deployment that has not signed up for anything. And
  * nobody is told about their own action.
  *
- * **What is deliberately not here: a reminder.** This mails on the event. A
+ * **What is deliberately not here: a reminder.** This notifies on the event —
+ * batched into two shifts since 2026-10-28, which changes when a message
+ * leaves rather than what sets one off. A
  * nightly *"3 orders still unplanned"* is a scheduler with its own proof, and
  * the sidebar badges already answer that question whenever somebody opens the
  * app — which is the honest version of the same promise.
@@ -86,10 +88,8 @@ export function notifyJobsRaised(orderId: number, byId: number | null): void {
     'They have no dates yet. Set a start and finish on each and release them,',
     'which is what moves them to Scheduled.',
     ...(link ? ['', `Plan them here: ${link}`] : []),
-    '',
-    'You are receiving this because your team holds the Work Orders permission.',
   ].join('\n');
-  fire(people.map((p) => p.email), `Jobs to plan: ${order.number}`, body);
+  fire(people.map((p) => p.email), `Jobs to plan: ${order.number}`, body, 'Work Orders');
 }
 
 /**
@@ -133,10 +133,8 @@ export function notifyAwaitingRelease(
     'Nothing can be loaded until the line is released, so this is the step',
     'between the floor finishing and logistics planning a lorry.',
     ...(link ? ['', `Release it here: ${link}`] : []),
-    '',
-    'You are receiving this because your team holds the Sales Orders permission.',
   ].join('\n');
-  fire(people.map((p) => p.email), `Ready to release: ${order.number}`, body);
+  fire(people.map((p) => p.email), `Ready to release: ${order.number}`, body, 'Sales Orders');
 }
 
 /**
@@ -183,9 +181,8 @@ export function notifyReleased(
       '',
       'Next: plan the dispatch, and raise the commercial invoice and packing list.',
       ...(dispatchLink ? ['', `Ready to dispatch: ${dispatchLink}`] : []),
-      '',
-      'You are receiving this because your team holds the Dispatches permission.',
     ].join('\n'),
+    'Dispatches',
   );
 
   if (!held.length) return;
@@ -200,8 +197,8 @@ export function notifyReleased(
       '',
       ...held.map((h) => `  ${h.item}\n    ${h.reason}`),
       '',
-      ...(qcLink ? [`Record a check here: ${qcLink}`, ''] : []),
-      'You are receiving this because your team holds the Quality permission.',
+      ...(qcLink ? ['', `Record a check here: ${qcLink}`] : []),
     ].join('\n'),
+    'Quality',
   );
 }

@@ -111,10 +111,8 @@ export function notifySubmitted(table: DocTable, id: number, byId: number | null
     `Submitted by: ${doc.author_name ?? 'somebody at the desk'}`,
     '',
     link ? `Open it here: ${link}` : 'Open it from the Approvals page in the app.',
-    '',
-    'You are receiving this because your team holds the Approvals permission.',
   ].join('\n');
-  fire(people.map((p) => p.email), `Approval needed: ${noun} ${doc.number}`, body);
+  fire(people.map((p) => p.email), `Approval needed: ${noun} ${doc.number}`, body, 'Approvals');
 }
 
 /**
