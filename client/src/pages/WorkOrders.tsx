@@ -149,9 +149,17 @@ type DatePatch = Partial<Record<JobDateField, string>>;
  * are the columns that were being clipped; where it does not, the card scrolls
  * less.
  */
-const DATE_BOX = 'inline-flex h-[30px] w-[6.75rem] items-center px-2.5 tabular-nums';
-/** The native picker glyph at full strength is the loudest thing in the row. */
-const DATE_INPUT = 'w-[6.75rem] tabular-nums [&::-webkit-calendar-picker-indicator]:opacity-40 [&::-webkit-calendar-picker-indicator]:hover:opacity-70';
+const DATE_BOX = 'inline-flex h-[28px] w-[6.5rem] items-center px-2 tabular-nums';
+/*
+ * The native picker glyph at full strength is the loudest thing in the row.
+ *
+ * `[font-size:inherit]` is not decoration: `fieldClass` hard-codes `text-sm`
+ * on every `Input`, and two font-size utilities of equal specificity are
+ * settled by **stylesheet order**, not by which was written last — the trap
+ * `setsWidth()` exists for. An arbitrary *property* beats the scale outright,
+ * so the box takes the table's own size and the column can narrow with it.
+ */
+const DATE_INPUT = 'w-[6.5rem] px-2 tabular-nums [font-size:inherit] [&::-webkit-calendar-picker-indicator]:opacity-40 [&::-webkit-calendar-picker-indicator]:hover:opacity-70';
 /** A group of two date columns opens on a rule; the pair inside shares it. */
 const GROUP_EDGE = 'border-l border-slate-200';
 
@@ -755,7 +763,7 @@ export default function WorkOrdersPage() {
         {jobs.length === 0 ? (
           <EmptyState message="No work orders match. A sales order raises its jobs when it is booked." />
         ) : (
-          <table className="w-full text-sm">
+          <table className="w-full text-xs">
             <thead>
               <tr className={`${TH_CLASS} ${planning ? 'border-b-0' : ''}`}>
                 {/* Ticking is for planning, so the column is Plan's. */}
@@ -863,16 +871,16 @@ export default function WorkOrdersPage() {
               */}
               {planning && (
                 <tr className={`${CAPTION_CLASS} border-b border-slate-200 text-left font-normal text-slate-400`}>
-                  <th className={`${GROUP_EDGE} whitespace-nowrap pb-2 pl-5 pr-2`}>
+                  <th className={`${GROUP_EDGE} whitespace-nowrap pb-2 pl-3 pr-1`}>
                     <span className="flex items-center gap-0.5">Start{filterFor('planned_start')}</span>
                   </th>
-                  <th className="whitespace-nowrap pb-2 pl-2.5 pr-2">
+                  <th className="whitespace-nowrap pb-2 pl-1 pr-1">
                     <span className="flex items-center gap-0.5">Finish{filterFor('planned_end')}</span>
                   </th>
-                  <th className={`${GROUP_EDGE} whitespace-nowrap pb-2 pl-5 pr-2`}>
+                  <th className={`${GROUP_EDGE} whitespace-nowrap pb-2 pl-3 pr-1`}>
                     <span className="flex items-center gap-0.5">Start{filterFor('revised_start')}</span>
                   </th>
-                  <th className="whitespace-nowrap pb-2 pl-2.5 pr-2">
+                  <th className="whitespace-nowrap pb-2 pl-1 pr-1">
                     <span className="flex items-center gap-0.5">Finish{filterFor('revised_end')}</span>
                   </th>
                 </tr>
@@ -1031,7 +1039,7 @@ export default function WorkOrdersPage() {
                         order already fully dated does not need a control over
                         it, and one that does needs it only once.
                       */}
-                      <td className={`${GROUP_EDGE} py-1.5 pl-5 pr-3 text-xs text-slate-500`} colSpan={planning ? 4 : 2} onClick={(e) => e.stopPropagation()}>
+                      <td className={`${GROUP_EDGE} py-1.5 pl-3 pr-2 text-xs text-slate-500`} colSpan={planning ? 4 : 2} onClick={(e) => e.stopPropagation()}>
                         <span className="mr-3">{group.length} job{group.length === 1 ? '' : 's'}</span>
                         {/* When it runs, by the date that stands on each job.
                             Only while folded: open, every row says its own. */}
@@ -1164,7 +1172,7 @@ export default function WorkOrdersPage() {
                             is no header to say it — a grouped job is indented
                             under one that does. */}
                         {first && !header && (
-                          <div className="mt-px text-[11px] font-normal leading-none">
+                          <div className="mt-px text-[10px] font-normal leading-none">
                             <Link to={`/orders/${w.order_id}`} className="text-slate-400 hover:text-brand-600 hover:underline">
                               {w.order_number}
                             </Link>
@@ -1184,7 +1192,7 @@ export default function WorkOrdersPage() {
                           column, and for the same reason: a name that wraps makes
                           every row in the table two lines tall to serve one. */}
                       <td className="py-1.5 pr-3 text-slate-600">
-                        <div className="max-w-[13rem] truncate" title={w.customer_name || undefined}>
+                        <div className="max-w-[11rem] truncate" title={w.customer_name || undefined}>
                           {w.customer_name || '—'}
                         </div>
                       </td>
@@ -1204,7 +1212,7 @@ export default function WorkOrdersPage() {
                       */}
                       <td className="py-1.5 pr-3">
                         <div
-                          className="max-w-[15rem] truncate"
+                          className="max-w-[12.5rem] truncate"
                           title={(w.product_name && w.description && w.description !== w.product_name
                             ? w.description
                             : w.product_name || w.description) || undefined}
@@ -1254,7 +1262,7 @@ export default function WorkOrdersPage() {
                         return (
                           <td
                             key={field}
-                            className={`whitespace-nowrap py-1.5 pr-2 text-xs ${
+                            className={`whitespace-nowrap py-1.5 pr-1 text-xs ${
                               flag ? 'font-medium text-red-600'
                               // The date that **stands** is the one being asked about, which is
                               // not the same cell as the one that takes the answer: a job with no
@@ -1262,7 +1270,7 @@ export default function WorkOrdersPage() {
                               // box beside it.
                               : (!isEnd && !!w.due_to_start && revised === !!w.revised_start) ? 'font-medium text-red-700'
                               : 'text-slate-600'
-                            } ${isEnd ? '' : `${GROUP_EDGE} pl-2`}`}
+                            } ${isEnd ? '' : `${GROUP_EDGE} pl-1`}`}
                           >
                             <DateCell
                               value={dateValue(w, field)}
