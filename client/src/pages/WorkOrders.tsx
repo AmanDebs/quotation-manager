@@ -913,6 +913,31 @@ export default function WorkOrdersPage() {
                    stylesheet order, not by which was written last. */
                 const tint = groupIndex[i] % 2 === 1 ? 'bg-slate-50/60' : '';
                 /*
+                 * A sales order with several jobs is drawn in colour (2026-10-29,
+                 * the client: *"The sale order which has multiple work order is
+                 * not clearly visible, maybe add a colour to it"*).
+                 *
+                 * It was `slate-50` against rows tinted `slate-50/60` — measured,
+                 * **lightness 0.984 against 0.984**, which is to say no
+                 * difference at all. Grey cannot fix that: the row has to leave
+                 * the grey the rest of the table is drawn in.
+                 *
+                 * `brand-100` with a `brand-600` bar down its left edge, which
+                 * is the sidebar's own way of saying *this one is different*.
+                 * The bar is an **inset shadow on the row** rather than a
+                 * border: a border in a collapsed table is negotiated with its
+                 * neighbours and lands on 2.4px of a 3px rule, and one on the
+                 * first cell would shift that cell's content — measured, the
+                 * shadow costs **no width at all**. The member rows of an open
+                 * order carry the same bar in `brand-100`, so the whole order
+                 * reads as one block rather than a coloured row over plain ones.
+                 *
+                 * It cannot be read as *ticked*: that is `brand-50`, which is
+                 * three steps paler and is what a job row takes, never a header.
+                 */
+                const GROUP_BAR = 'shadow-[inset_3px_0_0_var(--color-brand-600)]';
+                const MEMBER_BAR = 'shadow-[inset_3px_0_0_var(--color-brand-100)]';
+                /*
                  * A folded order is its header alone. A single-job order has no
                  * header to fold and is always drawn.
                  *
@@ -944,7 +969,7 @@ export default function WorkOrdersPage() {
                     */
                     <tr
                       key={`order-${w.order_id}`}
-                      className={`cursor-pointer border-t border-slate-200 ${tint ? 'bg-slate-100/70' : 'bg-slate-50'}`}
+                      className={`cursor-pointer border-t border-slate-200 bg-brand-100 ${GROUP_BAR}`}
                       onClick={() => toggleGroup(w.order_id)}
                       title={open ? `Fold ${w.order_number} back into one row` : `Show the ${group.length} jobs on ${w.order_number}`}
                     >
@@ -1119,7 +1144,7 @@ export default function WorkOrdersPage() {
                       key={w.id}
                       className={`border-b border-slate-100 last:border-0 hover:bg-brand-50/60 ${
                         ticked.has(w.id) ? 'bg-brand-50' : tint
-                      } ${first && !header ? 'border-t border-slate-200' : ''}`}
+                      } ${first && !header ? 'border-t border-slate-200' : ''} ${grouped ? MEMBER_BAR : ''}`}
                     >
                       {planning && mayPlan && (
                         <td className="py-2 pr-2">
