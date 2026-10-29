@@ -402,6 +402,33 @@ export default function WorkOrdersPage() {
     for (const j of group) setDate(j, jobDateColumn(jobDateIsRevision(j, end), end), value);
   };
 
+  /*
+   * Two facts about the page, counted once over it.
+   *
+   * **How many jobs of each order are on it** decides whether that order gets
+   * a header row at all. Clubbing by sales order (2026-09-15) earns its place
+   * on a real group — the 5-job order says *5 jobs*, totals them and sets one
+   * pair of dates across the lot. On a group of **one** it says nothing the
+   * row below does not: the order number, then the customer the row states in
+   * its own column, the pcs and made the row states in theirs, and *Set dates
+   * for all 1*, which is what the row's own two boxes are. On the client's own
+   * screen 9 of 10 orders had one job, so **half the height of the list was a
+   * header for a group of one** — and, because a header is grey and a job row
+   * is not, the list was striped every other row and could not be read down a
+   * column. It is drawn where there is a group, and a singleton names its
+   * order under its job number instead.
+   *
+   * **Which order each row belongs to** tints alternate ones, so a group still
+   * reads as one block without a grey band between every pair of rows — the
+   * order book's own rule about a three-line order.
+   */
+  const jobsPerOrder = new Map<number, number>();
+  for (const j of jobs) jobsPerOrder.set(j.order_id, (jobsPerOrder.get(j.order_id) ?? 0) + 1);
+  const groupIndex = jobs.reduce<number[]>((acc, j, i) => {
+    acc.push(i === 0 ? 0 : acc[i - 1] + (jobs[i - 1].order_id === j.order_id ? 0 : 1));
+    return acc;
+  }, []);
+
   // Over every matching job, not the page on screen — see `summary` in
   // routes/workOrders.ts. Adding up the rows to hand would answer a different
   // question in exactly the same words.
@@ -680,9 +707,18 @@ export default function WorkOrdersPage() {
                 const groupPlanned = group.reduce((n, x) => n + (x.qty_planned || 0), 0);
                 const groupMade = group.reduce((n, x) => n + (x.progress?.produced ?? 0), 0);
                 const groupPlannable = group.filter(plannable);
+                /* A header for a group of one repeats the row under it and
+                   says nothing else — see `jobsPerOrder` above. */
+                const grouped = (jobsPerOrder.get(w.order_id) ?? 1) > 1;
+                const header = first && grouped;
+                /* Alternate orders tinted, so a group reads as one block. The
+                   ticked colour **replaces** it rather than sitting beside it:
+                   two background utilities of equal specificity are settled by
+                   stylesheet order, not by which was written last. */
+                const tint = groupIndex[i] % 2 === 1 ? 'bg-slate-50/60' : '';
                 return [
-                  first && (
-                    <tr key={`order-${w.order_id}`} className="border-t border-slate-200 bg-slate-50">
+                  header && (
+                    <tr key={`order-${w.order_id}`} className={`border-t border-slate-200 ${tint ? 'bg-slate-100/70' : 'bg-slate-50'}`}>
                       {mayPlan && (
                         <td className="py-1.5 pr-2">
                           {groupPlannable.length > 0 && (
@@ -759,7 +795,12 @@ export default function WorkOrdersPage() {
                       <td colSpan={mayLog ? 3 : 2} />
                     </tr>
                   ),
-                  <tr key={w.id} className={`border-b border-slate-100 last:border-0 hover:bg-slate-50 ${ticked.has(w.id) ? 'bg-brand-50' : ''}`}>
+                  <tr
+                    key={w.id}
+                    className={`border-b border-slate-100 last:border-0 hover:bg-brand-50/60 ${
+                      ticked.has(w.id) ? 'bg-brand-50' : tint
+                    } ${first && !header ? 'border-t border-slate-200' : ''}`}
+                  >
                     {mayPlan && (
                       <td className="py-2 pr-2">
                         <input
@@ -771,8 +812,19 @@ export default function WorkOrdersPage() {
                       </td>
                     )}
                     {/* A document number is one word; split across two lines it reads as two. */}
-                    <td className="whitespace-nowrap py-2 pl-4 pr-3 font-medium">
+                    <td className={`whitespace-nowrap py-2 pr-3 font-medium ${grouped ? 'pl-4' : ''}`}>
                       <Link to={`/work-orders/${w.id}`} className="text-brand-600 hover:underline">{w.number}</Link>
+                      {/* The one thing the header said that the row cannot:
+                          which sales order raised this job. Drawn where there
+                          is no header to say it — a grouped job is indented
+                          under one that does. */}
+                      {first && !header && (
+                        <div className="mt-px text-[11px] font-normal leading-none">
+                          <Link to={`/orders/${w.order_id}`} className="text-slate-400 hover:text-brand-600 hover:underline">
+                            {w.order_number}
+                          </Link>
+                        </div>
+                      )}
                     </td>
                     {/* When the job was raised. Already this desk's own date
                         when it arrives — the stamp is UTC and the conversion
@@ -897,13 +949,19 @@ export default function WorkOrdersPage() {
                       */}
                     <td className="whitespace-nowrap py-1.5 pr-3 text-right tabular-nums">
                       {(() => {
-                        const made = fmtQty(w.progress?.produced ?? 0);
-                        const pct = w.qty_planned > 0
-                          ? Math.round(((w.progress?.produced ?? 0) / w.qty_planned) * 100)
-                          : null;
-                        const figure = (
+                        const produced = w.progress?.produced ?? 0;
+                        /*
+                         * Nothing made yet is one quiet figure. `0 0%` says it
+                         * twice, and on the client's own book 60 of 79 jobs are
+                         * not even planned — so that was the whole column. The
+                         * percentage earns its place once there is something
+                         * for it to be a percentage of.
+                         */
+                        if (produced === 0) return <span className="text-slate-300">0</span>;
+                        const pct = w.qty_planned > 0 ? Math.round((produced / w.qty_planned) * 100) : null;
+                        return (
                           <>
-                            {made}
+                            {fmtQty(produced)}
                             {pct != null && (
                               // Past the plan is a fact worth a colour: the figure
                               // is right, and it is the plan that is now wrong.
@@ -913,7 +971,6 @@ export default function WorkOrdersPage() {
                             )}
                           </>
                         );
-                        return figure;
                       })()}
                     </td>
                     {/* One word on this book, so it does not wrap; a job whose
