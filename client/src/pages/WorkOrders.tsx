@@ -994,12 +994,25 @@ export default function WorkOrdersPage() {
                       </td>
                       <td className={`${GROUP_EDGE} py-1.5 pl-3 pr-3 text-right text-xs tabular-nums text-slate-500`}>{fmtQty(groupPlanned)}</td>
                       <td className="py-1.5 pr-3 text-right text-xs tabular-nums text-slate-500">{fmtQty(groupMade)}</td>
-                      {/* SPOC and the output button are the row's own — a
-                          shift is booked against a job, and an order is not a
-                          job. Status is the one of the three an order can
-                          answer for, so a folded header answers it: the mix,
-                          commonest first, in the pills the rows would wear. */}
-                      <td colSpan={mayLog ? 3 : 2} className="py-1.5 pr-3">
+                      {/*
+                        **SPOC is the order's, not the job's.** It is
+                        `orders.spoc` read off the join, so every job under this
+                        header carries the same value and a folded row can state
+                        it rather than losing it — which is what it did when
+                        this cell was inside the status mix's span, on the
+                        reasoning that SPOC and the output button were both the
+                        row's own. The button is; this is not.
+                      */}
+                      <td className="whitespace-nowrap py-1.5 pr-3 text-slate-600">
+                        {folded && (w.spoc || <span className="text-slate-300">—</span>)}
+                      </td>
+                      {/* The output button is the row's own — a shift is booked
+                          against a job, and an order is not a job. Status an
+                          order can answer for, so a folded header answers it:
+                          the mix, commonest first, in the pills its rows wear.
+                          Spanning Status and the button puts the pills under
+                          the Status heading, where the rows' own pills are. */}
+                      <td colSpan={mayLog ? 2 : 1} className="py-1.5 pr-3">
                         {mix.length > 0 && (
                           <span
                             className="flex flex-wrap items-center gap-1"
