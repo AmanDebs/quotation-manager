@@ -3,8 +3,9 @@ import { Link } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { WorkOrder, WorkOrderStatus } from '../types';
-import { PageHeader, Card, Button, EmptyState, ErrorText, ExportTabs, Input, Pagination, Select, CAPTION_CLASS, TH_CLASS } from '../components/ui';
+import { PageHeader, Card, Button, EmptyState, ErrorText, ExportTabs, Input, Pagination, SegmentedTabs, Select, CAPTION_CLASS, TH_CLASS } from '../components/ui';
 import { useCompanies } from '../components/CompanySelect';
+import { JobDateCell } from './Orders';
 import { Icon } from '../components/icons';
 import { ColumnFilter, FilteredByStrip } from '../components/ColumnFilter';
 import { useColumnFilters, type ColumnFilterSpec } from '../lib/useColumnFilters';
@@ -315,7 +316,7 @@ export default function WorkOrdersPage() {
    * them by name anyway, and a box that cannot be ticked says so sooner.
    */
   const [ticked, setTicked] = useState<Set<number>>(new Set());
-  const [planning, setPlanning] = useState(false);
+  const [planModal, setPlanModal] = useState(false);
   /*
    * The planning grid (2026-09-29, the client: *"I can record all the dates in
    * a single page"*). `Plan jobs…` beside it writes **one** date across a
@@ -351,6 +352,31 @@ export default function WorkOrdersPage() {
    * Keyed by order id and never by index, `Quotations.tsx`'s rule, so
    * filtering the list cannot open the wrong one.
    */
+  /*
+   * Two views over one list (2026-10-29, the client, a third time on this
+   * page: *"make it more user friendly and increase its readibility"*).
+   *
+   * **The page was doing two jobs at once and paying fourteen columns for
+   * it** — filling in dates for the 65 jobs nobody has planned, and watching
+   * what is running. Measured at 1680 the width was already fully committed:
+   * the four date columns alone were 432px, 31% of the table, and Customer
+   * was truncated on six of eleven rows with nothing left to give it. Nothing
+   * could be freed by rearranging, so readability had to come from drawing
+   * **fewer** columns — and which ones depends on which of the two jobs you
+   * are doing, which is the order book's own answer to the same problem.
+   *
+   * **Plan** drops Date raised, Made, SPOC and the output button and keeps all
+   * four date cells, which are what you came to type into. **Progress** drops
+   * the tick and the editable grid and shows the date that **stands** as one
+   * pair with the slip under it — the order book's `JobDateCell`, imported
+   * rather than copied. Nothing anybody asked for has left the page: every
+   * column lives in one view or the other.
+   *
+   * Plan is the default because the book is 65 unplanned of 84, and the view
+   * is in the URL so a narrowed list can still be linked to whole.
+   */
+  const [view, setView] = useUrlFilter('view');
+  const planning = view !== 'progress';
   const [expandGroups, setExpandGroups] = useState<boolean>(readExpandGroups);
   const [toggledGroups, setToggledGroups] = useState<Set<number>>(new Set());
   const dirtyIds = Object.keys(dates).map(Number);
@@ -562,6 +588,14 @@ export default function WorkOrdersPage() {
    * inline element inside a heading narrow enough to wrap, and a heading broken
    * under its own control reads as a fault rather than as a control.
    */
+  /*
+   * Plan draws a banner row over its two date pairs, so every other heading
+   * spans both rows; Progress has one pair and a single header row. Written
+   * once, because a heading left at 2 under a one-row header silently eats
+   * the row beneath it.
+   */
+  const headSpan = planning ? 2 : 1;
+
   const filterFor = (key: string, label?: string) => {
     const spec = JOB_FILTERS.find((c) => c.key === key);
     return (
@@ -586,6 +620,17 @@ export default function WorkOrdersPage() {
       />
 
       <div className="mb-3 flex flex-wrap items-center gap-3">
+        {/* What the page is for this minute. Both views read the same query,
+            so every filter survives the switch, and the strip below names any
+            set on a column the current view does not draw. */}
+        <SegmentedTabs
+          value={planning ? 'plan' : 'progress'}
+          onChange={(v) => setView(v === 'plan' ? '' : v)}
+          tabs={[
+            { key: 'plan', label: 'Plan' },
+            { key: 'progress', label: 'Progress' },
+          ]}
+        />
         <ExportTabs value={exportFilter} onChange={setExportFilter} />
         {showCompany && (
           <Select value={companyFilter} onChange={(e) => setCompanyFilter(e.target.value)} className="max-w-56">
@@ -639,7 +684,7 @@ export default function WorkOrdersPage() {
         {statusTicked.length === 0 && unplanned > 0 && (
           <button
             className="rounded-md bg-amber-50 px-2 py-1 text-xs text-amber-800 ring-1 ring-amber-200 hover:bg-amber-100"
-            onClick={() => columns.set('status', { values: ['planned'] })}
+            onClick={() => { setView(''); columns.set('status', { values: ['planned'] }); }}
             title="Show only the jobs still to plan"
           >
             {unplanned} not planned
@@ -655,7 +700,7 @@ export default function WorkOrdersPage() {
             className={`rounded-md px-2 py-1 text-xs ring-1 ${awaiting
               ? 'bg-red-100 text-red-800 ring-red-300'
               : 'bg-red-50 text-red-700 ring-red-200 hover:bg-red-100'}`}
-            onClick={() => setAwaiting(awaiting ? '' : '1')}
+            onClick={() => { if (!awaiting) setView(''); setAwaiting(awaiting ? '' : '1'); }}
             title={awaiting
               ? 'Show every job again'
               : 'Jobs whose start date has come with nobody saying whether they started — confirm, or revise the date'}
@@ -663,21 +708,21 @@ export default function WorkOrdersPage() {
             {toConfirm} to confirm
           </button>
         )}
-        {mayPlan && (
+        {planning && mayPlan && (
           <Button
             disabled={ticked.size === 0}
-            onClick={() => setPlanning(true)}
+            onClick={() => setPlanModal(true)}
             title={ticked.size ? undefined : 'Tick the jobs to plan first'}
           >
             Plan {ticked.size || ''} job{ticked.size === 1 ? '' : 's'}…
           </Button>
         )}
       </div>
-      {planning && (
+      {planModal && (
         <PlanJobsModal
           jobs={jobs.filter((w) => ticked.has(w.id))}
-          onClose={() => setPlanning(false)}
-          onPlanned={() => { setPlanning(false); setTicked(new Set()); }}
+          onClose={() => setPlanModal(false)}
+          onPlanned={() => { setPlanModal(false); setTicked(new Set()); }}
         />
       )}
       {/*
@@ -712,9 +757,10 @@ export default function WorkOrdersPage() {
         ) : (
           <table className="w-full text-sm">
             <thead>
-              <tr className={`${TH_CLASS} border-b-0`}>
-                {mayPlan && (
-                  <th className="pb-2 pr-2" rowSpan={2}>
+              <tr className={`${TH_CLASS} ${planning ? 'border-b-0' : ''}`}>
+                {/* Ticking is for planning, so the column is Plan's. */}
+                {planning && mayPlan && (
+                  <th className="pb-2 pr-2" rowSpan={headSpan}>
                     <input
                       type="checkbox"
                       title="Tick every job on this page that can be planned"
@@ -727,7 +773,7 @@ export default function WorkOrdersPage() {
                     />
                   </th>
                 )}
-                <th className="whitespace-nowrap pb-2 pr-3" rowSpan={2}>
+                <th className="whitespace-nowrap pb-2 pr-3" rowSpan={headSpan}>
                   <span className="flex items-center gap-0.5">Job{filterFor('job')}</span>
                 </th>
                 {/* Who it is for. The group header above each run names the
@@ -738,16 +784,20 @@ export default function WorkOrdersPage() {
                 {/* When the job was raised, beside the number that names it
                     — where the sales order book puts its own Date, which is
                     the list this one is read next to. */}
-                <th className="whitespace-nowrap pb-2 pr-3" rowSpan={2}>
-                  <span className="flex items-center gap-0.5">Date{filterFor('created')}</span>
-                </th>
-                <th className="whitespace-nowrap pb-2 pr-3" rowSpan={2}>
+                {/* The day the job was raised is a fact about the record
+                    rather than about planning it, so it rides Progress. */}
+                {!planning && (
+                  <th className="whitespace-nowrap pb-2 pr-3" rowSpan={headSpan}>
+                    <span className="flex items-center gap-0.5">Date{filterFor('created')}</span>
+                  </th>
+                )}
+                <th className="whitespace-nowrap pb-2 pr-3" rowSpan={headSpan}>
                   <span className="flex items-center gap-0.5">Customer{filterFor('customer')}</span>
                 </th>
-                <th className="whitespace-nowrap pb-2 pr-3" rowSpan={2}>
+                <th className="whitespace-nowrap pb-2 pr-3" rowSpan={headSpan}>
                   <span className="flex items-center gap-0.5">Item{filterFor('item')}</span>
                 </th>
-                <th className="whitespace-nowrap pb-2 pr-3" rowSpan={2}>
+                <th className="whitespace-nowrap pb-2 pr-3" rowSpan={headSpan}>
                   <span className="flex items-center gap-0.5">Colour{filterFor('color')}</span>
                 </th>
                 {/*
@@ -759,26 +809,51 @@ export default function WorkOrdersPage() {
                   promised, and by how much it has moved. The original was on
                   hover, which is not somewhere a column can be read from.
                 */}
-                <th className={`${GROUP_EDGE} pb-1 pl-3 pr-3`} colSpan={2}>Planned</th>
-                <th className={`${GROUP_EDGE} pb-1 pl-3 pr-3`} colSpan={2}>Revised</th>
-                <th className={`${GROUP_EDGE} whitespace-nowrap pb-2 pl-3 pr-3 text-right`} rowSpan={2}>
+                {planning ? (
+                  <>
+                    <th className={`${GROUP_EDGE} pb-1 pl-3 pr-3`} colSpan={2}>Planned</th>
+                    <th className={`${GROUP_EDGE} pb-1 pl-3 pr-3`} colSpan={2}>Revised</th>
+                  </>
+                ) : (
+                  /*
+                    One pair, and it is the date that **stands** — the revised
+                    one where set, else the planned one — with the slip under
+                    it where it has moved. Watching asks *when does this run
+                    and is it late*, which is one date, not four.
+                    **No funnel on these two**: the stored columns are
+                    `planned_*` and `revised_*` and this is derived from both,
+                    so a tick list headed *Start* that filtered the planned
+                    column would be wrong on every revised job. The four date
+                    filters live on Plan, where the four columns are, and the
+                    strip above names one set from here.
+                  */
+                  <>
+                    <th className={`${GROUP_EDGE} whitespace-nowrap pb-2 pl-3 pr-3`}>Start</th>
+                    <th className="whitespace-nowrap pb-2 pr-3">Finish</th>
+                  </>
+                )}
+                <th className={`${GROUP_EDGE} whitespace-nowrap pb-2 pl-3 pr-3 text-right`} rowSpan={headSpan}>
                   <span className="flex items-center justify-end gap-0.5">Pcs{filterFor('qty')}</span>
                 </th>
-                <th className="whitespace-nowrap pb-2 pr-3 text-right" rowSpan={2}>
-                  <span className="flex items-center justify-end gap-0.5">Made{filterFor('made')}</span>
-                </th>
-                {/* Who is handling the order, as the sales order book shows
-                    it — last before the pill, where that list puts it too. */}
-                <th className="whitespace-nowrap pb-2 pr-3" rowSpan={2}>
-                  <span className="flex items-center gap-0.5">SPOC{filterFor('spoc')}</span>
-                </th>
-                <th className="whitespace-nowrap pb-2 pr-3" rowSpan={2}>
+                {/* What has been booked, and who to tell about it: both are
+                    things you read rather than things you plan. */}
+                {!planning && (
+                  <th className="whitespace-nowrap pb-2 pr-3 text-right" rowSpan={headSpan}>
+                    <span className="flex items-center justify-end gap-0.5">Made{filterFor('made')}</span>
+                  </th>
+                )}
+                {!planning && (
+                  <th className="whitespace-nowrap pb-2 pr-3" rowSpan={headSpan}>
+                    <span className="flex items-center gap-0.5">SPOC{filterFor('spoc')}</span>
+                  </th>
+                )}
+                <th className="whitespace-nowrap pb-2 pr-3" rowSpan={headSpan}>
                   <span className="flex items-center gap-0.5">Status{filterFor('status')}</span>
                 </th>
                 {/* No heading: the buttons under it say what they are, and a
                     word here would only widen the column past them. It carries
                     no funnel either — an action is not a value to filter on. */}
-                {mayLog && <th className="pb-2" rowSpan={2} aria-label="Book output" />}
+                {!planning && mayLog && <th className="pb-2" rowSpan={headSpan} aria-label="Book output" />}
               </tr>
               {/*
                 The sub-row carries the rule and the banner above it carries
@@ -786,20 +861,22 @@ export default function WorkOrdersPage() {
                 left-aligned over cells whose dates are left-aligned — a banner
                 centred over its pair floats away from the column it names.
               */}
-              <tr className={`${CAPTION_CLASS} border-b border-slate-200 text-left font-normal text-slate-400`}>
-                <th className={`${GROUP_EDGE} whitespace-nowrap pb-2 pl-5 pr-2`}>
-                  <span className="flex items-center gap-0.5">Start{filterFor('planned_start')}</span>
-                </th>
-                <th className="whitespace-nowrap pb-2 pl-2.5 pr-2">
-                  <span className="flex items-center gap-0.5">Finish{filterFor('planned_end')}</span>
-                </th>
-                <th className={`${GROUP_EDGE} whitespace-nowrap pb-2 pl-5 pr-2`}>
-                  <span className="flex items-center gap-0.5">Start{filterFor('revised_start')}</span>
-                </th>
-                <th className="whitespace-nowrap pb-2 pl-2.5 pr-2">
-                  <span className="flex items-center gap-0.5">Finish{filterFor('revised_end')}</span>
-                </th>
-              </tr>
+              {planning && (
+                <tr className={`${CAPTION_CLASS} border-b border-slate-200 text-left font-normal text-slate-400`}>
+                  <th className={`${GROUP_EDGE} whitespace-nowrap pb-2 pl-5 pr-2`}>
+                    <span className="flex items-center gap-0.5">Start{filterFor('planned_start')}</span>
+                  </th>
+                  <th className="whitespace-nowrap pb-2 pl-2.5 pr-2">
+                    <span className="flex items-center gap-0.5">Finish{filterFor('planned_end')}</span>
+                  </th>
+                  <th className={`${GROUP_EDGE} whitespace-nowrap pb-2 pl-5 pr-2`}>
+                    <span className="flex items-center gap-0.5">Start{filterFor('revised_start')}</span>
+                  </th>
+                  <th className="whitespace-nowrap pb-2 pl-2.5 pr-2">
+                    <span className="flex items-center gap-0.5">Finish{filterFor('revised_end')}</span>
+                  </th>
+                </tr>
+              )}
             </thead>
             <tbody>
               {jobs.map((w, i) => {
@@ -871,7 +948,7 @@ export default function WorkOrdersPage() {
                       onClick={() => toggleGroup(w.order_id)}
                       title={open ? `Fold ${w.order_number} back into one row` : `Show the ${group.length} jobs on ${w.order_number}`}
                     >
-                      {mayPlan && (
+                      {planning && mayPlan && (
                         <td className="py-1.5 pr-2" onClick={(e) => e.stopPropagation()}>
                           {groupPlannable.length > 0 && (
                             <input
@@ -891,9 +968,9 @@ export default function WorkOrdersPage() {
                           )}
                         </td>
                       )}
-                      {/* Job, Date, Customer, Item, Colour — five since the
-                          Date column went in beside the job number. */}
-                      <td className="py-1.5 pr-3 font-semibold" colSpan={5}>
+                      {/* Job, Customer, Item and Colour — and Date raised too
+                          on Progress, which is the view that draws it. */}
+                      <td className="py-1.5 pr-3 font-semibold" colSpan={planning ? 4 : 5}>
                         <div className="flex min-w-0 items-center gap-2">
                           <Icon
                             name="chevron-right"
@@ -929,7 +1006,7 @@ export default function WorkOrdersPage() {
                         order already fully dated does not need a control over
                         it, and one that does needs it only once.
                       */}
-                      <td className={`${GROUP_EDGE} py-1.5 pl-5 pr-3 text-xs text-slate-500`} colSpan={4} onClick={(e) => e.stopPropagation()}>
+                      <td className={`${GROUP_EDGE} py-1.5 pl-5 pr-3 text-xs text-slate-500`} colSpan={planning ? 4 : 2} onClick={(e) => e.stopPropagation()}>
                         <span className="mr-3">{group.length} job{group.length === 1 ? '' : 's'}</span>
                         {/* When it runs, by the date that stands on each job.
                             Only while folded: open, every row says its own. */}
@@ -993,7 +1070,9 @@ export default function WorkOrdersPage() {
                         )}
                       </td>
                       <td className={`${GROUP_EDGE} py-1.5 pl-3 pr-3 text-right text-xs tabular-nums text-slate-500`}>{fmtQty(groupPlanned)}</td>
-                      <td className="py-1.5 pr-3 text-right text-xs tabular-nums text-slate-500">{fmtQty(groupMade)}</td>
+                      {!planning && (
+                        <td className="py-1.5 pr-3 text-right text-xs tabular-nums text-slate-500">{fmtQty(groupMade)}</td>
+                      )}
                       {/*
                         **SPOC is the order's, not the job's.** It is
                         `orders.spoc` read off the join, so every job under this
@@ -1003,16 +1082,18 @@ export default function WorkOrdersPage() {
                         reasoning that SPOC and the output button were both the
                         row's own. The button is; this is not.
                       */}
-                      <td className="whitespace-nowrap py-1.5 pr-3 text-slate-600">
-                        {folded && (w.spoc || <span className="text-slate-300">—</span>)}
-                      </td>
+                      {!planning && (
+                        <td className="whitespace-nowrap py-1.5 pr-3 text-slate-600">
+                          {folded && (w.spoc || <span className="text-slate-300">—</span>)}
+                        </td>
+                      )}
                       {/* The output button is the row's own — a shift is booked
                           against a job, and an order is not a job. Status an
                           order can answer for, so a folded header answers it:
                           the mix, commonest first, in the pills its rows wear.
                           Spanning Status and the button puts the pills under
                           the Status heading, where the rows' own pills are. */}
-                      <td colSpan={mayLog ? 2 : 1} className="py-1.5 pr-3">
+                      <td colSpan={planning ? 1 : (mayLog ? 2 : 1)} className="py-1.5 pr-3">
                         {mix.length > 0 && (
                           <span
                             className="flex flex-wrap items-center gap-1"
@@ -1040,7 +1121,7 @@ export default function WorkOrdersPage() {
                         ticked.has(w.id) ? 'bg-brand-50' : tint
                       } ${first && !header ? 'border-t border-slate-200' : ''}`}
                     >
-                      {mayPlan && (
+                      {planning && mayPlan && (
                         <td className="py-2 pr-2">
                           <input
                             type="checkbox"
@@ -1068,15 +1149,17 @@ export default function WorkOrdersPage() {
                       {/* When the job was raised. Already this desk's own date
                           when it arrives — the stamp is UTC and the conversion
                           is done beside the filter that reads it. */}
-                      <td className="whitespace-nowrap py-1.5 pr-3 text-slate-600">
-                        {w.created_date ? fmtDate(w.created_date) : <span className="text-slate-300">—</span>}
-                      </td>
+                      {!planning && (
+                        <td className="whitespace-nowrap py-1.5 pr-3 text-slate-600">
+                          {w.created_date ? fmtDate(w.created_date) : <span className="text-slate-300">—</span>}
+                        </td>
+                      )}
                       {/* One line, with the whole name on hover — the rule the
                           order book's own lines view follows about its customer
                           column, and for the same reason: a name that wraps makes
                           every row in the table two lines tall to serve one. */}
                       <td className="py-1.5 pr-3 text-slate-600">
-                        <div className="max-w-[9rem] truncate" title={w.customer_name || undefined}>
+                        <div className="max-w-[13rem] truncate" title={w.customer_name || undefined}>
                           {w.customer_name || '—'}
                         </div>
                       </td>
@@ -1096,7 +1179,7 @@ export default function WorkOrdersPage() {
                       */}
                       <td className="py-1.5 pr-3">
                         <div
-                          className="max-w-[12rem] truncate"
+                          className="max-w-[15rem] truncate"
                           title={(w.product_name && w.description && w.description !== w.product_name
                             ? w.description
                             : w.product_name || w.description) || undefined}
@@ -1132,7 +1215,7 @@ export default function WorkOrdersPage() {
                         the same shape, so a row is one height whichever of its
                         four cells happen to be editable.
                       */}
-                      {([[false, false], [false, true], [true, false], [true, true]] as const).map(([revised, isEnd]) => {
+                      {planning && ([[false, false], [false, true], [true, false], [true, true]] as const).map(([revised, isEnd]) => {
                         const field = jobDateColumn(revised, isEnd);
                         const editable = mayPlan && plannable(w) && jobDateIsRevision(w, isEnd) === revised;
                         const own = jobDateOf(w, field);
@@ -1176,6 +1259,30 @@ export default function WorkOrdersPage() {
                           </td>
                         );
                       })}
+                      {/*
+                        Watching asks *when does this run, and is it late* —
+                        which is one date, not four. The date that **stands**,
+                        with the plan it replaced and the slip in days under it
+                        where it has moved: `JobDateCell`, imported from the
+                        order book rather than copied, since that list answers
+                        the same question about the same two columns.
+                        Read-only — revising a plan is a planning act, and the
+                        four boxes that do it are one tab away.
+                      */}
+                      {!planning && (
+                        <>
+                          <td className={`${GROUP_EDGE} whitespace-nowrap py-1.5 pl-3 pr-3 text-xs`}>
+                            <JobDateCell
+                              value={w.revised_start || w.planned_start}
+                              planned={w.planned_start}
+                              overdue={false}
+                            />
+                          </td>
+                          <td className="whitespace-nowrap py-1.5 pr-3 text-xs">
+                            <JobDateCell value={standingEnd} planned={w.planned_end} overdue={late} />
+                          </td>
+                        </>
+                      )}
                       <td className={`${GROUP_EDGE} py-1.5 pl-3 pr-3 text-right tabular-nums`}>{fmtQty(w.qty_planned)}</td>
                       {/* The percentage sits beside the figure rather than under
                           it: stacked, it made every one of eighty rows two lines
@@ -1186,6 +1293,7 @@ export default function WorkOrdersPage() {
                         * its own was how this was first built; it is a column
                         * now (see `mayLog` above), so the figure is a figure.
                         */}
+                      {!planning && (
                       <td className="whitespace-nowrap py-1.5 pr-3 text-right tabular-nums">
                         {(() => {
                           const produced = w.progress?.produced ?? 0;
@@ -1212,11 +1320,14 @@ export default function WorkOrdersPage() {
                           );
                         })()}
                       </td>
+                      )}
                       {/* One word on this book, so it does not wrap; a job whose
                           order names nobody reads as an absence rather than a gap. */}
-                      <td className="whitespace-nowrap py-1.5 pr-3 text-slate-600">
-                        {w.spoc || <span className="text-slate-300">—</span>}
-                      </td>
+                      {!planning && (
+                        <td className="whitespace-nowrap py-1.5 pr-3 text-slate-600">
+                          {w.spoc || <span className="text-slate-300">—</span>}
+                        </td>
+                      )}
                       <td className="py-1.5 pr-3">
                         <span className={`inline-block whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ${workOrderStatusStyle[w.status]}`}>
                           {workOrderStatusLabel(w.status)}
@@ -1228,8 +1339,13 @@ export default function WorkOrdersPage() {
                           the answer, not a note about it. Drawn only on a job
                           that is actually due, so it is a queue that empties
                           rather than a control on every row.
+
+                          **Plan only**, because *No* opens a box that only Plan
+                          draws — on Progress it would be an answer with nowhere
+                          to land. The *to confirm* chip switches to Plan for the
+                          same reason.
                         */}
-                        {!!w.due_to_start && mayPlan && (
+                        {planning && !!w.due_to_start && mayPlan && (
                           <div className="mt-0.5 whitespace-nowrap text-xs text-red-700">
                             Started?{' '}
                             <button
@@ -1254,7 +1370,7 @@ export default function WorkOrdersPage() {
                       {/* The action, in a cell of its own. Empty on a cancelled
                           job rather than dashed: an em-dash reads as a value
                           that is absent, and there is no value here to be. */}
-                      {mayLog && (
+                      {!planning && mayLog && (
                         <td className="py-1.5 pr-3">
                           {loggable(w) && (
                             <button

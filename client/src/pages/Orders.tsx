@@ -484,7 +484,7 @@ export default function OrdersPage() {
  * The second line is drawn **only where the date has actually moved**, so an
  * unrevised book reads exactly as it did and stays one line a row.
  */
-function JobDateCell({ value, planned, overdue }: {
+export function JobDateCell({ value, planned, overdue }: {
   value: string | null;
   planned: string | null;
   overdue: boolean;
