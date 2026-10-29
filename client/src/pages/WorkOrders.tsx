@@ -1,10 +1,11 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { WorkOrder, WorkOrderStatus } from '../types';
 import { PageHeader, Card, Button, EmptyState, ErrorText, ExportTabs, Input, Pagination, Select, CAPTION_CLASS, TH_CLASS } from '../components/ui';
 import { useCompanies } from '../components/CompanySelect';
+import { Icon } from '../components/icons';
 import { ColumnFilter, FilteredByStrip } from '../components/ColumnFilter';
 import { useColumnFilters, type ColumnFilterSpec } from '../lib/useColumnFilters';
 import PlanJobsModal from '../components/PlanJobsModal';
@@ -153,6 +154,68 @@ const DATE_INPUT = 'w-[6.75rem] tabular-nums [&::-webkit-calendar-picker-indicat
 /** A group of two date columns opens on a rule; the pair inside shares it. */
 const GROUP_EDGE = 'border-l border-slate-200';
 
+/*
+ * A sales order with several jobs folds into one row (2026-10-29, the client:
+ * *"In sale order which has multiple work orders group them together, to avoid
+ * overly large pages and enhance readability"*).
+ *
+ * Removing the header from a group of **one** was the other half of this, a day
+ * earlier. What was left is the opposite case: `SO/26-27/037` has five jobs —
+ * one product, `28mm PCO 1810`, in five colours — and took six rows of a page
+ * that showed eighteen.
+ *
+ * **Whether a multi-job order starts open is a preference about this screen**,
+ * so it is remembered the way `Dashboard.tsx` remembers its Review fold and
+ * `Layout.tsx` its sidebar: `qm.<area>.<thing>`, `'1'`/`'0'`, and a `try/catch`
+ * on both sides, because a blocked or corrupt store must not take the page
+ * down with it. Nothing is stored until somebody presses the control, so the
+ * default is folded.
+ */
+const FOLD_KEY = 'qm.workorders.fold';
+function readExpandGroups(): boolean {
+  try { return localStorage.getItem(FOLD_KEY) === '0'; } catch { return false; }
+}
+
+/**
+ * What a folded order is making: the products, and the colours where there is
+ * one of them.
+ *
+ * On the client's own five-job order the **colour is the only thing telling the
+ * jobs apart**, so a folded row without it would hide exactly the point. It is
+ * clipped to one line with the whole list on hover, the rule the Item and
+ * Customer cells beside it already follow — a summary that wrapped would undo
+ * the height the fold just bought.
+ */
+function groupItems(group: WorkOrder[]): string {
+  const products = [...new Set(group.map((w) => w.product_name || w.description || '').filter(Boolean))];
+  if (!products.length) return '';
+  if (products.length > 1) return products.join(', ');
+  const colors = [...new Set(group.map((w) => w.color?.trim() || '').filter(Boolean))];
+  return colors.length ? `${products[0]} · ${colors.join(', ')}` : products[0];
+}
+
+/** The group's statuses, commonest first — *5 Not planned*, or *3 Scheduled · 2 Running*. */
+function statusMix(group: WorkOrder[]): { status: WorkOrderStatus; n: number }[] {
+  const counts = new Map<WorkOrderStatus, number>();
+  for (const w of group) counts.set(w.status, (counts.get(w.status) ?? 0) + 1);
+  return [...counts.entries()]
+    .map(([status, n]) => ({ status, n }))
+    .sort((a, b) => b.n - a.n);
+}
+
+/**
+ * Earliest start to latest finish across the group, by the date that **stands**
+ * — the revised one where set, else the planned one, which is the rule every
+ * reader of a job's date follows. ISO dates sort chronologically, so this is a
+ * sort rather than a comparison written out. Blank where no job carries one:
+ * silence is not a date.
+ */
+function dateSpan(group: WorkOrder[]): { from: string; to: string } {
+  const starts = group.map((w) => w.revised_start || w.planned_start).filter(Boolean).sort();
+  const ends = group.map((w) => w.revised_end || w.planned_end).filter(Boolean).sort();
+  return { from: starts[0] ?? '', to: ends[ends.length - 1] ?? '' };
+}
+
 /**
  * A date that is quiet until somebody means to type (2026-09-29, the client:
  * *"Is there a better way to fill in dates in this, it is not looking
@@ -279,6 +342,17 @@ export default function WorkOrdersPage() {
    */
   const [groupOpen, setGroupOpen] = useState<Set<number>>(new Set());
   const [groupDates, setGroupDates] = useState<Record<number, { start?: string; end?: string }>>({});
+  /*
+   * The fold. `groupOpen` above is **not** this — that set means *"this
+   * order's date pair is open"*, which is a different fold on the same row.
+   *
+   * `toggledGroups` holds the orders whose fold differs from the page's
+   * current default, which is what lets one set serve a default that moves.
+   * Keyed by order id and never by index, `Quotations.tsx`'s rule, so
+   * filtering the list cannot open the wrong one.
+   */
+  const [expandGroups, setExpandGroups] = useState<boolean>(readExpandGroups);
+  const [toggledGroups, setToggledGroups] = useState<Set<number>>(new Set());
   const dirtyIds = Object.keys(dates).map(Number);
   const queryClient = useQueryClient();
   const mayPlan = can('work_order', 'full');
@@ -428,6 +502,30 @@ export default function WorkOrdersPage() {
     acc.push(i === 0 ? 0 : acc[i - 1] + (jobs[i - 1].order_id === j.order_id ? 0 : 1));
     return acc;
   }, []);
+  /** How many orders on this page have anything to fold — no control otherwise. */
+  const foldable = [...jobsPerOrder.values()].filter((n) => n > 1).length;
+  /*
+   * **A list somebody is searching or filtering is one they are hunting a
+   * particular job in**, so groups open. A fold that hid the match would be
+   * the page refusing to answer what was asked — search `WO/26-27/149` and
+   * find a folded order where the job should be. *Open jobs only* is not a
+   * filter in this sense: it is the default view of a shop floor.
+   */
+  const hunting = !!q || !!awaiting || columns.filtered.length > 0;
+  const groupsOpenByDefault = expandGroups || hunting;
+  const groupIsOpen = (orderId: number) =>
+    (toggledGroups.has(orderId) ? !groupsOpenByDefault : groupsOpenByDefault);
+  const toggleGroup = (orderId: number) => setToggledGroups((prev) => {
+    const next = new Set(prev);
+    if (next.has(orderId)) next.delete(orderId); else next.add(orderId);
+    return next;
+  });
+  /*
+   * When the default flips — a filter arrives, or Expand orders is pressed —
+   * the exceptions are dropped, or an order somebody opened would silently
+   * come to mean *closed*. Guarded so an unchanged empty set is not a render.
+   */
+  useEffect(() => { setToggledGroups((prev) => (prev.size ? new Set() : prev)); }, [groupsOpenByDefault]);
 
   // Over every matching job, not the page on screen — see `summary` in
   // routes/workOrders.ts. Adding up the rows to hand would answer a different
@@ -515,6 +613,27 @@ export default function WorkOrdersPage() {
         <span className="ml-auto text-sm text-slate-500">
           {summary.jobs} job{summary.jobs === 1 ? '' : 's'} · {fmtQty(summary.made)} of {fmtQty(summary.planned)} pcs made
         </span>
+        {/*
+          The whole page at once, and **the control is the preference**: what it
+          sets is remembered, so somebody who would rather see every job opens
+          them once rather than every morning. Not drawn while hunting — the
+          groups are open because of the filter, so it would be a control that
+          appears to do nothing; the chevron on a row still folds one.
+        */}
+        {foldable > 0 && !hunting && (
+          <button
+            type="button"
+            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-slate-600 ring-1 ring-slate-200 transition-colors hover:bg-slate-50 hover:text-slate-900"
+            onClick={() => setExpandGroups((v) => {
+              try { localStorage.setItem(FOLD_KEY, v ? '1' : '0'); } catch { /* not worth failing over */ }
+              return !v;
+            })}
+            title={`${expandGroups ? 'Fold' : 'Open'} the ${foldable} sales order${foldable === 1 ? '' : 's'} on this page with more than one job — remembered for next time`}
+          >
+            <Icon name={expandGroups ? 'chevron-down' : 'chevron-right'} size={12} />
+            {expandGroups ? 'Fold orders' : 'Expand orders'}
+          </button>
+        )}
         {/* The queue: jobs the order raised that nobody has planned yet. A
             filter, not a count of its own — it links to exactly what it says. */}
         {statusTicked.length === 0 && unplanned > 0 && (
@@ -716,16 +835,53 @@ export default function WorkOrdersPage() {
                    two background utilities of equal specificity are settled by
                    stylesheet order, not by which was written last. */
                 const tint = groupIndex[i] % 2 === 1 ? 'bg-slate-50/60' : '';
+                /*
+                 * A folded order is its header alone. A single-job order has no
+                 * header to fold and is always drawn.
+                 *
+                 * The three summaries below are built only while folded, and
+                 * each lands **under the columns it summarises** — the items
+                 * under Item and Colour, the span under the date columns, the
+                 * status mix under Status. That is what makes a fold possible
+                 * with no new column and no re-spanned header.
+                 */
+                const open = !grouped || groupIsOpen(w.order_id);
+                const folded = header && !open;
+                const groupTicked = groupPlannable.filter((x) => ticked.has(x.id)).length;
+                /* What a folded row would otherwise hide: edits waiting to be
+                   saved, and a job nobody has confirmed the start of. */
+                const groupDated = group.filter((x) => dates[x.id]).length;
+                const groupDue = group.filter((x) => x.due_to_start).length;
+                const items = folded ? groupItems(group) : '';
+                const mix = folded ? statusMix(group) : [];
+                const span = folded ? dateSpan(group) : { from: '', to: '' };
                 return [
                   header && (
-                    <tr key={`order-${w.order_id}`} className={`border-t border-slate-200 ${tint ? 'bg-slate-100/70' : 'bg-slate-50'}`}>
+                    /*
+                      The whole header is the hit target, the shape the Raw
+                      Material Required rows use — a bare chevron on a row this
+                      wide is a control nobody finds. Each cell holding a
+                      control of its own stops the click, so a control added to
+                      one later is covered by forgetting rather than by
+                      remembering.
+                    */
+                    <tr
+                      key={`order-${w.order_id}`}
+                      className={`cursor-pointer border-t border-slate-200 ${tint ? 'bg-slate-100/70' : 'bg-slate-50'}`}
+                      onClick={() => toggleGroup(w.order_id)}
+                      title={open ? `Fold ${w.order_number} back into one row` : `Show the ${group.length} jobs on ${w.order_number}`}
+                    >
                       {mayPlan && (
-                        <td className="py-1.5 pr-2">
+                        <td className="py-1.5 pr-2" onClick={(e) => e.stopPropagation()}>
                           {groupPlannable.length > 0 && (
                             <input
                               type="checkbox"
                               title="Tick every job on this sales order that can be planned"
-                              checked={groupPlannable.every((x) => ticked.has(x.id))}
+                              /* Some but not all. Without this a part-ticked
+                                 order reads as untouched — already slightly
+                                 wrong, and worse once its rows are folded. */
+                              ref={(el) => { if (el) el.indeterminate = groupTicked > 0 && groupTicked < groupPlannable.length; }}
+                              checked={groupPlannable.length > 0 && groupTicked === groupPlannable.length}
                               onChange={(e) => setTicked((t) => {
                                 const next = new Set(t);
                                 for (const x of groupPlannable) { if (e.target.checked) next.add(x.id); else next.delete(x.id); }
@@ -737,9 +893,35 @@ export default function WorkOrdersPage() {
                       )}
                       {/* Job, Date, Customer, Item, Colour — five since the
                           Date column went in beside the job number. */}
-                      <td className="whitespace-nowrap py-1.5 pr-3 font-semibold" colSpan={5}>
-                        <Link to={`/orders/${w.order_id}`} className="text-brand-700 hover:underline">{w.order_number}</Link>
-                        <span className="ml-2 font-normal text-slate-600">{w.customer_name}</span>
+                      <td className="py-1.5 pr-3 font-semibold" colSpan={5}>
+                        <div className="flex min-w-0 items-center gap-2">
+                          <Icon
+                            name="chevron-right"
+                            size={12}
+                            className={`shrink-0 text-slate-400 transition-transform ${open ? 'rotate-90' : ''}`}
+                          />
+                          <Link
+                            to={`/orders/${w.order_id}`}
+                            className="shrink-0 whitespace-nowrap text-brand-700 hover:underline"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            {w.order_number}
+                          </Link>
+                          <span className="max-w-[14rem] shrink-0 truncate font-normal text-slate-600" title={w.customer_name || undefined}>
+                            {w.customer_name}
+                          </span>
+                          {/* What is being made. On a five-job order of one
+                              product the colour is the only thing telling the
+                              jobs apart, so without this the fold hides the
+                              point. Clipped with the whole list on hover — a
+                              summary that wrapped would undo the height the
+                              fold just bought. */}
+                          {!!items && (
+                            <span className="min-w-0 flex-1 truncate text-xs font-normal text-slate-500" title={items}>
+                              {items}
+                            </span>
+                          )}
+                        </div>
                       </td>
                       {/*
                         The order's own pair: two dates that fill every job under
@@ -747,8 +929,31 @@ export default function WorkOrdersPage() {
                         order already fully dated does not need a control over
                         it, and one that does needs it only once.
                       */}
-                      <td className={`${GROUP_EDGE} py-1.5 pl-5 pr-3 text-xs text-slate-500`} colSpan={4}>
+                      <td className={`${GROUP_EDGE} py-1.5 pl-5 pr-3 text-xs text-slate-500`} colSpan={4} onClick={(e) => e.stopPropagation()}>
                         <span className="mr-3">{group.length} job{group.length === 1 ? '' : 's'}</span>
+                        {/* When it runs, by the date that stands on each job.
+                            Only while folded: open, every row says its own. */}
+                        {!!(span.from || span.to) && (
+                          <span className="mr-3 whitespace-nowrap tabular-nums" title="Earliest start to latest finish across this order's jobs">
+                            {span.from ? fmtDate(span.from) : '—'}
+                            <span className="px-1 text-slate-300">→</span>
+                            {span.to ? fmtDate(span.to) : '—'}
+                          </span>
+                        )}
+                        {/* Dates typed into rows that are now folded away. The
+                            bar below counts them, so a folded order holding
+                            some has to say so — or Save would write a date
+                            from a row nobody can see. */}
+                        {folded && groupDated > 0 && (
+                          <span className="mr-3 whitespace-nowrap font-medium text-brand-700" title="Dates typed on this order and not yet saved">
+                            {groupDated} dated
+                          </span>
+                        )}
+                        {folded && groupDue > 0 && (
+                          <span className="mr-3 whitespace-nowrap font-medium text-red-700" title="Due to start with nobody saying whether it has — open the order to answer">
+                            {groupDue} to confirm
+                          </span>
+                        )}
                         {mayPlan && groupPlannable.length > 0 && (
                           groupOpen.has(w.order_id) ? (
                             <span className="inline-flex items-center gap-1 align-middle">
@@ -789,247 +994,269 @@ export default function WorkOrdersPage() {
                       </td>
                       <td className={`${GROUP_EDGE} py-1.5 pl-3 pr-3 text-right text-xs tabular-nums text-slate-500`}>{fmtQty(groupPlanned)}</td>
                       <td className="py-1.5 pr-3 text-right text-xs tabular-nums text-slate-500">{fmtQty(groupMade)}</td>
-                      {/* SPOC, Status and the output button: all the row's
-                          own, never the group's — a shift is booked against a
-                          job, and an order is not a job. */}
-                      <td colSpan={mayLog ? 3 : 2} />
-                    </tr>
-                  ),
-                  <tr
-                    key={w.id}
-                    className={`border-b border-slate-100 last:border-0 hover:bg-brand-50/60 ${
-                      ticked.has(w.id) ? 'bg-brand-50' : tint
-                    } ${first && !header ? 'border-t border-slate-200' : ''}`}
-                  >
-                    {mayPlan && (
-                      <td className="py-2 pr-2">
-                        <input
-                          type="checkbox"
-                          checked={ticked.has(w.id)}
-                          disabled={!plannable(w)}
-                          onChange={(e) => toggle(w.id, e.target.checked)}
-                        />
-                      </td>
-                    )}
-                    {/* A document number is one word; split across two lines it reads as two. */}
-                    <td className={`whitespace-nowrap py-2 pr-3 font-medium ${grouped ? 'pl-4' : ''}`}>
-                      <Link to={`/work-orders/${w.id}`} className="text-brand-600 hover:underline">{w.number}</Link>
-                      {/* The one thing the header said that the row cannot:
-                          which sales order raised this job. Drawn where there
-                          is no header to say it — a grouped job is indented
-                          under one that does. */}
-                      {first && !header && (
-                        <div className="mt-px text-[11px] font-normal leading-none">
-                          <Link to={`/orders/${w.order_id}`} className="text-slate-400 hover:text-brand-600 hover:underline">
-                            {w.order_number}
-                          </Link>
-                        </div>
-                      )}
-                    </td>
-                    {/* When the job was raised. Already this desk's own date
-                        when it arrives — the stamp is UTC and the conversion
-                        is done beside the filter that reads it. */}
-                    <td className="whitespace-nowrap py-1.5 pr-3 text-slate-600">
-                      {w.created_date ? fmtDate(w.created_date) : <span className="text-slate-300">—</span>}
-                    </td>
-                    {/* One line, with the whole name on hover — the rule the
-                        order book's own lines view follows about its customer
-                        column, and for the same reason: a name that wraps makes
-                        every row in the table two lines tall to serve one. */}
-                    <td className="py-1.5 pr-3 text-slate-600">
-                      <div className="max-w-[9rem] truncate" title={w.customer_name || undefined}>
-                        {w.customer_name || '—'}
-                      </div>
-                    </td>
-                    {/*
-                      **The catalogue product, not the line's wording** (the
-                      client, 2026-10-08: *"it should show actual product name
-                      instead of description"*) — the call the order book's
-                      lines view already made about the same two fields on
-                      2026-09-16. The floor is making a catalogue item, and the
-                      line's description is one desk's sentence about it, which
-                      on this book runs to *"29/21 Press on / CTC Two Piece -
-                      Dual…"* where the product is one name.
-                      A **custom line names no product**, so it falls back to
-                      its own wording rather than printing a dash — that line
-                      has nothing else to say what it is. The description rides
-                      the hover wherever it differs, so nothing is lost.
-                    */}
-                    <td className="py-1.5 pr-3">
-                      <div
-                        className="max-w-[12rem] truncate"
-                        title={(w.product_name && w.description && w.description !== w.product_name
-                          ? w.description
-                          : w.product_name || w.description) || undefined}
-                      >
-                        {w.product_name || w.description || '—'}
-                      </div>
-                    </td>
-                    {/* One word on this book, so it does not wrap; a blank
-                        recedes rather than reading as a fault. */}
-                    <td className="whitespace-nowrap py-1.5 pr-3 text-xs text-slate-600">
-                      {w.color?.trim() || <span className="text-slate-300">—</span>}
-                    </td>
-                    {/*
-                      Four cells, and **exactly one box per date**: `jobDateField`
-                      says which column a date may go to — planned while that
-                      column is blank, revised after — so the Planned cell holds
-                      the box until it has taken its date and settles to text
-                      afterwards, and the Revised cell is the box from then on.
-                      The rule deciding which is editable is the one the server
-                      guards with, so a box can never produce a refusal.
-
-                      A revision with no plan to revise is not offered: nothing
-                      has been promised yet, so the first date typed belongs in
-                      Planned. That also keeps the row two boxes wide however far
-                      along the job is.
-
-                      A closed job keeps plain text throughout — the server
-                      refuses to plan a completed or cancelled one by name.
-                    */}
-                    {/*
-                      One renderer for all four, which is what makes the columns
-                      line up: the box, the settled date and the em-dash occupy
-                      the same shape, so a row is one height whichever of its
-                      four cells happen to be editable.
-                    */}
-                    {([[false, false], [false, true], [true, false], [true, true]] as const).map(([revised, isEnd]) => {
-                      const field = jobDateColumn(revised, isEnd);
-                      const editable = mayPlan && plannable(w) && jobDateIsRevision(w, isEnd) === revised;
-                      const own = jobDateOf(w, field);
-                      const word = isEnd ? 'finish' : 'start';
-                      /*
-                       * Late is judged on the finish that stands and drawn on the
-                       * cell holding it, so a plan that was moved is not flagged
-                       * on a date nobody is working to.
-                       */
-                      const flag = late && isEnd && (revised ? !!w.revised_end : !w.revised_end);
-                      return (
-                        <td
-                          key={field}
-                          className={`whitespace-nowrap py-1.5 pr-2 text-xs ${
-                            flag ? 'font-medium text-red-600'
-                            // The date that **stands** is the one being asked about, which is
-                            // not the same cell as the one that takes the answer: a job with no
-                            // revision is due on its plan, and answering *No* opens the revised
-                            // box beside it.
-                            : (!isEnd && !!w.due_to_start && revised === !!w.revised_start) ? 'font-medium text-red-700'
-                            : 'text-slate-600'
-                          } ${isEnd ? '' : `${GROUP_EDGE} pl-2`}`}
-                        >
-                          <DateCell
-                            value={dateValue(w, field)}
-                            editable={editable}
-                            pending={!!dates[w.id]?.[field]}
-                            open={editing === `${w.id}:${field}`}
-                            onOpen={() => setEditing(`${w.id}:${field}`)}
-                            onClose={() => setEditing(null)}
-                            onChange={(v) => setDate(w, field, v)}
-                            title={editable
-                              ? revised
-                                ? `${w.number} — the revised ${word}; the original stays as it was recorded`
-                                : `${w.number} — the original planned ${word}, recorded once`
-                              : revised
-                                ? own ? undefined : (isEnd ? w.planned_end : w.planned_start) ? 'Not revised' : 'Nothing planned yet to revise'
-                                : own ? 'Recorded once, and what the revision beside it is measured against' : undefined}
-                          />
-                          {flag && <span className="ml-1">overdue</span>}
-                        </td>
-                      );
-                    })}
-                    <td className={`${GROUP_EDGE} py-1.5 pl-3 pr-3 text-right tabular-nums`}>{fmtQty(w.qty_planned)}</td>
-                    {/* The percentage sits beside the figure rather than under
-                        it: stacked, it made every one of eighty rows two lines
-                        tall to say something one word wide. */}
-                    {/*
-                      * The figure, and the control that moves it. Putting the
-                      * button *on* the made figure rather than in a column of
-                      * its own was how this was first built; it is a column
-                      * now (see `mayLog` above), so the figure is a figure.
-                      */}
-                    <td className="whitespace-nowrap py-1.5 pr-3 text-right tabular-nums">
-                      {(() => {
-                        const produced = w.progress?.produced ?? 0;
-                        /*
-                         * Nothing made yet is one quiet figure. `0 0%` says it
-                         * twice, and on the client's own book 60 of 79 jobs are
-                         * not even planned — so that was the whole column. The
-                         * percentage earns its place once there is something
-                         * for it to be a percentage of.
-                         */
-                        if (produced === 0) return <span className="text-slate-300">0</span>;
-                        const pct = w.qty_planned > 0 ? Math.round((produced / w.qty_planned) * 100) : null;
-                        return (
-                          <>
-                            {fmtQty(produced)}
-                            {pct != null && (
-                              // Past the plan is a fact worth a colour: the figure
-                              // is right, and it is the plan that is now wrong.
-                              <span className={`ml-1.5 text-xs ${pct > 100 ? 'font-medium text-amber-700' : 'text-slate-400'}`} title={pct > 100 ? 'More made than planned — the plan is behind the floor' : undefined}>
-                                {pct}%{pct > 100 ? ' over' : ''}
+                      {/* SPOC and the output button are the row's own — a
+                          shift is booked against a job, and an order is not a
+                          job. Status is the one of the three an order can
+                          answer for, so a folded header answers it: the mix,
+                          commonest first, in the pills the rows would wear. */}
+                      <td colSpan={mayLog ? 3 : 2} className="py-1.5 pr-3">
+                        {mix.length > 0 && (
+                          <span
+                            className="flex flex-wrap items-center gap-1"
+                            title={mix.map(({ status, n }) => `${n} ${workOrderStatusLabel(status)}`).join(' · ')}
+                          >
+                            {mix.slice(0, 2).map(({ status, n }) => (
+                              <span
+                                key={status}
+                                className={`inline-block whitespace-nowrap rounded-full px-1.5 py-0.5 text-[11px] font-medium ${workOrderStatusStyle[status]}`}
+                              >
+                                {n} {workOrderStatusLabel(status)}
                               </span>
-                            )}
-                          </>
-                        );
-                      })()}
-                    </td>
-                    {/* One word on this book, so it does not wrap; a job whose
-                        order names nobody reads as an absence rather than a gap. */}
-                    <td className="whitespace-nowrap py-1.5 pr-3 text-slate-600">
-                      {w.spoc || <span className="text-slate-300">—</span>}
-                    </td>
-                    <td className="py-1.5 pr-3">
-                      <span className={`inline-block whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ${workOrderStatusStyle[w.status]}`}>
-                        {workOrderStatusLabel(w.status)}
-                      </span>
-                      {/*
-                        The confirmation, asked where the answer changes
-                        something. Two answers and no third: *Yes* runs the job,
-                        *No* opens the revised start box beside it — which is
-                        the answer, not a note about it. Drawn only on a job
-                        that is actually due, so it is a queue that empties
-                        rather than a control on every row.
-                      */}
-                      {!!w.due_to_start && mayPlan && (
-                        <div className="mt-0.5 whitespace-nowrap text-xs text-red-700">
-                          Started?{' '}
-                          <button
-                            className="rounded px-1 font-medium underline decoration-red-300 underline-offset-2 hover:bg-red-50"
-                            disabled={confirmStarted.isPending}
-                            onClick={() => confirmStarted.mutate(w.id)}
-                            title={`Mark ${w.number} as running — it started on time`}
-                          >
-                            Yes
-                          </button>
-                          <span className="text-red-300"> · </span>
-                          <button
-                            className="rounded px-1 font-medium underline decoration-red-300 underline-offset-2 hover:bg-red-50"
-                            onClick={() => setEditing(`${w.id}:${jobDateColumn(true, false)}`)}
-                            title={`Not started — give ${w.number} a revised start date`}
-                          >
-                            No
-                          </button>
-                        </div>
-                      )}
-                    </td>
-                    {/* The action, in a cell of its own. Empty on a cancelled
-                        job rather than dashed: an em-dash reads as a value
-                        that is absent, and there is no value here to be. */}
-                    {mayLog && (
-                      <td className="py-1.5 pr-3">
-                        {loggable(w) && (
-                          <button
-                            type="button"
-                            onClick={() => setLogging(w)}
-                            title={`Book a shift against ${w.number}`}
-                            className="whitespace-nowrap rounded border border-slate-200 px-2 py-0.5 text-xs font-medium text-slate-600 transition-colors hover:border-brand-300 hover:bg-brand-50 hover:text-brand-700"
-                          >
-                            Log output
-                          </button>
+                            ))}
+                            {mix.length > 2 && <span className="text-xs text-slate-400">+{mix.length - 2}</span>}
+                          </span>
                         )}
                       </td>
-                    )}
-                  </tr>,
+                    </tr>
+                  ),
+                  /* A folded order is its header alone — see `open` above. */
+                  open && (
+                    <tr
+                      key={w.id}
+                      className={`border-b border-slate-100 last:border-0 hover:bg-brand-50/60 ${
+                        ticked.has(w.id) ? 'bg-brand-50' : tint
+                      } ${first && !header ? 'border-t border-slate-200' : ''}`}
+                    >
+                      {mayPlan && (
+                        <td className="py-2 pr-2">
+                          <input
+                            type="checkbox"
+                            checked={ticked.has(w.id)}
+                            disabled={!plannable(w)}
+                            onChange={(e) => toggle(w.id, e.target.checked)}
+                          />
+                        </td>
+                      )}
+                      {/* A document number is one word; split across two lines it reads as two. */}
+                      <td className={`whitespace-nowrap py-2 pr-3 font-medium ${grouped ? 'pl-4' : ''}`}>
+                        <Link to={`/work-orders/${w.id}`} className="text-brand-600 hover:underline">{w.number}</Link>
+                        {/* The one thing the header said that the row cannot:
+                            which sales order raised this job. Drawn where there
+                            is no header to say it — a grouped job is indented
+                            under one that does. */}
+                        {first && !header && (
+                          <div className="mt-px text-[11px] font-normal leading-none">
+                            <Link to={`/orders/${w.order_id}`} className="text-slate-400 hover:text-brand-600 hover:underline">
+                              {w.order_number}
+                            </Link>
+                          </div>
+                        )}
+                      </td>
+                      {/* When the job was raised. Already this desk's own date
+                          when it arrives — the stamp is UTC and the conversion
+                          is done beside the filter that reads it. */}
+                      <td className="whitespace-nowrap py-1.5 pr-3 text-slate-600">
+                        {w.created_date ? fmtDate(w.created_date) : <span className="text-slate-300">—</span>}
+                      </td>
+                      {/* One line, with the whole name on hover — the rule the
+                          order book's own lines view follows about its customer
+                          column, and for the same reason: a name that wraps makes
+                          every row in the table two lines tall to serve one. */}
+                      <td className="py-1.5 pr-3 text-slate-600">
+                        <div className="max-w-[9rem] truncate" title={w.customer_name || undefined}>
+                          {w.customer_name || '—'}
+                        </div>
+                      </td>
+                      {/*
+                        **The catalogue product, not the line's wording** (the
+                        client, 2026-10-08: *"it should show actual product name
+                        instead of description"*) — the call the order book's
+                        lines view already made about the same two fields on
+                        2026-09-16. The floor is making a catalogue item, and the
+                        line's description is one desk's sentence about it, which
+                        on this book runs to *"29/21 Press on / CTC Two Piece -
+                        Dual…"* where the product is one name.
+                        A **custom line names no product**, so it falls back to
+                        its own wording rather than printing a dash — that line
+                        has nothing else to say what it is. The description rides
+                        the hover wherever it differs, so nothing is lost.
+                      */}
+                      <td className="py-1.5 pr-3">
+                        <div
+                          className="max-w-[12rem] truncate"
+                          title={(w.product_name && w.description && w.description !== w.product_name
+                            ? w.description
+                            : w.product_name || w.description) || undefined}
+                        >
+                          {w.product_name || w.description || '—'}
+                        </div>
+                      </td>
+                      {/* One word on this book, so it does not wrap; a blank
+                          recedes rather than reading as a fault. */}
+                      <td className="whitespace-nowrap py-1.5 pr-3 text-xs text-slate-600">
+                        {w.color?.trim() || <span className="text-slate-300">—</span>}
+                      </td>
+                      {/*
+                        Four cells, and **exactly one box per date**: `jobDateField`
+                        says which column a date may go to — planned while that
+                        column is blank, revised after — so the Planned cell holds
+                        the box until it has taken its date and settles to text
+                        afterwards, and the Revised cell is the box from then on.
+                        The rule deciding which is editable is the one the server
+                        guards with, so a box can never produce a refusal.
+
+                        A revision with no plan to revise is not offered: nothing
+                        has been promised yet, so the first date typed belongs in
+                        Planned. That also keeps the row two boxes wide however far
+                        along the job is.
+
+                        A closed job keeps plain text throughout — the server
+                        refuses to plan a completed or cancelled one by name.
+                      */}
+                      {/*
+                        One renderer for all four, which is what makes the columns
+                        line up: the box, the settled date and the em-dash occupy
+                        the same shape, so a row is one height whichever of its
+                        four cells happen to be editable.
+                      */}
+                      {([[false, false], [false, true], [true, false], [true, true]] as const).map(([revised, isEnd]) => {
+                        const field = jobDateColumn(revised, isEnd);
+                        const editable = mayPlan && plannable(w) && jobDateIsRevision(w, isEnd) === revised;
+                        const own = jobDateOf(w, field);
+                        const word = isEnd ? 'finish' : 'start';
+                        /*
+                         * Late is judged on the finish that stands and drawn on the
+                         * cell holding it, so a plan that was moved is not flagged
+                         * on a date nobody is working to.
+                         */
+                        const flag = late && isEnd && (revised ? !!w.revised_end : !w.revised_end);
+                        return (
+                          <td
+                            key={field}
+                            className={`whitespace-nowrap py-1.5 pr-2 text-xs ${
+                              flag ? 'font-medium text-red-600'
+                              // The date that **stands** is the one being asked about, which is
+                              // not the same cell as the one that takes the answer: a job with no
+                              // revision is due on its plan, and answering *No* opens the revised
+                              // box beside it.
+                              : (!isEnd && !!w.due_to_start && revised === !!w.revised_start) ? 'font-medium text-red-700'
+                              : 'text-slate-600'
+                            } ${isEnd ? '' : `${GROUP_EDGE} pl-2`}`}
+                          >
+                            <DateCell
+                              value={dateValue(w, field)}
+                              editable={editable}
+                              pending={!!dates[w.id]?.[field]}
+                              open={editing === `${w.id}:${field}`}
+                              onOpen={() => setEditing(`${w.id}:${field}`)}
+                              onClose={() => setEditing(null)}
+                              onChange={(v) => setDate(w, field, v)}
+                              title={editable
+                                ? revised
+                                  ? `${w.number} — the revised ${word}; the original stays as it was recorded`
+                                  : `${w.number} — the original planned ${word}, recorded once`
+                                : revised
+                                  ? own ? undefined : (isEnd ? w.planned_end : w.planned_start) ? 'Not revised' : 'Nothing planned yet to revise'
+                                  : own ? 'Recorded once, and what the revision beside it is measured against' : undefined}
+                            />
+                            {flag && <span className="ml-1">overdue</span>}
+                          </td>
+                        );
+                      })}
+                      <td className={`${GROUP_EDGE} py-1.5 pl-3 pr-3 text-right tabular-nums`}>{fmtQty(w.qty_planned)}</td>
+                      {/* The percentage sits beside the figure rather than under
+                          it: stacked, it made every one of eighty rows two lines
+                          tall to say something one word wide. */}
+                      {/*
+                        * The figure, and the control that moves it. Putting the
+                        * button *on* the made figure rather than in a column of
+                        * its own was how this was first built; it is a column
+                        * now (see `mayLog` above), so the figure is a figure.
+                        */}
+                      <td className="whitespace-nowrap py-1.5 pr-3 text-right tabular-nums">
+                        {(() => {
+                          const produced = w.progress?.produced ?? 0;
+                          /*
+                           * Nothing made yet is one quiet figure. `0 0%` says it
+                           * twice, and on the client's own book 60 of 79 jobs are
+                           * not even planned — so that was the whole column. The
+                           * percentage earns its place once there is something
+                           * for it to be a percentage of.
+                           */
+                          if (produced === 0) return <span className="text-slate-300">0</span>;
+                          const pct = w.qty_planned > 0 ? Math.round((produced / w.qty_planned) * 100) : null;
+                          return (
+                            <>
+                              {fmtQty(produced)}
+                              {pct != null && (
+                                // Past the plan is a fact worth a colour: the figure
+                                // is right, and it is the plan that is now wrong.
+                                <span className={`ml-1.5 text-xs ${pct > 100 ? 'font-medium text-amber-700' : 'text-slate-400'}`} title={pct > 100 ? 'More made than planned — the plan is behind the floor' : undefined}>
+                                  {pct}%{pct > 100 ? ' over' : ''}
+                                </span>
+                              )}
+                            </>
+                          );
+                        })()}
+                      </td>
+                      {/* One word on this book, so it does not wrap; a job whose
+                          order names nobody reads as an absence rather than a gap. */}
+                      <td className="whitespace-nowrap py-1.5 pr-3 text-slate-600">
+                        {w.spoc || <span className="text-slate-300">—</span>}
+                      </td>
+                      <td className="py-1.5 pr-3">
+                        <span className={`inline-block whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ${workOrderStatusStyle[w.status]}`}>
+                          {workOrderStatusLabel(w.status)}
+                        </span>
+                        {/*
+                          The confirmation, asked where the answer changes
+                          something. Two answers and no third: *Yes* runs the job,
+                          *No* opens the revised start box beside it — which is
+                          the answer, not a note about it. Drawn only on a job
+                          that is actually due, so it is a queue that empties
+                          rather than a control on every row.
+                        */}
+                        {!!w.due_to_start && mayPlan && (
+                          <div className="mt-0.5 whitespace-nowrap text-xs text-red-700">
+                            Started?{' '}
+                            <button
+                              className="rounded px-1 font-medium underline decoration-red-300 underline-offset-2 hover:bg-red-50"
+                              disabled={confirmStarted.isPending}
+                              onClick={() => confirmStarted.mutate(w.id)}
+                              title={`Mark ${w.number} as running — it started on time`}
+                            >
+                              Yes
+                            </button>
+                            <span className="text-red-300"> · </span>
+                            <button
+                              className="rounded px-1 font-medium underline decoration-red-300 underline-offset-2 hover:bg-red-50"
+                              onClick={() => setEditing(`${w.id}:${jobDateColumn(true, false)}`)}
+                              title={`Not started — give ${w.number} a revised start date`}
+                            >
+                              No
+                            </button>
+                          </div>
+                        )}
+                      </td>
+                      {/* The action, in a cell of its own. Empty on a cancelled
+                          job rather than dashed: an em-dash reads as a value
+                          that is absent, and there is no value here to be. */}
+                      {mayLog && (
+                        <td className="py-1.5 pr-3">
+                          {loggable(w) && (
+                            <button
+                              type="button"
+                              onClick={() => setLogging(w)}
+                              title={`Book a shift against ${w.number}`}
+                              className="whitespace-nowrap rounded border border-slate-200 px-2 py-0.5 text-xs font-medium text-slate-600 transition-colors hover:border-brand-300 hover:bg-brand-50 hover:text-brand-700"
+                            >
+                              Log output
+                            </button>
+                          )}
+                        </td>
+                      )}
+                    </tr>
+                  ),
                 ];
               })}
             </tbody>
