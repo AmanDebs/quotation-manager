@@ -1,6 +1,7 @@
 import { db } from '../db/connection.js';
 import { ORDER_JOB_END } from './production.js';
 import { round2 } from './totals.js';
+import { monthsBetween } from './months.js';
 import { STATUS_SQL, statusSqlFor } from './proformaStatus.js';
 import { trackerRows, type InvoiceHead, type TrackerRow } from './invoiceTracker.js';
 
@@ -171,22 +172,12 @@ export function unscheduledReport(f: ReportFilter): Pivot {
   return buildPivot(cells, [...UNSCHEDULED_COLUMNS]);
 }
 
-/** Every `YYYY-MM` from `from` to `to`, inclusive, so an empty month still has a column. */
-export function monthsBetween(from: string, to: string): string[] {
-  const a = /^(\d{4})-(\d{2})/.exec(from);
-  const b = /^(\d{4})-(\d{2})/.exec(to);
-  if (!a || !b) return [];
-  const out: string[] = [];
-  let y = Number(a[1]); let m = Number(a[2]);
-  const endY = Number(b[1]); const endM = Number(b[2]);
-  while (y < endY || (y === endY && m <= endM)) {
-    out.push(`${y}-${String(m).padStart(2, '0')}`);
-    m += 1;
-    if (m > 12) { m = 1; y += 1; }
-    if (out.length > 600) break;
-  }
-  return out;
-}
+/**
+ * Every `YYYY-MM` from `from` to `to`, inclusive, so an empty month still has
+ * a column. It lives in `services/months.ts` since the order-book pivot wants
+ * it too, and is re-exported here because this is where its callers look.
+ */
+export { monthsBetween };
 
 /**
  * *Dispatch by month*: commercial invoices under the month of their date —

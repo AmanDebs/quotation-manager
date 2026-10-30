@@ -9,7 +9,7 @@ import { orderMaterialCost } from '../services/costing.js';
 import { orderAdvance, advanceForProforma, preDispatchDue } from '../services/receivables.js';
 import { advanceBlockError } from '../services/despatchLimits.js';
 import { withStock, orderLines, productDemand, countOrderLines, orderSearchClause,
-  lineFacet, isFilterColumn, FILTERABLE, readLineFilters,
+  lineFacet, isFilterColumn, FILTERABLE, readLineFilters, pivotOrderLines, PIVOT_OTHER,
   type Filters, type OrderLine, type ProductDemand, statusClause } from '../services/orderLines.js';
 import { buildXlsx, attachmentName, type Column } from '../services/xlsx.js';
 import { allows, requirePermission, type AuthedRequest } from '../middleware/auth.js';
@@ -391,6 +391,33 @@ ordersRouter.get('/lines', (req: AuthedRequest, res) => {
 });
 
 /**
+ * The same lines folded whichever way was asked for.
+ *
+ * Declared **above `/:id`** like every sibling of `/lines`, or Express reads
+ * "lines" as an order id. Never paged, for the reason `/by-product` gives:
+ * a total taken over one page of lines is not the total — and here the fold
+ * is what keeps the answer small.
+ *
+ * Filters come from `lineFilters` unchanged, which is the whole point of
+ * putting this on the order book rather than on the Reports page: scope, the
+ * status picker, export/domestic, the company, the search box and all
+ * fourteen column filters narrow the sheet without one control being
+ * rebuilt, so the pivot folds exactly what the list beside it shows.
+ *
+ * `rows`, `rows2`, `col` and `measure` are each allowed to be blank or
+ * unknown — the service falls back to its own default rather than throwing,
+ * so a stale link cannot produce a sheet of nothing.
+ */
+ordersRouter.get('/lines/pivot', (req: AuthedRequest, res) => {
+  const str = (k: string) => String(req.query[k] ?? '').trim();
+  res.json(pivotOrderLines(lineFilters(req), {
+    rows: [str('rows'), str('rows2')],
+    column: str('col'),
+    measure: str('measure'),
+  }));
+});
+
+/**
  * Never paged, on purpose: this folds every matching line into one row per
  * product, and a total taken over one page of lines is not the total. It is
  * bounded by the catalogue rather than by trading volume, which is what makes
@@ -496,6 +523,62 @@ ordersRouter.get('/export', (req: AuthedRequest, res) => {
   if (view === 'by-product') {
     sheet = 'By product';
     book = buildXlsx(sheet, productColumns, allows(req, 'fg') ? withStock(productDemand(lineFilters(req))) : productDemand(lineFilters(req)));
+  } else if (view === 'pivot') {
+    /*
+     * The pivot as a grid of values, which is what `pivotXlsx` already ships
+     * for the Reports sheets: `buildXlsx` writes one sheet and four cell
+     * kinds and knows nothing about Excel PivotTables, so the file is the
+     * sheet that was on screen rather than a thing to re-pivot. The download
+     * holds what the screen holds — the same `lineFilters`, and the same
+     * fold, including the capped column and its `Other`.
+     */
+    sheet = 'Sales order pivot';
+    const p = pivotOrderLines(lineFilters(req), {
+      rows: [String(req.query.rows ?? ''), String(req.query.rows2 ?? '')],
+      column: String(req.query.col ?? ''),
+      measure: String(req.query.measure ?? ''),
+    });
+    /*
+     * On screen the page labels the raw values, since it already owns those
+     * words for its own pills — but a spreadsheet has no page, and a column
+     * headed `0` says nothing. So the two dimensions whose raw value is not
+     * readable are spelled out here, `state` through the very map the lines
+     * export beside this one already uses. `status` is deliberately left raw,
+     * the call that export makes about every stored status.
+     */
+    const TRADE_LABEL: Record<string, string> = { '1': 'Export', '0': 'Domestic' };
+    const value = (dim: string, k: string) => (dim === 'state' ? STATE_LABEL[k] ?? k
+      : dim === 'trade' ? TRADE_LABEL[k] ?? k : k);
+    const label = (dim: string) => (k: string) => (k === PIVOT_OTHER ? 'Other' : value(dim, k) || '(blank)');
+    const colLabel = label(p.column);
+    const dimLabel = (k: string) => p.dimensions.find((d) => d.key === k)?.label ?? k;
+    const kind = p.money ? 'money' as const : 'number' as const;
+    const cols: Column<Record<string, unknown>>[] = [
+      ...p.rows.map((k, i) => ({ header: dimLabel(k), value: (r: Record<string, unknown>) => String(r[`k${i}`] ?? '') })),
+      // Only where it means something: a sheet of pieces adds across
+      // currencies and is drawn once.
+      ...(p.money ? [{ header: 'Currency', value: (r: Record<string, unknown>) => String(r.currency ?? '') }] : []),
+      ...p.columns.map((c) => ({
+        header: colLabel(c),
+        // Blank, never zero — a cell nothing fell into is not a nil figure.
+        value: (r: Record<string, unknown>) => (r[`c:${c}`] as number | undefined) ?? null,
+        type: kind,
+      })),
+      { header: 'Total', value: (r: Record<string, unknown>) => r.total as number, type: kind },
+    ];
+    const rows: Record<string, unknown>[] = [];
+    for (const g of p.grids) {
+      for (const r of g.rows) {
+        const row: Record<string, unknown> = { currency: g.currency, total: r.total };
+        r.keys.forEach((k, i) => { row[`k${i}`] = label(p.rows[i])(k); });
+        for (const c of p.columns) if (r.cells[c] != null) row[`c:${c}`] = r.cells[c];
+        rows.push(row);
+      }
+      const total: Record<string, unknown> = { currency: g.currency, total: g.total, k0: 'Grand Total' };
+      for (const c of p.columns) if (g.cells[c] != null) total[`c:${c}`] = g.cells[c];
+      rows.push(total);
+    }
+    book = buildXlsx(sheet, cols, rows);
   } else if (view === 'orders') {
     sheet = 'Sales orders';
     const { where, params } = orderListWhere(req);

@@ -3,6 +3,7 @@ import { fgOnHandByProduct } from './finishedGoods.js';
 import { PIECES_ORDERED_SQL } from './totals.js';
 import { searchClause } from './search.js';
 import { countOf } from './pagination.js';
+import { monthsBetween } from './months.js';
 import { round2 } from './totals.js';
 import { LIVE_OK, JOB_START, JOB_END } from './production.js';
 import {
@@ -588,4 +589,330 @@ export function productDemand(f: Filters = {}): ProductDemand[] {
     .map(({ orderIds, ...g }) => ({ ...g, orders: orderIds.size }))
     // Most still to ship first: the page exists to say what to run next.
     .sort((a, b) => b.to_ship - a.to_ship || a.description.localeCompare(b.description));
+}
+
+/* ------------------------------------------------------------------- pivot */
+
+/**
+ * The same lines folded any way somebody asks (2026-10-30, the client: *"can
+ * you create a pivot table"*).
+ *
+ * The Reports page already carried three pivots and every one of them is a
+ * fixed shape — customer and SPOC down the side, dates or months across the
+ * top. Each answers the question the Excel sheet it was copied from answered,
+ * so a new question meant a new sheet and a release. This is the shape chosen
+ * at the moment of asking: up to two dimensions down the side, one across the
+ * top, and one measure.
+ *
+ * **It folds in TypeScript over `orderLines(f)`**, which is `productDemand`'s
+ * own call one dimension up, and the reason is not laziness. `lineWhere` is
+ * private, so a `GROUP BY` over it would mean exporting the single definition
+ * of *which lines*; `FILTERABLE.balance` uses SQLite's two-argument scalar
+ * `MAX`, which silently becomes the aggregate `MAX` in an aggregate position;
+ * and a line's `state` is `stateOf` here and `LINE_STATE_SQL` there — folding
+ * in TypeScript asks `stateOf`, so a pivot cell can never disagree with the
+ * pill the list prints beside it. The cost is reading every matching line,
+ * which on the live book is eight hundred of them.
+ */
+
+/**
+ * The tail of a capped column axis. NUL cannot occur in a value read off a
+ * row, so this can never collide with a real one.
+ */
+export const PIVOT_OTHER = '\u0000';
+
+/** Row keys are joined on this for the grouping map, never shown. */
+const KEY_SEP = '\u0001';
+
+/**
+ * How many columns a sheet draws before the rest are folded into one.
+ *
+ * Without a cap, picking *Item* across the top draws a column per catalogue
+ * entry and the sheet is unreadable — the same reason `facetOver` caps a tick
+ * list. Rows are deliberately **not** capped: the fold and the filters are
+ * what keep them short, the card scrolls, and a row missing in silence is
+ * worse than a long page.
+ */
+const COLUMN_CAP = 40;
+
+/** A dimension the sheet can be grouped by. Sent with every answer. */
+export interface PivotDimension {
+  key: string;
+  label: string;
+  /**
+   * The order book's own query key a cell links through, so a figure is never
+   * a dead end — the rule the Reports sheets state about themselves. `''`
+   * where this dimension is not one of the book's filters, and the cell is
+   * then drawn as plain text rather than as a link that goes somewhere wrong.
+   */
+  param: string;
+  /** How a value becomes that query string, and how the axis is ordered. */
+  kind: 'values' | 'plain' | 'month';
+}
+
+/** A figure the cells can hold. Sent with every answer. */
+export interface PivotMeasure {
+  key: string;
+  label: string;
+  /**
+   * Money adds up within one currency and not across, so a money sheet is
+   * drawn once per currency — `receivables.ts`'s rule, which every pivot in
+   * this app already follows.
+   */
+  money: boolean;
+}
+
+interface DimSpec extends PivotDimension {
+  /** The raw value, which is what a link filters on. Labelling is the screen's. */
+  of: (l: OrderLine) => string;
+}
+
+interface MeasureSpec extends PivotMeasure {
+  of: (l: OrderLine) => number;
+  /** Counted distinct rather than summed — see `orders`. */
+  distinct?: boolean;
+}
+
+/** `2026-04-17` to `2026-04`; a blank date stays blank, never today's month. */
+const monthOf = (d: string | null | undefined) => (d && d.length >= 7 ? d.slice(0, 7) : '');
+
+/**
+ * Ten of the thirteen drill through, because the order book's own filter keys
+ * are known here. Company is deliberately absent: the control above the table
+ * already answers *which entity*, and the row carries the name with no id to
+ * filter on. Currency is the one that cannot drill, and says so.
+ */
+const DIMENSIONS: DimSpec[] = [
+  { key: 'customer', label: 'Customer', param: 'f.customer', kind: 'values', of: (l) => l.customer_name },
+  // The Item cell's own rule: the catalogue name where the line names a
+  // product, else the line's own wording.
+  { key: 'item', label: 'Item', param: 'f.item', kind: 'values', of: (l) => l.product_name || l.description },
+  { key: 'color', label: 'Colour', param: 'f.color', kind: 'values', of: (l) => l.color },
+  { key: 'spoc', label: 'SPOC', param: 'f.spoc', kind: 'values', of: (l) => l.spoc },
+  { key: 'state', label: 'State', param: 'f.state', kind: 'values', of: (l) => l.state },
+  { key: 'port', label: 'Dest Port', param: 'f.port', kind: 'values', of: (l) => l.port_of_discharge },
+  { key: 'order_number', label: 'Sales Order', param: 'f.order_number', kind: 'values', of: (l) => l.order_number },
+  { key: 'status', label: 'Order status', param: 'status', kind: 'plain', of: (l) => l.order_status },
+  // The raw key is the query value and the screen labels it, which is why this
+  // is `1`/`0` rather than the two words.
+  { key: 'trade', label: 'Export / Domestic', param: 'export', kind: 'plain', of: (l) => (Number(l.is_export) === 1 ? '1' : '0') },
+  { key: 'currency', label: 'Currency', param: '', kind: 'plain', of: (l) => l.currency },
+  { key: 'month', label: 'Order month', param: 'f.date', kind: 'month', of: (l) => monthOf(l.date) },
+  { key: 'start_month', label: 'Start month', param: 'f.start', kind: 'month', of: (l) => monthOf(l.job_start) },
+  { key: 'end_month', label: 'Finish month', param: 'f.end', kind: 'month', of: (l) => monthOf(l.job_end) },
+];
+
+/**
+ * Every measure the client asked for, and three that are refused.
+ *
+ * **Not offered, each for its own reason**, because all three look summable:
+ * `unit_price` is a rate *in whatever basis `unit` names*, so a line quoted
+ * per 1000 carries a figure a thousandfold from the same line read per piece;
+ * `billing_qty` is the raw billed quantity in that same per-line basis, and
+ * mixing the two is the defect of 2026-09-16 where a fully billed line read
+ * 0.1% shipped; and `in_stock` is the *same figure on every line of that
+ * product*, since nothing reserves stock to a line, so summing it multiplies
+ * by the line count.
+ */
+const MEASURES: MeasureSpec[] = [
+  { key: 'ordered', label: 'Pieces ordered', money: false, of: (l) => l.ordered },
+  { key: 'sent', label: 'Pieces sent', money: false, of: (l) => l.sent },
+  /*
+   * Clamped per line and only then summed. `SUM(MAX(ordered - sent, 0))` and
+   * `SUM(ordered) - SUM(sent)` part company the moment one line over-ships,
+   * and this book over-ships — the dispatch form allows ±10% on purpose. The
+   * same way round as `productDemand`'s `to_ship`.
+   */
+  { key: 'balance', label: 'Balance to send', money: false, of: (l) => Math.max(0, l.ordered - l.sent) },
+  // Already `LIVE_OK`, so a condemned lot counts for nothing here either.
+  { key: 'made', label: 'Pieces made', money: false, of: (l) => l.made },
+  { key: 'billed', label: 'Pieces billed', money: false, of: (l) => l.billed },
+  { key: 'value', label: 'Value', money: true, of: (l) => l.amount },
+  { key: 'lines', label: 'Lines', money: false, of: () => 1 },
+  /*
+   * Distinct, never a sum: an order with five lines is one order, and every
+   * per-order figure added over lines is multiplied by that order's line
+   * count. `productDemand` keeps a Set for exactly this.
+   */
+  { key: 'orders', label: 'Sales orders', money: false, of: () => 0, distinct: true },
+];
+
+/** The vocabulary, sent with the answer so the pickers hold no second copy. */
+export const PIVOT_DIMENSIONS: PivotDimension[] = DIMENSIONS.map(({ of, ...d }) => d);
+export const PIVOT_MEASURES: PivotMeasure[] = MEASURES.map(({ of, distinct, ...m }) => m);
+
+export interface OrderPivotRow {
+  /** One raw value per row dimension — what this row's links filter on. */
+  keys: string[];
+  cells: Record<string, number>;
+  /** Lines behind each cell, for the hover. */
+  counts: Record<string, number>;
+  total: number;
+  count: number;
+}
+
+/** One sheet. Money is drawn once per currency; everything else once. */
+export interface OrderPivotGrid {
+  currency: string;
+  rows: OrderPivotRow[];
+  /** The grand-total row. */
+  cells: Record<string, number>;
+  total: number;
+  count: number;
+}
+
+export interface OrderPivot {
+  /** The dimensions in force, after unknown and repeated keys are dropped. */
+  rows: string[];
+  column: string;
+  measure: string;
+  money: boolean;
+  /** The column axis, shared by every grid so the sheets can be read together. */
+  columns: string[];
+  /** Distinct column values folded into `PIVOT_OTHER`; 0 when none were. */
+  folded: number;
+  grids: OrderPivotGrid[];
+  /** How many lines the sheet was folded from. */
+  lines: number;
+  dimensions: PivotDimension[];
+  measures: PivotMeasure[];
+}
+
+interface Acc { n: number; lines: number; ids?: Set<number> }
+
+export function pivotOrderLines(
+  f: Filters = {},
+  opts: { rows?: (string | undefined)[]; column?: string; measure?: string } = {},
+): OrderPivot {
+  /*
+   * A key the build does not know is **ignored rather than trusted** — the
+   * rule the permissions loader states about a stored level — so a stale link
+   * falls back to the default instead of drawing a sheet of nothing.
+   */
+  const dims: DimSpec[] = [];
+  for (const key of opts.rows ?? []) {
+    const d = DIMENSIONS.find((x) => x.key === key);
+    // The same dimension twice down the side is noise, not a second level.
+    if (d && !dims.includes(d)) dims.push(d);
+  }
+  if (!dims.length) dims.push(DIMENSIONS[0]);
+  const col = DIMENSIONS.find((d) => d.key === opts.column);
+  const measure = MEASURES.find((m) => m.key === opts.measure) ?? MEASURES[0];
+
+  const blank = (): Acc => (measure.distinct ? { n: 0, lines: 0, ids: new Set() } : { n: 0, lines: 0 });
+  const add = (a: Acc, l: OrderLine) => {
+    a.lines += 1;
+    if (a.ids) a.ids.add(l.order_id);
+    else a.n = round2(a.n + measure.of(l));
+  };
+  const value = (a: Acc) => (a.ids ? a.ids.size : a.n);
+  const at = (m: Map<string, Acc>, k: string) => {
+    let a = m.get(k);
+    if (!a) { a = blank(); m.set(k, a); }
+    return a;
+  };
+
+  interface Row { keys: string[]; cells: Map<string, Acc>; total: Acc }
+  interface Grid { rows: Map<string, Row>; cols: Map<string, Acc>; total: Acc }
+  const grids = new Map<string, Grid>();
+  // The column axis is measured over every currency at once, so the stacked
+  // money sheets share one set of columns and can be read against each other.
+  const seen = new Map<string, Acc>();
+
+  const lines = orderLines(f);
+  for (const line of lines) {
+    // '' unless the measure is money: pieces and counts add across currencies.
+    const cur = measure.money ? line.currency : '';
+    let g = grids.get(cur);
+    if (!g) { g = { rows: new Map(), cols: new Map(), total: blank() }; grids.set(cur, g); }
+
+    const keys = dims.map((d) => d.of(line));
+    const rowKey = keys.join(KEY_SEP);
+    let row = g.rows.get(rowKey);
+    if (!row) { row = { keys, cells: new Map(), total: blank() }; g.rows.set(rowKey, row); }
+
+    add(row.total, line);
+    add(g.total, line);
+    if (col) {
+      const colKey = col.of(line);
+      add(at(row.cells, colKey), line);
+      add(at(g.cols, colKey), line);
+      add(at(seen, colKey), line);
+    }
+  }
+
+  /* --- the column axis, shared by every grid --- */
+  let columns: string[] = [];
+  let folded = 0;
+  if (col) {
+    const keys = [...seen.keys()];
+    if (col.kind === 'month') {
+      // Chronological, with every month in the span drawn even where it is
+      // empty — the sheets' own rule. A line with no date is its own column
+      // and goes last: silence is not a date.
+      const dated = keys.filter((k) => k).sort();
+      const span = dated.length ? monthsBetween(dated[0], dated[dated.length - 1]) : [];
+      // Over the cap the oldest months fold, the recent ones being what
+      // somebody is reading the sheet for.
+      const kept = span.length > COLUMN_CAP ? span.slice(span.length - COLUMN_CAP) : span;
+      folded = span.length - kept.length;
+      columns = [...(folded ? [PIVOT_OTHER] : []), ...kept, ...(keys.includes('') ? [''] : [])];
+    } else {
+      const ordered = keys.sort((a, b) => value(seen.get(b)!) - value(seen.get(a)!) || a.localeCompare(b));
+      const kept = ordered.slice(0, COLUMN_CAP);
+      folded = ordered.length - kept.length;
+      columns = [...kept, ...(folded ? [PIVOT_OTHER] : [])];
+    }
+  }
+  const keep = new Set(columns);
+
+  /** Cells by column, with anything past the cap gathered into one. */
+  const spread = (m: Map<string, Acc>) => {
+    const cells: Record<string, number> = {};
+    const counts: Record<string, number> = {};
+    let other: Acc | undefined;
+    for (const [k, a] of m) {
+      if (keep.has(k)) {
+        cells[k] = value(a);
+        counts[k] = a.lines;
+      } else {
+        if (!other) other = blank();
+        // Merged rather than re-added: a distinct count has to union the sets
+        // and a sum has to add the sums.
+        other.lines += a.lines;
+        if (other.ids && a.ids) for (const id of a.ids) other.ids.add(id);
+        else other.n = round2(other.n + a.n);
+      }
+    }
+    if (other) { cells[PIVOT_OTHER] = value(other); counts[PIVOT_OTHER] = other.lines; }
+    return { cells, counts };
+  };
+
+  const chrono = dims[0].kind === 'month';
+  const out: OrderPivotGrid[] = [...grids.entries()].map(([currency, g]) => {
+    const rows = [...g.rows.values()].map((r) => {
+      const { cells, counts } = spread(r.cells);
+      return { keys: r.keys, cells, counts, total: value(r.total), count: r.total.lines };
+    });
+    rows.sort((a, b) => (chrono
+      // A blank date last, as on the column axis.
+      ? (a.keys[0] ? 0 : 1) - (b.keys[0] ? 0 : 1) || a.keys[0].localeCompare(b.keys[0])
+      // Biggest first — `productDemand`'s rule, the sheet saying what matters.
+      : b.total - a.total || a.keys.join(KEY_SEP).localeCompare(b.keys.join(KEY_SEP))));
+    return { currency, rows, ...spread(g.cols), total: value(g.total), count: g.total.lines };
+  });
+  out.sort((a, b) => b.total - a.total || a.currency.localeCompare(b.currency));
+
+  return {
+    rows: dims.map((d) => d.key),
+    column: col?.key ?? '',
+    measure: measure.key,
+    money: measure.money,
+    columns,
+    folded,
+    grids: out,
+    lines: lines.length,
+    dimensions: PIVOT_DIMENSIONS,
+    measures: PIVOT_MEASURES,
+  };
 }

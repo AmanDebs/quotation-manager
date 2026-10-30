@@ -59,6 +59,27 @@ export function fiscalYearRange(iso = today()): { from: string; to: string } {
   return { from: `${start}-04-01`, to: `${start + 1}-03-31` };
 }
 
+/** Short month names, shared by every date label in the app. */
+export const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/**
+ * `2026-04` to `Apr 2026` — a month column's heading.
+ *
+ * Here rather than on the Reports page since the order book's pivot wants it
+ * too, and a second copy of a date format is how two sheets come to label the
+ * same month differently.
+ */
+export function monthLabel(ym: string): string {
+  const [y, m] = ym.split('-').map(Number);
+  return m >= 1 && m <= 12 ? `${MONTHS[m - 1]} ${y}` : ym;
+}
+
+/** The last day of `YYYY-MM`, for the far end of a month's own date filter. */
+export function monthEnd(ym: string): string {
+  const [y, m] = ym.split('-').map(Number);
+  return `${ym}-${String(new Date(Date.UTC(y, m, 0)).getUTCDate()).padStart(2, '0')}`;
+}
+
 export function fmtQty(n: number | null | undefined): string {
   if (n == null) return '—';
   return new Intl.NumberFormat('en-IN', { maximumFractionDigits: 3 }).format(n);

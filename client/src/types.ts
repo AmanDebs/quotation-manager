@@ -1205,6 +1205,53 @@ export interface PaymentRegisterSummary {
 }
 
 /** Raw material required by start date (`GET /api/stock/schedule`). */
+/**
+ * The order book folded whichever way was asked for
+ * (`GET /api/orders/lines/pivot`).
+ *
+ * Deliberately not `ReportPivot` beside it: that one's row is a customer and
+ * a SPOC by name, which is exactly what this is not — a row here is one raw
+ * value per dimension in force, and the screen labels them.
+ */
+export interface PivotDimension {
+  key: string;
+  label: string;
+  /** The order book's own query key a cell links through; `''` where it cannot. */
+  param: string;
+  kind: 'values' | 'plain' | 'month';
+}
+export interface PivotMeasure { key: string; label: string; money: boolean }
+export interface OrderPivotRow {
+  keys: string[];
+  cells: Record<string, number>;
+  counts: Record<string, number>;
+  total: number;
+  count: number;
+}
+export interface OrderPivotGrid {
+  /** `''` unless the measure is money, which is drawn once per currency. */
+  currency: string;
+  rows: OrderPivotRow[];
+  /** The grand-total row. */
+  cells: Record<string, number>;
+  total: number;
+  count: number;
+}
+export interface OrderPivot {
+  rows: string[];
+  column: string;
+  measure: string;
+  money: boolean;
+  columns: string[];
+  /** Column values folded into the `Other` column; 0 when none were. */
+  folded: number;
+  grids: OrderPivotGrid[];
+  lines: number;
+  /** The vocabulary, sent with the answer so the pickers hold no second copy. */
+  dimensions: PivotDimension[];
+  measures: PivotMeasure[];
+}
+
 /** The Reports page's pivots (`services/reports.ts`): rows are customer × SPOC × currency. */
 export interface ReportPivotRow {
   customer_id: number; customer_name: string; spoc: string; currency: string;

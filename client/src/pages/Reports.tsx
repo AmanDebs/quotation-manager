@@ -18,7 +18,7 @@ import { BLUE, BLUE_PALE } from './Dashboard';
 import { PivotTable } from '../components/PivotTable';
 import { useCompanies } from '../components/CompanySelect';
 import { useCan } from '../App';
-import { fmtMoney, fmtMoneyRound, fmtQty, fmtRate, rateBasis, fmtDate, fiscalYearRange } from '../lib/format';
+import { fmtMoney, fmtMoneyRound, fmtQty, fmtRate, rateBasis, fmtDate, fiscalYearRange, monthLabel, monthEnd, MONTHS } from '../lib/format';
 import { useUrlFilter } from '../lib/useUrlFilter';
 
 /**
@@ -75,20 +75,9 @@ function lastTwoYears(): { from: string; to: string } {
 }
 
 /** `2026-09-15` → `15-Sep`, the sheet's own heading. */
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 function dayLabel(iso: string): string {
   const [, m, d] = iso.split('-').map(Number);
   return m >= 1 && m <= 12 ? `${d}-${MONTHS[m - 1]}` : iso;
-}
-/** `2026-04` → `Apr 2026`. */
-function monthLabel(ym: string): string {
-  const [y, m] = ym.split('-').map(Number);
-  return m >= 1 && m <= 12 ? `${MONTHS[m - 1]} ${y}` : ym;
-}
-/** The last day of `YYYY-MM`. */
-function monthEnd(ym: string): string {
-  const [y, m] = ym.split('-').map(Number);
-  return `${ym}-${String(new Date(Date.UTC(y, m, 0)).getUTCDate()).padStart(2, '0')}`;
 }
 
 /**

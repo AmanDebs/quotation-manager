@@ -2,8 +2,8 @@ import { useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
-import type { Order, OrderStatus, OrderLine, ProductDemand, LineState } from '../types';
-import { Button, Select, Input, PageHeader, EmptyState, Card, ExportTabs, ErrorText, Pagination, DownloadButton, SegmentedTabs, TH_CLASS, MultiSelectFilter } from '../components/ui';
+import type { Order, OrderStatus, OrderLine, ProductDemand, LineState, OrderPivot as OrderPivotData } from '../types';
+import { Button, Select, Input, PageHeader, EmptyState, Card, ExportTabs, ErrorText, Pagination, DownloadButton, SegmentedTabs, TH_CLASS, CAPTION_CLASS, MultiSelectFilter } from '../components/ui';
 import { useCompanies } from '../components/CompanySelect';
 import { fmtDate, fmtMoney, fmtQty, fmtRate, rateBasis, today, daysBetween } from '../lib/format';
 import { usePagedList, PAGE_SIZE, type PagedList } from '../lib/usePagedList';
@@ -12,6 +12,7 @@ import { Icon } from '../components/icons';
 import OrderImportModal from '../components/OrderImportModal';
 import { ColumnFilter, FilteredByStrip, type ColumnFilterValue } from '../components/ColumnFilter';
 import { useColumnFilters, type ColumnFilterSpec } from '../lib/useColumnFilters';
+import { OrderPivot } from '../components/OrderPivot';
 
 /**
  * The columns of the *Sales order lines* view that carry a header filter, and
@@ -150,12 +151,13 @@ const LINE_STATE: Record<LineState, { label: string; className: string }> = {
   fully_dispatched: { label: 'Fully dispatched', className: 'bg-green-50 text-green-700 ring-green-200' },
 };
 
-type View = 'lines' | 'products' | 'orders';
+type View = 'lines' | 'products' | 'orders' | 'pivot';
 
 const VIEWS: { key: View; label: string }[] = [
   { key: 'lines', label: 'Sales order lines' },
   { key: 'products', label: 'By product' },
   { key: 'orders', label: 'Sales orders' },
+  { key: 'pivot', label: 'Pivot' },
 ];
 
 /**
@@ -192,6 +194,16 @@ export default function OrdersPage() {
     if (value) next.set('q', value); else next.delete('q');
     setSearch(next, { replace: true });
   };
+  /*
+   * The pivot's shape — which dimensions and which measure. In the URL like
+   * the filters, so a sheet can be bookmarked and sent, and **blank means the
+   * server's own default**: the vocabulary rides the answer, so the first
+   * request is made without holding any of it.
+   */
+  const pivotRows = search.get('rows') ?? '';
+  const pivotRows2 = search.get('rows2') ?? '';
+  const pivotCol = search.get('col') ?? '';
+  const pivotMeasure = search.get('measure') ?? '';
 
   const [companyFilter, setCompanyFilter] = useState('');
   // In the URL rather than component state, so the dashboard's links
@@ -228,6 +240,18 @@ export default function OrdersPage() {
   for (const [k, v] of columns.params) params.set(k, v);
   const query = params.toString();
 
+  /*
+   * The shape is not a filter, so it rides its own string — the drill-through
+   * out of a cell carries `params` and lands on the lines view, where a
+   * `rows=` or `measure=` would mean nothing.
+   */
+  const shape = new URLSearchParams(params);
+  if (pivotRows) shape.set('rows', pivotRows);
+  if (pivotRows2) shape.set('rows2', pivotRows2);
+  if (pivotCol) shape.set('col', pivotCol);
+  if (pivotMeasure) shape.set('measure', pivotMeasure);
+  const pivotQuery = shape.toString();
+
   // `view` rides in each key so that switching views starts at page 1 — page 3
   // of the orders is not page 3 of the lines, and the two share one URL key.
   const orderList = usePagedList<Order>(
@@ -246,6 +270,29 @@ export default function OrdersPage() {
     queryFn: () => api.get<ProductDemand[]>(`/api/orders/by-product${query ? `?${query}` : ''}`),
     enabled: view === 'products',
   });
+  /*
+   * Not paged either, and for the same reason: the fold is the answer, and a
+   * fold over one page of lines is not the fold. Every filter above reaches
+   * it through the same `lineFilters` the list uses, so the sheet states
+   * exactly what the lines view beside it holds.
+   */
+  const { data: pivot } = useQuery({
+    queryKey: ['order-pivot', pivotQuery],
+    queryFn: () => api.get<OrderPivotData>(`/api/orders/lines/pivot${pivotQuery ? `?${pivotQuery}` : ''}`),
+    enabled: view === 'pivot',
+  });
+
+  /**
+   * How a raw value reads on screen. The page already owns these words for
+   * its own pills, which is why the server sends raw keys and leaves the
+   * labelling here — one vocabulary, not two.
+   */
+  const pivotLabel = (dimension: string, value: string) => {
+    if (dimension === 'state') return LINE_STATE[value as LineState]?.label ?? value;
+    if (dimension === 'status') return orderStatusLabel(value as OrderStatus);
+    if (dimension === 'trade') return value === '1' ? 'Export' : 'Domestic';
+    return value;
+  };
 
   const setStatus = useMutation({
     mutationFn: ({ id, status }: { id: number; status: string }) => api.post<Order>(`/api/orders/${id}/status`, { status }),
@@ -274,7 +321,7 @@ export default function OrdersPage() {
         subtitle="The sales order book — what's sold, what's in production, what's still to ship"
         actions={
           <div className="flex items-center gap-2">
-            <DownloadButton href={`/api/orders/export?view=${view}${query ? `&${query}` : ''}`} />
+            <DownloadButton href={`/api/orders/export?view=${view}${view === 'pivot' ? (pivotQuery ? `&${pivotQuery}` : '') : (query ? `&${query}` : '')}`} />
             {/* Booking a backlog is booking orders, so it sits behind the same
                 cell as the button beside it. */}
             {can('order', 'full') && (
@@ -307,7 +354,7 @@ export default function OrdersPage() {
           allLabel="All statuses"
         />
         {/*
-          * Shown on all three views. It used to be hidden on Orders, because
+          * Shown on every view. It used to be hidden on Orders, because
           * the per-order list could not answer it — which meant a term typed
           * on one tab silently stopped applying when you switched to another.
           * `orderSearchClause` now gives all three the same six columns, so
@@ -331,6 +378,40 @@ export default function OrdersPage() {
 
       {view === 'lines' && (
         <LinesTable lines={lines} pager={lineList} filters={{ get: columns.get, set: columns.set, query }} />
+      )}
+      {view === 'pivot' && (
+        <>
+          {/*
+            * The shape, on its own row rather than among the filters.
+            * Four unlabelled selects in the row above read as four more
+            * filters — and the shape is the opposite of a filter: it says
+            * how what is left is folded, not which lines are left. The
+            * vocabulary is the server's, sent with every answer, so there is
+            * no second list here to drift from the fold that produced the
+            * figures.
+            */}
+          <div className="mb-3 flex flex-wrap items-center gap-x-2 gap-y-2">
+            <span className={CAPTION_CLASS}>Down the side</span>
+            <Select value={pivotRows} onChange={(e) => setParam('rows', e.target.value)} className="max-w-44">
+              {(pivot?.dimensions ?? []).map((d) => <option key={d.key} value={d.key}>{d.label}</option>)}
+            </Select>
+            <Select value={pivotRows2} onChange={(e) => setParam('rows2', e.target.value)} className="max-w-44">
+              <option value="">and then by…</option>
+              {(pivot?.dimensions ?? []).filter((d) => d.key !== pivotRows)
+                .map((d) => <option key={d.key} value={d.key}>{d.label}</option>)}
+            </Select>
+            <span className={`${CAPTION_CLASS} ml-2`}>Across the top</span>
+            <Select value={pivotCol} onChange={(e) => setParam('col', e.target.value)} className="max-w-44">
+              <option value="">nothing</option>
+              {(pivot?.dimensions ?? []).map((d) => <option key={d.key} value={d.key}>{d.label}</option>)}
+            </Select>
+            <span className={`${CAPTION_CLASS} ml-2`}>Showing</span>
+            <Select value={pivotMeasure} onChange={(e) => setParam('measure', e.target.value)} className="max-w-44">
+              {(pivot?.measures ?? []).map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
+            </Select>
+          </div>
+          {pivot && <OrderPivot pivot={pivot} params={params} label={pivotLabel} />}
+        </>
       )}
       {view === 'products' && (
         <DemandTable
