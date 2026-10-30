@@ -185,24 +185,6 @@ function readExpandGroups(): boolean {
   try { return localStorage.getItem(FOLD_KEY) === '0'; } catch { return false; }
 }
 
-/**
- * What a folded order is making: the products, and the colours where there is
- * one of them.
- *
- * On the client's own five-job order the **colour is the only thing telling the
- * jobs apart**, so a folded row without it would hide exactly the point. It is
- * clipped to one line with the whole list on hover, the rule the Item and
- * Customer cells beside it already follow — a summary that wrapped would undo
- * the height the fold just bought.
- */
-function groupItems(group: WorkOrder[]): string {
-  const products = [...new Set(group.map((w) => w.product_name || w.description || '').filter(Boolean))];
-  if (!products.length) return '';
-  if (products.length > 1) return products.join(', ');
-  const colors = [...new Set(group.map((w) => w.color?.trim() || '').filter(Boolean))];
-  return colors.length ? `${products[0]} · ${colors.join(', ')}` : products[0];
-}
-
 /** The group's statuses, commonest first — *5 Not planned*, or *3 Scheduled · 2 Running*. */
 function statusMix(group: WorkOrder[]): { status: WorkOrderStatus; n: number }[] {
   const counts = new Map<WorkOrderStatus, number>();
@@ -962,7 +944,6 @@ export default function WorkOrdersPage() {
                    saved, and a job nobody has confirmed the start of. */
                 const groupDated = group.filter((x) => dates[x.id]).length;
                 const groupDue = group.filter((x) => x.due_to_start).length;
-                const items = folded ? groupItems(group) : '';
                 const mix = folded ? statusMix(group) : [];
                 const span = folded ? dateSpan(group) : { from: '', to: '' };
                 return [
@@ -1020,17 +1001,16 @@ export default function WorkOrdersPage() {
                           <span className="max-w-[14rem] shrink-0 truncate font-normal text-slate-600" title={w.customer_name || undefined}>
                             {w.customer_name}
                           </span>
-                          {/* What is being made. On a five-job order of one
-                              product the colour is the only thing telling the
-                              jobs apart, so without this the fold hides the
-                              point. Clipped with the whole list on hover — a
-                              summary that wrapped would undo the height the
-                              fold just bought. */}
-                          {!!items && (
-                            <span className="min-w-0 flex-1 truncate text-xs font-normal text-slate-500" title={items}>
-                              {items}
-                            </span>
-                          )}
+                          {/*
+                            What is being made is deliberately **not** summarised
+                            here (2026-10-30, the client with a folded four-job
+                            order reading *"48mm Seal Cap, 45/46/48mm Single
+                            Handle, 28MM - 2 LTR Deluxe Handle, 20 LTR Threaded
+                            Cap"*: *"No need to product names when order is
+                            folded"*). A folded row says what the order is, how
+                            many jobs it holds and when they run; the products
+                            are one click away on the rows themselves.
+                          */}
                         </div>
                       </td>
                       {/*
