@@ -377,6 +377,24 @@ export default function QcCheckFormPage({ certify }: {
   const summary = full?.qc?.summary;
   const specOwner = full?.qc?.spec_owner;
 
+  /**
+   * Whether a row has actually been answered, by the server's own reading of
+   * one: a reading, both ends of a range, *Complied*, or N/A. A boolean row
+   * carrying only wording is **not** an answer — the words replace what the
+   * certificate prints and never the verdict — and half a range is refused,
+   * so the count a person reads before pressing Record is the count the save
+   * will agree with.
+   */
+  const answered = (p: { id?: number; kind: string; ranged?: number }) => {
+    const r = row(p.id!);
+    if (r.na) return true;
+    if (p.kind === 'boolean') return !!r.v;
+    const m = modeOf(p);
+    if (m === 'complied') return true;
+    if (m === 'range') return !!r.v && !!r.vmax;
+    return !!r.v;
+  };
+
   const tolerance = (p: { min_value: number | null; max_value: number | null; unit: string }) => {
     if (p.min_value === null && p.max_value === null) return '—';
     const unit = p.unit ? ` ${p.unit}` : '';
@@ -401,8 +419,26 @@ export default function QcCheckFormPage({ certify }: {
       ? `Correct inspection — ${batch ? batch.number : job.number}`
       : batch ? `Final check — ${batch.number}` : `Quality check — ${job.number}`;
 
+  /*
+   * Every row of this page, so the bar at the foot can say how many of them
+   * have been answered — the one question somebody has after nineteen rows,
+   * and one no amount of scrolling back answers reliably.
+   */
+  const allChecks = blocks.flatMap((b) => b.checks);
+  const done = allChecks.filter(answered).length;
+
   return (
-    <div>
+    /*
+     * Capped like every other form in this app (2026-10-31, the client:
+     * *"Make it more user friendly"*). Uncapped it ran the full 1432 of the
+     * card, which on their own nineteen-row preform specification put **658px
+     * under *Characteristic* for a 281px name** and squeezed the three
+     * controls that are actually typed into to 364 — 585px of white sitting
+     * between a question and its answer, nineteen times down the page. This
+     * is a form rather than a book, and `max-w-7xl` is what the five document
+     * forms already use.
+     */
+    <div className="mx-auto max-w-7xl">
       <PageHeader
         title={title}
         subtitle={
@@ -542,12 +578,20 @@ export default function QcCheckFormPage({ certify }: {
               </div>
             )}
 
-            <table className="w-full text-sm">
+            {/*
+              Fixed widths rather than content-sized, so the slack is shared
+              out rather than dumped on the name column and a long
+              characteristic wraps instead of pushing the answer further
+              right. The three add to 100%: the name takes what it needs, the
+              tolerance is short on almost every row, and what is left goes to
+              the cells somebody types into.
+            */}
+            <table className="w-full table-fixed text-sm">
               <thead>
                 <tr className={TH_CLASS}>
-                  <th className="pb-1 pr-2">Characteristic</th>
-                  <th className="pb-1 pr-2">Should be</th>
-                  <th className="w-[26rem] pb-1">Measured</th>
+                  <th className="w-[40%] pb-1 pr-2">Characteristic</th>
+                  <th className="w-[18%] pb-1 pr-2">Should be</th>
+                  <th className="pb-1">Measured</th>
                 </tr>
               </thead>
               <tbody>
@@ -596,7 +640,15 @@ export default function QcCheckFormPage({ certify }: {
                     </td>
                     <td className="py-1.5 pr-2 text-slate-500">
                       {p.custom ? (
-                        <div className="flex items-center gap-1">
+                        /*
+                          A custom check states its own kind and tolerance,
+                          which is four controls in a cell sized for the words
+                          *50 – 51 gm*. It wraps onto a second line rather
+                          than running under the answer beside it — a row
+                          somebody is composing may be two lines tall, where
+                          the nineteen being read may not.
+                        */
+                        <div className="flex flex-wrap items-center gap-1">
                           <Select
                             className="w-28 shrink-0"
                             value={p.kind}
@@ -642,16 +694,35 @@ export default function QcCheckFormPage({ certify }: {
                       <div className="flex items-center gap-1.5">
                         {p.kind === 'boolean' ? (
                           <>
-                            <Select
-                              className="w-32 shrink-0"
-                              disabled={!!row(p.id!).na}
-                              value={row(p.id!).v ?? ''}
-                              onChange={(e) => setRow(p.id!, { v: e.target.value })}
-                            >
-                              <option value="">not checked</option>
-                              <option value="pass">pass</option>
-                              <option value="fail">fail</option>
-                            </Select>
+                            {/*
+                              Two buttons rather than a dropdown. On this
+                              desk's own specification eleven of nineteen rows
+                              are pass/fail, so a select cost two clicks and a
+                              read apiece — and nineteen boxes all reading *not
+                              checked* say nothing a glance can use. Pressed,
+                              the answer is a colour down the column; pressing
+                              it again clears it, which is how a mis-click is
+                              undone without a third control.
+                            */}
+                            <div className="flex shrink-0 gap-1">
+                              {(['pass', 'fail'] as const).map((v) => (
+                                <button
+                                  key={v}
+                                  type="button"
+                                  disabled={!!row(p.id!).na}
+                                  onClick={() => setRow(p.id!, { v: row(p.id!).v === v ? '' : v })}
+                                  className={`w-16 rounded-md border px-2 py-1 text-xs font-medium capitalize transition-colors disabled:opacity-40 ${
+                                    row(p.id!).v === v
+                                      ? v === 'pass'
+                                        ? 'border-green-500 bg-green-50 text-green-700'
+                                        : 'border-red-500 bg-red-50 text-red-700'
+                                      : 'border-slate-200 text-slate-400 hover:border-slate-300 hover:text-slate-600'
+                                  }`}
+                                >
+                                  {v}
+                                </button>
+                              ))}
+                            </div>
                             {/*
                               The words, where words are what gets written.
                               Aglo's own fitment block reads *Ok* and *No
@@ -661,7 +732,7 @@ export default function QcCheckFormPage({ certify }: {
                               still decides. Blank prints what it always did.
                             */}
                             <Input
-                              className="w-full"
+                              className="w-44 shrink-0"
                               disabled={!!row(p.id!).na}
                               value={row(p.id!).said ?? ''}
                               onChange={(e) => setRow(p.id!, { said: e.target.value })}
@@ -680,7 +751,7 @@ export default function QcCheckFormPage({ certify }: {
                               a gauge rather than measured carries Complied.
                             */}
                             <Select
-                              className="w-32 shrink-0"
+                              className="w-40 shrink-0"
                               disabled={!!row(p.id!).na}
                               value={modeOf(p)}
                               onChange={(e) => setRow(p.id!, { mode: e.target.value as Answer['mode'] })}
@@ -691,7 +762,7 @@ export default function QcCheckFormPage({ certify }: {
                             </Select>
                             {modeOf(p) === 'complied' ? (
                               <Input
-                                className="w-full"
+                                className="w-44 shrink-0"
                                 disabled={!!row(p.id!).na}
                                 value={row(p.id!).said ?? ''}
                                 onChange={(e) => setRow(p.id!, { said: e.target.value })}
@@ -702,7 +773,7 @@ export default function QcCheckFormPage({ certify }: {
                               <>
                                 <Input
                                   type="number"
-                                  className="w-full"
+                                  className={`shrink-0 ${modeOf(p) === 'range' ? 'w-28' : 'w-36'}`}
                                   disabled={!!row(p.id!).na}
                                   value={row(p.id!).v ?? ''}
                                   onChange={(e) => setRow(p.id!, { v: e.target.value })}
@@ -716,7 +787,7 @@ export default function QcCheckFormPage({ certify }: {
                                     <span className="text-xs text-slate-300">–</span>
                                     <Input
                                       type="number"
-                                      className="w-full"
+                                      className="w-28 shrink-0"
                                       disabled={!!row(p.id!).na}
                                       value={row(p.id!).vmax ?? ''}
                                       onChange={(e) => setRow(p.id!, { vmax: e.target.value })}
@@ -731,7 +802,7 @@ export default function QcCheckFormPage({ certify }: {
                         {/* Not applicable: a recorded answer, so it is a tick
                             rather than the absence of one. */}
                         <label
-                          className="flex shrink-0 items-center gap-1 text-xs text-slate-500"
+                          className="ml-auto flex shrink-0 items-center gap-1 text-xs text-slate-500"
                           title="Not applicable to this product — recorded as an answer, and neither a pass nor a failure"
                         >
                           <input
@@ -769,19 +840,40 @@ export default function QcCheckFormPage({ certify }: {
               </tbody>
             </table>
 
-            <div className="mt-2 flex items-center justify-between gap-3">
-              <p className="text-xs text-slate-400">
-                Leave a row blank if it was not checked — that is recorded as unmeasured, never as a failure.
-                <span className="font-medium"> Complied</span> is a pass with no figure behind it, and whatever
-                is typed beside an answer is what the certificate prints in place of the usual word.
-                Tick <span className="font-medium">N/A</span> where the characteristic does not apply to this
-                product: that is written down and prints on the certificate, and is neither a pass nor a failure.
-              </p>
-              <Button className="shrink-0 whitespace-nowrap" onClick={() => add.mutate()} disabled={add.isPending}>
-                {add.isPending ? 'Saving…' : editing ? 'Save corrections' : 'Record inspection'}
-              </Button>
-            </div>
+            <p className="mt-2 text-xs text-slate-400">
+              A row left blank was not checked — recorded as unmeasured, never as a failure.
+              <span className="font-medium"> Complied</span> is a pass with no figure behind it;
+              <span className="font-medium"> N/A</span> says the characteristic does not apply here. Anything
+              typed beside an answer is what the certificate prints in place of the usual word.
+            </p>
+          </div>
+
+          {/*
+            The Record button, where it can be pressed from.
+            Nineteen rows is 1,461px of page against a 1,000px window, so the
+            one button this form has was one somebody had to scroll to find
+            — and nothing said whether a row had been missed on the way down.
+            The bar answers both, in the shape the planning grid's own sticky
+            bar already has.
+          */}
+          <div className="sticky bottom-4 z-20 mt-3 flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-white/95 px-4 py-3 shadow-lg backdrop-blur">
+            <span className="text-sm font-medium text-slate-700">
+              <span className="tabular-nums">{done}</span> of{' '}
+              <span className="tabular-nums">{allChecks.length}</span> answered
+            </span>
+            {done < allChecks.length && (
+              <span className="text-xs text-slate-400">
+                {allChecks.length - done} not checked — that is recorded as unmeasured
+              </span>
+            )}
             <ErrorText error={add.error} />
+            <Button
+              className="ml-auto shrink-0 whitespace-nowrap"
+              onClick={() => add.mutate()}
+              disabled={add.isPending}
+            >
+              {add.isPending ? 'Saving…' : editing ? 'Save corrections' : 'Record inspection'}
+            </Button>
           </div>
 
           {checks.length > 0 && (

@@ -40,12 +40,17 @@ export function CoaExtraFields({ rows, onChange }: {
         value is refused — a labelled cell with nothing in it is a dead box on
         the page. The first draft of this line claimed both were dropped,
         which the render caught.
+
+        The rule about the boxes appears **once a row exists**, which is the
+        only moment it can be acted on. Above an empty panel it was a third
+        line of prose over a single button, on a form somebody fills in every
+        day — and this one sits near the top of it.
       */}
       <p className="mb-2 text-xs text-slate-400">
         Anything this customer asks to see — their own order number, a material
-        code, a shelf life. Printed in the certificate's header, under the
-        details it works out for itself. Fill in both boxes; an empty row is
-        simply left off.
+        code, a shelf life. Printed in the certificate&rsquo;s header, under the
+        details it works out for itself.
+        {rows.length > 0 && <> Fill in both boxes; an empty row is simply left off.</>}
       </p>
       {rows.map((r, i) => (
         <div key={i} className="mb-1 flex items-center gap-2">
