@@ -2,11 +2,12 @@ import { Fragment, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
-import type { CoaExtra, QcCheck, WorkOrder } from '../types';
+import type { CoaExtra, CoaField, CoaHeaderConfig, QcCheck, WorkOrder } from '../types';
 import {
   Button, Input, Select, Field, Card, PageHeader, ErrorText, EmptyState, TH_CLASS, FIELD_GRID,
 } from '../components/ui';
 import { CoaExtraFields } from '../components/CoaExtraFields';
+import { CoaHeaderFields } from '../components/CoaHeaderFields';
 import { PdfLink } from '../components/PdfLink';
 import { useUnsavedChanges } from '../lib/useUnsavedChanges';
 import { fmtDate, today } from '../lib/format';
@@ -117,12 +118,20 @@ export default function QcCheckFormPage({ certify }: {
     coa_date: today(),
     approved_by: '',
     batch_number: '',
-    buyer_order: '',
     // Whatever this customer asks to see on the page — see `CoaExtraFields`.
     // Empty on every certificate that asks for nothing extra, which the server
     // reads as nothing to print.
     extra: [] as CoaExtra[],
   });
+  /*
+   * Which header cells the certificate prints, and what was typed over the
+   * record on the ones that allow it — see `CoaHeaderFields`.
+   *
+   * **`null` until somebody ticks or types**, which is what makes an
+   * untouched panel send nothing at all: the server then writes the header it
+   * has always written, which is what every certificate on file carries.
+   */
+  const [header, setHeader] = useState<CoaHeaderConfig | null>(null);
   /*
    * Three facts per parameter since 2026-10-16, where there was one string.
    *
@@ -154,6 +163,39 @@ export default function QcCheckFormPage({ certify }: {
   });
   const job = full;
   /*
+   * What the certificate's header will say — the same list `buildCoaPdf`
+   * draws from, so this page cannot promise a cell the document does not
+   * print. Asked only in the one-press shape, an ordinary inspection having
+   * no certificate to preview.
+   */
+  const { data: headerData, isLoading: headerLoading } = useQuery({
+    queryKey: ['coa-header', 'wo', String(id)],
+    queryFn: () => api.get<{ fields: CoaField[] }>(`/api/work-orders/${id}/coa-header`),
+    enabled: !!certify,
+  });
+  /*
+   * The two cells that exist only once the press is made, shown as what it is
+   * about to write rather than as an em-dash: the batch takes the number
+   * typed above, and the certificate its date — its own number is drawn from
+   * the series at the moment it is issued, which the hint says.
+   *
+   * Merged here rather than asked of the server per keystroke.
+   */
+  const headerFields = headerData?.fields?.map((f) => {
+    if (f.key === 'batch') {
+      // The number typed above, or what the press will do with a blank — an
+      // em-dash here would read as a certificate with no batch on it, which
+      // is the one thing it cannot be.
+      const v = coa.batch_number.trim() || '(next in the series)';
+      return { ...f, derived: v, value: v };
+    }
+    if (f.key === 'certificate') {
+      const v = `(drawn at issue)   ${coa.coa_date ? fmtDate(coa.coa_date) : ''}`.trim();
+      return { ...f, derived: v, value: v };
+    }
+    return f;
+  });
+  /*
    * **The inspection being corrected**, where that is what this is —
    * `/work-orders/:id/qc/:checkId` (2026-10-24, the client, with a draft
    * certificate in front of them: *"i want to change the results of the
@@ -174,6 +216,7 @@ export default function QcCheckFormPage({ certify }: {
   const payload = () => ({
     ...head,
     ...(certify ? coa : {}),
+    ...(certify && header ? { header } : {}),
     batch_id: batch?.id ?? null,
     sample_size: head.sample_size === '' ? null : Number(head.sample_size),
     results: [
@@ -558,19 +601,21 @@ export default function QcCheckFormPage({ certify }: {
                       placeholder="Who signs it off"
                     />
                   </Field>
-                  {/*
-                    The buyer's own reference. Blank is the ordinary answer —
-                    the certificate falls back to the proforma behind the
-                    order, then the customer's PO, and never to the sales
-                    order, which is ours rather than theirs.
-                  */}
-                  <Field label="Buyer's order">
-                    <Input
-                      value={coa.buyer_order}
-                      onChange={(e) => setCoa({ ...coa, buyer_order: e.target.value })}
-                      placeholder="PI or PO number"
-                    />
-                  </Field>
+                </div>
+                {/*
+                  Every cell of the header, with a tick on each — the whole of
+                  what the certificate says about itself. The buyer's own
+                  reference lives in there rather than beside the three boxes
+                  above: it is a header cell like the rest, and two controls
+                  over one fact is how the two come to disagree.
+                */}
+                <div className="mt-3 border-t border-slate-200 pt-3">
+                  <CoaHeaderFields
+                    fields={headerFields}
+                    config={header}
+                    loading={headerLoading}
+                    onChange={setHeader}
+                  />
                 </div>
                 <div className="mt-3 border-t border-slate-200 pt-3">
                   <CoaExtraFields rows={coa.extra} onChange={(extra) => setCoa({ ...coa, extra })} />

@@ -260,12 +260,19 @@ describe('where the lots went, once they have gone', () => {
   });
 
   test('and the same certificate states them once the goods have gone', () => {
+    /*
+     * The boxes and the pieces are **two cells** since 2026-10-31, because
+     * their own paper has two — *TOTAL BOXES* beside *INVOICE QUANTITY* — and
+     * because each now carries its own tick. They were one cell reading
+     * *3,40,000 pcs · 136 boxes* before that, which this case asserted.
+     */
     ship(lots);
     const texts = textsOf(buildCoaPdf(lots[0]));
     assert.ok(texts.includes('INVOICE NO.  /  DATE'));
     assert.ok(texts.some((t) => t.includes('AP/EX/189/25-26')), 'the invoice is not named');
     assert.ok(texts.includes('AFRICA INDUSTRIAS LDA'), 'the consignee is not named');
-    assert.ok(texts.some((t) => t.includes('3,40,000 pcs') && t.includes('136 boxes')), 'the figures are wrong');
+    assert.ok(texts.includes('TOTAL BOXES') && texts.includes('136 boxes'), 'the boxes are wrong');
+    assert.ok(texts.includes('DISPATCHED') && texts.includes('3,40,000 pcs'), 'the quantity is wrong');
   });
 
   test('counting only the lines these lots are on, never the whole lorry', () => {
@@ -279,15 +286,26 @@ describe('where the lots went, once they have gone', () => {
     assert.ok(!texts.some((t) => t.includes('999 boxes')), 'another line was counted in');
   });
 
-  test('a trip that left before its paperwork names no invoice and still reports the load', () => {
-    /* `despatches.invoice_id` is nullable precisely because a lorry can go
-       first — so this is the record being honest, not a fault. */
+  test('a trip that left before its paperwork reports the load and names no invoice', () => {
+    /*
+     * `despatches.invoice_id` is nullable precisely because a lorry can go
+     * first — so this is the record being honest, not a fault.
+     *
+     * **Each consignment cell now stands or falls on its own** (2026-10-31).
+     * They were one row drawn whenever there was a trip, so an unbilled one
+     * printed *INVOICE NO. / DATE —* and *CONSIGNEE —*; per cell, those are
+     * dead boxes and go, which is this codebase's own rule about a blank cell
+     * on a document and what makes a tick per cell coherent. What says the
+     * goods have gone is still on the page: the load.
+     */
     const other = lot('10032026A', '2026-03-10');
     db.prepare("UPDATE batches SET coa_no = 'COA/25-26/009', coa_date = '2026-03-20' WHERE id = ?").run(other);
     ship([other], { invoice: false, packs: 12, qty: 2000 });
     const texts = textsOf(buildCoaPdf(other));
-    assert.ok(texts.includes('INVOICE NO.  /  DATE'), 'the row is missing');
     assert.ok(texts.some((t) => t.includes('12 boxes')), 'the load is not reported');
+    assert.ok(texts.includes('TOTAL BOXES'), 'the load has no heading');
+    assert.ok(!texts.includes('INVOICE NO.  /  DATE'), 'an unbilled trip prints an empty invoice cell');
+    assert.ok(!texts.includes('CONSIGNEE'), 'an unbilled trip prints an empty consignee cell');
   });
 });
 

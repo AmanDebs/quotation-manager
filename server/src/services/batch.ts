@@ -186,6 +186,14 @@ export interface Batch {
   coa_buyer_order: string;
   /** Whatever this buyer asked to see on the page — see `CoaExtra`. */
   coa_extra: CoaExtra[];
+  /**
+   * Which header cells print and what was typed over the record, as stored —
+   * raw JSON, read through `parseCoaHeader`. It stays a string here because
+   * `services/coaHeader.ts` imports this file, so the parse cannot live on
+   * this side of it; nothing but that service and the route guarding it ever
+   * looks inside.
+   */
+  coa_header: string;
   /** Derived from the shift entries filed against this lot. */
   made: number;
   rejected: number;
@@ -321,6 +329,7 @@ export function batchesFor(workOrderId: number): Batch[] {
       coa_approved_by: String(r.coa_approved_by ?? ''),
       coa_buyer_order: String(r.coa_buyer_order ?? ''),
       coa_extra: parseCoaExtra(r.coa_extra),
+      coa_header: String(r.coa_header ?? ''),
       made: num(made.ok),
       rejected: num(made.rej),
       entries: made.n,

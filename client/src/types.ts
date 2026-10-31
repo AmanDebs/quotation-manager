@@ -1769,6 +1769,39 @@ export interface PriceHistory {
  */
 export type CoaExtra = { label: string; value: string };
 
+/**
+ * One cell of the certificate's header, as the server builds it — the same
+ * list `buildCoaPdf` draws from, so the page and the paper cannot describe
+ * different documents. See `services/coaHeader.ts`.
+ */
+export interface CoaField {
+  key: string;
+  label: string;
+  /** Can somebody type over what the record says? */
+  editable: boolean;
+  /** Dropped from the certificate when it has nothing to say. */
+  optional: boolean;
+  /** Never ticked off: a certificate has to state its own number. */
+  fixed?: boolean;
+  span?: 2;
+  hint?: string;
+  placeholder?: string;
+  /** What the record says, before anything typed over it. */
+  derived: string;
+  /** What somebody typed instead, or ''. */
+  typed: string;
+  /** What prints: the typed value where there is one, else the derived one. */
+  value: string;
+  /** Ticked off — not printed. */
+  hidden: boolean;
+}
+
+/** Only the differences from the header the app works out for itself. */
+export interface CoaHeaderConfig {
+  hidden: string[];
+  values: Record<string, string>;
+}
+
 export interface CoaRow {
   coa_no: string;
   coa_date: string;

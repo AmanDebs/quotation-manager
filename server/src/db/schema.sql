@@ -1305,6 +1305,19 @@ CREATE TABLE IF NOT EXISTS batches (
   -- parsed at the boundary like `bank_accounts`. Blank on every certificate
   -- that asks for nothing extra, which is every one issued before 2026-10-27.
   coa_extra TEXT NOT NULL DEFAULT '',
+  /*
+   * Which header cells this certificate prints, and what was typed over the
+   * record on the ones that allow it: a JSON `{hidden: [], values: {}}`,
+   * parsed at the boundary like `column_config` and never trusted as
+   * vocabulary -- a key this build does not know is passed over rather than
+   * taking a PDF route down with it.
+   *
+   * **Only the differences are stored**, so blank means the header this app
+   * has always drawn, which is every certificate issued before 2026-10-31,
+   * and a cell added in a later release arrives drawn rather than silently
+   * suppressed. `services/coaHeader.ts` owns the list and the rules.
+   */
+  coa_header TEXT NOT NULL DEFAULT '',
   -- The second signatory. Both of Aglo's certificates carry *Prepared by* and
   -- *Approved by*, and this is the one header fact that cannot be derived from
   -- anything else on file -- the first is the account that issued it, which

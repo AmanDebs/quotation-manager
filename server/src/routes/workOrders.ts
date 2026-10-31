@@ -7,6 +7,9 @@ import {
   coaExtraError, cleanCoaExtra, parseCoaExtra,
 } from '../services/batch.js';
 import { coaWhere } from '../services/coaRegister.js';
+import {
+  coaHeaderFields, coaHeaderError, cleanCoaHeader, buyerOrderFrom,
+} from '../services/coaHeader.js';
 import { progressFor, progressForMany, LIVE_OK } from '../services/production.js';
 import { despatchedByOrder, lastTripForLine } from '../services/despatch.js';
 import { materialCostByWorkOrder } from '../services/costing.js';
@@ -922,6 +925,48 @@ workOrdersRouter.post('/batches/:batchId/coa', requirePermission('qc', 'full'), 
  * Declared **above** nothing in particular, but it must not be reachable as
  * `/batches/:batchId/coa` — it is not, the paths differing in shape.
  */
+/**
+ * What the certificate's header will say, cell by cell — the preview the page
+ * ticks (2026-10-31).
+ *
+ * **One list, two doors.** `buildCoaPdf` asks `coaHeaderFields` for exactly
+ * what it draws; so does this. A page that assembled its own preview is how a
+ * screen comes to promise a cell the document does not print, and a tick
+ * beside a label with no value is a control nobody can judge.
+ *
+ * Two shapes, because a certificate is ticked at two moments. A **lot** that
+ * carries one answers for the whole group the number covers. A **job**
+ * answers for the one-press `certify`, where no lot exists yet: the period is
+ * the shifts about to be swept up, and the consignee, the invoice and the
+ * boxes are blank, there being no trip behind goods that have not gone — which
+ * is the honest preview of a document required *before* dispatch.
+ *
+ * `qc: full`, like every screen that uses it. It is not a leak either way:
+ * whoever holds any `qc` can already print the certificate these cells are on.
+ */
+workOrdersRouter.get('/batches/:batchId/coa-header', requirePermission('qc', 'full'), (req: AuthedRequest, res) => {
+  const id = Number(req.params.batchId);
+  const b = db.prepare('SELECT work_order_id FROM batches WHERE id = ?').get(id) as
+    { work_order_id: number } | undefined;
+  // Scope first, so an id on somebody else's order cannot be probed for.
+  if (!b || !accessible(req, Number(b.work_order_id))) {
+    return res.status(404).json({ error: 'Batch not found' });
+  }
+  return res.json({ fields: coaHeaderFields({ batchId: id }) });
+});
+
+workOrdersRouter.get('/:id/coa-header', requirePermission('qc', 'full'), (req: AuthedRequest, res) => {
+  const id = Number(req.params.id);
+  if (!accessible(req, id)) return res.status(404).json({ error: 'Work order not found' });
+  // The batch number about to be opened, where a caller knows it. The page
+  // does not send it — it merges what is in the box itself rather than asking
+  // again on every keystroke — so this is for an API caller and for the
+  // cases that read the rule directly.
+  return res.json({
+    fields: coaHeaderFields({ workOrderId: id, batchNumber: String(req.query.batch_number ?? '') }),
+  });
+});
+
 workOrdersRouter.post('/batches/coa', requirePermission('qc', 'full'), (req: AuthedRequest, res) => {
   const raw = Array.isArray(req.body?.batch_ids) ? (req.body.batch_ids as unknown[]) : [];
   const ids = [...new Set(raw.map(Number).filter((n) => Number.isInteger(n) && n > 0))];
@@ -972,9 +1017,15 @@ function issueCoa(req: AuthedRequest, res: Response, ids: number[]) {
   // certificate being issued, so a missing key is blank.
   const extra = coaExtraJson(req.body, res);
   if (!extra) return;
+  const header = coaHeaderJson(req.body, res);
+  if (!header) return;
 
-  writeCoa(ids, date, req.user!.id, companyId,
-    { approvedBy, buyerOrder, extra: extra.json ?? '' });
+  writeCoa(ids, date, req.user!.id, companyId, {
+    approvedBy,
+    buyerOrder: header.buyerOrder ?? buyerOrder,
+    extra: extra.json ?? '',
+    header: header.json ?? '',
+  });
   res.status(201).json(ids.map((id) => batchById(id)));
 }
 
@@ -1042,6 +1093,30 @@ function coaGroup(req: AuthedRequest, res: Response): { lots: ReturnType<typeof 
  * leave alone. The rule itself is `batch.ts`'s, asked here rather than
  * restated.
  */
+/**
+ * Which header cells this certificate prints, and what was typed over the
+ * record on the ones that allow it (2026-10-31).
+ *
+ * The same contract as the extra details beside it: **a key omitted leaves
+ * what is stored alone** and an empty config clears it, so a dialog that does
+ * not know about this cannot blank it. The rule itself is `coaHeader.ts`'s,
+ * asked here rather than restated.
+ */
+function coaHeaderJson(
+  raw: unknown, res: Response
+): { json: string | null; buyerOrder: string | null } | null {
+  const body = (raw ?? {}) as Record<string, unknown>;
+  if (body.header === undefined) return { json: null, buyerOrder: null };
+  const refused = coaHeaderError(body.header);
+  if (refused) {
+    res.status(400).json({ error: refused });
+    return null;
+  }
+  // The one cell with a column of its own, lifted back out — see
+  // `buyerOrderFrom`. It is never stored in the map beside it.
+  return { json: cleanCoaHeader(body.header), buyerOrder: buyerOrderFrom(body.header) };
+}
+
 function coaExtraJson(raw: unknown, res: Response): { json: string | null } | null {
   const body = (raw ?? {}) as Record<string, unknown>;
   if (body.extra === undefined) return { json: null };
@@ -1054,7 +1129,8 @@ function coaExtraJson(raw: unknown, res: Response): { json: string | null } | nu
 }
 
 type CoaFields = {
-  date: string | null; approvedBy: string | null; buyerOrder: string | null; extra: string | null;
+  date: string | null; approvedBy: string | null; buyerOrder: string | null;
+  extra: string | null; header: string | null;
 };
 
 function coaFields(raw: unknown, res: Response): CoaFields | null {
@@ -1066,13 +1142,19 @@ function coaFields(raw: unknown, res: Response): CoaFields | null {
   }
   const extra = coaExtraJson(raw, res);
   if (!extra) return null;
+  const header = coaHeaderJson(raw, res);
+  if (!header) return null;
   return {
     date,
     approvedBy: body.approved_by === undefined ? null : String(body.approved_by).trim(),
     // Blanked deliberately is a real answer here: it puts the document back on
     // its own fallback, which is the proforma behind the order.
-    buyerOrder: body.buyer_order === undefined ? null : String(body.buyer_order).trim(),
+    // The panel owns this cell; the older key stays for an API caller that
+    // still sends it, and the panel wins where both arrive.
+    buyerOrder: header.buyerOrder
+      ?? (body.buyer_order === undefined ? null : String(body.buyer_order).trim()),
     extra: extra.json,
+    header: header.json,
   };
 }
 
@@ -1086,6 +1168,9 @@ function applyCoaFields(batchId: number, f: CoaFields): void {
   }
   if (f.extra !== null) {
     db.prepare('UPDATE batches SET coa_extra = ? WHERE id = ?').run(f.extra, batchId);
+  }
+  if (f.header !== null) {
+    db.prepare('UPDATE batches SET coa_header = ? WHERE id = ?').run(f.header, batchId);
   }
 }
 
@@ -1215,7 +1300,7 @@ workOrdersRouter.delete('/batches/:batchId/coa', requirePermission('qc', 'full')
  * caller when the extra details were added rather than leaving a fourth to be
  * found later.
  */
-type CoaHead = { approvedBy: string; buyerOrder: string; extra: string };
+type CoaHead = { approvedBy: string; buyerOrder: string; extra: string; header: string };
 
 function writeCoa(
   ids: number[], date: string, userId: number, companyId: number, head: CoaHead
@@ -1225,10 +1310,10 @@ function writeCoa(
     number = nextNumber('coa', { companyId, date });
     const set = db.prepare(
       `UPDATE batches SET coa_no = ?, coa_date = ?, coa_issued_by = ?, coa_approved_by = ?,
-                          coa_buyer_order = ?, coa_extra = ? WHERE id = ?`
+                          coa_buyer_order = ?, coa_extra = ?, coa_header = ? WHERE id = ?`
     );
     for (const id of ids) {
-      set.run(number, date, userId, head.approvedBy, head.buyerOrder, head.extra, id);
+      set.run(number, date, userId, head.approvedBy, head.buyerOrder, head.extra, head.header, id);
     }
   });
   return number;
@@ -1577,6 +1662,9 @@ workOrdersRouter.post('/:id/certify', requirePermission('qc', 'full'), (req: Aut
   const extra = coaExtraJson(body, res);
   if (!extra) return;
   const extraJson = extra.json ?? '';
+  const header = coaHeaderJson(body, res);
+  if (!header) return;
+  const headerJson = header.json ?? '';
 
   const order = db.prepare('SELECT company_id, customer_id FROM orders WHERE id = ?')
     .get(Number(wo.order_id)) as { company_id: number; customer_id: number };
@@ -1610,8 +1698,9 @@ workOrdersRouter.post('/:id/certify', requirePermission('qc', 'full'), (req: Aut
   const date = String(body.coa_date ?? '').trim() || String(body.date);
   writeCoa([batchId], date, req.user!.id, companyId, {
     approvedBy: String(body.approved_by ?? '').trim(),
-    buyerOrder: String(body.buyer_order ?? '').trim(),
+    buyerOrder: header.buyerOrder ?? String(body.buyer_order ?? '').trim(),
     extra: extraJson,
+    header: headerJson,
   });
   res.status(201).json({ batch: batchById(batchId), certified: true });
 });

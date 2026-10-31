@@ -9,6 +9,8 @@ import { invoiceReceivable, proformaAdvance, orderAdvance } from './receivables.
 import { specOwner, checksForWorkOrder } from './qc.js';
 import { batchById, lotsUnderCoa, batchesOnDespatch, batchesOnCreditNote } from './batch.js';
 import { getCompany, defaultCompany } from './companies.js';
+import { fmtDate, fmtNum } from './format.js';
+import { coaHeaderFields, printedCoaFields } from './coaHeader.js';
 
 // The npm package ships fonts only as base64 vfs; decode them for the server printer.
 const vfs: Record<string, string> =
@@ -39,11 +41,6 @@ function fmtMoney(n: number, currency: string): string {
   }).format(n || 0)}`;
 }
 
-function fmtNum(n: number | null | undefined, maxFrac = 3): string {
-  if (n == null) return '—';
-  return new Intl.NumberFormat('en-IN', { maximumFractionDigits: maxFrac }).format(n);
-}
-
 /**
  * A rate, always to at least two decimals (2026-09-24, the client with a
  * quotation's Unit Price column in front of them: *"Can all digit be 2
@@ -70,12 +67,6 @@ function fmtNum(n: number | null | undefined, maxFrac = 3): string {
 function fmtRate(n: number | null | undefined): string {
   if (n == null) return '—';
   return new Intl.NumberFormat('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 3 }).format(n);
-}
-
-function fmtDate(iso: string): string {
-  if (!iso) return '';
-  const [y, m, d] = iso.split('-');
-  return `${d}-${m}-${y}`;
 }
 
 /* ------------------------------------------------------------------ */
@@ -3622,7 +3613,6 @@ export function buildCoaPdf(batchId: number): TDocumentDefinitions {
       WHERE w.id = ?`
   ).get(b.work_order_id) as Row;
   const s = companyProfile(wo.company_id);
-  const c = db.prepare('SELECT * FROM customers WHERE id = ?').get(wo.customer_id) as Row;
 
   /*
    * The check each lot was certified on: its latest one that reached a
@@ -3665,191 +3655,56 @@ export function buildCoaPdf(batchId: number): TDocumentDefinitions {
   const many = lots.length > 1;
 
   /*
-   * What the header states, derived rather than stored — the rule this module
-   * follows about everything on a certificate bar the number and the date.
+   * **What the header states, and which of it this certificate prints**
+   * (2026-10-31). The derivation moved to `services/coaHeader.ts`, so the
+   * page that ticks these cells on and off and the paper they print on read
+   * **one list** — that file says what is derived, what may be typed over and
+   * what the tick does.
    *
-   * **Resin** is what the product's recipe consumes, which is where PET and
-   * HDPE already live. **Production period** is the span of the shift entries
-   * actually booked into these lots, so it narrows when a mis-keyed shift is
-   * deleted. **Colour** is the order line's, the one printed on every selling
-   * document. Each prints an em-dash rather than a guess where the record is
-   * silent.
+   * Laid out three to a row, every cell taking one column except the
+   * customer's address, which takes two; a row that cannot hold the next cell
+   * closes, and **the last cell of a part row spans out** rather than leaving
+   * an empty box — the rule the extra details already followed, now the rule
+   * for the whole header. So a cell ticked off, or one the record has nothing
+   * to say about, simply reflows the rows after it instead of leaving a hole.
    */
-  const ids = lots.map((l) => l.id);
-  const holes = ids.map(() => '?').join(', ');
-  const span = db.prepare(
-    `SELECT MIN(date) AS lo, MAX(date) AS hi FROM production_entries WHERE batch_id IN (${holes})`
-  ).get(...(ids as never[])) as { lo: string | null; hi: string | null };
-  const resin = (db.prepare(
-    `SELECT m.name FROM product_materials pm JOIN materials m ON m.id = pm.material_id
-      WHERE pm.product_id = (SELECT product_id FROM work_orders WHERE id = ?)
-      ORDER BY pm.sort_order, pm.id`
-  ).all(b.work_order_id) as { name: string }[]).map((r) => r.name).join(', ');
-  /*
-   * **Where these lots actually went** (2026-10-21, the client: *"Add the
-   * invoice details to the COA header"*). Their own certificate states the
-   * consignee, the invoice and its date, and the boxes — facts about a
-   * *consignment*, where this document is issued against a **batch**.
-   *
-   * They are reachable, and only one way: `despatch_batches` says which lots
-   * travelled on which trip, and a trip names the invoice it was billed
-   * under. Read rather than stored, like every other header fact here, so
-   * correcting a trip or re-pointing an invoice corrects the certificate.
-   *
-   * **Blank at the moment it matters most, and that is correct rather than a
-   * gap.** A COA is required *before* dispatch — it is what `qcBlockError`
-   * looks for — so at issue there is no trip and no invoice, and the row is
-   * **not drawn at all** rather than printing three em-dashes. A dead box on
-   * a document is the rule the notify parties already follow. Reprint the
-   * same certificate after the goods have gone and it fills in.
-   */
-  const trips = db.prepare(
-    `SELECT DISTINCT d.id AS despatch_id, ci.number AS invoice_number, ci.date AS invoice_date,
-            ci.consignee AS consignee
-       FROM despatch_batches dbx
-       JOIN despatches d ON d.id = dbx.despatch_id
-       LEFT JOIN commercial_invoices ci ON ci.id = d.invoice_id
-      WHERE dbx.batch_id IN (${holes})
-      ORDER BY d.date, d.id`
-  ).all(...(ids as never[])) as
-    { despatch_id: number; invoice_number: string | null; invoice_date: string | null; consignee: string | null }[];
+  const printed = printedCoaFields(coaHeaderFields({ batchId }));
+  const cells: { cell: Cell; span: number }[] = [
+    ...printed.map((f) => ({ cell: lv(f.label, f.value), span: f.span ?? 1 })),
+    /*
+     * **Whatever this buyer asked to see** (2026-10-27) — see `CoaExtra`.
+     * They come last, after the header the app works out for itself, so the
+     * certificate's own shape is what it has always been and the additions
+     * read as additions. Already parsed on the row.
+     */
+    ...b.coa_extra.map((x) => ({ cell: lv(x.label, x.value), span: 1 })),
+  ];
 
-  /*
-   * The boxes and pieces of **these lots' own lines**, not of the whole trip:
-   * a lorry carries lines this certificate says nothing about, and summing
-   * them would overstate what was certified. The lot names no line itself —
-   * its work order does, the chain's own index rule.
-   */
-  const lotLines = (db.prepare(
-    `SELECT DISTINCT w.order_line FROM batches bb
-       JOIN work_orders w ON w.id = bb.work_order_id
-      WHERE bb.id IN (${holes})`
-  ).all(...(ids as never[])) as { order_line: number }[]).map((r) => Number(r.order_line));
-
-  const shipped = trips.length && lotLines.length
-    ? db.prepare(
-      `SELECT COALESCE(SUM(di.packs), 0) AS boxes, COALESCE(SUM(di.qty), 0) AS pcs
-         FROM despatch_items di
-        WHERE di.despatch_id IN (${trips.map(() => '?').join(', ')})
-          AND di.order_line IN (${lotLines.map(() => '?').join(', ')})`
-    ).get(...(trips.map((t) => t.despatch_id) as never[]), ...(lotLines as never[])) as { boxes: number; pcs: number }
-    : { boxes: 0, pcs: 0 };
-
-  // One invoice is the ordinary case; a lot split across two consignments is
-  // not, so the numbers are joined and the **date is stated only where it is
-  // unambiguous** rather than one of them being picked to stand for both.
-  const invNumbers = [...new Set(trips.map((t) => (t.invoice_number ?? '').trim()).filter(Boolean))];
-  const invDates = [...new Set(trips.map((t) => (t.invoice_date ?? '').trim()).filter(Boolean))];
-  const consignees = [...new Set(trips.map((t) => (t.consignee ?? '').trim()).filter(Boolean))];
-
-  const colour = String((db.prepare(
-    `SELECT COALESCE(NULLIF(oi.color, ''), p.color, '') AS color
-       FROM work_orders w
-       JOIN (SELECT order_id, color, ROW_NUMBER() OVER (PARTITION BY order_id ORDER BY sort_order, id) - 1 AS pos
-               FROM order_items) oi ON oi.order_id = w.order_id AND oi.pos = w.order_line
-       LEFT JOIN products p ON p.id = w.product_id
-      WHERE w.id = ?`
-  ).get(b.work_order_id) as { color?: string } | undefined)?.color ?? '');
-
-  /*
-   * **The buyer's own reference, never ours** (2026-10-22, the client: *"Buyer
-   * order — should be editable, capture PI number or PO number (but no SO
-   * number)"*). The sales order is this company's internal number and means
-   * nothing to the person reading the certificate; their own paper carries
-   * *AGLO/EX/25-26/150*, which is the proforma the buyer ordered against.
-   *
-   * Typed where somebody typed it, then the proforma behind the order —
-   * reached by the back-pointer, `dispatchProgress`'s own walk — then the
-   * customer's own PO. An em-dash where the record is silent, rather than
-   * falling through to a number that would be wrong.
-   */
-  const buyerOrder = b.coa_buyer_order
-    || String((db.prepare('SELECT number FROM proforma_invoices WHERE order_id = ? ORDER BY id LIMIT 1')
-      .get(Number(wo.order_id)) as { number?: string } | undefined)?.number ?? '')
-    || String(wo.po_number ?? '');
-
-  const period = span.lo
-    ? (span.lo === span.hi ? fmtDate(span.lo) : `${fmtDate(span.lo)} – ${fmtDate(String(span.hi))}`)
-    : '';
-
-  /*
-   * **Whatever this buyer asked to see** (2026-10-27) — see `CoaExtra`. Every
-   * other cell above is derived or is one of the three somebody types; these
-   * are facts about the agreement rather than about the lot, so nothing here
-   * can derive them.
-   *
-   * They come **last**, after the derived header, so the certificate's own
-   * shape is what it has always been and the additions read as additions. Laid
-   * out three to a row like the grid above, the last row spanning out rather
-   * than ending in empty boxes — a dead cell on a document reads as a fault,
-   * the notify parties' own rule. Nothing at all is drawn where nothing was
-   * asked for, which is every certificate issued before this.
-   */
-  // Already parsed on the row — `batchById` reads the column at the boundary.
-  const extra = b.coa_extra;
-  const extraRows: Content[][] = [];
-  for (let i = 0; i < extra.length; i += 3) {
-    const row = extra.slice(i, i + 3);
-    if (row.length === 3) {
-      extraRows.push(row.map((x) => lv(x.label, x.value)));
-    } else if (row.length === 2) {
-      extraRows.push([lv(row[0].label, row[0].value), { ...lv(row[1].label, row[1].value), colSpan: 2 }, {}]);
-    } else {
-      extraRows.push([{ ...lv(row[0].label, row[0].value), colSpan: 3 }, {}, {}]);
+  const body: Cell[][] = [];
+  let row: { cell: Cell; span: number }[] = [];
+  const width = (r: { span: number }[]) => r.reduce((n, x) => n + x.span, 0);
+  const flush = () => {
+    if (!row.length) return;
+    const spare = 3 - width(row);
+    if (spare > 0) row[row.length - 1].span += spare;
+    const out: Cell[] = [];
+    for (const x of row) {
+      out.push(x.span > 1 ? { ...x.cell, colSpan: x.span } : x.cell);
+      // pdfmake wants the spanned-over cells present and empty, or it throws
+      // at layout time rather than when the definition is built.
+      for (let i = 1; i < x.span; i += 1) out.push({});
     }
+    body.push(out);
+    row = [];
+  };
+  for (const x of cells) {
+    if (width(row) + x.span > 3) flush();
+    row.push({ ...x });
   }
+  flush();
 
-  /*
-   * **Four cells came off this header** (2026-10-22, the client, reading a
-   * certificate against their own: the batch *date*, the **work order**, the
-   * **quantity certified** and **inspected on** are *"not required"*). Each
-   * was derivable and none of them is a fact the buyer needs — the work order
-   * is an internal instruction, the quantity is on the invoice, and when it
-   * was inspected is what the readings below are dated by.
-   *
-   * **Production period is optional**, so it is drawn only where the shift
-   * book has one and Resin takes the width where it does not — a dead cell on
-   * a document being the rule the notify parties already follow, rather than
-   * a box with an em-dash in it.
-   */
   const grid: Content = {
-    table: {
-      widths: ['*', '*', '*'],
-      body: [
-        [
-          lv('Certificate No.  /  Date', `${b.coa_no}   ${fmtDate(b.coa_date)}`),
-          // A run of lots reads as a range, the way the paper writes it; one
-          // lot still reads as itself, so nothing already issued changes.
-          lv(many ? 'Batch Nos.' : 'Batch No.', many
-            ? `${lots[0].number} to ${lots[lots.length - 1].number}`
-            : b.number),
-          lv('Product', String(wo.product_name || wo.description || '—')),
-        ],
-        period
-          ? [lv('Colour', colour || '—'), lv('Resin', resin || '—'), lv('Production Period', period)]
-          : [lv('Colour', colour || '—'), { ...lv('Resin', resin || '—'), colSpan: 2 }, {}],
-        [
-          { ...lv('Customer', [c?.name, c?.address].filter(Boolean).join('\n')), colSpan: 2 },
-          {},
-          lv("Buyer's Order", buyerOrder || '—'),
-        ],
-        // Drawn only once the goods have gone — see the read above.
-        ...(trips.length ? [[
-          lv('Invoice No.  /  Date', [
-            invNumbers.join(', ') || '—',
-            // A trip can leave before its paperwork, so a blank invoice here
-            // is the lorry having gone unbilled rather than a fault.
-            invDates.length === 1 ? fmtDate(invDates[0]) : '',
-          ].filter(Boolean).join('   ')),
-          lv('Consignee', consignees.join('\n') || '—'),
-          lv('Dispatched', [
-            shipped.pcs ? `${fmtNum(shipped.pcs, 0)} pcs` : '',
-            shipped.boxes ? `${fmtNum(shipped.boxes, 0)} boxes` : '',
-          ].filter(Boolean).join('  ·  ') || '—'),
-        ]] : []),
-        ...extraRows,
-      ],
-    },
+    table: { widths: ['*', '*', '*'], body },
     layout: boxedLayout,
     margin: [0, 0, 0, 8] as any,
   };

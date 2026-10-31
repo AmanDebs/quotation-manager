@@ -2,13 +2,16 @@ import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
-import type { QcCheckRow, QcRegisterSummary, CoaRow, CoaSummary, Customer, Product } from '../types';
+import type {
+  QcCheckRow, QcRegisterSummary, CoaRow, CoaSummary, Customer, Product, CoaField, CoaHeaderConfig,
+} from '../types';
 import {
   PageHeader, Card, Select, Input, Field, Button, Modal, ErrorText, EmptyState, Pagination,
   DownloadButton, SegmentedTabs, FIELD_GRID, TH_CLASS,
 } from '../components/ui';
 import { useCan } from '../App';
 import { CoaExtraFields } from '../components/CoaExtraFields';
+import { CoaHeaderFields } from '../components/CoaHeaderFields';
 import type { ReadyLine } from '../types';
 import { fmtQty } from '../lib/format';
 import { fmtDate } from '../lib/format';
@@ -74,15 +77,27 @@ function EditCoa({ row, onClose }: { row: CoaRow; onClose: () => void }) {
   const [form, setForm] = useState({
     date: row.coa_date,
     approved_by: row.approved_by,
-    buyer_order: row.buyer_order,
     // Opened on what is actually on the certificate: the whole list is sent on
     // save, so a dialog that did not know about these would blank them.
     extra: row.extra ?? [],
   });
+  /*
+   * Which header cells print, and what was typed over the record — `null`
+   * until somebody ticks or types, so an untouched dialog sends nothing about
+   * the header and cannot rewrite it. The buyer's own reference lives in here
+   * rather than beside the two boxes above: it is a header cell like the
+   * rest, and two controls over one fact is how the two come to disagree.
+   */
+  const [header, setHeader] = useState<CoaHeaderConfig | null>(null);
+  const { data: headerData, isLoading: headerLoading } = useQuery({
+    queryKey: ['coa-header', 'batch', String(row.batch_id)],
+    queryFn: () => api.get<{ fields: CoaField[] }>(`/api/work-orders/batches/${row.batch_id}/coa-header`),
+  });
+  const body = () => ({ ...form, ...(header ? { header } : {}) });
   const queryClient = useQueryClient();
   const refresh = () => queryClient.invalidateQueries({ queryKey: ['coa-register'] });
   const save = useMutation({
-    mutationFn: () => api.put(`/api/work-orders/batches/${row.batch_id}/coa`, form),
+    mutationFn: () => api.put(`/api/work-orders/batches/${row.batch_id}/coa`, body()),
     onSuccess: () => { refresh(); onClose(); },
   });
   /*
@@ -91,7 +106,7 @@ function EditCoa({ row, onClose }: { row: CoaRow; onClose: () => void }) {
    * has moved and the certificate is still a draft.
    */
   const issue = useMutation({
-    mutationFn: () => api.post(`/api/work-orders/batches/${row.batch_id}/coa/issue`, form),
+    mutationFn: () => api.post(`/api/work-orders/batches/${row.batch_id}/coa/issue`, body()),
     onSuccess: () => { refresh(); onClose(); },
   });
   /*
@@ -107,7 +122,12 @@ function EditCoa({ row, onClose }: { row: CoaRow; onClose: () => void }) {
   });
   const busy = save.isPending || issue.isPending || toReadings.isPending;
   return (
-    <Modal title={`Correct ${row.coa_no}`} onClose={onClose}>
+    /*
+      Wide, because the dialog now carries the whole header. Thirteen cells in
+      one narrow column is a tower; at `max-w-3xl` they sit two up with room
+      for the value beside each label.
+    */
+    <Modal title={`Correct ${row.coa_no}`} onClose={onClose} wide>
       <p className="mb-3 text-xs text-slate-500">
         {row.lots > 1
           ? `Covers ${row.lots} batches — ${row.batch_numbers}. A correction applies to all of them.`
@@ -124,19 +144,14 @@ function EditCoa({ row, onClose }: { row: CoaRow; onClose: () => void }) {
             placeholder="Who signs it off"
           />
         </Field>
-        {/*
-          The buyer's own reference, never ours. Blank is a real answer: the
-          document falls back to the proforma behind the order and then to the
-          customer's PO, and never to the sales order, which means nothing to
-          whoever reads the certificate.
-        */}
-        <Field label="Buyer's order">
-          <Input
-            value={form.buyer_order}
-            onChange={(e) => setForm({ ...form, buyer_order: e.target.value })}
-            placeholder="PI or PO number"
-          />
-        </Field>
+      </div>
+      <div className="mt-3 border-t border-slate-100 pt-3">
+        <CoaHeaderFields
+          fields={headerData?.fields}
+          config={header}
+          loading={headerLoading}
+          onChange={setHeader}
+        />
       </div>
       <div className="mt-3 border-t border-slate-100 pt-3">
         <CoaExtraFields rows={form.extra} onChange={(extra) => setForm({ ...form, extra })} />
