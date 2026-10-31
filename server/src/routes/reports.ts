@@ -31,10 +31,15 @@ const filter = (req: AuthedRequest, column: string): ReportFilter => ({
 const todayIso = () => new Date().toISOString().slice(0, 10);
 
 /**
- * Each sheet downloads as the spreadsheet it came from. `?currency=` narrows
- * to the one the page is showing; without it every row goes, with its
- * currency in a column — never added across. Grand totals are per currency
- * and close the sheet, one line each, as the screen draws them.
+ * Each sheet downloads as the spreadsheet it came from: every row, with its
+ * currency in a column and never added across, and a grand total per
+ * currency closing the sheet — one line each, exactly as the screen now
+ * draws its blocks.
+ *
+ * `?currency=` narrows to one. **The page stopped sending it on 2026-10-31**,
+ * when the currency selector gave way to a block per currency, so the file
+ * holds what the screen holds by doing nothing. It is kept because it costs
+ * a line and answers a real question somebody may ask by hand.
  */
 type Row = Record<string, unknown>;
 function sendXlsx(res: Response, name: string, cols: Column<Row>[], rows: Row[]) {
@@ -191,7 +196,9 @@ const DOC_LABEL: Record<BookDoc, string> = {
 /**
  * The sheet as a spreadsheet: one row per line, the group on every row so the
  * file can be pivoted in Excel the way the desk already does. The whole
- * filtered set, never a page, and `?currency=` narrows to the one on screen.
+ * filtered set, never a page; `?currency=` narrows to one, which the page no
+ * longer asks for — it draws every currency, so the file carries every
+ * currency too.
  */
 reportsRouter.get('/book/export', (req: AuthedRequest, res) => {
   const out = book(req);

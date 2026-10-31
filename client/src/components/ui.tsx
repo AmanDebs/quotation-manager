@@ -458,6 +458,14 @@ export const CAPTION_CLASS = `${labelClass(false)} leading-4`;
 export const TH_CLASS = `border-b border-slate-200 text-left ${CAPTION_CLASS}`;
 
 /**
+ * A band across a table naming the block under it — the Reports sheets use
+ * it for a currency, money only adding up within one. Drawn as a row of the
+ * same table rather than a card of its own, so every block shares one set of
+ * column widths and the sheet can be read straight down.
+ */
+export const BAND_CLASS = `border-y border-slate-200 bg-slate-50 py-1.5 ${CAPTION_CLASS}`;
+
+/**
  * The shape a document form's field grid takes.
  *
  * Three columns on every screen was one answer to four different questions: a

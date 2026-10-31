@@ -19,7 +19,8 @@ import { trackerRows, type InvoiceHead, type TrackerRow } from './invoiceTracker
  * **Every figure is per currency.** A row is a customer × SPOC × currency,
  * and the grand-total line is one entry per currency — the rule
  * `receivables.ts` states, that money only adds up within one currency. The
- * client draws one currency at a time, the way the dashboard does.
+ * client draws them one after another, a block per currency, each closing
+ * on its own grand total.
  *
  * The functions take a `ReportFilter` rather than a request so the tests can
  * call them the way `materialSchedule()` is called; the route builds it from
