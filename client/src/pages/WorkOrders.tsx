@@ -1145,18 +1145,35 @@ export default function WorkOrdersPage() {
                         </td>
                       )}
                       {/* A document number is one word; split across two lines it reads as two. */}
-                      <td className={`whitespace-nowrap py-2 pr-3 font-medium ${grouped ? 'pl-4' : ''}`}>
+                      <td className={`whitespace-nowrap py-2 pr-2 font-medium ${grouped ? 'pl-4' : ''}`}>
                         <Link to={`/work-orders/${w.id}`} className="text-brand-600 hover:underline">{w.number}</Link>
-                        {/* The one thing the header said that the row cannot:
-                            which sales order raised this job. Drawn where there
-                            is no header to say it — a grouped job is indented
-                            under one that does. */}
+                        {/*
+                          The one thing a group header says that the row cannot:
+                          which sales order raised this job. Drawn where there is
+                          no header to say it — a grouped job is indented under
+                          one that does.
+
+                          **Beside the job number, not under it** (2026-11-02,
+                          the client with the two shapes interleaved: *"Make
+                          every row of the same format as the ones which are
+                          condensed"*). It was a second line, and measured, that
+                          second line cost **1px** of row height — so what made
+                          a job row read as a different kind of row from a folded
+                          header was not its height but that it was the one
+                          stacked cell in the table. The header states its order
+                          and its customer side by side on one line; the row now
+                          states its job and its order the same way.
+                        */}
                         {first && !header && (
-                          <div className="mt-px text-[10px] font-normal leading-none">
-                            <Link to={`/orders/${w.order_id}`} className="text-slate-400 hover:text-brand-600 hover:underline">
+                          <>
+                            <span className="px-1 text-slate-300">·</span>
+                            <Link
+                              to={`/orders/${w.order_id}`}
+                              className="text-[10px] font-normal text-slate-400 hover:text-brand-600 hover:underline"
+                            >
                               {w.order_number}
                             </Link>
-                          </div>
+                          </>
                         )}
                       </td>
                       {/* When the job was raised. Already this desk's own date
