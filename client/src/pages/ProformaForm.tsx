@@ -65,6 +65,15 @@ interface Draft {
   hs_code: string;
   prepared_by: string;
   remarks: string;
+  /**
+   * Carried from the quotation when this one is raised from it, and written
+   * by the **create alone** — a saved proforma's notes belong to
+   * `InternalNotes`, which PATCHes them through their own endpoint so that
+   * saving the document cannot touch them. It stays `''` on an existing
+   * document for exactly that reason: two writers for one field is how the
+   * draft and the server come to disagree about it.
+   */
+  internal_notes: string;
   tax_type: TaxType;
   column_config: ColumnConfig;
   items: LineItem[];
@@ -81,7 +90,8 @@ const emptyDraft = (): Draft => ({
   is_export: 0, country_of_origin: '', port_of_loading: '',
   port_of_discharge: '', final_destination: '', container_count: '', partial_shipment: 'Not Allowed',
   po_number: '', po_date: '', notify_party_2: '', method_of_despatch: '', quantity_tolerance: '',
-  hs_code: '', prepared_by: '', remarks: '', tax_type: 'igst', column_config: newColumnConfig(), items: [],
+  hs_code: '', prepared_by: '', remarks: '', internal_notes: '',
+  tax_type: 'igst', column_config: newColumnConfig(), items: [],
 });
 
 export default function ProformaFormPage() {
@@ -613,13 +623,38 @@ export default function ProformaFormPage() {
           <ContainerFitment items={draft.items} plan={fitment} size={containerSize} onSize={setContainerSize} />
         )}
 
-        {/* Saved through its own endpoint, so it needs an id — and so saving a
-            note cannot reset an approved proforma the way the form's Save does. */}
-        {!isNew && (
-          <Card title="Notes for us">
+        {/*
+          Saved through its own endpoint once there is a row to PATCH — and so
+          saving a note cannot reset an approved proforma the way the form's
+          Save does.
+
+          On a **new** one there is no id yet, so the card used to be absent
+          altogether. That was fine while nothing could put a note there before
+          the first save, and stopped being fine when the quotation's notes
+          started carrying across: a value the app is about to save that nobody
+          can see or correct is the `HeaderCharges` hazard. So a new proforma
+          draws the same box over the draft, and it becomes the PATCH-backed
+          one the moment the document exists. The two are never on screen
+          together.
+        */}
+        <Card title="Notes for us">
+          {isNew ? (
+            <>
+              <Textarea
+                rows={4}
+                value={draft.internal_notes}
+                onChange={(e) => set({ internal_notes: e.target.value })}
+                placeholder="What was asked for, what was conceded, when to call back…"
+              />
+              <p className="mt-1 text-xs text-slate-500">
+                For the team — never printed on the proforma.
+                {fromQuotation && draft.internal_notes ? ' Carried over from the quotation.' : ''}
+              </p>
+            </>
+          ) : (
             <InternalNotes docType="proforma" docId={Number(id)} value={existing!.internal_notes ?? ''} rows={4} />
-          </Card>
-        )}
+          )}
+        </Card>
 
         {/* Nothing to read and nothing to write: gone, like the empty fields. */}
         <Card

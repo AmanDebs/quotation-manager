@@ -455,6 +455,30 @@ proformasRouter.get('/prefill/from-quotation/:quotationId', (req: AuthedRequest,
     quantity_tolerance: isExport ? '(±) 10% in value and quantity' : '',
     inco_terms: q.inco_terms ?? '',
     container_count: q.container_count ?? '',
+    /*
+     * **Both notes carry across** (2026-11-03, the client: *"Internal note and
+     * note are not getting copied when we move to next step .. like quotation
+     * to PI"*). Neither did, and the printed one is the easier of the two to
+     * miss because **the column changes name across the hop**: a quotation's
+     * is `notes` and a proforma's is `remarks`, so there was nothing to notice
+     * by eye in the spread below.
+     *
+     * The intent was already written down on both sides. `useDefaultNotes`
+     * fills the standard clauses into an empty box only, and says why: *"text
+     * carried forward from a quotation or order is the more specific answer"*
+     * — so the client-side default has been deferring to a prefill that never
+     * sent one. And the proforma was given `internal_notes` at all *"so the
+     * team's commentary on a negotiation no longer stops at the moment it
+     * becomes a document"*, which is this hop exactly.
+     *
+     * **Unlike `duplicate`**, which deliberately leaves the running commentary
+     * behind: a copy is usually a second offer to a *different* customer, and
+     * carrying one customer's private notes into another's file is the hazard
+     * that rule exists for. A conversion is the same customer and the same
+     * negotiation, so the opposite answer is the right one.
+     */
+    remarks: q.notes ?? '',
+    internal_notes: q.internal_notes ?? '',
     freight: q.freight ?? 0,
     insurance: q.insurance ?? 0,
     column_config: JSON.parse(String(q.column_config || '{}')),
@@ -571,14 +595,24 @@ proformasRouter.post('/', (req: AuthedRequest, res) => {
   const id = transaction(() => {
     const number = nextNumber('proforma', { isExport: h.is_export === 1, companyId, date: h.date });
     const info = db.prepare(
-      `INSERT INTO proforma_invoices (number, company_id, ${headerFields.join(', ')}, created_by, column_config, status)
-       VALUES (?, ?, ${headerFields.map(() => '?').join(', ')}, ?, ?, 'draft')`
+      `INSERT INTO proforma_invoices (number, company_id, ${headerFields.join(', ')}, created_by, column_config, internal_notes, status)
+       VALUES (?, ?, ${headerFields.map(() => '?').join(', ')}, ?, ?, ?, 'draft')`
     ).run(
       number,
       companyId,
       ...(headerFields.map((f) => (h as Record<string, unknown>)[f]) as never[]),
       req.user!.id,
-      JSON.stringify(body.column_config ?? {})
+      JSON.stringify(body.column_config ?? {}),
+      /*
+       * Written **on create only**, and deliberately not through
+       * `headerFields`, which drives the UPDATE as well. Internal notes are
+       * owned by `PATCH /:id/internal-notes` precisely so that saving the
+       * document cannot touch them — and so that typing one cannot reset an
+       * approved proforma. A new document has no approval to reset and no
+       * note to overwrite, so the conversion can seed it here without
+       * weakening that; the PUT still ignores the field entirely.
+       */
+      String(body.internal_notes ?? '')
     );
     const id = Number(info.lastInsertRowid);
     saveItems(id, (body.items ?? []) as LineItemInput[], h.tax_type, h.freight, h.insurance, h.currency);
