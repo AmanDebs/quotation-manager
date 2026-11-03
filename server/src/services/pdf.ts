@@ -3340,7 +3340,39 @@ function toleranceText(r: { kind?: unknown; min_value?: unknown; max_value?: unk
   const lo = r.min_value == null ? null : Number(r.min_value);
   const hi = r.max_value == null ? null : Number(r.max_value);
   const with_ = (n: number) => `${fmtNum(n, 3)}${u ? ` ${u}` : ''}`;
-  if (lo !== null && hi !== null) return `${fmtNum(lo, 3)} – ${with_(hi)}`;
+  if (lo !== null && hi !== null) {
+    /*
+     * **A window with two ends is stated as a tolerance** (2026-11-03, the
+     * client with the COA's dimensional block in front of them: *"instead of
+     * minimum maximum, write tolerance +/- for example 37.5 +- 0.5"*), which
+     * is how their own certificates read: *(20.90±0.20) mm*.
+     *
+     * It is a **lossless re-expression** of the same window, which is why it
+     * is done here rather than in the one block that was reported: the same
+     * characteristic would otherwise read one way on a sectioned certificate
+     * and another on the flat fallback, depending on whether somebody had
+     * filled in the Section column.
+     *
+     * An **open-ended** window is left exactly as it was. A wall that can be
+     * too thin and never too thick has no nominal to sit either side of, and
+     * inventing one would state a ceiling the specification does not have.
+     */
+    const nominal = (lo + hi) / 2;
+    const tol = (hi - lo) / 2;
+    /*
+     * ...and the range is kept where the ± form would not read back to the
+     * ends actually stated. `fmtNum` prints three decimals, so a window whose
+     * half-span is finer than that would otherwise be printed as a slightly
+     * different window -- and a certificate may be terse but may not misstate
+     * what was allowed.
+     */
+    const back = (txt: string) => Number(txt.replace(/,/g, ''));
+    const n = back(fmtNum(nominal, 3));
+    const t = back(fmtNum(tol, 3));
+    const exact = Math.abs((n - t) - lo) < 1e-9 && Math.abs((n + t) - hi) < 1e-9;
+    if (exact) return `${fmtNum(nominal, 3)} ± ${with_(tol)}`;
+    return `${fmtNum(lo, 3)} – ${with_(hi)}`;
+  }
   if (lo !== null) return `min ${with_(lo)}`;
   if (hi !== null) return `max ${with_(hi)}`;
   return '—';
@@ -3441,10 +3473,14 @@ function qcSectionTable(s: Row, section: string, rows: QcRow[]): Content {
   if (section === 'dimensional') {
     const cell = (v: unknown, unit: string) =>
       v == null || v === '' ? '—' : `${fmtNum(Number(v), 3)}${unit ? ` ${unit}` : ''}`;
-    const specCells = (r: QcRow) => {
-      const unit = String(r.unit ?? '').trim();
-      return [qtd(name(r)), qtd(cell(r.min_value, unit), 'center'), qtd(cell(r.max_value, unit), 'center')];
-    };
+    /*
+     * **One Specification cell, not a Minimum/Maximum pair** (2026-11-03, the
+     * client: *"instead of minimum maximum, write tolerance +/-"*). The pair
+     * is the same window said in two cells, and `toleranceText` is asked for
+     * it rather than this block formatting its own -- a second formatter here
+     * is exactly what 2026-10-21 found and removed.
+     */
+    const specCells = (r: QcRow) => [qtd(name(r)), qtd(toleranceText(r), 'center')];
 
     /*
      * **The Actual side is headed by what is actually under it** (2026-10-21,
@@ -3465,20 +3501,20 @@ function qcSectionTable(s: Row, section: string, rows: QcRow[]): Content {
       // answered entirely in words is an observation, the word the two blocks
       // either side of this one already use.
       const anyNumber = rows.some((r) => !r.na && !r.complied && r.value != null);
+      /*
+       * Neither side has sub-columns now, so the banner row goes with them:
+       * a two-row header over three plain columns would be a heading over a
+       * heading saying the same thing.
+       */
       return {
         table: {
-          headerRows: 2,
-          widths: ['*', 62, 62, 124],
+          headerRows: 1,
+          widths: ['*', 124, 124],
           body: [
             [
-              qth('Parameter', s, { rowSpan: 2 }),
-              qth('Specification', s, { colSpan: 2, alignment: 'center' }), {},
-              qth(anyNumber ? 'Average Value' : 'Observation', s, { rowSpan: 2, alignment: 'center' }),
-            ],
-            [
-              {},
-              qth('Minimum', s, { alignment: 'center' }), qth('Maximum', s, { alignment: 'center' }),
-              {},
+              qth('Parameter', s),
+              qth('Specification', s, { alignment: 'center' }),
+              qth(anyNumber ? 'Average Value' : 'Observation', s, { alignment: 'center' }),
             ],
             ...rows.map((r) => [...specCells(r), qtd(readingText(r), 'center')]),
           ],
@@ -3490,16 +3526,15 @@ function qcSectionTable(s: Row, section: string, rows: QcRow[]): Content {
     return {
       table: {
         headerRows: 2,
-        widths: ['*', 62, 62, 62, 62],
+        widths: ['*', 124, 62, 62],
         body: [
           [
             qth('Parameter', s, { rowSpan: 2 }),
-            qth('Specification', s, { colSpan: 2, alignment: 'center' }), {},
+            qth('Specification', s, { rowSpan: 2, alignment: 'center' }),
             qth('Actual', s, { colSpan: 2, alignment: 'center' }), {},
           ],
           [
-            {},
-            qth('Minimum', s, { alignment: 'center' }), qth('Maximum', s, { alignment: 'center' }),
+            {}, {},
             qth('Minimum', s, { alignment: 'center' }), qth('Maximum', s, { alignment: 'center' }),
           ],
           ...rows.map((r) => {

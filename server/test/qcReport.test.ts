@@ -158,7 +158,8 @@ describe('what the report says', () => {
     const { woId } = chain();
     const texts = textsOf(buildQcReportPdf(woId));
     assert.ok(texts.includes('Pass'), 'no passing reading');
-    assert.ok(texts.some((t) => t.includes('0.3 – 0.5')), 'the spec column is missing');
+    // Stated as a tolerance since 2026-11-03: 0.3–0.5 is 0.4 ± 0.1.
+    assert.ok(texts.some((t) => t.includes('0.4 ± 0.1')), 'the spec column is missing');
   });
 
   /** `passed: null` is not a pass — the trap `decorate` exists to avoid. */
@@ -254,7 +255,50 @@ describe('the Spec column states the window, in full', () => {
 
   test('a two-sided window carries its unit, like the reading beside it', () => {
     const texts = withTolerance(9, 11, 'gm');
-    assert.ok(texts.includes('9 – 11 gm'), 'the Spec column dropped the unit');
+    assert.ok(texts.includes('10 ± 1 gm'), 'the Spec column dropped the unit');
+  });
+
+  /**
+   * **A window with two ends is stated as a tolerance** (2026-11-03, the
+   * client with the COA's dimensional block in front of them: *"instead of
+   * minimum maximum, write tolerance +/- for example 37.5 +- 0.5"*), which
+   * is how their own certificates read: *(20.90±0.20) mm*.
+   *
+   * Most of these are about what must **not** become a tolerance: an
+   * open-ended window has no nominal to sit either side of, and a window
+   * finer than the three decimals this prints would be restated as a
+   * slightly different window, which a certificate may not do.
+   */
+  test('a two-ended window is its midpoint and half-span', () => {
+    assert.ok(withTolerance(37, 38).includes('37.5 ± 0.5 mm'), "the client's own example");
+    assert.ok(withTolerance(21, 22).includes('21.5 ± 0.5 mm'));
+    // Not every window is symmetric about a round number, and that is fine:
+    // the pair is restated exactly, whatever it comes to.
+    assert.ok(withTolerance(29, 30.5).includes('29.75 ± 0.75 mm'));
+  });
+
+  test('a window with one open end keeps its own words', () => {
+    // No nominal to sit either side of, and inventing one would state a
+    // ceiling the specification does not have.
+    assert.ok(withTolerance(2.8, null).includes('min 2.8 mm'));
+    assert.ok(withTolerance(null, 1.5).includes('max 1.5 mm'));
+    for (const t of [...withTolerance(2.8, null), ...withTolerance(null, 1.5)]) {
+      assert.ok(!t.includes('±'), `a one-sided window was written as a tolerance: ${t}`);
+    }
+  });
+
+  test('and a window finer than the figures printed keeps the range', () => {
+    /* `fmtNum` prints three decimals, so a half-span of 0.0005 would be
+       rounded and the certificate would state a window nobody specified.
+       The range is exact in that case and is what prints. */
+    const texts = withTolerance(1.0005, 1.0015);
+    assert.ok(!texts.some((t) => t.includes('±')), 'a window was restated at a precision it does not have');
+    assert.ok(texts.some((t) => t.includes('1.001') && t.includes('1.002')), 'the range is not printed either');
+  });
+
+  test('floating point does not leak into the figures', () => {
+    // (0.1 + 0.2) / 2 is 0.15000000000000002 before it is formatted.
+    assert.ok(withTolerance(0.1, 0.2).includes('0.15 ± 0.05 mm'));
   });
 
   test('and a pass/fail check states what is allowed rather than a verdict', () => {
@@ -342,9 +386,11 @@ describe('the three blocks the client certificate prints', () => {
     assert.ok(at('VISUAL CHECKS') >= 0 && at('DIMENSIONAL CHECKS') >= 0 && at('FITMENT CHECK') >= 0);
     assert.ok(at('VISUAL CHECKS') < at('DIMENSIONAL CHECKS'), 'visual is not first');
     assert.ok(at('DIMENSIONAL CHECKS') < at('FITMENT CHECK'), 'fitment is not last');
-    // The dimensional block alone carries the two-row banner.
+    // The dimensional block alone carries the two-row banner, and since
+    // 2026-11-03 only the **Actual** side has a pair under it: the
+    // Specification is one cell stating the window as a tolerance.
     assert.ok(texts.includes('Specification') && texts.includes('Actual'));
-    assert.ok(texts.filter((t) => t === 'Minimum').length === 2, 'the Min columns are not a pair');
+    assert.equal(texts.filter((t) => t === 'Minimum').length, 1, 'the Specification side still has a pair');
   });
 
   test('the visual block says it once, not twice', () => {
@@ -393,9 +439,9 @@ describe('the three blocks the client certificate prints', () => {
     assert.ok(texts.includes('Neck Finish O/D'), 'the custom check is not on the page');
     // In the dimensional block, which on this fixture is the only one drawn.
     assert.ok(at('DIMENSIONAL CHECKS') < at('Neck Finish O/D'), 'it was not placed in its block');
-    // The dimensional block splits a window into its two cells, so the
-    // custom row's own tolerance reads as a pair like any other.
-    assert.ok(texts.includes('21.8 mm') && texts.includes('22.2 mm'), 'its own tolerance is not printed');
+    // Its own tolerance is stated like any other characteristic's: one cell
+    // saying the window, 21.8–22.2 being 22 ± 0.2.
+    assert.ok(texts.includes('22 ± 0.2 mm'), 'its own tolerance is not printed');
     assert.ok(texts.includes('QC PASSED'), 'a custom check was not judged');
   });
 
@@ -475,7 +521,10 @@ describe('the three blocks the client certificate prints', () => {
     const texts = textsOf(buildQcReportPdf(woId));
     assert.ok(texts.includes('Average Value'), 'the Actual side is not headed by what is under it');
     assert.ok(!texts.includes('Actual'), 'the pair banner is still drawn over one column');
-    assert.equal(texts.filter((t) => t === 'Minimum').length, 1, 'Minimum is still a pair');
+    // Neither side has sub-columns now, so the words are off the block
+    // entirely rather than one of them surviving on the Specification side.
+    assert.equal(texts.filter((t) => t === 'Minimum').length, 0, 'a sub-column heading survived');
+    assert.equal(texts.filter((t) => t === 'Maximum').length, 0, 'a sub-column heading survived');
     assert.equal(texts.filter((t) => t === '0.4 mm').length, 1, 'the reading is printed twice');
   });
 
@@ -494,7 +543,7 @@ describe('the three blocks the client certificate prints', () => {
     const def = buildQcReportPdf(woId);
     const texts = textsOf(def);
     assert.ok(texts.includes('Actual'), 'the pair banner was dropped on a block that has a range');
-    assert.equal(texts.filter((t) => t === 'Minimum').length, 2, 'the Min columns are not a pair');
+    assert.equal(texts.filter((t) => t === 'Minimum').length, 1, 'the Specification side still has a pair');
     assert.ok(spans(def, '0.4 mm'), 'the single answer does not span the two Actual cells');
   });
 
