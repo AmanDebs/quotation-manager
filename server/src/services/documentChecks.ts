@@ -201,33 +201,43 @@ const RULES: Rule[] = [
         ? 'The credit note total is zero — there is nothing to credit.'
         : `The ${NOUN[d.table]} total is zero — there is nothing to pay.`),
   },
+  /* ------------------------------------------------------------- warnings */
   {
     /*
-     * **Nothing may be invoiced until it has passed QC.**
+     * **An invoice says when its goods have not passed QC, and no longer
+     * refuses to go out over it** (2026-11-03, the client: *"I think we need
+     * to generate commercial invoice even without a QC - the process of
+     * getting QC before is getting tedious for now.."*).
      *
-     * The Hard Stop in the client's ERP specification of 2026-09-10: *"prevent
-     * the issuance of a Commercial Invoice or Gate Pass unless the
-     * corresponding batch status is marked as QC_PASSED"*. The gate-pass half
-     * was already covered, and transitively rather than by a second guard — a
-     * challan prints for a despatch, and `POST`/`PUT /despatches` have carried
-     * `qcBlockError` since they were written. The invoice half was not covered
-     * at all: one could be raised, approved and sent for goods nobody had
-     * inspected.
+     * This was a **block** from 2026-09-10 to today, and it was the Hard Stop
+     * in the client's own ERP specification: *"prevent the issuance of a
+     * Commercial Invoice or Gate Pass unless the corresponding batch status is
+     * marked as QC_PASSED"*. Relaxing it is therefore going against something
+     * they wrote down, which is worth saying out loud rather than quietly
+     * deleting — and it is still their call, made with the book in front of
+     * them and with *"for now"* on it.
      *
-     * **It gates approval, not the save**, which is what *issuance* means here
-     * and is the whole reason this table exists. Refusing to create the row
-     * would stop the office drafting an invoice while the floor finishes
-     * inspecting, which is ordinary work; refusing to *approve* it stops the
-     * document going out, `approval.ts` guarding every outgoing status behind
-     * exactly that. So it reaches all four routes into `approved` for free,
-     * and shows on the form as a finding above a disabled button rather than
-     * springing a 422 on a press.
+     * **Demoted, not removed**, which is the whole of why this is cheap and
+     * reversible: the finding is still computed, still names the line and
+     * still says what to record, and it now prints under *Worth checking* on
+     * the invoice form and in the approvals queue instead of disabling the
+     * button. Nobody loses the information; what they lose is the refusal.
+     * Putting it back is the one-word `level` change this table was shaped
+     * for — the same move the proforma's `bank` rule made in the other
+     * direction on 2026-09-07.
+     *
+     * **The gate-pass half is untouched and still refuses**: `POST`/`PUT
+     * /despatches` carry `qcBlockError` directly, not through this table, so
+     * a lorry still cannot leave against goods nobody inspected and the
+     * *Ready to dispatch* queue still holds that line with the same sentence.
+     * The client named the invoice; the spec names both, and the half that
+     * actually stops goods leaving the plant is the one left standing. It is
+     * one line in `routes/despatches.ts` if they want that too.
      *
      * `qcBlockError` is **asked** rather than restated — it owns what a pass
-     * means, and it is the same rule that already refuses the lorry.
-     *
-     * Three cases it deliberately does not block, each of which would
-     * otherwise refuse a legitimate invoice on the day this shipped.
+     * means, and it is the same rule that refuses the lorry. Three cases it
+     * deliberately says nothing about, each of which would otherwise have
+     * warned about a perfectly ordinary invoice.
      *
      * **An invoice with no order behind it.** Nothing was produced against it,
      * so there is no work order to have inspected — the same silence-is-not-
@@ -242,7 +252,7 @@ const RULES: Rule[] = [
      * **A product with no specification, and a charge line** — both inside
      * `qcBlockError`, which is the point of asking it rather than rewriting it.
      */
-    key: 'qc', level: 'block', tables: ['commercial_invoices'],
+    key: 'qc', level: 'warn', tables: ['commercial_invoices'],
     check: (d) => {
       // The invoice's own order, or the one its proforma was booked from —
       // resolved in two steps rather than one COALESCE, because `row` is
@@ -266,7 +276,6 @@ const RULES: Rule[] = [
     },
   },
 
-  /* ------------------------------------------------------------- warnings */
   {
     key: 'gstin', level: 'warn', tables: ['commercial_invoices'], when: isDomestic,
     check: (d) => (text(d.customer?.gstin)

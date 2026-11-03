@@ -237,16 +237,26 @@ describe('the refusal itself', () => {
 });
 
 /**
- * The Hard Stop: no commercial invoice for goods nobody inspected.
+ * An invoice says when its goods have not passed QC, and refuses nothing.
  *
- * The only rule in this table that reaches outside the document it is checking
- * — everything else reads the row and its lines, while this walks back to the
- * order and asks `qcBlockError` what it already tells the despatch register.
- * So these build real orders, jobs and checks rather than a synthetic
- * `CheckedDoc`, and most of them assert what is **not** blocked: this is a
- * blocking rule, and a blocking rule that fires wrongly stops a shipment.
+ * This was the Hard Stop from their own ERP specification and blocked
+ * approval from 2026-09-10 until 2026-11-03, when the client asked for the
+ * invoice to go out without one. The rule is **demoted, not deleted**: the
+ * finding is still computed, still names the line and still says what to
+ * record — so most of these assert what it must *not* say, a warning that
+ * fires wrongly being noise that teaches people to ignore the strip.
+ *
+ * The group reads `keys(d, 'warn')` rather than `'block'` deliberately. Read
+ * at the old level every case here would pass for the wrong reason: nothing
+ * is ever blocked now, so a `!blocked(...)` assertion can no longer fail.
+ *
+ * The only rule in this table that reaches outside the document it is
+ * checking — everything else reads the row and its lines, while this walks
+ * back to the order and asks `qcBlockError` what it already tells the
+ * despatch register. So these build real orders, jobs and checks rather than
+ * a synthetic `CheckedDoc`.
  */
-describe('nothing is invoiced until it has passed QC', () => {
+describe('an invoice reports QC rather than waiting for it', () => {
   let seq = 0;
 
   const product = (spec: boolean) => {
@@ -298,52 +308,72 @@ describe('nothing is invoiced until it has passed QC', () => {
     doc('commercial_invoices', { order_id: orderId },
       Array.from({ length: lines }, () => line({ description: 'Preform' })));
 
-  const blocked = (d: CheckedDoc) => keys(d, 'block').includes('qc');
+  const warned = (d: CheckedDoc) => keys(d, 'warn').includes('qc');
 
-  test('a spec-carrying line with no work order at all is blocked', () => {
-    assert.ok(blocked(invoiceFor(order([product(true)]))));
+  test('a spec-carrying line with no work order at all is reported', () => {
+    assert.ok(warned(invoiceFor(order([product(true)]))));
   });
 
-  test('and a job that has been inspected and failed is still blocked', () => {
+  test('and a job that has been inspected and failed is still reported', () => {
     const o = order([product(true)]);
     check(job(o), 30.5);   // outside 27.9–28.1
-    assert.ok(blocked(invoiceFor(o)));
+    assert.ok(warned(invoiceFor(o)));
   });
 
-  test('a passing check opens it', () => {
+  test('a passing check clears it', () => {
     const o = order([product(true)]);
     check(job(o), 28.0);
-    assert.ok(!blocked(invoiceFor(o)));
+    assert.ok(!warned(invoiceFor(o)));
   });
 
-  /** The refusal names the line and says what to do, not merely that it failed. */
-  test('the refusal says which line and what to record', () => {
+  /*
+   * The whole of what the client asked for: the document goes out. Asserted
+   * against `incompleteError`, which is what every route into `approved` and
+   * the PDF route actually call — a `level` left at `block` fails here.
+   */
+  test('and it blocks nothing: submit, approve and the PDF all go through', () => {
     const o = order([product(true)]);
-    const msg = incompleteError('commercial_invoices', 0);
-    assert.equal(msg, null, 'an invoice that does not exist has nothing to refuse');
+    const d = invoiceFor(o);
+    assert.ok(!keys(d, 'block').includes('qc'), 'the QC finding is still blocking');
+    assert.equal(
+      evaluate(d).filter((f) => f.level === 'block').length, 0,
+      'an otherwise finished invoice was refused over QC'
+    );
+  });
+
+  /**
+   * The sentence has to be true of what the app now does. It said *"so it
+   * cannot be invoiced"*, which as a warning would describe a refusal that
+   * does not happen — the clause is dropped for this context rather than
+   * reworded, leaving the fact and what to do about it.
+   */
+  test('the warning says which line and what to record, and claims no refusal', () => {
+    const o = order([product(true)]);
     const found = evaluate(invoiceFor(o)).find((f) => f.key === 'qc');
     assert.ok(found, 'no finding at all');
-    assert.match(found.message, /has not passed QC yet, so it cannot be invoiced/);
+    assert.equal(found.level, 'warn');
+    assert.match(found.message, /has not passed QC yet/);
     assert.match(found.message, /Record a passing quality check/);
+    assert.doesNotMatch(found.message, /cannot be invoiced/);
   });
 
-  /* ------------------------------------------------- what is NOT blocked */
+  /* -------------------------------------------- what is not reported at all */
 
   test('a product nobody has written a specification for', () => {
-    assert.ok(!blocked(invoiceFor(order([product(false)]))));
+    assert.ok(!warned(invoiceFor(order([product(false)]))));
   });
 
   test('an invoice with no order behind it', () => {
     const d = doc('commercial_invoices', {}, [line()]);
-    assert.ok(!blocked(d), 'an invoice outside the order flow was refused');
+    assert.ok(!warned(d), 'an invoice outside the order flow was reported');
   });
 
   test('a line past the end of the order, which has no counterpart to check', () => {
     const o = order([product(true)]);
     check(job(o), 28.0);
     // Two invoice lines against a one-line order: the second matches nothing,
-    // and the chain skips such a line rather than refusing it.
-    assert.ok(!blocked(invoiceFor(o, 2)));
+    // and the chain skips such a line rather than reporting it.
+    assert.ok(!warned(invoiceFor(o, 2)));
   });
 
   test('a charge line, which is a fee and not goods', () => {
@@ -351,16 +381,17 @@ describe('nothing is invoiced until it has passed QC', () => {
     // counts charges, and numbering after filtering would gate the wrong line.
     const o = order([null, product(true)], true);
     check(job(o, 1), 28.0);
-    assert.ok(!blocked(invoiceFor(o, 2)));
+    assert.ok(!warned(invoiceFor(o, 2)));
   });
 
   /**
-   * The proforma is raised before anything is made, so gating it on QC would
-   * refuse every advance this business collects.
+   * The proforma is raised before anything is made, so asking it about QC
+   * would report against every advance this business collects.
    */
   test('and a proforma is never asked the question at all', () => {
     const o = order([product(true)]);
-    assert.ok(!keys(doc('proforma_invoices', { order_id: o }), 'block').includes('qc'));
+    const d = doc('proforma_invoices', { order_id: o });
+    assert.ok(!keys(d).includes('qc'));
   });
 });
 

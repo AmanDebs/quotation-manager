@@ -393,10 +393,21 @@ function lotsForLine(orderId: number, pos: number): { total: number; cleared: nu
 
 export type QcContext = 'dispatch' | 'invoice';
 
-/** The two words the refusal needs, so a caller cannot pass them inconsistently. */
-const CONTEXT: Record<QcContext, { noun: string; verb: string }> = {
-  dispatch: { noun: 'dispatch', verb: 'dispatched' },
-  invoice: { noun: 'invoice', verb: 'invoiced' },
+/**
+ * The words each caller's sentence needs, so a caller cannot pass them
+ * inconsistently — and, since 2026-11-03, so the sentence cannot **claim a
+ * refusal that does not happen**.
+ *
+ * A dispatch is still refused outright, and says so. An invoice is only
+ * *warned* about (see the `qc` rule in `documentChecks.ts`), so the clause
+ * saying it cannot go out is dropped rather than reworded: what is left is
+ * the fact and what to do about it, which is the whole of what a warning has
+ * to say. A warning asserting a block that is not there is how people learn
+ * to stop reading the strip it prints in.
+ */
+const CONTEXT: Record<QcContext, { noun: string; stop: string; gate: string }> = {
+  dispatch: { noun: 'dispatch', stop: ', so it cannot be dispatched', gate: 'before it can be dispatched ' },
+  invoice: { noun: 'invoice', stop: '', gate: '' },
 };
 
 export function qcBlockError(
@@ -404,7 +415,7 @@ export function qcBlockError(
   lines: { order_line?: unknown }[],
   context: QcContext = 'dispatch',
 ): string | null {
-  const { noun, verb } = CONTEXT[context];
+  const { noun, stop, gate } = CONTEXT[context];
   // Every line of the order, numbered exactly as orderLines.ts numbers them —
   // charge lines included, because they take a position too.
   const items = db.prepare(
@@ -486,10 +497,10 @@ export function qcBlockError(
          */
         if (lots.drafted > 0) {
           return `${name}: its ${lots.drafted === 1 ? 'batch is' : 'batches are'} on a `
-            + `Certificate of Analysis that has been withdrawn and not issued again, so it cannot be `
-            + `${verb}. Issue that certificate from the COA register, or discard it and certify afresh.`;
+            + `Certificate of Analysis that has been withdrawn and not issued again${stop}. `
+            + 'Issue that certificate from the COA register, or discard it and certify afresh.';
         }
-        return `${name}: no batch of it carries a Certificate of Analysis, so it cannot be ${verb}. `
+        return `${name}: no batch of it carries a Certificate of Analysis${stop}. `
           + 'Issue a COA against a batch that has passed its final check.';
       }
       continue;
@@ -500,7 +511,7 @@ export function qcBlockError(
      * since an export order needs no tick and a domestic one carries one.
      */
     if (needsCoa) {
-      return `${name} needs a Certificate of Analysis before it can be ${verb} — `
+      return `${name} needs a Certificate of Analysis ${gate}— `
         + `${Number(owner?.is_export) ? 'this is an export order' : 'this order is marked COA required'}. `
         + 'Press Certify on the Quality queue, or inspect the batch on the job and issue its COA.';
     }
@@ -508,7 +519,7 @@ export function qcBlockError(
       .filter((j) => Number(j.order_line) === pos)
       .some((j) => (checks.get(Number(j.id)) ?? []).some((c) => c.passed === true));
     if (!passed) {
-      return `${name} has not passed QC yet, so it cannot be ${verb}. `
+      return `${name} has not passed QC yet${stop}. `
         + 'Record a passing quality check against its work order first.';
     }
   }
