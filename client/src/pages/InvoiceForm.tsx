@@ -622,9 +622,22 @@ export default function InvoiceFormPage() {
           <div className={`${FIELD_GRID} mb-3`}>
             {!isNew && (
               <Field label="Packing List Number">
+                {/*
+                  Editable (2026-11-03, the client with the card in front of
+                  them: *"Make packing list number editable"*) — the call the
+                  commercial invoice took on 2026-09-20 and the proforma on
+                  2026-09-24, and the standalone packing-list form has drawn a
+                  plain box all along, so this was the one screen still
+                  settling a number its own siblings let somebody overrule.
+                  The series issues it and a person may argue; uniqueness is
+                  the per-company index's, surfacing as the central 409. A box
+                  cleared by mistake keeps the issued number — see the guard
+                  in `syncPackingList`.
+                */}
                 <DocNumber
                   value={draft.packing.number}
-                  title="Assigned from this company's packing-list series when the invoice was first saved"
+                  title="Assigned from this company's packing-list series when the invoice was first saved — editable"
+                  onChange={(v) => setPacking({ number: v })}
                 />
               </Field>
             )}

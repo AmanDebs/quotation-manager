@@ -163,7 +163,10 @@ packingListsRouter.put('/:id', (req: AuthedRequest, res) => {
   if (!existing || !canAccessCustomer(req, Number(existing.customer_id))) return res.status(404).json({ error: 'Packing list not found' });
   transaction(() => {
     db.prepare('UPDATE packing_lists SET number = ?, date = ?, invoice_id = ?, customer_id = ?, shipping_marks = ?, lot_no = ?, remarks = ?, container_no = ?, invoice_reference = ?, column_config = ? WHERE id = ?').run(
-      String(body.number ?? existing.number),
+      // A blank keeps the issued number: this form's box has always been a
+      // plain input, so the empty-string case was reachable here before the
+      // invoice's packing card gained one. See syncPackingList's own note.
+      String(body.number ?? '').trim() || String(existing.number),
       String(body.date ?? existing.date),
       body.invoice_id ? Number(body.invoice_id) : (existing.invoice_id as number | null),
       Number(body.customer_id ?? existing.customer_id),

@@ -255,7 +255,15 @@ function syncPackingList(invoiceId: number, userId: number, packing: PackingInpu
     db.prepare(
       `UPDATE packing_lists SET number = ?, date = ?, customer_id = ?, shipping_marks = ?, lot_no = ?, remarks = ?, container_no = ?, invoice_reference = ?, column_config = ? WHERE id = ?`
     ).run(
-      String(packing?.number ?? pl.number),
+      /*
+       * **A blank keeps the issued number.** `?? pl.number` catches a key the
+       * body never sent and not one sent empty — harmless only while nothing
+       * could type into the box, and the client asked for that box on
+       * 2026-11-03. A packing list saved with no number at all is a document
+       * nobody can quote, so a cleared box falls back the way the invoice's
+       * and the proforma's own numbers do.
+       */
+      String(packing?.number ?? '').trim() || String(pl.number),
       String(packing?.date ?? pl.date),
       Number(inv.customer_id),
       String(packing?.shipping_marks ?? pl.shipping_marks ?? ''),
