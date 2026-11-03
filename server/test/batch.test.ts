@@ -379,14 +379,18 @@ describe('a withdrawn certificate is a draft', () => {
     assert.equal(batchById(b)!.cleared, false, 'a draft cleared the lot it covers');
   });
 
-  test('so no lorry takes it, and the refusal names the draft rather than denying it exists', () => {
+  /*
+   * **The lorry is no longer one of the things a draft stops** (2026-11-03,
+   * the client: *"Allow dispatch without COA"*). What a draft still does is
+   * everything that is about the certificate itself — it certifies nothing,
+   * so the QC queue still names the line, a second certificate over the lot
+   * is still refused, and the readings are still correctable. Only the
+   * dispatch refusal went, with the rest of the gate.
+   */
+  test('and the lorry is no longer stopped by it, though it still certifies nothing', () => {
     const { b, orderId } = certified('COA/26-27/022', true);
-    const refused = String(despatchBatchError(orderId, [b]));
-    assert.match(refused, /COA\/26-27\/022/, 'the sentence hid the number the register shows');
-    assert.match(refused, /not been issued/);
-    // And issued, the same lot goes.
-    db.prepare("UPDATE batches SET coa_status = '' WHERE id = ?").run(b);
     assert.equal(despatchBatchError(orderId, [b]), null);
+    assert.equal(batchById(b)!.cleared, false, 'a draft was read as an issued certificate');
   });
 
   test('a second certificate is refused over a lot already on a draft', () => {

@@ -250,37 +250,61 @@ describe('what is ready to dispatch', () => {
 });
 
 describe('what is holding a line back', () => {
-  test('a spec\'d line with no passing check is held, in the gate\'s own words', () => {
+  /*
+   * **QC warns and does not hold** (2026-11-03, the client: *"Allow dispatch
+   * without COA"*), which is the advance's own move of 2026-10-17 read for
+   * the other gate: `POST /despatches` no longer refuses it, and a line
+   * sitting under *Held* would be a block in the one screen Logistics uses
+   * over a save that would succeed.
+   *
+   * So the sentence rides `qc_hold` and the line is on the ready list — and
+   * it is still the gate's **own** sentence rather than a copy, which is what
+   * keeps the queue and the Quality page from drifting from the rule.
+   */
+  test('a spec\'d line with no passing check warns, in the gate\'s own words, and does not hold', () => {
     const p = makeProduct({ spec: true });
     const o = makeOrder([{ productId: p, pcs: 20000 }]);
     book(makeJob(o, 0, p, 20000), 12000);
     release(o, 0);
     const row = forOrder(o)[0];
-    // Not a copy of the sentence: the queue must say what the save would say.
-    assert.equal(row.held, qcBlockError(o, [{ order_line: 0 }]));
-    assert.match(row.held!, /has not passed QC yet/);
-    assert.equal(row.ready, 12000, 'still listed — the goods exist, they are just held');
+    assert.equal(row.qc_hold, qcBlockError(o, [{ order_line: 0 }]));
+    assert.match(row.qc_hold!, /has not passed QC yet/);
+    assert.equal(row.held, null, 'QC is holding a line the save would now take');
+    assert.equal(row.ready, 12000, 'the goods are loadable, and are counted as such');
   });
 
-  test('recording the pass releases it', () => {
+  /*
+   * The half worth asserting rather than assuming, since it is the whole
+   * point: the gate no longer refuses. `qcBlockError` is still what the
+   * warning says, so this reads it directly -- the route simply stopped
+   * turning it into a 409.
+   */
+  test('and the gate itself still answers, so nothing lost the sentence', () => {
+    const p = makeProduct({ spec: true });
+    const o = makeOrder([{ productId: p, pcs: 20000 }]);
+    book(makeJob(o, 0, p, 20000), 12000);
+    assert.match(String(qcBlockError(o, [{ order_line: 0 }])), /has not passed QC yet/);
+  });
+
+  test('recording the pass clears the warning', () => {
     const p = makeProduct({ spec: true });
     const o = makeOrder([{ productId: p, pcs: 20000 }]);
     const job = makeJob(o, 0, p, 20000);
     book(job, 12000);
     release(o, 0);
-    assert.notEqual(forOrder(o)[0].held, null);
+    assert.notEqual(forOrder(o)[0].qc_hold, null);
     pass(job);
-    assert.equal(forOrder(o)[0].held, null);
+    assert.equal(forOrder(o)[0].qc_hold, null);
   });
 
-  test('a failed check does not release it — a failure is not a pass', () => {
+  test('a failed check does not clear it — a failure is not a pass', () => {
     const p = makeProduct({ spec: true });
     const o = makeOrder([{ productId: p, pcs: 20000 }]);
     const job = makeJob(o, 0, p, 20000);
     book(job, 12000);
     release(o, 0);
     pass(job, 0.9);
-    assert.notEqual(forOrder(o)[0].held, null);
+    assert.notEqual(forOrder(o)[0].qc_hold, null);
   });
 
   /*
@@ -327,14 +351,19 @@ describe('what is holding a line back', () => {
     assert.match(row.advance_due!, /has not been paid for/);
   });
 
-  test('QC still holds a released line — it is not the desk\'s to waive', () => {
+  /* Both gates warn now, and a released line carries both marks without
+     either one holding it. */
+  test('a released line carries the QC warning beside the money one', () => {
     const p = makeProduct({ spec: true });
     const o = makeOrder([{ productId: p, pcs: 20000 }]);
     db.prepare("UPDATE orders SET payment_terms = ?, grand_total = 50000 WHERE id = ?")
       .run('30% Advance and Balance before Dispatch', o);
     book(makeJob(o, 0, p, 20000), 12000);
     release(o, 0);
-    assert.match(forOrder(o)[0].held!, /has not passed QC yet/);
+    const row = forOrder(o)[0];
+    assert.match(row.qc_hold!, /has not passed QC yet/);
+    assert.match(row.advance_due!, /has not been paid for/);
+    assert.equal(row.held, null);
   });
 
   test('terms naming no money warn about nothing', () => {
@@ -352,14 +381,18 @@ describe('what is holding a line back', () => {
     const plain = makeProduct();
     const specd = makeProduct({ spec: true });
     const a = makeOrder([{ productId: plain, pcs: 10000 }]);
-    const b = makeOrder([{ productId: specd, pcs: 10000 }]);
+    const b = makeOrder([{ productId: specd, pcs: 10000 }]);   // warns, loadable
+    const c = makeOrder([{ productId: plain, pcs: 10000 }]);   // nobody released it
     book(makeJob(a, 0, plain), 10000);
     book(makeJob(b, 0, specd), 10000);
+    book(makeJob(c, 0, plain), 10000);
     release(a, 0);
     release(b, 0);
     const all = readyLines(req);
-    const ours = all.rows.filter((r) => r.order_id === a || r.order_id === b);
-    assert.equal(ours.filter((r) => !r.held).length, 1);
+    const ours = all.rows.filter((r) => [a, b, c].includes(r.order_id));
+    // *Held* means *cannot be loaded*, which since 2026-11-03 is the desk's
+    // release alone — a QC warning is counted as ready, because it is.
+    assert.equal(ours.filter((r) => !r.held).length, 2, 'a QC warning was counted as a hold');
     assert.equal(ours.filter((r) => r.held).length, 1);
     assert.equal(all.ready, all.rows.filter((r) => r.ready > 0 && !r.held).length);
     assert.equal(all.held, all.rows.filter((r) => r.held).length);
@@ -505,11 +538,15 @@ describe('the sales desk releasing goods for dispatch', () => {
   /* QC and the advance are the save's own guards and their sentence is the one
      the save would give; saying "awaiting Meisha" over a failed check would
      send somebody to chase the wrong person. */
-  test('a QC hold is reported ahead of the missing release', () => {
+  test('an unreleased line held by the desk still carries its QC warning', () => {
     const p = makeProduct({ spec: true });
     const o = makeOrder([{ productId: p, pcs: 20000 }]);
     book(makeJob(o, 0, p, 20000), 12000);
-    assert.match(forOrder(o)[0].held!, /has not passed QC yet/);
+    const row = forOrder(o)[0];
+    // Neither gate holds anything now, so the one thing left in `held` is the
+    // release -- and the QC sentence rides beside it rather than in front.
+    assert.match(row.held!, /not yet released for dispatch/);
+    assert.match(row.qc_hold!, /has not passed QC yet/);
   });
 
   test('the hold names the SPOC where the order has one', () => {
@@ -696,7 +733,9 @@ describe('which refusal is holding the line, on the Quality queue', () => {
     book(makeJob(o, 0, p), 12000);
     const row = forOrder(o)[0];
     assert.match(row.qc_hold!, /has not passed QC yet/);
-    assert.equal(row.held, row.qc_hold, 'the composed reason is the QC one here');
+    // Since 2026-11-03 `held` no longer composes the QC gate in: this line is
+    // held by the missing release alone, and the QC sentence rides its own key.
+    assert.match(row.held!, /not yet released for dispatch/);
   });
 
   test('a line held only by the desk carries no QC hold', () => {

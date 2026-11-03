@@ -405,8 +405,22 @@ export type QcContext = 'dispatch' | 'invoice';
  * to say. A warning asserting a block that is not there is how people learn
  * to stop reading the strip it prints in.
  */
+/*
+ * **Neither context claims a refusal any more** (the invoice on 2026-11-03,
+ * and dispatch later the same day: *"Allow dispatch without COA"*).
+ *
+ * Both clauses are empty, so each is **dropped** rather than reworded and
+ * what is left is the fact and what to do about it. A sentence ending *"so
+ * it cannot be dispatched"* over a lorry the save would now take is the kind
+ * of wording this codebase records as a real defect: a prompt naming the
+ * wrong thing is how people learn to ignore the strip it prints in.
+ *
+ * They are kept as fields rather than deleted because they are what a
+ * refusal would need if either gate is put back, and because `noun` still
+ * carries the one word the line-shape refusals use.
+ */
 const CONTEXT: Record<QcContext, { noun: string; stop: string; gate: string }> = {
-  dispatch: { noun: 'dispatch', stop: ', so it cannot be dispatched', gate: 'before it can be dispatched ' },
+  dispatch: { noun: 'dispatch', stop: '', gate: '' },
   invoice: { noun: 'invoice', stop: '', gate: '' },
 };
 

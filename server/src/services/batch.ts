@@ -812,20 +812,26 @@ export function despatchBatchError(orderId: number, batchIds: unknown[]): string
       return `Batch ${row.number} was scrapped, so it cannot be dispatched.`;
     }
     /*
-     * **A draft is not a certificate** (2026-10-24), and is refused in its own
-     * words: somebody looking at a number on the register and told the lot
-     * "has no Certificate of Analysis" would reasonably conclude the app had
-     * lost it. The lot carries a number and the document has not gone out,
-     * which is a different fact and a different thing to do about it.
+     * **And a lot with no certificate is no longer refused one** (2026-11-03,
+     * the client: *"Allow dispatch without COA"*). The two branches that stood
+     * here — a lot carrying nothing, and one on a certificate withdrawn to a
+     * draft — were the specification's Hard Stop asked of the exact lot, and
+     * they go with the line-level gate in `routes/despatches.ts` rather than
+     * surviving it: left standing they would have **punished recording a
+     * lot**, since naming none is always allowed, so the way past them would
+     * have been to write down less about the trip than actually happened.
+     * A traceability record that people learn to leave blank is worse than
+     * one nobody is holding up.
+     *
+     * The three above stay, and none of them is about quality: a lot that is
+     * not on file, one made against another order (a scoping lie as much as a
+     * traceability one), and a scrapped lot, whose output `CONDEMNED` has
+     * already taken out of what the job made — so dispatching it would be
+     * dispatching goods this book says do not exist.
+     *
+     * The screen says what the guard no longer does: the picker draws an
+     * uncertified lot with its reason rather than disabled.
      */
-    if (String(row.coa_status) === 'draft') {
-      return `Batch ${row.number} is on draft certificate ${row.coa_no}, which has not been issued, `
-        + 'so it cannot be dispatched. Issue that certificate first.';
-    }
-    if (!String(row.coa_no)) {
-      return `Batch ${row.number} has no Certificate of Analysis, so it cannot be dispatched. `
-        + 'Issue one against it first.';
-    }
   }
   return null;
 }

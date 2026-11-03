@@ -385,12 +385,16 @@ export function DespatchFields({
         traceability chain, and the only part of it somebody has to type.
 
         The whole block is absent unless the order has lots, so an order nobody
-        has batched shows exactly the form it always did. An uncertified lot is
-        **shown and disabled rather than hidden**, with the reason beside it: a
-        picker that silently omits the batch somebody is looking for reads as a
-        fault, where one that says *no COA yet* says what to do next. The
-        server refuses the same lot with the same reason, so the screen is
-        explaining that rule rather than keeping a second copy of it.
+        has batched shows exactly the form it always did.
+
+        An uncertified lot is **shown, and tickable** (2026-11-03, the client:
+        *"Allow dispatch without COA"*). It was drawn disabled, which matched
+        the server while `despatchBatchError` refused it; now that it does
+        not, a disabled box would be the form refusing what the API accepts.
+        The reason stays beside it, in amber, because *no COA yet* is still
+        worth knowing when you are deciding what to write on the challan --
+        and because a picker that silently omitted the lot somebody is
+        looking for would read as a fault.
       */}
       {orderBatches.length > 0 && (
         <>
@@ -403,13 +407,12 @@ export function DespatchFields({
                   key={b.id}
                   className={`flex items-start gap-2 rounded-lg px-2 py-1.5 text-sm ring-1 ${
                     on ? 'bg-brand-50 ring-brand-200' : 'ring-slate-200'
-                  } ${b.cleared ? 'cursor-pointer hover:bg-slate-50' : 'opacity-60'}`}
+                  } cursor-pointer hover:bg-slate-50`}
                 >
                   <input
                     type="checkbox"
                     className="mt-0.5"
                     checked={on}
-                    disabled={!b.cleared}
                     onChange={(e) => set({
                       batch_ids: e.target.checked
                         ? [...(draft.batch_ids ?? []), b.id]
@@ -424,7 +427,7 @@ export function DespatchFields({
                     <span className="block text-xs">
                       {b.cleared
                         ? <span className="text-green-700">{b.coa_no}</span>
-                        : <span className="text-amber-700">no COA yet — cannot be dispatched</span>}
+                        : <span className="text-amber-700">no COA yet</span>}
                     </span>
                   </span>
                 </label>

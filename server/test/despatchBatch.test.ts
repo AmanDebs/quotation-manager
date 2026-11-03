@@ -78,22 +78,28 @@ describe('what may be named on a trip', () => {
   });
 
   /** The specification's Hard Stop, asked of the exact lot rather than the line. */
-  test('a lot with no certificate is refused', () => {
+  /**
+   * **A lot with no certificate is no longer refused** (2026-11-03, the
+   * client: *"Allow dispatch without COA"*), which withdraws the Hard Stop
+   * this guard asked of the exact lot, along with the line-level one in
+   * `routes/despatches.ts`.
+   *
+   * Left standing it would have **punished recording a lot**: naming none is
+   * always allowed, so the way past it would have been to write down less
+   * about the trip than actually happened. The reason is still on the screen,
+   * beside the lot in the picker; what is gone is the refusal.
+   */
+  test('a lot with no certificate is named on the trip like any other', () => {
     const { orderId, woId } = order();
     const b = batch(woId, null);
-    assert.match(String(despatchBatchError(orderId, [b])), /has no Certificate of Analysis/);
+    assert.equal(despatchBatchError(orderId, [b]), null);
   });
 
-  /**
-   * The line-level gate would have passed this: the line *does* have a cleared
-   * lot. Naming the uncertified one is what makes the difference, and is the
-   * whole reason the link is worth storing.
-   */
-  test('even when another lot of the same line is certified', () => {
+  test('and so is one whose certificate was withdrawn to a draft', () => {
     const { orderId, woId } = order();
-    batch(woId);                       // certified, and not the one loaded
-    const uncleared = batch(woId, null);
-    assert.match(String(despatchBatchError(orderId, [uncleared])), /has no Certificate/);
+    const b = batch(woId);
+    db.prepare("UPDATE batches SET coa_status = 'draft' WHERE id = ?").run(b);
+    assert.equal(despatchBatchError(orderId, [b]), null);
   });
 
   test('a lot made against another order is refused', () => {
@@ -117,12 +123,20 @@ describe('what may be named on a trip', () => {
     assert.match(String(despatchBatchError(orderId, ['nonsense'])), /not on file/);
   });
 
+  /*
+   * The half that did **not** move: one lot the record cannot support still
+   * refuses the whole trip, however many good ones ride with it. None of the
+   * three refusals left is about quality — a lot not on file, one made
+   * against another order, and a scrapped one, whose output `CONDEMNED` has
+   * already taken out of what the job made.
+   */
   test('one bad lot refuses the whole trip, however many good ones ride with it', () => {
     const { orderId, woId } = order();
     const ok = batch(woId);
-    const bad = batch(woId, null);
+    const scrapped = batch(woId);
+    db.prepare("UPDATE batches SET disposition = 'scrapped' WHERE id = ?").run(scrapped);
     assert.equal(despatchBatchError(orderId, [ok]), null);
-    assert.match(String(despatchBatchError(orderId, [ok, bad])), /has no Certificate/);
+    assert.match(String(despatchBatchError(orderId, [ok, scrapped])), /was scrapped/);
   });
 });
 

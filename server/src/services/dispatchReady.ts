@@ -308,10 +308,22 @@ export function readyLines(
      * beside this as `advance_due`, and a released line is not held by it.
      */
     const qcHold = qcBlockError(c.r.order_id, [{ order_line: c.r.line }]);
-    const held = qcHold
-      ?? (ready === 0 && awaiting > 0
-        ? `Made, but not yet released for dispatch${spoc ? ` by ${spoc}` : ''}.`
-        : null);
+    /*
+     * **QC is a warning now, not a hold** (2026-11-03, the client: *"Allow
+     * dispatch without COA"*), which is the advance's own move of 2026-10-17
+     * read for the other gate: `POST /despatches` no longer refuses it, so a
+     * line sitting under *Held* would be a block in the one screen Logistics
+     * uses over a save that would succeed — and *Held* has to go on meaning
+     * *cannot be loaded* or the queue stops being worth reading.
+     *
+     * It is still computed, and `qc_hold` still rides the row: Logistics get
+     * the amber mark beside the Ready figure, the desk gets the sentence in
+     * full under the row, and the handoff mail to Quality still fires on a
+     * release it names. Only the hold is gone.
+     */
+    const held = ready === 0 && awaiting > 0
+      ? `Made, but not yet released for dispatch${spoc ? ` by ${spoc}` : ''}.`
+      : null;
 
     return {
       order_id: c.r.order_id,

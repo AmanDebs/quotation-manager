@@ -325,6 +325,13 @@ function noteFor(r: ReadyLine, desk: boolean): string[] {
   } else if (r.held) {
     out.push(r.held);
   }
+  /*
+   * QC warns rather than holds since 2026-11-03, so its sentence no longer
+   * arrives inside `held` -- the desk still needs it in full for the same
+   * reason it needs the money in full, being the person who decides whether
+   * these goods go.
+   */
+  if (desk && r.qc_hold) out.push(r.qc_hold);
   if (desk && r.advance_due) out.push(r.advance_due);
   return out;
 }
@@ -425,6 +432,14 @@ function ReadyTable({ rows, canLink, onRecord, onRelease, busy }: {
                       mark, not a hold: the decision has been taken, and the
                       figure behind it is a hover away rather than three lines
                       of sentence repeated down the table. */}
+                  {/* QC marks the figure rather than holding the row
+                      (2026-11-03), the shape the money took on 2026-10-17:
+                      the decision has been taken, and three lines of sentence
+                      repeated down the table is the noise that change
+                      removed. */}
+                  {r.ready > 0 && r.qc_hold && (
+                    <span className="mr-1 cursor-help font-normal text-amber-600" title={r.qc_hold}>⚠</span>
+                  )}
                   {r.ready > 0 && r.advance_due && (
                     <span className="mr-1 cursor-help font-normal text-amber-600" title={r.advance_due}>⚠</span>
                   )}

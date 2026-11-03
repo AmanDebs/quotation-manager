@@ -3,7 +3,6 @@ import { db, transaction } from '../db/connection.js';
 import type { AuthedRequest } from '../middleware/auth.js';
 import { requirePermission } from '../middleware/auth.js';
 import { scopeClause, canAccessCustomer } from '../middleware/scope.js';
-import { qcBlockError } from '../services/qc.js';
 import { despatchLimitError, despatchDateError, advanceBlockError } from '../services/despatchLimits.js';
 import { syncOrderStatus } from '../services/orderStatus.js';
 import { listBody } from '../services/pagination.js';
@@ -417,10 +416,21 @@ despatchesRouter.post('/', (req: AuthedRequest, res) => {
   if (!items.some((it) => numOrNull(it.qty) !== null || numOrNull(it.packs) !== null)) {
     return res.status(400).json({ error: 'Record what went — pieces or boxes on at least one line' });
   }
-  // Nothing ships until it has passed QC. See qcBlockError for what "passed"
-  // means and for the two things it deliberately does not block.
-  const blocked = qcBlockError(order.id, items);
-  if (blocked) return res.status(409).json({ error: blocked });
+  /*
+   * **QC does not hold a lorry** (2026-11-03, the client: *"Allow dispatch
+   * without COA"*), which withdraws the gate-pass half of their own ERP
+   * specification's Hard Stop — the half this file still refused with after
+   * the commercial invoice's was demoted to a warning that morning. Stated
+   * rather than quietly deleted: it is going against something they wrote
+   * down, it is their call, and it is `qcBlockError(order.id, items)` and a
+   * 409 to put back.
+   *
+   * **Nobody loses the information.** The rule still runs, in
+   * `services/dispatchReady.ts`, where the *Ready to dispatch* queue carries
+   * it as `qc_hold` and prints the same sentence; the handoff mail to Quality
+   * still fires on a release it holds; and the Quality queue still lists the
+   * line. What goes is the refusal.
+   */
   // And nothing leaves until the advance the order's own terms ask for has
   // arrived — unless the sales desk has released these very lines, which is
   // that question asked of the person whose question it is. The lines are
@@ -530,8 +540,8 @@ despatchesRouter.put('/:id', (req: AuthedRequest, res) => {
   const badDate = despatchDateError(Number(existing.order_id), String(v('date')), { etd: String(v('etd')), eta: String(v('eta')) });
   if (badDate) return res.status(400).json({ error: badDate });
   if (Array.isArray(body.items)) {
-    const stopped = qcBlockError(Number(existing.order_id), body.items as ItemInput[]);
-    if (stopped) return res.status(409).json({ error: stopped });
+    // The QC gate is a warning rather than a refusal here too (2026-11-03) —
+    // see the POST, which carries the reasoning.
     // This despatch's own lines are already in the register, so they are left
     // out of "already sent" — otherwise re-saving an unchanged trip would read
     // as a second shipment of the same goods and refuse itself.
