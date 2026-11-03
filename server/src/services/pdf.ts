@@ -258,6 +258,32 @@ const gridLayout: TableLayout = {
 };
 
 /** Label + value stacked inside one boxed cell (AP/EX invoice style). */
+/**
+ * *Indian*, not *INDian* (2026-11-03, the client reading their own packing
+ * list's certificate line).
+ *
+ * `country_of_origin` is stored as the form takes it — `INDIA` on every
+ * export document on this book — and the rule was `.replace(/ia$/i, 'ian')`,
+ * whose **match** is case-insensitive and whose **replacement** is not, so an
+ * uppercase country came back with a lowercase tail glued onto it.
+ *
+ * The sentence it sits in is sentence case throughout and the hard-coded
+ * fallback has always been `Indian`, so the adjective is title-cased — **but
+ * only where the `-ia` rule actually fires**. A country the rule cannot
+ * inflect is printed exactly as it was typed, so `UAE` stays `UAE` rather
+ * than becoming `Uae`, and nothing on paper moves except the case this was
+ * reported for.
+ *
+ * It deliberately inflects nothing else: *Germany* has no `-ia` to take, and
+ * a country-to-adjective table is a decision somebody should make on purpose
+ * rather than a guess buried in a footer.
+ */
+function originAdjective(country: string): string {
+  const c = String(country || '').trim();
+  if (!/ia$/i.test(c)) return c;
+  return c.toLowerCase().replace(/ia$/, 'ian').replace(/(^|\s)\p{L}/gu, (m) => m.toUpperCase());
+}
+
 function lv(label: string, value: string, opts: Cell = {}): Cell {
   return {
     stack: [
@@ -2051,7 +2077,7 @@ export function buildInvoicePdf(id: number): TDocumentDefinitions {
       body: [[
         {
           stack: [
-            { text: `We certify that the merchandise is of ${(inv.country_of_origin || s.country || 'Indian').replace(/ia$/i, 'ian')} Origin`, fontSize: 8, bold: true },
+            { text: `We certify that the merchandise is of ${originAdjective(inv.country_of_origin || s.country || 'Indian')} Origin`, fontSize: 8, bold: true },
             ...(inv.inco_terms ? [{ text: `Incoterms® 2020: ${incoBasis(inv.inco_terms, { loading: inv.port_of_loading, discharge: inv.port_of_discharge })}`, fontSize: 8, margin: [0, 2, 0, 0] as any }] : []),
             // The consignment's own LUT/ARN, falling back to the company's while
             // an older invoice has none of its own — so nothing already raised
@@ -2379,7 +2405,7 @@ export function buildPackingListPdf(id: number): TDocumentDefinitions {
       body: [[
         {
           stack: [
-            { text: `We certify that the merchandise is of ${(inv?.country_of_origin || s.country || 'Indian').replace(/ia$/i, 'ian')} Origin`, fontSize: 8, bold: true },
+            { text: `We certify that the merchandise is of ${originAdjective(inv?.country_of_origin || s.country || 'Indian')} Origin`, fontSize: 8, bold: true },
             ...(inv?.inco_terms ? [{ text: `Incoterms® 2020: ${incoBasis(inv.inco_terms, { loading: inv.port_of_loading, discharge: inv.port_of_discharge })}`, fontSize: 8, margin: [0, 2, 0, 0] as any }] : []),
             // Same reference as the invoice this list travels with.
             ...(Number(inv?.is_export) && (inv?.arn_ref || s.arn_ref)

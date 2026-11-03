@@ -175,6 +175,62 @@ describe('the packing list states its container', () => {
  * the invoice as well, and that it does not disturb the despatch cell beside
  * it.
  */
+/**
+ * *Indian*, not *INDian* (2026-11-03, read off the client's own packing
+ * list). The country is stored as the form takes it — `INDIA` — and the old
+ * rule matched case-insensitively while replacing in lower case.
+ *
+ * Both footers carried the same line, so both are asserted: fixing the one
+ * that was reported and leaving its twin is how the two come to disagree
+ * about the same consignment.
+ */
+describe('the origin certificate reads the country as an adjective', () => {
+  function footer(origin: string): { pl: string; inv: string } {
+    const inv = makeInvoice({ customerId: cust, currency: 'USD', total: 100 });
+    db.prepare("UPDATE commercial_invoices SET is_export = 1, country_of_origin = ? WHERE id = ?").run(origin, inv);
+    addItem(inv, { description: 'Preform A', qty: 100, unit: 'per 1000', unit_price: 1, amount: 100 });
+    const pl = Number((db.prepare(
+      `INSERT INTO packing_lists (number, date, invoice_id, customer_id, company_id)
+       VALUES (?, '2026-11-03', ?, ?, 1) RETURNING id`
+    ).get(`PL/26-27/7${inv}`, inv, cust) as { id: number }).id);
+    db.prepare(`INSERT INTO packing_list_items (packing_list_id, description, qty, unit, sort_order)
+                VALUES (?, 'Preform A', 100, 'per 1000', 0)`).run(pl);
+    const line = (doc: unknown) => {
+      const m = JSON.stringify(doc).match(/merchandise is of ([^"]*?) Origin/);
+      assert.ok(m, 'no origin certificate on the page');
+      return m[1];
+    };
+    return { pl: line(buildPackingListPdf(pl)), inv: line(buildInvoicePdf(inv)) };
+  }
+
+  test('an uppercase INDIA reads Indian on both documents', () => {
+    const f = footer('INDIA');
+    assert.equal(f.pl, 'Indian');
+    assert.equal(f.inv, 'Indian');
+  });
+
+  test('however it was typed', () => {
+    assert.equal(footer('India').pl, 'Indian');
+    assert.equal(footer('india').pl, 'Indian');
+    assert.equal(footer('SAUDI ARABIA').pl, 'Saudi Arabian');
+  });
+
+  /*
+   * The half that keeps this from re-casing things it cannot inflect: a
+   * country the `-ia` rule does not fire on is printed exactly as typed, so
+   * an acronym is not mangled into `Uae` to fix a word it never applied to.
+   */
+  test('and a country the rule cannot inflect is printed as it was typed', () => {
+    assert.equal(footer('UAE').pl, 'UAE');
+    assert.equal(footer('GERMANY').pl, 'GERMANY');
+    assert.equal(footer('Nepal').pl, 'Nepal');
+  });
+
+  test('a document stating no origin falls back to the company, then to Indian', () => {
+    assert.equal(footer('').pl, 'Indian');
+  });
+});
+
 describe('the packing list states its shipment type, terms and preparer', () => {
   /** The value of the boxed grid's `lv(label, value)` cell, or undefined. */
   function gridValue(doc: unknown, label: string): string | undefined {
