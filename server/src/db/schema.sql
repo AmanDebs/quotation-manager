@@ -648,6 +648,12 @@ CREATE TABLE IF NOT EXISTS packing_lists (
   -- The container the whole list travelled in (2026-09-20): one list, one
   -- container, and on an export it is mandatory.
   container_no TEXT NOT NULL DEFAULT '',
+  -- How the consignment travelled, as the customs grid states it -- FCL, LCL,
+  -- By Sea (2026-11-03). Blank falls back to the invoice's method of despatch
+  -- at render time, which is what both documents printed before this column,
+  -- so nothing already on file changes. The commercial invoice reads it back
+  -- for its own cell, or the two pages of one file could disagree.
+  shipment_type TEXT NOT NULL DEFAULT '',
   -- What the Invoice Reference block prints, typed (2026-09-20). Blank means
   -- derived from the linked invoice at render time, as it always was.
   invoice_reference TEXT NOT NULL DEFAULT '',

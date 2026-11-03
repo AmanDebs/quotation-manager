@@ -209,6 +209,8 @@ interface PackingInput {
   container_no?: string;
   /** The Invoice Reference block as typed; blank prints the derived one. */
   invoice_reference?: string;
+  /** How it travelled, as the customs grid states it; blank prints the invoice's method of despatch. */
+  shipment_type?: string;
   items?: {
     packages?: string; dimensions?: string; gross_weight?: number; net_weight?: number;
     custom1?: string; custom2?: string; custom3?: string;
@@ -234,8 +236,8 @@ function syncPackingList(invoiceId: number, userId: number, packing: PackingInpu
     // Dated with the invoice it belongs to, so it is numbered in that year too.
     const number = nextNumber('packing_list', { companyId: plCompanyId, date: String(packing?.date ?? inv.date ?? '') });
     const info = db.prepare(
-      `INSERT INTO packing_lists (number, date, invoice_id, customer_id, company_id, shipping_marks, lot_no, remarks, container_no, invoice_reference, created_by, column_config)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO packing_lists (number, date, invoice_id, customer_id, company_id, shipping_marks, lot_no, remarks, container_no, invoice_reference, shipment_type, created_by, column_config)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       packing?.number || number,
       String(packing?.date ?? inv.date),
@@ -247,13 +249,14 @@ function syncPackingList(invoiceId: number, userId: number, packing: PackingInpu
       String(packing?.remarks ?? ''),
       String(packing?.container_no ?? '').trim(),
       String(packing?.invoice_reference ?? '').trim(),
+      String(packing?.shipment_type ?? '').trim(),
       userId,
       JSON.stringify(packing?.column_config ?? {})
     );
     pl = { id: Number(info.lastInsertRowid) };
   } else {
     db.prepare(
-      `UPDATE packing_lists SET number = ?, date = ?, customer_id = ?, shipping_marks = ?, lot_no = ?, remarks = ?, container_no = ?, invoice_reference = ?, column_config = ? WHERE id = ?`
+      `UPDATE packing_lists SET number = ?, date = ?, customer_id = ?, shipping_marks = ?, lot_no = ?, remarks = ?, container_no = ?, invoice_reference = ?, shipment_type = ?, column_config = ? WHERE id = ?`
     ).run(
       /*
        * **A blank keeps the issued number.** `?? pl.number` catches a key the
@@ -271,6 +274,10 @@ function syncPackingList(invoiceId: number, userId: number, packing: PackingInpu
       String(packing?.remarks ?? pl.remarks ?? ''),
       String(packing?.container_no ?? pl.container_no ?? '').trim(),
       String(packing?.invoice_reference ?? pl.invoice_reference ?? '').trim(),
+      // A field omitted is left alone and one sent blank clears it, which puts
+      // the document back on the invoice's method of despatch -- a real answer
+      // rather than a loss, so this is `??` and not the number's `|| stored`.
+      String(packing?.shipment_type ?? pl.shipment_type ?? '').trim(),
       JSON.stringify(packing?.column_config ?? JSON.parse(String(pl.column_config || '{}'))),
       Number(pl.id)
     );

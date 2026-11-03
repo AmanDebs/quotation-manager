@@ -71,6 +71,8 @@ interface PackingDraft {
   remarks: string;
   /** The container the whole list travelled in; mandatory on an export. */
   container_no: string;
+  /** How it travelled; blank prints the invoice's method of despatch. */
+  shipment_type: string;
   /** The Invoice Reference block as typed; blank prints the derived one. */
   invoice_reference: string;
   column_config: ColumnConfig;
@@ -87,7 +89,7 @@ const emptyDraft = (): Draft => ({
   is_export: 0, country_of_origin: '', port_of_loading: '', port_of_discharge: '', final_destination: '',
   notify_party_2: '', method_of_despatch: '', lot_no: '', arn_ref: '', prepared_by: '',
   remarks: '', tax_type: 'igst', column_config: newColumnConfig(), items: [],
-  packing: { date: today(), shipping_marks: '', remarks: '', container_no: '', invoice_reference: '', column_config: {}, items: [] },
+  packing: { date: today(), shipping_marks: '', remarks: '', container_no: '', shipment_type: '', invoice_reference: '', column_config: {}, items: [] },
 });
 
 export default function InvoiceFormPage() {
@@ -230,6 +232,7 @@ export default function InvoiceFormPage() {
           shipping_marks: existing.packing?.shipping_marks ?? '',
           remarks: existing.packing?.remarks ?? '',
           container_no: existing.packing?.container_no ?? '',
+          shipment_type: existing.packing?.shipment_type ?? '',
           invoice_reference: existing.packing?.invoice_reference ?? '',
           column_config: existing.packing?.column_config ?? {},
           items: existing.packing?.items ?? [],
@@ -648,6 +651,16 @@ export default function InvoiceFormPage() {
                 and the invoice will not approve or print without it. */}
             <Field label={draft.is_export ? 'Container No. *' : 'Container No.'}>
               <Input value={draft.packing.container_no} onChange={(e) => { setTypedContainer(true); setPacking({ container_no: e.target.value }); }} placeholder="e.g. MSKU1234567" />
+            </Field>
+            {/* How it travelled, as the boxed customs grid states it on both
+                documents (2026-11-03). Blank prints the invoice's own Method
+                of Dispatch, which is what the cell printed before the field
+                existed, so nothing already on file changes; the commercial
+                invoice reads this same value, or one file's two pages would
+                state two different answers. */}
+            <Field label="Type of Shipment">
+              <Input value={draft.packing.shipment_type} onChange={(e) => setPacking({ shipment_type: e.target.value })}
+                placeholder={draft.method_of_despatch || 'e.g. FCL'} />
             </Field>
             <Field label="Shipping Marks" className="sm:col-span-2">
               <Input value={draft.packing.shipping_marks} onChange={(e) => { setTypedMarks(true); setPacking({ shipping_marks: e.target.value }); }} placeholder="e.g. 1-590/AGLO POLY/NACALA" />

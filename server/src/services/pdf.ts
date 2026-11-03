@@ -1918,6 +1918,16 @@ export function buildInvoicePdf(id: number): TDocumentDefinitions {
   const c = db.prepare('SELECT * FROM customers WHERE id = ?').get(inv.customer_id) as Row;
   const items = db.prepare('SELECT * FROM invoice_items WHERE invoice_id = ? ORDER BY sort_order, id').all(id) as Row[];
   const pi = inv.pi_id ? (db.prepare('SELECT number, date, po_number, po_date FROM proforma_invoices WHERE id = ?').get(inv.pi_id) as Row | undefined) : undefined;
+  /*
+   * Its own packing list's typed shipment type (2026-11-03). Read backwards
+   * rather than stored here, because the client asked for the field on the
+   * packing list and a standalone list has no invoice to read it from -- and
+   * read at all because `exportDocGrid` prints a *Type of Shipment* cell on
+   * both documents, so `invoice-with-packing` would otherwise state two
+   * different answers on two pages of one file. Blank on both is the method
+   * of despatch, which is what each printed before the column.
+   */
+  const invPl = db.prepare('SELECT shipment_type FROM packing_lists WHERE invoice_id = ?').get(id) as Row | undefined;
 
   const cur = inv.currency;
   const showTax = inv.tax_type !== 'none';
@@ -1951,6 +1961,7 @@ export function buildInvoicePdf(id: number): TDocumentDefinitions {
     finalDestination: inv.final_destination || (Number(inv.is_export) ? '—' : (c.country || '').toUpperCase()),
     currency: cur,
     despatch: inv.method_of_despatch,
+    shipmentType: String(invPl?.shipment_type || '').trim(),
     paymentTerms: inv.payment_terms,
     portLoading: inv.port_of_loading,
     portDischarge: inv.port_of_discharge,
@@ -2299,7 +2310,20 @@ export function buildPackingListPdf(id: number): TDocumentDefinitions {
     finalDestination: inv?.final_destination || (c.country || '').toUpperCase(),
     currency: inv?.currency || c.currency,
     despatch: inv?.method_of_despatch || '',
-    shipmentType: inv?.method_of_despatch || '',
+    /*
+     * How it travelled, typed on the list (2026-11-03). Blank falls back to
+     * the method of despatch, which is what this cell printed before the
+     * column existed -- so every list already on file reads as it did, and
+     * the two cells merely say the same thing until somebody distinguishes
+     * them. The invoice reads this same column for its own cell.
+     */
+    shipmentType: String(pl.shipment_type || '').trim() || inv?.method_of_despatch || '',
+    /*
+     * Derived from the invoice, never stored here: a second copy would be a
+     * second answer able to disagree with the document this list travels
+     * with. It printed an em-dash until this call simply did not pass it.
+     */
+    paymentTerms: inv?.payment_terms as string | undefined,
     portLoading: inv?.port_of_loading || '',
     portDischarge: inv?.port_of_discharge || '',
     weightBlock: `TOTAL GROSS WEIGHT: ${fmtNum(totalGross)} KGS\nTOTAL NET WEIGHT: ${fmtNum(totalNet)} KGS`,
@@ -2362,6 +2386,13 @@ export function buildPackingListPdf(id: number): TDocumentDefinitions {
               ? [{ text: `Application Reference No. (ARN): ${inv?.arn_ref || s.arn_ref}`, fontSize: 8, margin: [0, 2, 0, 0] as any }]
               : []),
             ...(pl.remarks ? [{ text: pl.remarks, fontSize: 7.5, italics: true, margin: [0, 3, 0, 0] as any }] : []),
+            /*
+             * The invoice's own footer has printed this since it was written
+             * and this one never did (2026-11-03). Derived from the invoice
+             * for the reason the terms above are: a standalone list, linked
+             * to no invoice, prints nothing rather than a blank label.
+             */
+            ...(inv?.prepared_by ? [{ text: `Prepared By: ${inv.prepared_by}`, fontSize: 7.5, color: '#666666', margin: [0, 3, 0, 0] as any }] : []),
           ],
         },
         {

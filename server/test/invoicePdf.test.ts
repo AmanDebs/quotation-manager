@@ -161,6 +161,99 @@ describe('the packing list states its container', () => {
   });
 });
 
+/**
+ * Three facts their own packing list states that this one printed as an
+ * em-dash or not at all (2026-11-03, the client with the rendered header
+ * beside theirs). `exportDocGrid` is shared with the commercial invoice, so
+ * the cells were always drawn -- the packing list's own call simply did not
+ * pass a payment term, its footer never printed a Prepared By, and *Type of
+ * Shipment* read the same column as *Method of Despatch*, so both documents
+ * printed the despatch method twice under two headings.
+ *
+ * Read by walking the definition for an `lv` cell by its own label, which is
+ * what makes the last two cases possible: that a typed shipment type reaches
+ * the invoice as well, and that it does not disturb the despatch cell beside
+ * it.
+ */
+describe('the packing list states its shipment type, terms and preparer', () => {
+  /** The value of the boxed grid's `lv(label, value)` cell, or undefined. */
+  function gridValue(doc: unknown, label: string): string | undefined {
+    let found: string | undefined;
+    const walk = (n: any) => {
+      if (!n || typeof n !== 'object') return;
+      if (Array.isArray(n)) { n.forEach(walk); return; }
+      const st = n.stack;
+      if (Array.isArray(st) && st.length === 2
+        && typeof st[0]?.text === 'string' && st[0].text === label.toUpperCase()
+        && typeof st[1]?.text === 'string') found = st[1].text;
+      Object.values(n).forEach(walk);
+    };
+    walk(doc);
+    return found;
+  }
+
+  function pair(shipmentType: string): { inv: number; pl: number } {
+    const inv = makeInvoice({ customerId: cust, currency: 'USD', total: 100 });
+    db.prepare(
+      `UPDATE commercial_invoices SET is_export = 1, method_of_despatch = 'By Sea',
+         payment_terms = '30% Advance and Balance against shipping documents',
+         prepared_by = 'Meisha' WHERE id = ?`
+    ).run(inv);
+    addItem(inv, { description: 'Preform A', qty: 100, unit: 'per 1000', unit_price: 1, amount: 100, total_pcs: 100000 });
+    const pl = Number((db.prepare(
+      `INSERT INTO packing_lists (number, date, invoice_id, customer_id, company_id, container_no, shipment_type)
+       VALUES (?, '2026-11-03', ?, ?, 1, 'MSKU7777777', ?) RETURNING id`
+    ).get(`PL/26-27/8${inv}`, inv, cust, shipmentType) as { id: number }).id);
+    db.prepare(`INSERT INTO packing_list_items (packing_list_id, description, qty, unit, packages, sort_order)
+                VALUES (?, 'Preform A', 100, 'per 1000', '10 CTN', 0)`).run(pl);
+    return { inv, pl };
+  }
+
+  test('the terms of payment are the invoice’s, where the cell printed an em-dash', () => {
+    const { pl } = pair('');
+    assert.equal(gridValue(buildPackingListPdf(pl), 'Terms of Payment'),
+      '30% Advance and Balance against shipping documents');
+  });
+
+  test('Prepared By is the invoice’s, and a list with no invoice prints none', () => {
+    const { pl } = pair('');
+    assert.ok(JSON.stringify(buildPackingListPdf(pl).content).includes('Prepared By: Meisha'));
+    // A standalone list has no invoice to read it from, so it prints nothing
+    // rather than a label over a blank.
+    const loose = Number((db.prepare(
+      `INSERT INTO packing_lists (number, date, invoice_id, customer_id, company_id)
+       VALUES ('PL/26-27/899', '2026-11-03', NULL, ?, 1) RETURNING id`
+    ).get(cust) as { id: number }).id);
+    db.prepare(`INSERT INTO packing_list_items (packing_list_id, description, qty, unit, sort_order)
+                VALUES (?, 'Preform A', 100, 'per 1000', 0)`).run(loose);
+    assert.ok(!/Prepared By/.test(JSON.stringify(buildPackingListPdf(loose).content)));
+  });
+
+  /*
+   * The half that protects every list already on file: with nothing typed
+   * both cells read the method of despatch, which is exactly what the two
+   * printed before the column existed.
+   */
+  test('a list stating no shipment type falls back to the method of despatch', () => {
+    const { inv, pl } = pair('');
+    assert.equal(gridValue(buildPackingListPdf(pl), 'Type of Shipment'), 'By Sea');
+    assert.equal(gridValue(buildInvoicePdf(inv), 'Type of Shipment'), 'By Sea');
+  });
+
+  test('a typed shipment type prints on the list and on its own invoice', () => {
+    const { inv, pl } = pair('FCL 1 x 40FT HC');
+    assert.equal(gridValue(buildPackingListPdf(pl), 'Type of Shipment'), 'FCL 1 x 40FT HC');
+    // The two pages of `invoice-with-packing` must not state two answers.
+    assert.equal(gridValue(buildInvoicePdf(inv), 'Type of Shipment'), 'FCL 1 x 40FT HC');
+  });
+
+  test('and leaves the method of despatch beside it alone', () => {
+    const { inv, pl } = pair('LCL');
+    assert.equal(gridValue(buildPackingListPdf(pl), 'Method of Despatch'), 'By Sea');
+    assert.equal(gridValue(buildInvoicePdf(inv), 'Method of Despatch'), 'By Sea');
+  });
+});
+
 describe('the money sits in the items table', () => {
   test('every money line is a row of the table', () => {
     const id = exportInvoice();

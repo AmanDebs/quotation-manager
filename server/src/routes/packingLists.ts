@@ -133,8 +133,8 @@ packingListsRouter.post('/', (req: AuthedRequest, res) => {
   const id = transaction(() => {
     const number = nextNumber('packing_list', { companyId, date: String(body.date ?? '') });
     const info = db.prepare(
-      `INSERT INTO packing_lists (number, date, invoice_id, customer_id, company_id, shipping_marks, lot_no, remarks, container_no, invoice_reference, created_by, column_config)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO packing_lists (number, date, invoice_id, customer_id, company_id, shipping_marks, lot_no, remarks, container_no, invoice_reference, shipment_type, created_by, column_config)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       number,
       String(body.date ?? new Date().toISOString().slice(0, 10)),
@@ -146,6 +146,7 @@ packingListsRouter.post('/', (req: AuthedRequest, res) => {
       String(body.remarks ?? ''),
       String(body.container_no ?? '').trim(),
       String(body.invoice_reference ?? '').trim(),
+      String(body.shipment_type ?? '').trim(),
       req.user!.id,
       JSON.stringify(body.column_config ?? {})
     );
@@ -162,7 +163,7 @@ packingListsRouter.put('/:id', (req: AuthedRequest, res) => {
   const existing = db.prepare('SELECT * FROM packing_lists WHERE id = ?').get(id) as Record<string, unknown> | undefined;
   if (!existing || !canAccessCustomer(req, Number(existing.customer_id))) return res.status(404).json({ error: 'Packing list not found' });
   transaction(() => {
-    db.prepare('UPDATE packing_lists SET number = ?, date = ?, invoice_id = ?, customer_id = ?, shipping_marks = ?, lot_no = ?, remarks = ?, container_no = ?, invoice_reference = ?, column_config = ? WHERE id = ?').run(
+    db.prepare('UPDATE packing_lists SET number = ?, date = ?, invoice_id = ?, customer_id = ?, shipping_marks = ?, lot_no = ?, remarks = ?, container_no = ?, invoice_reference = ?, shipment_type = ?, column_config = ? WHERE id = ?').run(
       // A blank keeps the issued number: this form's box has always been a
       // plain input, so the empty-string case was reachable here before the
       // invoice's packing card gained one. See syncPackingList's own note.
@@ -175,6 +176,7 @@ packingListsRouter.put('/:id', (req: AuthedRequest, res) => {
       String(body.remarks ?? existing.remarks ?? ''),
       String(body.container_no ?? existing.container_no ?? '').trim(),
       String(body.invoice_reference ?? existing.invoice_reference ?? '').trim(),
+      String(body.shipment_type ?? existing.shipment_type ?? '').trim(),
       JSON.stringify(body.column_config ?? JSON.parse(String(existing.column_config || '{}'))),
       id
     );

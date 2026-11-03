@@ -231,6 +231,10 @@ addColumnIfMissing('packing_list_items', 'hsn_code', "TEXT NOT NULL DEFAULT ''")
 addColumnIfMissing('packing_list_items', 'container_no', "TEXT NOT NULL DEFAULT ''");
 addColumnIfMissing('packing_lists', 'container_no', "TEXT NOT NULL DEFAULT ''");
 addColumnIfMissing('packing_lists', 'invoice_reference', "TEXT NOT NULL DEFAULT ''");
+// How the consignment travelled (2026-11-03). Blank reads as the invoice's
+// method of despatch, which is exactly what printed before the column, so no
+// list already on file moves. No index: this is read one row at a time.
+addColumnIfMissing('packing_lists', 'shipment_type', "TEXT NOT NULL DEFAULT ''");
 addColumnIfMissing('quotations', 'freight', 'REAL NOT NULL DEFAULT 0');
 addColumnIfMissing('quotations', 'insurance', 'REAL NOT NULL DEFAULT 0');
 addColumnIfMissing('quotations', 'inco_terms', "TEXT NOT NULL DEFAULT ''");

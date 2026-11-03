@@ -21,6 +21,8 @@ interface Draft {
   lot_no: string;
   remarks: string;
   container_no: string;
+  /** How it travelled; blank prints the linked invoice's method of despatch. */
+  shipment_type: string;
   invoice_reference: string;
   items: PackingListItem[];
 }
@@ -42,7 +44,7 @@ export default function PackingListFormPage() {
     enabled: !isNew,
   });
 
-  const [draft, setDraft] = useState<Draft>({ customer_id: '', invoice_id: null, date: today(), shipping_marks: '', lot_no: '', remarks: '', container_no: '', invoice_reference: '', items: [] });
+  const [draft, setDraft] = useState<Draft>({ customer_id: '', invoice_id: null, date: today(), shipping_marks: '', lot_no: '', remarks: '', container_no: '', shipment_type: '', invoice_reference: '', items: [] });
   const [prefilled, setPrefilled] = useState(false);
 
   useEffect(() => {
@@ -56,6 +58,7 @@ export default function PackingListFormPage() {
         lot_no: existing.lot_no ?? '',
         remarks: existing.remarks,
         container_no: existing.container_no ?? '',
+        shipment_type: existing.shipment_type ?? '',
         invoice_reference: existing.invoice_reference ?? '',
         items: existing.items ?? [],
       });
@@ -152,6 +155,10 @@ export default function PackingListFormPage() {
             <Field label="Date"><Input type="date" value={draft.date} onChange={(e) => set({ date: e.target.value })} /></Field>
             <Field label="Lot No."><Input value={draft.lot_no} onChange={(e) => set({ lot_no: e.target.value })} placeholder="e.g. 90/2025" /></Field>
             <Field label="Container No."><Input value={draft.container_no} onChange={(e) => set({ container_no: e.target.value })} placeholder="e.g. MSKU1234567" /></Field>
+            {/* As the boxed customs grid states it (2026-11-03). Blank prints
+                the linked invoice's method of despatch, which is what the
+                cell printed before the field existed. */}
+            <Field label="Type of Shipment"><Input value={draft.shipment_type} onChange={(e) => set({ shipment_type: e.target.value })} placeholder="Blank = the invoice's method of despatch" /></Field>
             <Field label="Shipping Marks" className="col-span-full">
               <Textarea rows={2} value={draft.shipping_marks} onChange={(e) => set({ shipping_marks: e.target.value })} placeholder="Marks and numbers printed on packages…" />
             </Field>

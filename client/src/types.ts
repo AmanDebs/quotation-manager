@@ -1513,6 +1513,8 @@ export interface PackingList {
   container_no?: string;
   /** The Invoice Reference block as typed; blank prints the invoice's own number, date and P.I. */
   invoice_reference?: string;
+  /** How it travelled, as the customs grid states it; blank prints the invoice's method of despatch. */
+  shipment_type?: string;
   invoice?: Record<string, unknown>;
   customer_name?: string; invoice_number?: string;
   total_gross?: number; total_net?: number;
