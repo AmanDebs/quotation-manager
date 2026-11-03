@@ -159,7 +159,7 @@ describe('what the report says', () => {
     const texts = textsOf(buildQcReportPdf(woId));
     assert.ok(texts.includes('Pass'), 'no passing reading');
     // Stated as a tolerance since 2026-11-03: 0.3–0.5 is 0.4 ± 0.1.
-    assert.ok(texts.some((t) => t.includes('0.4 ± 0.1')), 'the spec column is missing');
+    assert.ok(texts.some((t) => t.includes('0.40 ± 0.10')), 'the spec column is missing');
   });
 
   /** `passed: null` is not a pass — the trap `decorate` exists to avoid. */
@@ -244,18 +244,18 @@ describe('the Spec column states the window, in full', () => {
 
   test('a window open at the bottom reads as a maximum, not as a missing number', () => {
     const texts = withTolerance(null, 1.5);
-    assert.ok(texts.includes('max 1.5 mm'), 'the one-sided tolerance is not named');
+    assert.ok(texts.includes('max 1.50 mm'), 'the one-sided tolerance is not named');
     // The shape it used to print, which reads as a negative or a broken range.
     assert.ok(!texts.some((t) => t.trim().startsWith('–')), 'a bare dash is back');
   });
 
   test('and one open at the top reads as a minimum', () => {
-    assert.ok(withTolerance(0.4, null).includes('min 0.4 mm'));
+    assert.ok(withTolerance(0.4, null).includes('min 0.40 mm'));
   });
 
   test('a two-sided window carries its unit, like the reading beside it', () => {
     const texts = withTolerance(9, 11, 'gm');
-    assert.ok(texts.includes('10 ± 1 gm'), 'the Spec column dropped the unit');
+    assert.ok(texts.includes('10.00 ± 1.00 gm'), 'the Spec column dropped the unit');
   });
 
   /**
@@ -270,8 +270,8 @@ describe('the Spec column states the window, in full', () => {
    * slightly different window, which a certificate may not do.
    */
   test('a two-ended window is its midpoint and half-span', () => {
-    assert.ok(withTolerance(37, 38).includes('37.5 ± 0.5 mm'), "the client's own example");
-    assert.ok(withTolerance(21, 22).includes('21.5 ± 0.5 mm'));
+    assert.ok(withTolerance(37, 38).includes('37.50 ± 0.50 mm'), "the client's own example");
+    assert.ok(withTolerance(21, 22).includes('21.50 ± 0.50 mm'));
     // Not every window is symmetric about a round number, and that is fine:
     // the pair is restated exactly, whatever it comes to.
     assert.ok(withTolerance(29, 30.5).includes('29.75 ± 0.75 mm'));
@@ -280,8 +280,8 @@ describe('the Spec column states the window, in full', () => {
   test('a window with one open end keeps its own words', () => {
     // No nominal to sit either side of, and inventing one would state a
     // ceiling the specification does not have.
-    assert.ok(withTolerance(2.8, null).includes('min 2.8 mm'));
-    assert.ok(withTolerance(null, 1.5).includes('max 1.5 mm'));
+    assert.ok(withTolerance(2.8, null).includes('min 2.80 mm'));
+    assert.ok(withTolerance(null, 1.5).includes('max 1.50 mm'));
     for (const t of [...withTolerance(2.8, null), ...withTolerance(null, 1.5)]) {
       assert.ok(!t.includes('±'), `a one-sided window was written as a tolerance: ${t}`);
     }
@@ -294,6 +294,25 @@ describe('the Spec column states the window, in full', () => {
     const texts = withTolerance(1.0005, 1.0015);
     assert.ok(!texts.some((t) => t.includes('±')), 'a window was restated at a precision it does not have');
     assert.ok(texts.some((t) => t.includes('1.001') && t.includes('1.002')), 'the range is not printed either');
+  });
+
+  test('every figure carries two decimals, and keeps a third where it has one', () => {
+    /* 2026-11-03, the client with the dimensional block in front of them,
+       reading *37.5 ± 0.5 mm* over *29.75 ± 0.75 mm*: *"All measurement - two
+       decimals places"*. A column of windows compared down its own length
+       cannot afford five shapes of number — the rate column's own complaint,
+       one document over.
+
+       Three stays the maximum, which is the sharper half: forcing exactly two
+       would restate a window finer than that, and a certificate may be terse
+       and may not misstate what was allowed. */
+    assert.ok(withTolerance(37, 38).includes('37.50 ± 0.50 mm'), 'a figure was left at one decimal');
+    assert.ok(withTolerance(9, 11, 'gm').includes('10.00 ± 1.00 gm'), 'a whole number was left bare');
+    assert.ok(withTolerance(2.8, null).includes('min 2.80 mm'), 'an open-ended window was left unpadded');
+    // Three decimals survive rather than being rounded to the new minimum.
+    assert.ok(withTolerance(1.0, 1.006).includes('1.003 ± 0.003 mm'), 'a third decimal was rounded away');
+    // The reading beside it reads the same way — `qcReading.test.ts` holds
+    // that half, over the formatter itself.
   });
 
   test('floating point does not leak into the figures', () => {
@@ -441,7 +460,7 @@ describe('the three blocks the client certificate prints', () => {
     assert.ok(at('DIMENSIONAL CHECKS') < at('Neck Finish O/D'), 'it was not placed in its block');
     // Its own tolerance is stated like any other characteristic's: one cell
     // saying the window, 21.8–22.2 being 22 ± 0.2.
-    assert.ok(texts.includes('22 ± 0.2 mm'), 'its own tolerance is not printed');
+    assert.ok(texts.includes('22.00 ± 0.20 mm'), 'its own tolerance is not printed');
     assert.ok(texts.includes('QC PASSED'), 'a custom check was not judged');
   });
 
@@ -525,7 +544,7 @@ describe('the three blocks the client certificate prints', () => {
     // entirely rather than one of them surviving on the Specification side.
     assert.equal(texts.filter((t) => t === 'Minimum').length, 0, 'a sub-column heading survived');
     assert.equal(texts.filter((t) => t === 'Maximum').length, 0, 'a sub-column heading survived');
-    assert.equal(texts.filter((t) => t === '0.4 mm').length, 1, 'the reading is printed twice');
+    assert.equal(texts.filter((t) => t === '0.40 mm').length, 1, 'the reading is printed twice');
   });
 
   test('...and a mixed block keeps the pair, with the single answer spanning it', () => {
@@ -544,7 +563,7 @@ describe('the three blocks the client certificate prints', () => {
     const texts = textsOf(def);
     assert.ok(texts.includes('Actual'), 'the pair banner was dropped on a block that has a range');
     assert.equal(texts.filter((t) => t === 'Minimum').length, 1, 'the Specification side still has a pair');
-    assert.ok(spans(def, '0.4 mm'), 'the single answer does not span the two Actual cells');
+    assert.ok(spans(def, '0.40 mm'), 'the single answer does not span the two Actual cells');
   });
 
   test('complied is a pass with no figure, and the words beat the default wording', () => {

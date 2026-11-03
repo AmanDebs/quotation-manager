@@ -17,7 +17,23 @@ import { readingText } from '../src/services/pdf.js';
 describe('what a quality result prints as', () => {
   test('a single reading carries its unit', () => {
     assert.equal(readingText({ kind: 'numeric', value: 170.05, unit: 'mm' }), '170.05 mm');
-    assert.equal(readingText({ kind: 'numeric', value: 1.3, unit: '' }), '1.3');
+    assert.equal(readingText({ kind: 'numeric', value: 1.3, unit: '' }), '1.30');
+  });
+
+  test('a measurement carries two decimals, and keeps a third where it has one', () => {
+    /* 2026-11-03, the client with the COA's dimensional block in front of
+       them: *"All measurement - two decimals places"*. The Specification and
+       the Actual columns of one row have to read as the same kind of number,
+       so the reading pads exactly as the window beside it does. Three stays
+       the maximum: a figure genuinely measured to a third decimal is not
+       rounded away to meet a minimum. */
+    assert.equal(readingText({ kind: 'numeric', value: 37.5, unit: 'mm' }), '37.50 mm');
+    assert.equal(readingText({ kind: 'numeric', value: 22, unit: 'mm' }), '22.00 mm');
+    assert.equal(readingText({ kind: 'numeric', value: 2.017, unit: 'gm' }), '2.017 gm');
+    assert.equal(
+      readingText({ kind: 'numeric', value: 50.2, value_max: 50.45, unit: 'mm' }),
+      '50.20 – 50.45 mm'
+    );
   });
 
   test('a range prints both ends, with the unit once', () => {

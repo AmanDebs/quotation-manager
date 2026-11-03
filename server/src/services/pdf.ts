@@ -41,6 +41,11 @@ function fmtMoney(n: number, currency: string): string {
   }).format(n || 0)}`;
 }
 
+/** At least two decimals and at most three — the shape `fmtRate` and `fmtMeasure` share. */
+function twoToThree(n: number): string {
+  return new Intl.NumberFormat('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 3 }).format(n);
+}
+
 /**
  * A rate, always to at least two decimals (2026-09-24, the client with a
  * quotation's Unit Price column in front of them: *"Can all digit be 2
@@ -60,13 +65,38 @@ function fmtMoney(n: number, currency: string): string {
  * checking the arithmetic would find it wrong. So an ordinary rate pads to
  * 26.00 and 55.10, and a rate that genuinely carries a third decimal keeps it.
  *
- * Quantities, weights and box counts deliberately do **not** go through this:
- * 20,000 pieces is not 20,000.00, and a QC tolerance is a measurement rather
- * than a price.
+ * Quantities and box counts deliberately do **not** go through this: 20,000
+ * pieces is not 20,000.00. A **measurement** does, but under its own name —
+ * see `fmtMeasure`.
  */
 function fmtRate(n: number | null | undefined): string {
   if (n == null) return '—';
-  return new Intl.NumberFormat('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 3 }).format(n);
+  return twoToThree(n);
+}
+
+/**
+ * A measurement on a quality document, to at least two decimals (2026-11-03,
+ * the client with the COA's dimensional block in front of them, reading
+ * *37.5 ± 0.5 mm* beside *29.75 ± 0.75 mm*: *"All measurement - two decimals
+ * places"*).
+ *
+ * The rate rule above, read for a certificate, and it is the same complaint
+ * one document over: a column of windows in five different shapes is compared
+ * down its own length by eye, and a ragged decimal point makes them read as
+ * different kinds of number. So 37.5 pads to 37.50 and 0.5 to 0.50.
+ *
+ * **Three decimals stay the maximum**, for a sharper reason than the rate's:
+ * forcing exactly two would restate a window finer than that — a certificate
+ * may be terse and may not misstate what was allowed — and `toleranceText`
+ * reads its own output back to check the ± form reproduces both stated ends.
+ *
+ * It is a **separate name from `fmtRate`** rather than the same function
+ * called twice. The shape is shared because the complaint was; a price and a
+ * measurement are different facts, and a later change to one must not move
+ * every certificate already issued.
+ */
+function fmtMeasure(n: number): string {
+  return twoToThree(n);
 }
 
 /* ------------------------------------------------------------------ */
@@ -3339,7 +3369,7 @@ function toleranceText(r: { kind?: unknown; min_value?: unknown; max_value?: unk
   const u = String(r.unit ?? '').trim();
   const lo = r.min_value == null ? null : Number(r.min_value);
   const hi = r.max_value == null ? null : Number(r.max_value);
-  const with_ = (n: number) => `${fmtNum(n, 3)}${u ? ` ${u}` : ''}`;
+  const with_ = (n: number) => `${fmtMeasure(n)}${u ? ` ${u}` : ''}`;
   if (lo !== null && hi !== null) {
     /*
      * **A window with two ends is stated as a tolerance** (2026-11-03, the
@@ -3361,17 +3391,17 @@ function toleranceText(r: { kind?: unknown; min_value?: unknown; max_value?: unk
     const tol = (hi - lo) / 2;
     /*
      * ...and the range is kept where the ± form would not read back to the
-     * ends actually stated. `fmtNum` prints three decimals, so a window whose
-     * half-span is finer than that would otherwise be printed as a slightly
-     * different window -- and a certificate may be terse but may not misstate
-     * what was allowed.
+     * ends actually stated. `fmtMeasure` prints at most three decimals, so a
+     * window whose half-span is finer than that would otherwise be printed as
+     * a slightly different window -- and a certificate may be terse but may
+     * not misstate what was allowed.
      */
     const back = (txt: string) => Number(txt.replace(/,/g, ''));
-    const n = back(fmtNum(nominal, 3));
-    const t = back(fmtNum(tol, 3));
+    const n = back(fmtMeasure(nominal));
+    const t = back(fmtMeasure(tol));
     const exact = Math.abs((n - t) - lo) < 1e-9 && Math.abs((n + t) - hi) < 1e-9;
-    if (exact) return `${fmtNum(nominal, 3)} ± ${with_(tol)}`;
-    return `${fmtNum(lo, 3)} – ${with_(hi)}`;
+    if (exact) return `${fmtMeasure(nominal)} ± ${with_(tol)}`;
+    return `${fmtMeasure(lo)} – ${with_(hi)}`;
   }
   if (lo !== null) return `min ${with_(lo)}`;
   if (hi !== null) return `max ${with_(hi)}`;
@@ -3407,8 +3437,8 @@ export function readingText(r: {
   if (String(r.kind) === 'boolean') return said || (Number(r.value) ? 'Pass' : 'Fail');
   const u = String(r.unit ?? '').trim();
   const tail = u ? ` ${u}` : '';
-  if (r.value_max != null) return `${fmtNum(Number(r.value), 3)} – ${fmtNum(Number(r.value_max), 3)}${tail}`;
-  return `${fmtNum(Number(r.value), 3)}${tail}`;
+  if (r.value_max != null) return `${fmtMeasure(Number(r.value))} – ${fmtMeasure(Number(r.value_max))}${tail}`;
+  return `${fmtMeasure(Number(r.value))}${tail}`;
 }
 
 
@@ -3472,7 +3502,7 @@ function qcSectionTable(s: Row, section: string, rows: QcRow[]): Content {
 
   if (section === 'dimensional') {
     const cell = (v: unknown, unit: string) =>
-      v == null || v === '' ? '—' : `${fmtNum(Number(v), 3)}${unit ? ` ${unit}` : ''}`;
+      v == null || v === '' ? '—' : `${fmtMeasure(Number(v))}${unit ? ` ${unit}` : ''}`;
     /*
      * **One Specification cell, not a Minimum/Maximum pair** (2026-11-03, the
      * client: *"instead of minimum maximum, write tolerance +/-"*). The pair
