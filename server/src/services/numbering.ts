@@ -110,6 +110,37 @@ const patternColumn: Record<DocType, { std: string; export?: string; flag?: stri
  * `AP/EX/101/25-26` while the domestic one runs `AP/0196/26-27`. Padding is
  * a minimum, not a limit — a series that passes 999 simply prints in full.
  */
+/**
+ * Which table a series numbers into -- asked for the one thing a counter has
+ * to get right, that the number it hands out is free.
+ *
+ * Every entry here carries a `company_id` and a `number`, which is what makes
+ * *"is this taken"* askable per company: the unit both the counters and the
+ * unique indexes work in. `challan`, `batch` and `coa` are deliberately
+ * absent -- those numbers sit on `despatches` and `batches`, neither of which
+ * carries a company, so the question cannot be put to the row; neither has a
+ * unique index either, so neither can wedge a counter.
+ */
+const SERIES_TABLE: Partial<Record<DocType, string>> = {
+  quotation: 'quotations',
+  order: 'orders',
+  proforma: 'proforma_invoices',
+  invoice: 'commercial_invoices',
+  packing_list: 'packing_lists',
+  work_order: 'work_orders',
+  purchase_order: 'purchase_orders',
+  credit_note: 'credit_notes',
+};
+
+/**
+ * How far a counter may be wound forward in one go. The real case is a book
+ * imported whole -- 616 orders came in with their own numbers -- so this is
+ * comfortably above that and still a bounded scan of an indexed column. Past
+ * it the number is handed back as it stands and the index refuses it, which
+ * is exactly where this was before.
+ */
+const MAX_SKIP = 10000;
+
 export function nextNumber(
   docType: DocType,
   opts: { isExport?: boolean; companyId: number; date?: string | null }
@@ -131,7 +162,57 @@ export function nextNumber(
      RETURNING next_num`
   ).get(opts.companyId, seqKey, fy.start) as { next_num: number };
 
-  return applyPattern(patternFor(docType, opts.companyId, useExport), row.next_num, fy.label);
+  const pattern = patternFor(docType, opts.companyId, useExport);
+  let seq = row.next_num;
+  let number = applyPattern(pattern, seq, fy.label);
+
+  /*
+   * And step over anything already on a document of this company.
+   *
+   * A counter exists to produce an **unused** number, and this one could not:
+   * it knows what it has issued and nothing about what somebody typed. Three
+   * of these documents have an editable number box precisely so the desk can
+   * enter numbers from the book they kept before this app, so a series
+   * catching up with one is ordinary here rather than exotic.
+   *
+   * Without the skip the unique index refuses the INSERT, and the create
+   * transaction rolls back **the counter's own increment with it** -- so the
+   * series wedges on that value and every document of that type is refused,
+   * for ever, with no document on screen to change the number on. Measured on
+   * a scratch instance before this landed: a proforma renamed to the number
+   * the series was about to draw left `POST /proformas` and `duplicate` both
+   * answering 409 on every attempt.
+   *
+   * It leaves **no gap in the series**, which is the thing worth being sure of
+   * -- a GST return is checked against a consecutive series per GSTIN. The
+   * number stepped over is on a document of this company, so skipping an
+   * occupied value makes the series denser rather than sparser; refusing is
+   * what leaves a hole, since it produces no document at all.
+   *
+   * Forward only, and it sticks: the counter is written to where it landed, so
+   * a book whose numbers were all typed in by hand is wound past them once
+   * rather than scanned on every create. Bounded, because a pattern naming no
+   * sequence formats the same at every value -- there is nothing to advance to
+   * -- and that case is left to the index, whose refusal now names the
+   * document holding it. The ordinary path costs one indexed lookup.
+   */
+  const table = SERIES_TABLE[docType];
+  if (table && /\{SEQ4?\}/.test(pattern)) {
+    const taken = db.prepare(`SELECT 1 FROM ${table} WHERE company_id = ? AND number = ? LIMIT 1`);
+    let tries = 0;
+    while (tries < MAX_SKIP && taken.get(opts.companyId, number)) {
+      seq += 1;
+      number = applyPattern(pattern, seq, fy.label);
+      tries += 1;
+    }
+    if (seq !== row.next_num) {
+      db.prepare(
+        'UPDATE sequences SET next_num = ? WHERE company_id = ? AND doc_type = ? AND year = ?'
+      ).run(seq, opts.companyId, seqKey, fy.start);
+    }
+  }
+
+  return number;
 }
 
 /** The stored pattern for one series, or a last-resort generic one. */
