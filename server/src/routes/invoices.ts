@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { db, transaction } from '../db/connection.js';
-import { nextNumber, exportChangeError } from '../services/numbering.js';
+import { nextNumber, exportChangeError, numberInUseError } from '../services/numbering.js';
 import { exportOnlyInvoice } from '../services/permissions.js';
 import { computeTotals, round2, type LineItemInput } from '../services/totals.js';
 import { allows, type AuthedRequest } from '../middleware/auth.js';
@@ -644,6 +644,30 @@ invoicesRouter.put('/:id', (req: AuthedRequest, res) => {
   // rather than from the body, which cannot move it.
   const wrongBank = foreignBankError(Number(existing.company_id), h.bank_account);
   if (wrongBank) return res.status(400).json({ error: wrongBank });
+  /*
+   * And the number it is about to carry is not already on another commercial invoice
+   * of this company. The index below refuses it either way; this is what
+   * makes the refusal name the document somebody has to go and look at, and
+   * what keeps the line items and the packing list out of a transaction that cannot complete.
+   */
+  const taken = numberInUseError(req, 'commercial_invoices', Number(existing.company_id), String(body.number ?? ''), id);
+  if (taken) return res.status(409).json({ error: taken });
+  /*
+   * The packing card carries its own number, and `syncPackingList` runs
+   * inside this save's transaction — so a clash typed there rolls the whole
+   * invoice back, which is right and was measured, and reads as the invoice
+   * refusing to save for no stated reason. Asked here it names the list in
+   * the way instead, and nothing is written.
+   */
+  const plRow = db.prepare('SELECT id, company_id FROM packing_lists WHERE invoice_id = ?').get(id) as
+    { id: number; company_id: number } | undefined;
+  const plTaken = numberInUseError(
+    req, 'packing_lists',
+    Number(plRow?.company_id ?? existing.company_id),
+    String((body.packing as PackingInput | undefined)?.number ?? ''),
+    plRow?.id,
+  );
+  if (plTaken) return res.status(409).json({ error: plTaken });
   transaction(() => {
     db.prepare(
       `UPDATE commercial_invoices SET number = ?, column_config = ?, ${headerFields.map((f) => `${f} = ?`).join(', ')} WHERE id = ?`

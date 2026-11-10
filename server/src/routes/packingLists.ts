@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { db, transaction } from '../db/connection.js';
-import { nextNumber } from '../services/numbering.js';
+import { nextNumber, numberInUseError } from '../services/numbering.js';
 import { round2 } from '../services/totals.js';
 import type { AuthedRequest } from '../middleware/auth.js';
 import { scopeClause, canAccessCustomer, raiseForError } from '../middleware/scope.js';
@@ -162,6 +162,11 @@ packingListsRouter.put('/:id', (req: AuthedRequest, res) => {
   const body = req.body ?? {};
   const existing = db.prepare('SELECT * FROM packing_lists WHERE id = ?').get(id) as Record<string, unknown> | undefined;
   if (!existing || !canAccessCustomer(req, Number(existing.customer_id))) return res.status(404).json({ error: 'Packing list not found' });
+  // And the number it is about to carry is not already on another packing
+  // list of this company -- the index refuses it either way, and this is what
+  // names the document somebody has to go and look at.
+  const taken = numberInUseError(req, 'packing_lists', Number(existing.company_id), String(body.number ?? ''), id);
+  if (taken) return res.status(409).json({ error: taken });
   transaction(() => {
     db.prepare('UPDATE packing_lists SET number = ?, date = ?, invoice_id = ?, customer_id = ?, shipping_marks = ?, lot_no = ?, remarks = ?, container_no = ?, invoice_reference = ?, shipment_type = ?, column_config = ? WHERE id = ?').run(
       // A blank keeps the issued number: this form's box has always been a

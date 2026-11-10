@@ -5,7 +5,7 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { requireAuth, requirePermission, requireFunction } from './middleware/auth.js';
-import { isDuplicateNumberError } from './db/connection.js';
+import { duplicateNumberMessage } from './services/numbering.js';
 import { healthRouter } from './routes/health.js';
 import { backupRouter } from './routes/backup.js';
 import { startBackupSchedule } from './services/backup.js';
@@ -158,11 +158,8 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
   // A number the database refuses is a conflict the user can fix, not a fault.
   // Handled centrally so every document type behaves the same on create, on
   // update and on manual override.
-  if (isDuplicateNumberError(err)) {
-    return res.status(409).json({
-      error: 'That document number is already in use. Choose a different one.',
-    });
-  }
+  const duplicate = duplicateNumberMessage(err);
+  if (duplicate) return res.status(409).json({ error: duplicate });
   // Safety net: a delete blocked by a foreign key is a conflict the user can
   // act on, not a server fault. Routes still guard explicitly with a specific
   // message — this only stops a missed guard from reading as a crash.

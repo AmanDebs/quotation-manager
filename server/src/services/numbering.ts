@@ -1,4 +1,7 @@
 import { db } from '../db/connection.js';
+import { fmtDate } from './format.js';
+import { canAccessCustomer } from '../middleware/scope.js';
+import type { AuthedRequest } from '../middleware/auth.js';
 
 export type DocType =
   | 'quotation' | 'order' | 'proforma' | 'invoice' | 'packing_list'
@@ -297,3 +300,105 @@ export function setNextNumber(
   const pattern = patternFor(docType, companyId, key.endsWith('_export'));
   return { previous, next_number: next, preview: applyPattern(pattern, next) };
 }
+
+/* ------------------------------------------------------------------ */
+/* A number already on another document                                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The documents whose number somebody can type, and the word each is called
+ * by on screen. Quotations are deliberately absent: their index keys on
+ * `(company_id, number, revision)` because revisions share a number on
+ * purpose, and nothing offers a box for it.
+ */
+const NUMBERED: Record<string, string> = {
+  proforma_invoices: 'proforma invoice',
+  commercial_invoices: 'commercial invoice',
+  packing_lists: 'packing list',
+};
+
+export type NumberedTable = keyof typeof NUMBERED;
+
+/**
+ * Which document already holds this number, said so it can be found
+ * (2026-11-10, the client with a proforma they could not save: *"I am
+ * receiving this error in proforma invoice"*).
+ *
+ * The per-company unique index has refused a repeated number since it was
+ * built, and the central handler turned that into *"That document number is
+ * already in use. Choose a different one."* — which is true and **unusable**:
+ * on a book of several hundred proformas it names nothing to look for, and
+ * the list is scoped, so the document holding the number may not even be on
+ * the reader's own screen. A refusal that cannot be acted on is the defect
+ * this codebase records about a prompt naming the wrong thing, one step on.
+ *
+ * So this is the guard of the shape the rest of them take — `lockError`,
+ * `renameError`, `foreignBankError` — a function returning the sentence to
+ * refuse with, which is what lets the route answer *before* writing and lets
+ * the sentence name the number, the document and the date.
+ *
+ * **The customer is named only where the caller may read it.** The clash is
+ * decided per company and the lists are scoped per owner, so the document in
+ * the way is quite often somebody else's — telling a Sales login merely that
+ * "another proforma has it" would leave them hunting a row they cannot see,
+ * and printing the customer would hand them a name their own book does not
+ * carry. It says which of the two it is instead.
+ */
+export function numberInUseError(
+  req: AuthedRequest,
+  table: NumberedTable,
+  companyId: number,
+  number: string,
+  exceptId?: number,
+): string | null {
+  const wanted = String(number ?? '').trim();
+  if (!wanted) return null;
+  const noun = NUMBERED[table];
+  if (!noun) return null;
+  const row = db.prepare(
+    `SELECT id, date, customer_id FROM ${table}
+      WHERE company_id = ? AND number = ? AND id <> ? LIMIT 1`
+  ).get(companyId, wanted, exceptId ?? 0) as
+    { id: number; date: string; customer_id: number } | undefined;
+  if (!row) return null;
+  const dated = row.date ? ` dated ${fmtDate(String(row.date))}` : '';
+  if (!canAccessCustomer(req, Number(row.customer_id))) {
+    return `${wanted} is already on another ${noun}${dated}, which is not in your book. Give this one a different number.`;
+  }
+  const customer = db.prepare('SELECT name FROM customers WHERE id = ?').get(Number(row.customer_id)) as
+    { name?: string } | undefined;
+  const whose = customer?.name ? ` for ${customer.name}` : '';
+  return `${wanted} is already on another ${noun}${dated}${whose}. Give this one a different number.`;
+}
+
+/**
+ * The same refusal for the paths no guard can reach first.
+ *
+ * `numberInUseError` above answers *before* a write, which needs the number
+ * and the company in hand — true of every box somebody types into, and not
+ * of a **create**, where the number is drawn from the series inside the
+ * transaction that writes it. That path can still collide: the counter knows
+ * nothing about a number typed onto a document by hand, so a series catching
+ * up with one is a real and baffling refusal.
+ *
+ * So the index stays the backstop and this is what it says. It reads the
+ * table out of SQLite's own message rather than being told, which is what
+ * lets it cover every numbered document including the ones with no box; and
+ * it drops *"choose a different one"*, which on a create is advice about a
+ * control that is not on the page.
+ */
+export function duplicateNumberMessage(err: unknown): string | null {
+  const message = err instanceof Error ? err.message : String(err);
+  if (!/UNIQUE constraint failed/i.test(message) || !/\.number\b/i.test(message)) return null;
+  const table = /([a-z_]+)\.number\b/i.exec(message)?.[1] ?? '';
+  const noun = NUMBERED[table] ?? DOCUMENT_NOUNS[table] ?? 'document';
+  return `That number is already on another ${noun} of this company. Give this one a different number, or correct the one that holds it.`;
+}
+
+/** The numbered documents with no editable box, for the sentence above. */
+const DOCUMENT_NOUNS: Record<string, string> = {
+  quotations: 'quotation',
+  orders: 'sales order',
+  work_orders: 'work order',
+  purchase_orders: 'purchase order',
+};

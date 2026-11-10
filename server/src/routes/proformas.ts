@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { db, transaction } from '../db/connection.js';
 import { STATUS_SQL, statusSqlFor } from '../services/proformaStatus.js';
-import { nextNumber, exportChangeError } from '../services/numbering.js';
+import { nextNumber, exportChangeError, numberInUseError } from '../services/numbering.js';
 import { computeTotals, round2, type LineItemInput } from '../services/totals.js';
 import type { AuthedRequest } from '../middleware/auth.js';
 import { scopeClause, canAccessCustomer, linkError, customerChangeError, raiseForError } from '../middleware/scope.js';
@@ -653,6 +653,14 @@ proformasRouter.put('/:id', (req: AuthedRequest, res) => {
   // rather than from the body, which cannot move it.
   const wrongBank = foreignBankError(Number(existing.company_id), h.bank_account);
   if (wrongBank) return res.status(400).json({ error: wrongBank });
+  /*
+   * And the number it is about to carry is not already on another proforma invoice
+   * of this company. The index below refuses it either way; this is what
+   * makes the refusal name the document somebody has to go and look at, and
+   * what keeps the line items out of a transaction that cannot complete.
+   */
+  const taken = numberInUseError(req, 'proforma_invoices', Number(existing.company_id), String(body.number ?? ''), id);
+  if (taken) return res.status(409).json({ error: taken });
   transaction(() => {
     db.prepare(
       `UPDATE proforma_invoices SET number = ?, column_config = ?, ${headerFields.map((f) => `${f} = ?`).join(', ')} WHERE id = ?`

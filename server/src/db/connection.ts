@@ -914,11 +914,3 @@ export function transaction<T>(fn: () => T): T {
   }
 }
 
-/**
- * True when an error is the unique-number index rejecting a manual override.
- * Routes turn this into a 409 the user can act on, rather than a 500.
- */
-export function isDuplicateNumberError(err: unknown): boolean {
-  const message = err instanceof Error ? err.message : String(err);
-  return /UNIQUE constraint failed/i.test(message) && /\.number\b/i.test(message);
-}
