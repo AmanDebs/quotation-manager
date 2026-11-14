@@ -54,6 +54,8 @@ export interface CheckedItem {
   qty?: number | null;
   total_pcs?: number | null;
   unit?: string | null;
+  /** The divisor a per-box line bills by — see `piecesPerBillingUnitOf`. */
+  pcs_per_pack?: number | null;
   /** `number | boolean` to match `billedQty`'s own parameter; SQLite gives 0/1. */
   is_charge?: number | boolean | null;
 }
@@ -86,6 +88,7 @@ const billed = (it: CheckedItem): number | null => billedQty({
   qty: it.qty ?? null,
   unit: it.unit ?? undefined,
   total_pcs: it.total_pcs ?? null,
+  pcs_per_pack: it.pcs_per_pack ?? null,
 });
 const goods = (items: CheckedItem[]) => items.filter((it) => !it.is_charge);
 const isExport = (d: CheckedDoc) => Number(d.row.is_export) === 1;

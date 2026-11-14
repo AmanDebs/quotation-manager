@@ -1,7 +1,7 @@
 import './helpers/scratch.js';
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { computeTotals, billedQty, round2, piecesOrdered, PIECES_ORDERED_SQL } from '../src/services/totals.js';
+import { computeTotals, billedQty, round2, piecesOrdered, piecesPerBillingUnit, piecesPerBillingUnitOf, isPieceBasis, PIECES_ORDERED_SQL } from '../src/services/totals.js';
 import { db } from '../src/db/connection.js';
 
 /**
@@ -29,6 +29,69 @@ describe('billedQty', () => {
 
   test('a line with neither has no quantity — a price-only quotation', () => {
     assert.equal(billedQty({ qty: null, unit: 'pcs', total_pcs: null }), null);
+  });
+});
+
+/**
+ * A per-box rate is charged against boxes, and the line already states them:
+ * 85 boxes of 4,200 is 3,57,000 pieces, so Total Qty over the pack size is
+ * the quantity. `box` is the one piece basis whose divisor is not a constant,
+ * which is why `PIECES_PER_BILLING_UNIT` could not carry it and why it had
+ * none — the line fell through to the Total Qty fallback and billed 3,57,000
+ * boxes (2026-11-14, the client: *"When I put unit as box it is not working
+ * properly"*).
+ *
+ * Most of these are about what must **not** move: every other basis reads
+ * exactly as it did, and `pcs_per_pack` is ignored everywhere but here.
+ */
+describe('a per-box rate bills by the box', () => {
+  /** The client's own line: 85 boxes of 4,200 at 13.50. */
+  const line = { qty: null, unit: 'box', total_pcs: 357000, pcs_per_pack: 4200 };
+
+  test('Total Qty over the pack size is the box count', () => {
+    assert.equal(billedQty(line), 85);
+    assert.equal(computeTotals([{ ...line, description: 'Cap', unit_price: 13.5 }], 'none').subtotal, 1147.5);
+  });
+
+  test('and it beats a quantity stamped under the basis the line used to be on', () => {
+    // The defect as the client met it: saved at `per 1000`, `computeTotals`
+    // stamped qty 357, and switching the unit left that figure billing — so
+    // the amount did not move at all. The derivation has to win, as it does
+    // for every other piece basis.
+    assert.equal(billedQty({ ...line, qty: 357 }), 85);
+  });
+
+  test('a pack size of nothing derives nothing rather than dividing by zero', () => {
+    assert.equal(billedQty({ ...line, pcs_per_pack: 0 }), 357000);
+    assert.equal(billedQty({ ...line, pcs_per_pack: null }), 357000);
+    // ...and a quantity typed on such a line still stands.
+    assert.equal(billedQty({ ...line, pcs_per_pack: null, qty: 85 }), 85);
+  });
+
+  test('a charge still bills as one, pack size or not', () => {
+    assert.equal(billedQty({ ...line, is_charge: 1 }), 1);
+  });
+
+  test('no other basis reads the pack size', () => {
+    assert.equal(billedQty({ ...line, unit: 'per 1000' }), 357);
+    assert.equal(billedQty({ ...line, unit: 'unit' }), 357000);
+    // A weight basis is not a count of boxes: Total Qty stands as kilos.
+    assert.equal(billedQty({ ...line, unit: 'kg' }), 357000);
+    assert.equal(billedQty({ ...line, unit: 'kg', qty: 250 }), 250);
+  });
+
+  test('piecesPerBillingUnitOf answers for the line, piecesPerBillingUnit for the unit', () => {
+    assert.equal(piecesPerBillingUnitOf(line), 4200);
+    assert.equal(piecesPerBillingUnitOf({ unit: 'per 1000', pcs_per_pack: 4200 }), 1000);
+    // The unit alone cannot settle a box, which is what `isPieceBasis` says.
+    assert.equal(piecesPerBillingUnit('box'), null);
+    assert.equal(isPieceBasis('box'), false);
+  });
+
+  test('what the line orders in pieces is untouched — a box line still made 3,57,000', () => {
+    // The floor, the order book and the dispatch ceiling all read this, and
+    // none of them is about how the line is priced.
+    assert.equal(piecesOrdered(line), 357000);
   });
 });
 

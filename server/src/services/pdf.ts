@@ -4,7 +4,7 @@ import type { TDocumentDefinitions, Content } from 'pdfmake/interfaces';
 import { inflateSync } from 'node:zlib';
 import { db } from '../db/connection.js';
 import { amountInWords } from './amountInWords.js';
-import { round2, isPieceBasis, piecesPerBillingUnit, piecesOrdered, computeTotals } from './totals.js';
+import { round2, isPieceBasis, piecesPerBillingUnitOf, piecesOrdered, computeTotals } from './totals.js';
 import { invoiceReceivable, proformaAdvance, orderAdvance } from './receivables.js';
 import { specOwner, checksForWorkOrder } from './qc.js';
 import { batchById, lotsUnderCoa, batchesOnDespatch, batchesOnCreditNote } from './batch.js';
@@ -1082,16 +1082,18 @@ const goodsOnly = (rows: Row[]): Row[] => rows.filter((it) => !it.is_charge);
 function qtyTotal(rows: Row[]): string {
   const byBasis = new Map<string, number>();
   for (const it of goodsOnly(rows)) {
-    const pieces = isPieceBasis(it.unit);
+    // Asked of the line rather than of the unit, so a per-box line counts as
+    // the pieces it is: its divisor is the pack size on the row, which the
+    // unit alone cannot give. Without it a box line's Total Qty printed under
+    // its own billing word — "3,57,000 box" over a line stating 85 boxes.
+    const per = piecesPerBillingUnitOf(it);
     // total_pcs is already a piece count; the legacy `qty` is in billing units,
     // so 1,785 at "per 1000" is 17,85,000 pieces. Scaling it up is what lets
     // the two sit in the same bucket at all.
-    const q = it.total_pcs != null
-      ? Number(it.total_pcs)
-      : Number(it.qty) * (pieces ? piecesPerBillingUnit(it.unit)! : 1);
+    const q = it.total_pcs != null ? Number(it.total_pcs) : Number(it.qty) * (per ?? 1);
     if (!Number.isFinite(q) || q === 0) continue;
     // Every piece basis shares one bucket, keyed '' so it prints bare.
-    const basis = pieces ? '' : String(it.unit ?? '').trim();
+    const basis = per != null ? '' : String(it.unit ?? '').trim();
     byBasis.set(basis, (byBasis.get(basis) ?? 0) + q);
   }
   if (!byBasis.size) return '';

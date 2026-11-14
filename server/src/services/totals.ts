@@ -60,6 +60,27 @@ export const piecesPerBillingUnit = (unit: string | undefined | null): number | 
   PIECES_PER_BILLING_UNIT[unit ?? ''] ?? null;
 
 /**
+ * Pieces in one billing unit **of this line**, which is the same question for
+ * every basis but one: a box holds `pcs_per_pack` pieces, and that is stated
+ * per line rather than per unit, so the constant table above cannot carry it.
+ *
+ * `box` is therefore a piece basis whose divisor lives on the row — Total Qty
+ * is a piece count exactly as it is for `per 1000`, and dividing it by the
+ * pack size gives the boxes the rate is charged against. Without this branch a
+ * per-box line read Total Qty at face value and billed 3,57,000 boxes for a
+ * line stating 85 of them (2026-11-14, the client: *"When I put unit as box it
+ * is not working properly"*).
+ *
+ * Null for a line stating no pack size, which is the honest answer: nothing on
+ * it says how many boxes there are, so the fallbacks in `billedQty` take over
+ * exactly as they did before.
+ */
+export const piecesPerBillingUnitOf = (
+  it: Pick<LineItemInput, 'unit' | 'pcs_per_pack'>
+): number | null =>
+  (it.unit === 'box' ? (Number(it.pcs_per_pack) || null) : piecesPerBillingUnit(it.unit));
+
+/**
  * How many pieces a line orders — the figure a job is planned at and the order
  * book measures *made* against.
  *
@@ -86,7 +107,13 @@ export function piecesOrdered(it: Pick<LineItemInput, 'qty' | 'unit' | 'total_pc
 export const PIECES_ORDERED_SQL = (l: string) =>
   `COALESCE(${l}.total_pcs, CASE ${l}.unit WHEN 'per 1000' THEN ${l}.qty * 1000 WHEN 'unit' THEN ${l}.qty ELSE ${l}.qty END, 0)`;
 
-/** True when the rate is quoted against a piece count, so Total Qty is pieces. */
+/**
+ * True when the basis is a piece count the *unit alone* settles — `per 1000`
+ * and `unit`, whose divisor is a constant. **Not `box`**, whose Total Qty is
+ * pieces too but whose divisor is the line's own pack size: ask
+ * `piecesPerBillingUnitOf` where the line is in hand. The callers here are the
+ * ones that have only a unit string to go on.
+ */
 export const isPieceBasis = (unit: string | undefined | null): boolean =>
   piecesPerBillingUnit(unit) != null;
 
@@ -99,8 +126,10 @@ export const isPieceBasis = (unit: string | undefined | null): boolean =>
  * contradiction was reachable — the two fields were independent, so a line
  * could print 60,000 pieces against a total priced on some other number.
  *
- * For any other basis (kg, tonne, box) the piece count says
- * nothing about the billed quantity, so the typed qty stands.
+ * A box is a piece basis too, by `piecesPerBillingUnitOf`: the pack size is
+ * on the line, so Total Qty divided by it is the box count the rate charges
+ * against. For a weight basis (kg, tonne) the piece count says nothing about
+ * the billed quantity, so the typed qty stands.
  *
  * Failing both, Total Qty is taken at face value in whatever the rate basis is.
  * Quotations and proformas no longer offer a Qty field at all, so on those a
@@ -112,9 +141,11 @@ export const isPieceBasis = (unit: string | undefined | null): boolean =>
  * amount. There is nothing to count: one freight bill is not one of anything
  * the goods columns are adding up.
  */
-export function billedQty(it: Pick<LineItemInput, 'qty' | 'unit' | 'total_pcs' | 'is_charge'>): number | null {
+export function billedQty(
+  it: Pick<LineItemInput, 'qty' | 'unit' | 'total_pcs' | 'pcs_per_pack' | 'is_charge'>
+): number | null {
   if (it.is_charge) return 1;
-  const per = PIECES_PER_BILLING_UNIT[it.unit ?? ''];
+  const per = piecesPerBillingUnitOf(it);
   if (per && it.total_pcs != null) return it.total_pcs / per;
   if (it.qty != null) return it.qty;
   return it.total_pcs ?? null;

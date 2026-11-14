@@ -12,7 +12,7 @@ import { productTypeLabel, unitOptions } from './Products';
 import { PhotoCell } from '../components/LineItemsEditor';
 import ColumnsControl, { newColumnConfig, purchaseColumns } from '../components/ColumnsControl';
 import { fmtMoney, today } from '../lib/format';
-import { PIECES_PER_BILLING_UNIT, piecesOrdered } from '../lib/pieces';
+import { piecesPerBillingUnitOf, piecesOrdered } from '../lib/pieces';
 import { useUnsavedChanges } from '../lib/useUnsavedChanges';
 import { poStatusLabel, poStatusStyle } from './PurchaseOrders';
 import { DEFAULT_TAX_PCT, taxChoiceOf, taxPatchFor, newLineTaxPct } from '../lib/tax';
@@ -144,11 +144,13 @@ export default function PurchaseOrderFormPage() {
    * boxes of 5,000 at `per 1000` is 5,000. The last figure typed drives, the
    * dispatch form's rule: retyping a box count recomputes the quantity, and
    * a quantity typed afterwards stands until the packing is touched again.
-   * A weight basis derives nothing — kilos are not a count of boxes.
+   * A weight basis derives nothing — kilos are not a count of boxes. Per box
+   * is a piece basis like the rest, its divisor being the line's pack size
+   * (`piecesPerBillingUnitOf`), so Qty shows the pieces and the boxes follow.
    */
   const setPacking = (i: number, patch: Partial<PoItem>) => {
     const it = { ...draft.items[i], ...patch };
-    const per = PIECES_PER_BILLING_UNIT[it.unit ?? ''];
+    const per = piecesPerBillingUnitOf(it);
     if (it.packs != null && it.pcs_per_pack != null) {
       it.total_pcs = it.packs * it.pcs_per_pack;
     } else if (per && 'unit' in patch && it.total_pcs == null && it.qty != null) {
@@ -172,10 +174,10 @@ export default function PurchaseOrderFormPage() {
    * on a weight basis the box is the kilos, as it always was.
    */
   const qtyShown = (it: PoItem): number | null =>
-    (PIECES_PER_BILLING_UNIT[it.unit ?? ''] ? piecesOrdered(it) : it.qty ?? null);
+    (piecesPerBillingUnitOf(it) ? piecesOrdered(it) : it.qty ?? null);
   const setQty = (i: number, value: number | null) => {
     const it = { ...draft.items[i] };
-    const per = PIECES_PER_BILLING_UNIT[it.unit ?? ''];
+    const per = piecesPerBillingUnitOf(it);
     if (per) {
       it.total_pcs = value;
       it.qty = value == null ? null : value / per;

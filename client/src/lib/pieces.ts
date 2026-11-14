@@ -13,6 +13,19 @@
  */
 export const PIECES_PER_BILLING_UNIT: Record<string, number> = { 'per 1000': 1000, unit: 1 };
 
+/**
+ * Pieces in one billing unit **of this line** — `piecesPerBillingUnitOf` in
+ * `server/src/services/totals.ts`, which is the authority. Every basis but one
+ * is settled by the unit alone; a box holds `pcs_per_pack` pieces, stated per
+ * line rather than per unit, so the table above cannot carry it.
+ */
+export const piecesPerBillingUnitOf = (
+  it: { unit?: string | null; pcs_per_pack?: number | null }
+): number | null =>
+  (it.unit === 'box'
+    ? (Number(it.pcs_per_pack) || null)
+    : PIECES_PER_BILLING_UNIT[it.unit ?? ''] ?? null);
+
 export function piecesOrdered(it: { qty?: number | null; unit?: string | null; total_pcs?: number | null }): number | null {
   if (it.total_pcs != null) return Number(it.total_pcs) || 0;
   const per = PIECES_PER_BILLING_UNIT[it.unit ?? ''];

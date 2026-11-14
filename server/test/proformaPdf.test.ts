@@ -232,3 +232,48 @@ describe('a proforma carrying extra columns', () => {
     assert.ok(descriptionShare(def) > 40, `three extras leave ${descriptionShare(def).toFixed(2)}pt`);
   });
 });
+
+/**
+ * The closing TOTAL QTY cell adds the quantity column up **per rate basis**,
+ * since 1,785 (per 1000) and 5 tonne make 1,790 of nothing. A per-box line
+ * broke that from the other side: its Total Qty is a piece count like any
+ * other, but the basis was read off the unit alone, so the footer printed
+ * *3,57,000 box* over a line stating 85 boxes of 4,200.
+ */
+describe('the quantity total on a per-box line', () => {
+  /** The client's own line: 85 boxes of 4,200 at 13.50. */
+  const boxProforma = (unit: string, qty: number, amount: number): number => {
+    const pi = makeProforma({ customerId: makeCustomer(), currency: 'USD', total: amount });
+    db.prepare(
+      `INSERT INTO pi_items (pi_id, description, color, qty, unit, unit_price, tax_pct, amount,
+                             packs, pcs_per_pack, total_pcs, sort_order)
+       VALUES (?, '38mm 3 Start Cap', 'Green 6', ?, ?, 13.5, 0, ?, 85, 4200, 357000, 0)`
+    ).run(pi, qty, unit, amount);
+    db.prepare("UPDATE proforma_invoices SET tax_type = 'none' WHERE id = ?").run(pi);
+    return pi;
+  };
+
+  /** The last row of the items table is the one carrying the column totals. */
+  const totalCells = (pi: number): string[] => {
+    const body = itemsBody(buildProformaPdf(pi) as any);
+    return body[body.length - 1].map((c: any) =>
+      (typeof c?.text === 'string' ? c.text : Array.isArray(c?.text) ? c.text.join('') : ''));
+  };
+
+  test('counts as the pieces it is, not as its own billing word', () => {
+    const cells = totalCells(boxProforma('box', 85, 1147.5));
+    assert.ok(cells.some((c) => /3,57,000$/.test(c)), `totals row: ${JSON.stringify(cells)}`);
+    assert.ok(!cells.some((c) => /box/.test(c)), 'the pieces bucket prints bare');
+  });
+
+  test('and a weight basis still states its own word, which is the point of the bucketing', () => {
+    const cells = totalCells(boxProforma('kg', 357000, 4819500));
+    assert.ok(cells.some((c) => /3,57,000 kg$/.test(c)), `totals row: ${JSON.stringify(cells)}`);
+  });
+
+  test('a per-1000 line is untouched', () => {
+    const cells = totalCells(boxProforma('per 1000', 357, 4819.5));
+    assert.ok(cells.some((c) => /3,57,000$/.test(c)), `totals row: ${JSON.stringify(cells)}`);
+    assert.ok(!cells.some((c) => /per 1000/.test(c)), 'the pieces bucket prints bare');
+  });
+});
