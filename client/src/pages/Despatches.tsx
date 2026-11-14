@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
 import type { Despatch, Location, Customer, Order, ReadyLine } from '../types';
-import { PageHeader, Card, Select, Input, Button, Modal, EmptyState, ErrorText, Pagination, DownloadButton, SearchSelect, SegmentedTabs, TH_CLASS } from '../components/ui';
+import { PageHeader, Card, Select, Input, Button, Modal, EmptyState, ErrorText, Pagination, DownloadButton, ExportTabs, SearchSelect, SegmentedTabs, TH_CLASS } from '../components/ui';
 import { useCan } from '../App';
 import { fmtQty, fmtDate } from '../lib/format';
 import { useUrlFilter } from '../lib/useUrlFilter';
@@ -565,11 +565,14 @@ export default function DespatchesPage() {
   const [docs, setDocs] = useUrlFilter('docs');
   const [uninvoiced, setUninvoiced] = useUrlFilter('uninvoiced');
   const [q, setQ] = useUrlFilter('q');
+  // The order's own flag, under the key the order book and the Work
+  // Orders list already use, so a habit learned on one works here.
+  const [exportFilter, setExportFilter] = useUrlFilter('export');
 
   const query = new URLSearchParams();
   for (const [key, value] of [
     ['location_id', location], ['customer_id', customer], ['from', from], ['to', to],
-    ['docs', docs], ['uninvoiced', uninvoiced], ['q', q],
+    ['docs', docs], ['uninvoiced', uninvoiced], ['q', q], ['export', exportFilter],
   ] as [string, string][]) if (value) query.set(key, value);
   // The header funnels — ETA among them, under the `eta_from`/`eta_to`
   // keys the dashboard chip has always linked with — carried into the
@@ -589,7 +592,7 @@ export default function DespatchesPage() {
   const totals = list.summary ?? { ...EMPTY, trips: trips.length };
   const showEta = totals.with_eta > 0;
   const showDocs = totals.with_docs > 0 || totals.docs_pending > 0;
-  const filtered = !!(location || customer || from || to || docs || uninvoiced || q)
+  const filtered = !!(location || customer || from || to || docs || uninvoiced || q || exportFilter)
     || columns.filtered.length > 0;
 
   return (
@@ -630,6 +633,7 @@ export default function DespatchesPage() {
       {approving ? <AwaitingApproval /> : ready ? <ReadyToDispatch /> : (
       <>
       <div className="mb-3 flex flex-wrap items-center gap-2">
+        <ExportTabs value={exportFilter} onChange={setExportFilter} />
         <Input
           className="w-64"
           placeholder="Search container, BL, CN, vehicle, order…"

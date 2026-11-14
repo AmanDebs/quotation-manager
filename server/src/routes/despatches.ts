@@ -170,6 +170,24 @@ function despatchListWhere(req: AuthedRequest): { where: string[]; params: unkno
   if (req.query.order_id) { where.push('d.order_id = ?'); params.push(Number(req.query.order_id)); }
   if (req.query.location_id) { where.push('d.location_id = ?'); params.push(Number(req.query.location_id)); }
   if (req.query.customer_id) { where.push('o.customer_id = ?'); params.push(Number(req.query.customer_id)); }
+  /*
+   * Export or domestic, read off the **order** behind the trip rather than off
+   * the despatch (2026-11-14). A trip has no such flag and deliberately gains
+   * none: giving it one would be a second copy able to disagree with the
+   * document the goods are being sent against. The same key the order book and
+   * the Work Orders list already answer to, read the same way, so a link
+   * carrying `export=1` means one thing everywhere.
+   *
+   * It is the question this register could not ask, and the two halves of it
+   * are different work: an export trip is a container with a bill of lading,
+   * an ETA and documents that have to reach the buyer, where a domestic one is
+   * a lorry with a consignment note. Half the columns on this page are about
+   * the first kind.
+   */
+  if (req.query.export === '1' || req.query.export === '0') {
+    where.push('o.is_export = ?');
+    params.push(Number(req.query.export));
+  }
   if (req.query.from) { where.push('d.date >= ?'); params.push(String(req.query.from)); }
   if (req.query.to) { where.push('d.date <= ?'); params.push(String(req.query.to)); }
   /*
