@@ -261,6 +261,14 @@ export default function OrdersPage() {
     ['order-lines', view, query], `/api/orders/lines${query ? `?${query}` : ''}`, { enabled: view === 'lines' },
   );
   const orders = orderList.rows;
+  /*
+   * INCO Terms is export-only on the order form, so a domestic book carries it
+   * on no row at all and a column empty for ever is worse than no column —
+   * the rule the lines view's own Dest Port column follows. Measured over the
+   * rows on the page rather than the whole book, which is what the reader can
+   * see and is how `anyPort` reads it too.
+   */
+  const anyInco = orders.some((o) => o.inco_terms);
   const lines = lineList.rows;
   // The per-product view is deliberately not paged: it folds every matching
   // line into one row per product, and a total over one page of lines is not
@@ -435,6 +443,11 @@ export default function OrdersPage() {
                   <th className="pb-2 pr-3">Customer</th>
                   {showCompany && <th className="pb-2 pr-3">Issued By</th>}
                   <th className="pb-2 pr-3">Their PO</th>
+                  {/* The terms the price is on — who pays the freight and who
+                      insures it — beside the buyer's own reference rather than
+                      among the dates and the money, those being what the terms
+                      qualify. */}
+                  {anyInco && <th className="whitespace-nowrap pb-2 pr-3">INCO Terms</th>}
                   <th className="pb-2 pr-3">Promised</th>
                   <th className="pb-2 pr-3 text-right">Value</th>
                   <th className="pb-2 pr-3 text-right">Pending</th>
@@ -455,6 +468,9 @@ export default function OrdersPage() {
                       <td className="py-2 pr-3 text-xs text-slate-500">{o.company_name ?? '—'}</td>
                     )}
                     <td className="py-2 pr-3">{o.po_number || '—'}</td>
+                    {anyInco && (
+                      <td className="whitespace-nowrap py-2 pr-3 text-xs text-slate-600">{o.inco_terms || '—'}</td>
+                    )}
                     {/* The heading stays *Promised*, which is what the
                         overwhelming majority of this book genuinely carries —
                         renaming the column would mislabel 600 imported orders

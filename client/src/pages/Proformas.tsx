@@ -94,7 +94,7 @@ const PROFORMA_FILTERS: ColumnFilterSpec[] = [
   { key: 'advance', label: 'Advance', kind: 'numbers' },
   { key: 'balance', label: 'Balance', kind: 'numbers' },
   { key: 'payment_terms', label: 'Payment Terms', kind: 'values' },
-  { key: 'issued_by', label: 'Issued By', kind: 'values' },
+  { key: 'inco_terms', label: 'INCO Terms', kind: 'values' },
   { key: 'spoc', label: 'SPOC', kind: 'values' },
   { key: 'order_number', label: 'Sales Order', kind: 'values' },
 ];
@@ -270,8 +270,14 @@ export default function ProformasPage() {
                 <th className="whitespace-nowrap pb-2 pr-3">
                   <span className="flex items-center gap-0.5">Payment Terms{filterFor('payment_terms')}</span>
                 </th>
+                {/* Beside Payment Terms, the two being the terms the deal is
+                    on: one says when the money comes, the other who pays the
+                    freight and who insures it. It took the slot *Issued By*
+                    held until 2026-11-14 — whoever typed the row in, which is
+                    rarely a fact anybody reads a register for. The download
+                    still carries that column. */}
                 <th className="whitespace-nowrap pb-2 pr-3">
-                  <span className="flex items-center gap-0.5">Issued By{filterFor('issued_by')}</span>
+                  <span className="flex items-center gap-0.5">INCO Terms{filterFor('inco_terms')}</span>
                 </th>
                 {/* Who on the desk is answerable for this offer — `prepared_by`,
                     the field the form calls SPOC since 2026-10-07. Beside
@@ -318,7 +324,7 @@ export default function ProformasPage() {
                     {fmtMoney(p.grand_total - (p.advance_received ?? 0), p.currency)}
                   </td>
                   <td className="py-2 pr-3 text-xs text-slate-600">{p.payment_terms || '—'}</td>
-                  <td className="py-2 pr-3 text-xs text-slate-500">{p.created_by_name ?? '—'}</td>
+                  <td className="py-2 pr-3 whitespace-nowrap text-xs text-slate-600">{p.inco_terms || '—'}</td>
                   {/* A blank recedes to an em-dash rather than reading as a
                       fault, and the cell does not wrap — a name on this book is
                       one word. */}

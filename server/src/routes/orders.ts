@@ -504,6 +504,10 @@ const orderColumns: Column<OrderRow>[] = [
   { header: 'Customer', value: (r) => String(r.customer_name ?? '') },
   { header: 'Issued by', value: (r) => (r.company_name == null ? '' : String(r.company_name)) },
   { header: 'Dest port', value: (r) => String(r.port_of_discharge ?? '') },
+  // Beside the screen's own column (2026-11-14): who pays the freight and who
+  // insures it is a fact about the deal, and the file has to hold what the
+  // table above it holds.
+  { header: 'INCO', value: (r) => String(r.inco_terms ?? '') },
   { header: 'PO number', value: (r) => String(r.po_number ?? '') },
   { header: 'PO date', value: (r) => String(r.po_date ?? ''), type: 'date' },
   { header: 'Promised', value: (r) => String(r.promised_date ?? ''), type: 'date' },

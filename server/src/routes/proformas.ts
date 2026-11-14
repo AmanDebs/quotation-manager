@@ -274,6 +274,13 @@ export const PROFORMA_FILTERABLE = {
   advance: { sql: 'advance_received', kind: 'numbers' },
   balance: { sql: 'grand_total - advance_received', kind: 'numbers' },
   payment_terms: { sql: 'payment_terms', kind: 'values' },
+  inco_terms: { sql: 'inco_terms', kind: 'values' },
+  /*
+   * Kept although the column left the screen on 2026-11-14 — the download
+   * still carries *Issued by*, so a link or a saved filter naming it still
+   * narrows the file it is in. What went with the column is the funnel: one
+   * filter per column, and the one offered has to be the one on screen.
+   */
   issued_by: { sql: 'created_by_name', kind: 'values' },
   spoc: { sql: 'prepared_by', kind: 'values' },
   order_number: { sql: 'order_number', kind: 'values' },
