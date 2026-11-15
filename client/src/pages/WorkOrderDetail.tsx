@@ -121,7 +121,7 @@ export default function WorkOrderDetailPage() {
    */
   const { markSaved, pdf, prompt } = useUnsavedChanges(draft, {
     run: () => save.mutateAsync(draft!),
-    can: !!draft && draft.qty_planned > 0,
+    can: !!draft,
   });
 
   const save = useMutation({
@@ -366,13 +366,25 @@ export default function WorkOrderDetailPage() {
               <Field label="Description" className="sm:col-span-2">
                 <Input disabled={!mayEdit} value={draft.description} onChange={(e) => set({ description: e.target.value })} />
               </Field>
+              {/*
+                **The sales order line decides how many, not the floor**
+                (2026-11-15, the client: *"Pieces to make should not be
+                editable"*). The figure is the line's own, by `piecesOrdered`,
+                and `syncOrderJobs` keeps an untouched job in step with it — so
+                a figure typed here was reverted by the next save of that order
+                and by `raiseJobsForOpenOrders()` on the next boot. The box
+                could not hold its value, and where it could — a job the floor
+                has already touched — it put a quantity on the instruction that
+                the document does not say.
+
+                Stated with where it comes from, because that is the question a
+                settled field raises; the order and the line are linked in the
+                header above. The column, the route and the draft are all
+                untouched, so an ordinary save sends it straight back.
+              */}
               <Field label="Pieces to make">
-                <Input
-                  type="number" min={0} step="any" disabled={!mayEdit}
-                  className="w-full text-right tabular-nums"
-                  value={draft.qty_planned || ''}
-                  onChange={(e) => set({ qty_planned: Number(e.target.value) })}
-                />
+                <div className="px-0.5 py-1.5 text-sm tabular-nums text-slate-700">{fmtQty(job.qty_planned)}</div>
+                <p className="text-xs text-slate-400">From the sales order line — change it there</p>
               </Field>
               <Field label="Product">
                 <div className="px-0.5 py-1.5 text-sm text-slate-700">{job.product_name || '—'}</div>
@@ -435,7 +447,7 @@ export default function WorkOrderDetailPage() {
               >
                 Delete
               </Button>
-              <Button onClick={() => save.mutate(draft)} disabled={save.isPending || !(draft.qty_planned > 0)}>
+              <Button onClick={() => save.mutate(draft)} disabled={save.isPending}>
                 {save.isPending ? 'Saving…' : 'Save Changes'}
               </Button>
             </div>
