@@ -9,6 +9,7 @@ import {
 import { CoaExtraFields } from '../components/CoaExtraFields';
 import { CoaHeaderFields } from '../components/CoaHeaderFields';
 import { useUnsavedChanges } from '../lib/useUnsavedChanges';
+import { printedCheck } from '../lib/qc';
 import { fmtDate, today } from '../lib/format';
 
 /**
@@ -89,7 +90,16 @@ export default function QcCheckFormPage({ certify }: {
    */
   certify?: boolean;
 }) {
-  const { id, checkId } = useParams();
+  const { id, checkId, batchId: coaBatchParam } = useParams();
+  /*
+   * **The certificate's own way in** (`/work-orders/:id/coa/:batchId`;
+   * 2026-11-15, the client on the corrections page: *"I want to edit the
+   * whole COA at one place"*). The COA register links here with a lot rather
+   * than with an inspection, because what somebody is correcting is the
+   * certificate — the readings it prints are `printedCheck`'s to resolve, by
+   * the same rule the document itself reads.
+   */
+  const coaBatchId = Number(coaBatchParam) || null;
   const navigate = useNavigate();
   const [params] = useSearchParams();
   /*
@@ -162,15 +172,61 @@ export default function QcCheckFormPage({ certify }: {
   });
   const job = full;
   /*
+   * **The inspection being corrected**, where that is what this is —
+   * `/work-orders/:id/qc/:checkId` (2026-10-24, the client, with a draft
+   * certificate in front of them: *"i want to change the results of the
+   * tests"*). It is the same page and the same rules: a correction is this
+   * list of readings written again, so a second screen for it would be two
+   * forms that could come to disagree about what an answer means.
+   */
+  const editing: QcCheck | undefined = checkId
+    ? (full?.qc?.checks ?? []).find((c) => c.id === Number(checkId))
+    // Reached by the certificate rather than by the inspection: the readings
+    // being corrected are the ones the document prints.
+    : coaBatchId
+      ? printedCheck((full?.batches ?? []).find((b) => b.id === coaBatchId))
+      : undefined;
+  // The lot in play: the one being inspected, or — on a correction — the one
+  // the stored check already names, which nothing here may change.
+  const batch = (full?.batches ?? []).find((b) => b.id === (editing ? editing.batch_id : batchId));
+  /*
+   * **The certificate this page also edits**, where the lot carries one.
+   *
+   * Until 2026-11-15 the readings were here and the certificate's own fields
+   * — its date, who approved it, which header cells print, the details a
+   * particular buyer asked for — were in a dialog on the COA register, so
+   * correcting a document meant two screens and a sentence telling you to go
+   * to the other one. They are one page now, and the dialog is gone.
+   *
+   * Everything written here is the **group's**: `PUT /batches/:id/coa`
+   * resolves the rest by number, so a certificate over ten lots is corrected
+   * once. The readings are not — they belong to one lot's inspection, which
+   * is what the note beside them says.
+   */
+  const cert = editing && batch?.coa_no ? batch : undefined;
+  /*
+   * An **issued** certificate's readings cannot move (`checkEditError`), and
+   * the reason is that everything letting goods leave reads the number rather
+   * than the reading behind it. So the page locks them and offers the one act
+   * that unlocks them — which happens **in place** rather than by sending
+   * somebody somewhere else, that round trip being the thing this change is
+   * about. A draft certifies nothing, so a draft's readings are free.
+   */
+  const locked = !!cert && !!batch?.cleared;
+  /*
    * What the certificate's header will say — the same list `buildCoaPdf`
    * draws from, so this page cannot promise a cell the document does not
-   * print. Asked only in the one-press shape, an ordinary inspection having
-   * no certificate to preview.
+   * print. Asked where there is a certificate to describe: **the job's own
+   * preview** while one is being raised, and **the lot's** while one is being
+   * corrected, which is the reading that carries what is already ticked and
+   * typed on it.
    */
   const { data: headerData, isLoading: headerLoading } = useQuery({
-    queryKey: ['coa-header', 'wo', String(id)],
-    queryFn: () => api.get<{ fields: CoaField[] }>(`/api/work-orders/${id}/coa-header`),
-    enabled: !!certify,
+    queryKey: cert ? ['coa-header', 'batch', String(cert.id)] : ['coa-header', 'wo', String(id)],
+    queryFn: () => api.get<{ fields: CoaField[] }>(
+      cert ? `/api/work-orders/batches/${cert.id}/coa-header` : `/api/work-orders/${id}/coa-header`
+    ),
+    enabled: !!certify || !!cert,
   });
   /*
    * The two cells that exist only once the press is made, shown as what it is
@@ -178,9 +234,10 @@ export default function QcCheckFormPage({ certify }: {
    * typed above, and the certificate its date — its own number is drawn from
    * the series at the moment it is issued, which the hint says.
    *
-   * Merged here rather than asked of the server per keystroke.
+   * Merged here rather than asked of the server per keystroke, and only while
+   * raising one: a certificate being corrected has both facts already.
    */
-  const headerFields = headerData?.fields?.map((f) => {
+  const headerFields = !certify ? headerData?.fields : headerData?.fields?.map((f) => {
     if (f.key === 'batch') {
       // The number typed above, or what the press will do with a blank — an
       // em-dash here would read as a certificate with no batch on it, which
@@ -194,20 +251,6 @@ export default function QcCheckFormPage({ certify }: {
     }
     return f;
   });
-  /*
-   * **The inspection being corrected**, where that is what this is —
-   * `/work-orders/:id/qc/:checkId` (2026-10-24, the client, with a draft
-   * certificate in front of them: *"i want to change the results of the
-   * tests"*). It is the same page and the same rules: a correction is this
-   * list of readings written again, so a second screen for it would be two
-   * forms that could come to disagree about what an answer means.
-   */
-  const editing: QcCheck | undefined = checkId
-    ? (full?.qc?.checks ?? []).find((c) => c.id === Number(checkId))
-    : undefined;
-  // The lot in play: the one being inspected, or — on a correction — the one
-  // the stored check already names, which nothing here may change.
-  const batch = (full?.batches ?? []).find((b) => b.id === (editing ? editing.batch_id : batchId));
 
   const after = () => {
     queryClient.invalidateQueries({ queryKey: ['work-order', String(id)] });
@@ -254,29 +297,76 @@ export default function QcCheckFormPage({ certify }: {
       };
     }),
   });
+  /** What the certificate's own routes take, under the `batch_ids` contract. */
+  const coaBody = () => ({
+    date: coa.coa_date,
+    approved_by: coa.approved_by,
+    extra: coa.extra,
+    ...(header ? { header } : {}),
+  });
   const add = useMutation({
     /*
      * A correction is a PUT on the check itself rather than a fresh POST: the
      * reading moves and the inspection stays the one that happened, on its own
      * date, by whoever took it. Recording it again would date every other
      * reading on it to today.
+     *
+     * **Readings first, then the certificate**, and the order is the whole of
+     * what makes two writes safe here: a refused reading — a half-filled
+     * range, a row with nothing in it — leaves the certificate exactly as it
+     * was, where the other way round would issue a document over figures that
+     * never saved. A certificate write that fails after them leaves the
+     * readings saved and the certificate untouched, which the next press
+     * finishes.
      */
-    mutationFn: () => (editing
-      ? api.put(`/api/work-orders/qc-checks/${editing.id}`, payload())
-      : api.post(`/api/work-orders/${id}/${certify ? 'certify' : 'qc-checks'}`, payload())),
+    mutationFn: async (opts?: { issue?: boolean }) => {
+      // Locked readings are the server's refusal, not a state to send: an
+      // issued certificate's figures cannot move until it is a draft again.
+      if (!locked) {
+        if (editing) await api.put(`/api/work-orders/qc-checks/${editing.id}`, payload());
+        else await api.post(`/api/work-orders/${id}/${certify ? 'certify' : 'qc-checks'}`, payload());
+      }
+      /*
+       * One request for the certificate, whichever end of the correction this
+       * is: `/coa/issue` takes the same fields, so there is no window where
+       * the date has moved and the document is still a draft.
+       */
+      if (cert) {
+        if (opts?.issue) await api.post(`/api/work-orders/batches/${cert.id}/coa/issue`, coaBody());
+        else await api.put(`/api/work-orders/batches/${cert.id}/coa`, coaBody());
+      }
+    },
     /*
-     * **Back to the job, not back to a blank form.** The dialog this replaced
+     * **Back where the correction came from.** The dialog this replaced
      * stayed open and cleared itself, which is right for a thing floating over
      * the page you came from; a page that silently emptied after Save would
-     * read as one that had lost the reading. The job's own Quality tab is
-     * where the inspection now is — or the Batches tab, where a lot just
-     * certified needs looking at.
+     * read as one that had lost the reading. A certificate opened from the
+     * register goes back to the register, and everything else to the job —
+     * its Batches tab where a lot is in play, its Quality tab otherwise.
      */
     onSuccess: () => {
       setValues({});
       markSaved();
       after();
-      navigate(`/work-orders/${id}?tab=${certify || batch ? 'batches' : 'quality'}`);
+      if (cert) queryClient.invalidateQueries({ queryKey: ['coa-register'] });
+      navigate(coaBatchId ? '/quality' : `/work-orders/${id}?tab=${certify || batch ? 'batches' : 'quality'}`);
+    },
+  });
+  /*
+   * The one act that unlocks an issued certificate's readings, **in place**.
+   *
+   * It is the same `withdraw` the register used to offer behind *Correct the
+   * readings…*, which navigated away afterwards; here the page simply
+   * unlocks, because the whole point of this screen is that correcting a
+   * certificate does not mean going somewhere else. Nothing is lost by it and
+   * the number is kept — what a draft loses is its clearance, which the
+   * sentence beside the button says.
+   */
+  const withdraw = useMutation({
+    mutationFn: () => api.post(`/api/work-orders/batches/${cert!.id}/coa/withdraw`, {}),
+    onSuccess: () => {
+      after();
+      queryClient.invalidateQueries({ queryKey: ['coa-register'] });
     },
   });
   const removeCheck = useMutation({
@@ -291,15 +381,21 @@ export default function QcCheckFormPage({ certify }: {
    * is exactly the thing somebody would be annoyed to lose to a stray click on
    * the sidebar.
    *
-   * The readings are what counts as dirty; the header fields carry defaults
-   * and are not a change by themselves.
+   * The readings are what counts as dirty; the inspection's own header fields
+   * carry defaults and are not a change by themselves. **The certificate's
+   * fields count too** where the page carries one — a date moved and a cell
+   * unticked are exactly as easy to lose to a stray click as a reading, and
+   * since 2026-11-15 they are on this page rather than in a dialog that could
+   * not be navigated away from.
    */
-  const { markSaved, prompt } = useUnsavedChanges(values, {
-    run: () => add.mutateAsync(),
-    can: Object.keys(values).length > 0,
-    message: editing
-      ? 'These corrections to the inspection have not been saved yet.'
-      : 'This inspection has not been recorded yet.',
+  const { markSaved, prompt } = useUnsavedChanges(cert ? { values, coa, header } : values, {
+    run: () => add.mutateAsync({}),
+    can: Object.keys(values).length > 0 || !!cert,
+    message: cert
+      ? `The changes to ${cert.coa_no} have not been saved yet.`
+      : editing
+        ? 'These corrections to the inspection have not been saved yet.'
+        : 'This inspection has not been recorded yet.',
   });
 
   /*
@@ -386,6 +482,39 @@ export default function QcCheckFormPage({ certify }: {
     setNextCustom(next);
   }, [editing, filled]);
 
+  /*
+   * And the certificate's own fields, on the same latch and for the same
+   * reason: the lot arrives with the page's second query, so this fills in
+   * once per lot rather than on every refetch, and a date typed over is never
+   * put back. The header panel seeds itself from the fields it is handed, so
+   * there is nothing to copy here — what is ticked and what was typed over
+   * the record both ride on that reading.
+   */
+  const [coaFilled, setCoaFilled] = useState(0);
+  /*
+   * **Nothing is saved before the certificate has been read**, which the
+   * render caught rather than the type-checker: the fields above fill in from
+   * the lot when the page's own query lands, so a press in the moment before
+   * that would send the empty state they start in — and `applyCoaFields`
+   * treats a blank approver as a real answer, so it would wipe the signatory
+   * off a live certificate. The press is simply not offered until the panel
+   * holds what the document says.
+   */
+  const coaReady = !cert || coaFilled === cert.id;
+  useEffect(() => {
+    if (!cert || coaFilled === cert.id) return;
+    setCoaFilled(cert.id);
+    setCoa({
+      coa_date: cert.coa_date || today(),
+      approved_by: cert.coa_approved_by ?? '',
+      // A lot's number is fixed once it is on paper (`renameError`), so this
+      // is never asked again — it is the one field of the certify panel that
+      // does not come back when a certificate is corrected.
+      batch_number: '',
+      extra: cert.coa_extra ?? [],
+    });
+  }, [cert, coaFilled]);
+
   const specParams = full?.qc?.params ?? [];
   const checks = full?.qc?.checks ?? [];
   /*
@@ -457,9 +586,13 @@ export default function QcCheckFormPage({ certify }: {
 
   const title = certify
     ? `Certify — ${job.number}`
-    : editing
-      ? `Correct inspection — ${batch ? batch.number : job.number}`
-      : batch ? `Final check — ${batch.number}` : `Quality check — ${job.number}`;
+    // Named for the document where there is one: this page is the
+    // certificate's, and the readings on it are one of the things it carries.
+    : cert
+      ? `Certificate ${cert.coa_no}`
+      : editing
+        ? `Correct inspection — ${batch ? batch.number : job.number}`
+        : batch ? `Final check — ${batch.number}` : `Quality check — ${job.number}`;
 
   /*
    * Every row of this page, so the bar at the foot can say how many of them
@@ -494,7 +627,13 @@ export default function QcCheckFormPage({ certify }: {
           <Button variant="secondary" onClick={() => navigate(`/work-orders/${id}`)}>Back to job</Button>
         }
       />
-      <Card title={certify ? 'Inspection and certificate' : editing ? 'Correct the readings' : 'Inspection'}>
+      <Card title={certify
+        ? 'Inspection and certificate'
+        // Named for what is in it: on a certificate's page the card holds the
+        // document as well as the readings, and *Correct the readings* under a
+        // panel of certificate fields would describe half of it.
+        : cert ? 'The certificate, and the readings it prints'
+          : editing ? 'Correct the readings' : 'Inspection'}>
       {summary && !summary.has_spec ? (
         <EmptyState message="No quality checks are defined for this product. Set them under Products → QC, then come back." />
       ) : (
@@ -516,9 +655,10 @@ export default function QcCheckFormPage({ certify }: {
             What a correction is, said before the readings rather than left to
             be worked out from the title: the inspection keeps its own date and
             inspector, because that is when it happened and who took it.
-            Where a draft certificate prints these readings, it says so and
-            names the step left to do — issuing it again is what puts the
-            corrected document out, and nothing here does that.
+
+            It no longer sends anybody to the COA page for the rest of it
+            (2026-11-15) — the certificate is on this page now, and a sentence
+            naming another screen was the shape of the complaint.
           */}
           {editing && (
             <p className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
@@ -526,10 +666,11 @@ export default function QcCheckFormPage({ certify }: {
               {editing.shift ? ` · ${editing.shift}` : ''}
               {editing.inspector ? ` · ${editing.inspector}` : ''}. It keeps that date and inspector — this is a
               figure being put right, not a second inspection.
-              {batch?.coa_draft && (
-                <> Certificate <b>{batch.coa_no}</b> is a draft and prints these readings, so issue it again
-                  from the COA page once they are right.</>
-              )}
+              {cert && (batch?.coa_draft
+                ? <> Certificate <b>{cert.coa_no}</b> is a draft and prints these readings: correct them below,
+                  then <b>Save &amp; issue</b> to put it back out under the same number.</>
+                : <> Certificate <b>{cert.coa_no}</b> has been issued, so its readings are settled — its date,
+                  its approver and what it prints are not.</>)}
             </p>
           )}
 
@@ -566,25 +707,39 @@ export default function QcCheckFormPage({ certify }: {
             </div>
 
             {/*
-              The two things a certificate needs that an inspection does not.
-              Shown only in the one-press shape — on an ordinary check there
-              is no certificate to date or to have approved.
+              The certificate, whole: the two fields an inspection does not
+              have, every header cell with its tick, and the details this buyer
+              asked for.
+
+              Drawn while **raising** one and while **correcting** one alike
+              (2026-11-15) — the fields are the same fields and the panel is
+              the same panel, so a second copy of it on the COA register was
+              two controls over one fact waiting to disagree. What differs is
+              the batch number, which is asked once: a lot's number is fixed
+              the moment it is on paper.
             */}
-            {certify && (
+            {(certify || cert) && (
               <div className="mb-3 rounded-lg bg-slate-50 p-3 ring-1 ring-slate-200">
                 <p className="mb-2 text-xs text-slate-500">
-                  This opens a batch covering everything this job has made and not yet
-                  certified, records the inspection against it, and issues the certificate. The
-                  batch is dated by the last shift in it.
+                  {certify
+                    ? `This opens a batch covering everything this job has made and not yet
+                       certified, records the inspection against it, and issues the certificate. The
+                       batch is dated by the last shift in it.`
+                    : `Everything ${cert!.coa_no} says about itself, beside the readings it prints.
+                       This panel is the certificate's and reaches every batch it covers; the
+                       readings below are ${batch!.number}'s own. Which batches it covers is not a
+                       correction — a certificate over different batches is a different certificate.`}
                 </p>
                 <div className={FIELD_GRID}>
-                  <Field label="Batch number">
-                    <Input
-                      value={coa.batch_number}
-                      placeholder="next in the series"
-                      onChange={(e) => setCoa({ ...coa, batch_number: e.target.value })}
-                    />
-                  </Field>
+                  {certify && (
+                    <Field label="Batch number">
+                      <Input
+                        value={coa.batch_number}
+                        placeholder="next in the series"
+                        onChange={(e) => setCoa({ ...coa, batch_number: e.target.value })}
+                      />
+                    </Field>
+                  )}
                   <Field label="Certificate date">
                     <Input type="date" value={coa.coa_date} onChange={(e) => setCoa({ ...coa, coa_date: e.target.value })} />
                   </Field>
@@ -625,6 +780,36 @@ export default function QcCheckFormPage({ certify }: {
               tolerance is short on almost every row, and what is left goes to
               the cells somebody types into.
             */}
+            {/*
+              **Settled while the certificate is issued**, and unlocked in
+              place rather than somewhere else (2026-11-15).
+
+              `checkEditError` refuses these readings until the document is a
+              draft again, so a page that offered boxes here would be offering
+              what the save refuses — the trap this codebase keeps naming. A
+              `fieldset` is what locks them: one attribute over a hundred-odd
+              controls, where a `disabled` threaded through every row is one
+              somebody adds a row without.
+            */}
+            {locked && (
+              <div className="mb-2 flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                <span>
+                  These readings are what <b>{cert!.coa_no}</b> certifies, so they are settled while it
+                  stands. Withdrawing it keeps the number and everything on it, and certifies nothing
+                  until you issue it again — nothing of it can be dispatched meanwhile.
+                </span>
+                <Button
+                  variant="secondary"
+                  className="ml-auto shrink-0"
+                  disabled={withdraw.isPending}
+                  onClick={() => withdraw.mutate()}
+                >
+                  {withdraw.isPending ? 'Withdrawing…' : 'Withdraw to a draft'}
+                </Button>
+                <ErrorText error={withdraw.error} />
+              </div>
+            )}
+            <fieldset disabled={locked} className={`m-0 min-w-0 border-0 p-0${locked ? ' opacity-60' : ''}`}>
             <table className="w-full table-fixed text-sm">
               <thead>
                 <tr className={TH_CLASS}>
@@ -878,6 +1063,7 @@ export default function QcCheckFormPage({ certify }: {
                 ))}
               </tbody>
             </table>
+            </fieldset>
 
             <p className="mt-2 text-xs text-slate-400">
               A row left blank was not checked — recorded as unmeasured, never as a failure.
@@ -906,12 +1092,37 @@ export default function QcCheckFormPage({ certify }: {
               </span>
             )}
             <ErrorText error={add.error} />
+            {/*
+              One press for the whole document, and on a **draft** the ordinary
+              end of a correction is putting it back out — so *Save & issue* is
+              the primary and *Save as draft* sits beside it for a correction
+              somebody has not finished. An issued certificate offers neither:
+              its readings are settled, and what is left to save is the panel
+              above, which the server allows without withdrawing anything.
+            */}
+            {cert && batch?.coa_draft && (
+              <Button
+                variant="secondary"
+                className="ml-auto shrink-0 whitespace-nowrap"
+                onClick={() => add.mutate({})}
+                disabled={add.isPending || !coaReady || !coa.coa_date}
+              >
+                {add.isPending ? 'Saving…' : 'Save as draft'}
+              </Button>
+            )}
             <Button
-              className="ml-auto shrink-0 whitespace-nowrap"
-              onClick={() => add.mutate()}
-              disabled={add.isPending}
+              className={`shrink-0 whitespace-nowrap${cert && batch?.coa_draft ? '' : ' ml-auto'}`}
+              onClick={() => add.mutate({ issue: !!(cert && batch?.coa_draft) })}
+              disabled={add.isPending || !coaReady || (!!cert && !coa.coa_date)}
+              title={cert && batch?.coa_draft
+                ? `Save these corrections and issue ${cert.coa_no} again — the same certificate, the same number`
+                : undefined}
             >
-              {add.isPending ? 'Saving…' : editing ? 'Save corrections' : 'Record inspection'}
+              {add.isPending
+                ? 'Saving…'
+                : cert
+                  ? batch?.coa_draft ? 'Save & issue' : `Save ${cert.coa_no}`
+                  : editing ? 'Save corrections' : 'Record inspection'}
             </Button>
           </div>
 

@@ -230,14 +230,19 @@ export const routes: RouteObject[] = [
        * on `qc: full`, which is what the two routes behind them require, so
        * the screen is never offered to somebody the save would refuse.
        *
-       * Three entries over one component: `?batch=N` makes the inspection a
+       * Four entries over one component: `?batch=N` makes the inspection a
        * **final** check on that lot, `/certify` is the one press that opens a
-       * lot, inspects it and issues the certificate, and `/qc/:checkId`
-       * **corrects** readings already recorded — which the address bar says,
-       * rather than the page deciding from a prop somebody passes.
+       * lot, inspects it and issues the certificate, `/qc/:checkId`
+       * **corrects** readings already recorded, and `/coa/:batchId` opens the
+       * **certificate** on that lot — the same page, which carries the
+       * document's own fields beside the readings it prints (2026-11-15,
+       * *"I want to edit the whole COA at one place"*). Which of the four it
+       * is, the address bar says, rather than the page deciding from a prop
+       * somebody passes.
        */
       { path: '/work-orders/:id/qc', element: <Needs fn="qc" level="full"><QcCheckFormPage /></Needs> },
       { path: '/work-orders/:id/qc/:checkId', element: <Needs fn="qc" level="full"><QcCheckFormPage /></Needs> },
+      { path: '/work-orders/:id/coa/:batchId', element: <Needs fn="qc" level="full"><QcCheckFormPage /></Needs> },
       { path: '/work-orders/:id/certify', element: <Needs fn="qc" level="full"><QcCheckFormPage certify /></Needs> },
       { path: '/quality', element: <Needs fn="qc"><QualityPage /></Needs> },
       { path: '/despatches', element: <Needs fn="dispatch"><DespatchesPage /></Needs> },

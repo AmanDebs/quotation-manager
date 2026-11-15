@@ -12,6 +12,7 @@ import { IssueModal } from '../components/IssueMaterialModal';
 import BatchDispositionModal from '../components/BatchDispositionModal';
 import { PdfLink } from '../components/PdfLink';
 import { useUnsavedChanges } from '../lib/useUnsavedChanges';
+import { printedCheck } from '../lib/qc';
 import { useUrlFilter } from '../lib/useUrlFilter';
 import { useCan } from '../App';
 import { fmtDate, fmtMoney, fmtQty, today } from '../lib/format';
@@ -184,14 +185,14 @@ export default function WorkOrderDetailPage() {
   const grouping = can('qc', 'full') && (job?.batches ?? []).filter(certifiable).length > 1;
   /*
    * The check the certificate prints: this lot's latest that reached a
-   * verdict, which is the one `buildCoaPdf` reads. So *Correct readings* lands
-   * on the inspection whose figures are actually on the document, rather than
-   * on whichever was recorded last.
+   * verdict, which is the one `buildCoaPdf` reads. So *Correct* lands on the
+   * inspection whose figures are actually on the document, rather than on
+   * whichever was recorded last.
+   *
+   * Shared with the certificate page rather than written twice (`lib/qc.ts`),
+   * since that page resolves the same check from the lot a link names.
    */
-  const printed = (b: Batch) => {
-    const decided = (b.final_checks ?? []).filter((ch) => ch.passed !== null);
-    return decided[decided.length - 1];
-  };
+  const printed = printedCheck;
   /*
    * What to do with a lot that failed. The note is asked for on the way, and
    * only for a decision being *made* — withdrawing one asks nothing, because
@@ -763,18 +764,26 @@ export default function WorkOrderDetailPage() {
                               the lot really was measured a second time — but
                               a mistyped reading is a transcription error, and
                               correcting it on a long specification is one box
-                              instead of nineteen. Not offered on a certified
-                              lot: `checkEditError` refuses that until the
-                              certificate is withdrawn to a draft.
+                              instead of nineteen.
+                              Where the lot carries a certificate this opens
+                              **the certificate** (2026-11-15), which is that
+                              page's own route and carries the document's
+                              fields beside the readings; an issued one settles
+                              the readings there and offers the withdrawal that
+                              unlocks them, rather than refusing a press here.
                             */}
                             {printed(b) && (
                               <Button
                                 variant="ghost"
                                 className="ml-1"
-                                title="Correct the readings this batch's certificate prints"
-                                onClick={() => navigate(`/work-orders/${id}/qc/${printed(b)!.id}`)}
+                                title={b.coa_no
+                                  ? `Open ${b.coa_no} — its date, its approver, what it prints, and these readings`
+                                  : "Correct the readings this batch's certificate would print"}
+                                onClick={() => navigate(b.coa_no
+                                  ? `/work-orders/${id}/coa/${b.id}`
+                                  : `/work-orders/${id}/qc/${printed(b)!.id}`)}
                               >
-                                Correct readings
+                                {b.coa_no ? 'Correct COA' : 'Correct readings'}
                               </Button>
                             )}
                             {/*
@@ -807,9 +816,10 @@ export default function WorkOrderDetailPage() {
                                 its own number, so this is the draft route
                                 rather than the dialog above — the dialog
                                 draws a number, and a second number over
-                                these lots is a second document. The date and
-                                the approver are already on the lot; the COA
-                                register's Edit dialog is where they change.
+                                these lots is a second document. This issues
+                                it as it stands; *Correct COA* beside it is
+                                where the date, the approver, what it prints
+                                and its readings all change.
                               */
                               <Button
                                 variant="secondary"

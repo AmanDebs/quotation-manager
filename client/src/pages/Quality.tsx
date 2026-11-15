@@ -1,17 +1,14 @@
-import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type {
-  QcCheckRow, QcRegisterSummary, CoaRow, CoaSummary, Customer, Product, CoaField, CoaHeaderConfig,
+  QcCheckRow, QcRegisterSummary, CoaRow, CoaSummary, Customer, Product,
 } from '../types';
 import {
-  PageHeader, Card, Select, Input, Field, Button, Modal, ErrorText, EmptyState, Pagination,
-  DownloadButton, SegmentedTabs, FIELD_GRID, TH_CLASS,
+  PageHeader, Card, Select, Input, Button, ErrorText, EmptyState, Pagination,
+  DownloadButton, SegmentedTabs, TH_CLASS,
 } from '../components/ui';
 import { useCan } from '../App';
-import { CoaExtraFields } from '../components/CoaExtraFields';
-import { CoaHeaderFields } from '../components/CoaHeaderFields';
 import type { ReadyLine } from '../types';
 import { fmtQty } from '../lib/format';
 import { fmtDate } from '../lib/format';
@@ -45,168 +42,24 @@ const verdictPill = (row: QcCheckRow) => {
     );
 };
 
-/**
- * Correct a certificate — one verb over what used to be four.
+/*
+ * **Correcting a certificate is a page, not a dialog here** (2026-11-15, the
+ * client on the corrections screen: *"I want to edit the whole COA at one
+ * place"*).
  *
- * 2026-10-27, from a review the client approved: a row carried *Edit ·
- * Withdraw · Issue · Discard* beside its PDF, which is four ways to touch one
- * document and three of them only mean anything in a particular state.
- * Somebody correcting a certificate does not think *"withdraw it, edit it,
- * issue it"*; they think *"this says the wrong thing"*.
+ * This file used to carry an `EditCoa` dialog over the certificate's date,
+ * its approver, its header cells and the buyer's extra details, with a button
+ * that sent somebody to the job for the **readings** — so putting one
+ * document right meant two screens, and the readings page carried a sentence
+ * telling you to come back here and issue it again. The certificate page owns
+ * all of it now (`/work-orders/:id/coa/:batchId`), readings included, and
+ * *Correct* below is a link to it.
  *
- * So the row offers **Correct** and this dialog decides what that means:
- *
- * - the **header fields** (date, approver, the buyer's reference, the extra
- *   details) are a plain `PUT`, which the server allows on an issued
- *   certificate — nothing has to be withdrawn to fix a date, and the old
- *   row-button made people withdraw first for no reason;
- * - the **readings** cannot move under an issued certificate (`checkEditError`
- *   refuses it, since everything that lets goods leave reads the number rather
- *   than the reading behind it), so that button **withdraws and opens the job**
- *   in one press, which is the whole of the old three-step path;
- * - a **draft** can be saved as a draft or saved and issued, which is the
- *   ordinary end of a correction and is why *Issue* no longer needs a row of
- *   its own.
- *
- * It acts on the **group**: the route is given one batch and resolves the rest
- * by number, so a certificate covering ten batches is corrected once rather
- * than ten times.
+ * It is the two-controls-over-one-fact rule applied to a whole panel: the
+ * fields are drawn by `CoaHeaderFields` and `CoaExtraFields` either way, and
+ * two parents holding their state is how the two come to send different
+ * things.
  */
-function EditCoa({ row, onClose }: { row: CoaRow; onClose: () => void }) {
-  const navigate = useNavigate();
-  const [form, setForm] = useState({
-    date: row.coa_date,
-    approved_by: row.approved_by,
-    // Opened on what is actually on the certificate: the whole list is sent on
-    // save, so a dialog that did not know about these would blank them.
-    extra: row.extra ?? [],
-  });
-  /*
-   * Which header cells print, and what was typed over the record — `null`
-   * until somebody ticks or types, so an untouched dialog sends nothing about
-   * the header and cannot rewrite it. The buyer's own reference lives in here
-   * rather than beside the two boxes above: it is a header cell like the
-   * rest, and two controls over one fact is how the two come to disagree.
-   */
-  const [header, setHeader] = useState<CoaHeaderConfig | null>(null);
-  const { data: headerData, isLoading: headerLoading } = useQuery({
-    queryKey: ['coa-header', 'batch', String(row.batch_id)],
-    queryFn: () => api.get<{ fields: CoaField[] }>(`/api/work-orders/batches/${row.batch_id}/coa-header`),
-  });
-  const body = () => ({ ...form, ...(header ? { header } : {}) });
-  const queryClient = useQueryClient();
-  const refresh = () => queryClient.invalidateQueries({ queryKey: ['coa-register'] });
-  const save = useMutation({
-    mutationFn: () => api.put(`/api/work-orders/batches/${row.batch_id}/coa`, body()),
-    onSuccess: () => { refresh(); onClose(); },
-  });
-  /*
-   * Save and send it back out, in **one** request: `/coa/issue` takes the same
-   * fields under the `batch_ids` contract, so there is no window where the date
-   * has moved and the certificate is still a draft.
-   */
-  const issue = useMutation({
-    mutationFn: () => api.post(`/api/work-orders/batches/${row.batch_id}/coa/issue`, body()),
-    onSuccess: () => { refresh(); onClose(); },
-  });
-  /*
-   * The readings' own way through. On an issued certificate this withdraws
-   * first — it has to, or the job refuses the correction — and lands on the
-   * batch that prints them; on a draft there is nothing to withdraw.
-   */
-  const toReadings = useMutation({
-    mutationFn: async () => {
-      if (!row.draft) await api.post(`/api/work-orders/batches/${row.batch_id}/coa/withdraw`, {});
-    },
-    onSuccess: () => { refresh(); navigate(`/work-orders/${row.work_order_id}?tab=batches`); },
-  });
-  const busy = save.isPending || issue.isPending || toReadings.isPending;
-  return (
-    /*
-      Wide, because the dialog now carries the whole header. Thirteen cells in
-      one narrow column is a tower; at `max-w-3xl` they sit two up with room
-      for the value beside each label.
-    */
-    <Modal title={`Correct ${row.coa_no}`} onClose={onClose} wide>
-      <p className="mb-3 text-xs text-slate-500">
-        {row.lots > 1
-          ? `Covers ${row.lots} batches — ${row.batch_numbers}. A correction applies to all of them.`
-          : `Covers batch ${row.batch_numbers}.`}
-      </p>
-      <div className={FIELD_GRID}>
-        <Field label="Certificate date">
-          <Input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
-        </Field>
-        <Field label="Approved by">
-          <Input
-            value={form.approved_by}
-            onChange={(e) => setForm({ ...form, approved_by: e.target.value })}
-            placeholder="Who signs it off"
-          />
-        </Field>
-      </div>
-      <div className="mt-3 border-t border-slate-100 pt-3">
-        <CoaHeaderFields
-          fields={headerData?.fields}
-          config={header}
-          loading={headerLoading}
-          onChange={setHeader}
-        />
-      </div>
-      <div className="mt-3 border-t border-slate-100 pt-3">
-        <CoaExtraFields rows={form.extra} onChange={(extra) => setForm({ ...form, extra })} />
-      </div>
-      <p className="mt-3 text-xs text-slate-400">
-        {row.draft
-          ? 'This one is a draft: it certifies nothing and none of its batches can be dispatched until it '
-            + 'is issued again, under this same number.'
-          : 'Which batches it covers is not a correction — a certificate over different batches is a '
-            + 'different certificate. Discard this one and certify again.'}
-      </p>
-      <ErrorText error={save.error || issue.error || toReadings.error} />
-      <div className="mt-3 flex items-center gap-2">
-        {/*
-          The readings are the other half of what somebody means by correcting
-          a certificate, and they belong to the inspection — its own date, its
-          own inspector — so they are changed where that inspection is. What
-          used to be a sentence telling somebody to go and withdraw it first is
-          now the button doing both.
-        */}
-        <Button
-          variant="ghost"
-          disabled={busy}
-          title={row.draft
-            ? 'Open the job, where readings are corrected on the batch itself'
-            : 'Puts it back to a draft and opens the job — readings cannot move under an issued certificate'}
-          onClick={() => {
-            if (row.draft || confirm(
-              `Correct the readings on ${row.coa_no}? It goes back to a draft while you do — nothing is `
-              + 'lost, and nothing of it can be dispatched until you issue it again.'
-            )) toReadings.mutate();
-          }}
-        >
-          {toReadings.isPending ? 'Opening…' : 'Correct the readings…'}
-        </Button>
-        <span className="ml-auto" />
-        <Button variant="secondary" onClick={onClose}>Cancel</Button>
-        <Button
-          variant={row.draft ? 'secondary' : 'primary'}
-          onClick={() => save.mutate()}
-          disabled={busy || !form.date}
-        >
-          {save.isPending ? 'Saving…' : row.draft ? 'Save as draft' : 'Save'}
-        </Button>
-        {/* The ordinary end of a correction, which is why *Issue* is no longer
-            a button on the row. */}
-        {!!row.draft && (
-          <Button onClick={() => issue.mutate()} disabled={busy || !form.date}>
-            {issue.isPending ? 'Issuing…' : 'Save & issue'}
-          </Button>
-        )}
-      </div>
-    </Modal>
-  );
-}
 
 /**
  * Every Certificate of Analysis issued — what the desk tracks COAs from
@@ -251,16 +104,17 @@ function Certificates() {
   });
   const can = useCan();
   const mayEdit = can('qc', 'full');
-  const [editing, setEditing] = useState<CoaRow | null>(null);
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const refresh = () => queryClient.invalidateQueries({ queryKey: ['coa-register'] });
   /*
    * **Three acts on a row, not five** (2026-10-27). *Withdraw* and *Issue*
-   * moved inside the Correct dialog, where they are the shape of the thing
-   * somebody is actually doing rather than two more states to reason about —
-   * see `EditCoa`. What is left is the document itself, the one way to change
-   * it, and the way out for one that should never have existed: the batches go
-   * back to uncertified and the number is **not** re-used.
+   * are the shape of the thing somebody is actually doing rather than two
+   * more states to reason about, so they live where the correction is made —
+   * the dialog until 2026-11-15, the certificate's own page since. What is
+   * left here is the document itself, the one way through to changing it, and
+   * the way out for one that should never have existed: the batches go back
+   * to uncertified and the number is **not** re-used.
    */
   const discard = useMutation({
     mutationFn: (batchId: number) => api.del(`/api/work-orders/batches/${batchId}/coa`),
@@ -423,8 +277,8 @@ function Certificates() {
                           className="ml-1"
                           title={r.draft
                             ? 'Finish this draft — correct it and issue it again'
-                            : 'Change the date, the approver or the readings'}
-                          onClick={() => setEditing(r)}
+                            : 'Open the certificate: its date, its approver, what it prints, and the readings behind it'}
+                          onClick={() => navigate(`/work-orders/${r.work_order_id}/coa/${r.batch_id}`)}
                         >
                           Correct
                         </Button>
@@ -462,7 +316,6 @@ function Certificates() {
         />
         <ErrorText error={discard.error} />
       </Card>
-      {editing && <EditCoa row={editing} onClose={() => setEditing(null)} />}
     </>
   );
 }

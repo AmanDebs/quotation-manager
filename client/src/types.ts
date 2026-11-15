@@ -290,6 +290,10 @@ export interface Batch {
   coa_issued_by_name?: string | null;
   /** The second signatory, as the certificate prints it. */
   coa_approved_by?: string;
+  /** The buyer's own reference as typed; blank means the document falls back. */
+  coa_buyer_order?: string;
+  /** Whatever this buyer asked to see on the certificate — see `CoaExtraFields`. */
+  coa_extra?: CoaExtra[];
   made: number;
   rejected: number;
   entries: number;
