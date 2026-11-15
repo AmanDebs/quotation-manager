@@ -5,7 +5,6 @@ import { db } from '../db/connection.js';
 import {
   buildQuotationPdf, buildOrderPdf, buildProformaPdf, buildInvoicePdf, buildPackingListPdf,
   buildInvoiceWithPackingPdf, buildCreditNotePdf, buildPurchaseOrderPdf,
-  buildQcReportPdf, buildOrderQcReportPdf, buildInvoiceQcReportPdf, buildInvoiceWithQcPdf,
   buildDeliveryChallanPdf, buildCoaPdf,
   renderPdf,
 } from '../services/pdf.js';
@@ -52,38 +51,12 @@ const builders = {
     party: 'supplier', fn: 'purchasing',
   },
   /*
-   * The quality reports, and the one place `partySql` earns its keep.
-   *
-   * These hang off a work order rather than off a document with a
-   * `customer_id` of its own, so neither the customer join nor the supplier
-   * one fits. Naming the query per entry generalises what `party: 'supplier'`
-   * was already doing by hand, instead of adding a third special case — and it
-   * still has to return `number`, `customer_id` and `party_name`, because the
-   * filename and the scope check are built from those three.
-   */
-  'qc-report': {
-    build: buildQcReportPdf, table: 'work_orders', approvable: false, fn: 'qc',
-    partySql: `SELECT w.number, o.customer_id, c.name AS party_name
-                 FROM work_orders w
-                 JOIN orders o ON o.id = w.order_id
-                 JOIN customers c ON c.id = o.customer_id
-                WHERE w.id = ?`,
-  },
-  'order-qc-report': {
-    build: buildOrderQcReportPdf, table: 'orders', approvable: false, fn: 'qc',
-  },
-  'invoice-qc-report': {
-    build: buildInvoiceQcReportPdf, table: 'commercial_invoices', approvable: false, fn: 'qc',
-  },
-  // The invoice and its quality summary in one file. Approval follows the
-  // invoice, as it does for the invoice-and-packing-list pair.
-  'invoice-with-qc': {
-    build: buildInvoiceWithQcPdf, table: 'commercial_invoices', approvable: true, fn: 'invoice',
-  },
-  /*
-   * The document that travels with the lorry, and the second entry to need its
-   * own `partySql`: a despatch has no `customer_id`, hanging off the order the
-   * way a work order does.
+   * The document that travels with the lorry, and the first of the two entries
+   * to need its own `partySql`: a despatch has no `customer_id`, hanging off
+   * the order instead. Naming the query per entry generalises what
+   * `party: 'supplier'` above does by hand, and it still has to return
+   * `number`, `customer_id` and `party_name`, because the filename and the
+   * scope check are built from those three.
    *
    * `fn: 'dispatch'` is the load-bearing half. `/api/pdf` is mounted with
    * `requireAuth` alone, so an entry without one would serve every customer's
@@ -96,15 +69,14 @@ const builders = {
    * this document existed.
    */
   /*
-   * The certificate that clears a lot, and the third entry to need its own
+   * The certificate that clears a lot, and the other entry to need its own
    * `partySql`: a batch has no `customer_id`, reaching one through its work
-   * order the way the quality report does.
+   * order the way a despatch reaches one through its order.
    *
-   * `fn: 'qc'` — the same function that issues it. It is a quality document
-   * about goods, not a commercial one: Production and Quality read it, Sales
-   * and Logistics are refused, which is what the access matrix says about
-   * every other QC report. `number` is the certificate's, so the filename is
-   * the number the customer will quote.
+   * `fn: 'qc'` — the same function that issues it, and the only quality
+   * document this router serves since the quality report was withdrawn on
+   * 2026-11-15. `number` is the certificate's, so the filename is the number
+   * the customer will quote.
    */
   coa: {
     build: buildCoaPdf, table: 'batches', approvable: false, fn: 'qc',
@@ -146,10 +118,6 @@ const DOC_LABEL: Record<DocType, string> = {
   'invoice-with-packing': 'Commercial Invoice & Packing List',
   'credit-note': 'Credit Note',
   'purchase-order': 'Purchase Order',
-  'qc-report': 'Quality Report',
-  'order-qc-report': 'Quality Report',
-  'invoice-qc-report': 'Quality Report',
-  'invoice-with-qc': 'Commercial Invoice & Quality Report',
   challan: 'Delivery Challan',
   coa: 'Certificate of Analysis',
 };

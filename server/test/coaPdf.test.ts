@@ -555,3 +555,343 @@ describe('extra details on a certificate', () => {
     db.prepare("UPDATE batches SET coa_extra = '' WHERE coa_no = 'COA/25-26/001'").run();
   });
 });
+
+/**
+ * **Two rules that outlived the quality report** (2026-11-15, the client:
+ * *"Completely remove Quality report feature, in my company only COA is made
+ * after production is completed for that product"*). `toleranceText` and the
+ * three sectioned blocks were asserted through that document; it is gone and
+ * they are not — both draw *this* page, and `qcSectionTable` is the one
+ * function behind either. So the cases moved here with the code rather than
+ * going with the document they happened to be written against.
+ *
+ * Two of them could not come: a row answered **N/A** is dropped from a
+ * certificate (2026-10-24, the group above), and *NOT YET DECIDED* is
+ * unreachable here by construction — a lot is certified on its latest
+ * **decided** check, so a page with readings on it always has one that
+ * reached a verdict.
+ */
+
+let fmtSeq = 0;
+
+type Reading = {
+  name: string;
+  section?: string;
+  kind?: string;
+  unit?: string;
+  value?: number | null;
+  value_max?: number | null;
+  ranged?: number;
+  complied?: number;
+  observation?: string;
+  min?: number | null;
+  max?: number | null;
+  /** Whether the row points at a parameter, or is a check nobody specified. */
+  specified?: boolean;
+};
+
+/** A certified lot of its own, whose final check carries exactly these rows. */
+function certificate(rows: Reading[]): number {
+  const n = `FMT-${++fmtSeq}`;
+  const id = Number((db.prepare(
+    `INSERT INTO batches (number, work_order_id, date, coa_no, coa_date, coa_approved_by)
+     VALUES (?, ?, '2026-04-02', ?, '2026-04-03', 'KUMUDA NAYAK') RETURNING id`
+  ).get(n, woId, `COA/25-26/4${fmtSeq}`) as { id: number }).id);
+  db.prepare(
+    `INSERT INTO production_entries (work_order_id, batch_id, date, shift, qty_ok, qty_reject)
+     VALUES (?, ?, '2026-04-02', 'A', 1000, 0)`
+  ).run(woId, id);
+  const checkId = Number((db.prepare(
+    `INSERT INTO qc_checks (work_order_id, batch_id, date, shift, inspector)
+     VALUES (?, ?, '2026-04-02', 'A', 'ARNAB PALUI') RETURNING id`
+  ).get(woId, id) as { id: number }).id);
+  rows.forEach((r, i) => {
+    db.prepare(
+      `INSERT INTO qc_results (check_id, param_id, name, kind, section, unit, value, value_max, ranged,
+                               complied, observation, min_value, max_value, sort_order)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      checkId, r.specified ? paramId : null, r.name, r.kind ?? 'numeric', r.section ?? '',
+      r.unit ?? 'mm', r.value ?? null, r.value_max ?? null, r.ranged ?? 0,
+      r.complied ?? 0, r.observation ?? '',
+      r.min === undefined ? 0.3 : r.min, r.max === undefined ? 0.5 : r.max, i,
+    );
+  });
+  return id;
+}
+
+/** Every string on the certificate a lot carrying exactly these rows prints. */
+const pageOf = (rows: Reading[]) => textsOf(buildCoaPdf(certificate(rows)));
+
+/**
+ * Whether this text is written **once across two cells** rather than in one of
+ * them. A `colSpan` is also the thing pdfmake throws on at layout time rather
+ * than definition time, so a case asserting one is a case that has to be
+ * rendered as well as read — see the note on the render in CLAUDE.md.
+ */
+function spansTwo(node: unknown, text: string): boolean {
+  if (node == null || typeof node !== 'object') return false;
+  const n = node as Node;
+  if (n.text === text && Number(n.colSpan) === 2) return true;
+  for (const k of ['stack', 'columns', 'body', 'table', 'content']) {
+    if (n[k] !== undefined && spansTwo(n[k], text)) return true;
+  }
+  if (Array.isArray(node)) return node.some((x) => spansTwo(x, text));
+  return false;
+}
+
+describe('the window each reading was judged against', () => {
+  /*
+   * Read off the client's own printed page (2026-10-21). The report had grown
+   * its own tolerance formatter beside this document's, and it was wrong in
+   * two ways visible on paper: a window open at one end, and the unit. One
+   * formatter now, which is what these hold.
+   */
+  const withTolerance = (min: number | null, max: number | null, unit = 'mm') =>
+    pageOf([{ name: 'Perpendicularity', value: 0.7, min, max, unit }]);
+
+  test('a window open at the bottom reads as a maximum, not as a missing number', () => {
+    const texts = withTolerance(null, 1.5);
+    assert.ok(texts.includes('max 1.50 mm'), 'the one-sided tolerance is not named');
+    // The shape it used to print, which reads as a negative or a broken range.
+    assert.ok(!texts.some((t) => t.trim().startsWith('–')), 'a bare dash is back');
+  });
+
+  test('and one open at the top reads as a minimum', () => {
+    assert.ok(withTolerance(0.4, null).includes('min 0.40 mm'));
+  });
+
+  test('a two-sided window carries its unit, like the reading beside it', () => {
+    assert.ok(withTolerance(9, 11, 'gm').includes('10.00 ± 1.00 gm'), 'the Specification column dropped the unit');
+  });
+
+  /**
+   * **A window with two ends is stated as a tolerance** (2026-11-03, the
+   * client with the dimensional block in front of them: *"instead of minimum
+   * maximum, write tolerance +/- for example 37.5 +- 0.5"*), which is how
+   * their own certificates read: *(20.90±0.20) mm*.
+   */
+  test('a two-ended window is its midpoint and half-span', () => {
+    assert.ok(withTolerance(37, 38).includes('37.50 ± 0.50 mm'), "the client's own example");
+    assert.ok(withTolerance(21, 22).includes('21.50 ± 0.50 mm'));
+    // Not every window is symmetric about a round number, and that is fine:
+    // the pair is restated exactly, whatever it comes to.
+    assert.ok(withTolerance(29, 30.5).includes('29.75 ± 0.75 mm'));
+  });
+
+  test('a window with one open end keeps its own words', () => {
+    // No nominal to sit either side of, and inventing one would state a
+    // ceiling the specification does not have.
+    assert.ok(withTolerance(2.8, null).includes('min 2.80 mm'));
+    assert.ok(withTolerance(null, 1.5).includes('max 1.50 mm'));
+    for (const t of [...withTolerance(2.8, null), ...withTolerance(null, 1.5)]) {
+      assert.ok(!t.includes('±'), `a one-sided window was written as a tolerance: ${t}`);
+    }
+  });
+
+  test('and a window finer than the figures printed keeps the range', () => {
+    /* `fmtMeasure` prints three decimals at most, so a half-span of 0.0005
+       would be rounded and the certificate would state a window nobody
+       specified. The range is exact in that case and is what prints. */
+    const texts = withTolerance(1.0005, 1.0015);
+    assert.ok(!texts.some((t) => t.includes('±')), 'a window was restated at a precision it does not have');
+    assert.ok(texts.some((t) => t.includes('1.001') && t.includes('1.002')), 'the range is not printed either');
+  });
+
+  test('every figure carries two decimals, and keeps a third where it has one', () => {
+    /* 2026-11-03: *"All measurement - two decimals places"*. A column of
+       windows compared down its own length cannot afford five shapes of
+       number — the rate column's own complaint, one document over.
+
+       Three stays the maximum, which is the sharper half: forcing exactly two
+       would restate a window finer than that, and a certificate may be terse
+       and may not misstate what was allowed. */
+    assert.ok(withTolerance(37, 38).includes('37.50 ± 0.50 mm'), 'a figure was left at one decimal');
+    assert.ok(withTolerance(9, 11, 'gm').includes('10.00 ± 1.00 gm'), 'a whole number was left bare');
+    assert.ok(withTolerance(2.8, null).includes('min 2.80 mm'), 'an open-ended window was left unpadded');
+    // Three decimals survive rather than being rounded to the new minimum.
+    assert.ok(withTolerance(1.0, 1.006).includes('1.003 ± 0.003 mm'), 'a third decimal was rounded away');
+    // The reading beside it reads the same way — `qcReading.test.ts` holds
+    // that half, over the formatter itself.
+  });
+
+  test('floating point does not leak into the figures', () => {
+    // (0.1 + 0.2) / 2 is 0.15000000000000002 before it is formatted.
+    assert.ok(withTolerance(0.1, 0.2).includes('0.15 ± 0.05 mm'));
+  });
+
+  test('and a pass/fail check states what is allowed rather than a verdict', () => {
+    const texts = pageOf([{ name: 'Appearance', kind: 'boolean', unit: '', value: 1, min: null, max: null }]);
+    assert.ok(texts.includes('pass / fail'), 'the Specification column states a verdict instead');
+  });
+});
+
+describe('the three blocks the client certificate prints', () => {
+  /*
+   * Aglo's own 48mm cap certificate (2026-10-21, *"The format should be like
+   * this"*) prints Visual, Dimensional and Fitment as separate tables of
+   * different shapes. These hold the two halves that could go silently wrong:
+   * a specification that says nothing must print exactly as it always did,
+   * and a result must keep the block it was issued under however the
+   * specification is re-sectioned afterwards.
+   */
+
+  test('an unsectioned specification prints the single table it always did', () => {
+    const texts = pageOf([{ name: 'Wall thickness', value: 0.4, specified: true }]);
+    // The flat shape, and none of the three headings.
+    assert.ok(texts.includes('Characteristic') && texts.includes('Verdict'), 'the flat table is gone');
+    for (const h of ['VISUAL CHECKS', 'DIMENSIONAL CHECKS', 'FITMENT CHECK']) {
+      assert.ok(!texts.includes(h), h);
+    }
+  });
+
+  test('and a sectioned one prints a block per section, in the paper order', () => {
+    const texts = pageOf([
+      { name: 'Short Molding', section: 'visual', kind: 'boolean', value: 1 },
+      // The pair of sub-columns is what a **range** needs; a block of single
+      // figures is headed differently, which is the case below.
+      { name: 'Closure O/D', section: 'dimensional', value: 0.35, value_max: 0.45, ranged: 1 },
+      { name: 'TE Band', section: 'fitment', kind: 'boolean', value: 1 },
+    ]);
+    const at = (t: string) => texts.indexOf(t);
+    assert.ok(at('VISUAL CHECKS') >= 0 && at('DIMENSIONAL CHECKS') >= 0 && at('FITMENT CHECK') >= 0);
+    assert.ok(at('VISUAL CHECKS') < at('DIMENSIONAL CHECKS'), 'visual is not first');
+    assert.ok(at('DIMENSIONAL CHECKS') < at('FITMENT CHECK'), 'fitment is not last');
+    // The dimensional block alone carries the two-row banner, and since
+    // 2026-11-03 only the **Actual** side has a pair under it: the
+    // Specification is one cell stating the window as a tolerance.
+    assert.ok(texts.includes('Actual'), 'the pair banner is missing');
+    assert.equal(texts.filter((t) => t === 'Minimum').length, 1, 'the Specification side still has a pair');
+  });
+
+  test('the visual block says it once, not twice', () => {
+    /* 2026-10-21, the client with nine rows reading *Pass · Pass*:
+       *"Observation and result are same thing, result not required"*. On a
+       pass/fail characteristic the verdict **is** the observation, and the
+       fitment block beside it already prints words with no verdict column —
+       a fourth column here would make the two disagree about their shape. */
+    const texts = pageOf([{ name: 'Short Moulding', section: 'visual', kind: 'boolean', value: 1 }]);
+    assert.ok(texts.includes('Observation'), 'the visual block lost its Observation column');
+    assert.ok(!texts.includes('Result'), 'the visual block still carries a Result column');
+    assert.equal(texts.filter((t) => t === 'Pass').length, 1, 'the verdict is printed twice');
+  });
+
+  test('...and a failure still reads, because the observation is the verdict', () => {
+    /* The half that must not move: dropping a column must not drop the only
+       place a failed visual check says so. */
+    const texts = pageOf([{ name: 'Black Spots', section: 'visual', kind: 'boolean', value: 0 }]);
+    assert.ok(texts.includes('Fail'), 'a failed visual check says nothing on the page');
+    assert.ok(texts.includes('QC FAILED'), 'the set was not read as failed');
+  });
+
+  test('a check nobody specified prints in the block it was added to', () => {
+    /* 2026-10-22, the client: *"give option to add a custom check in that
+       section"*. `qc_results.param_id` has always been nullable, so a check
+       nobody specified is a result that points at no parameter and carries
+       its own name, kind, section and tolerance — which is the whole reason
+       nothing downstream has to be told about it. */
+    const texts = pageOf([
+      { name: 'Closure O/D', section: 'dimensional', value: 0.4, specified: true },
+      { name: 'Neck Finish O/D', section: 'dimensional', value: 22, min: 21.8, max: 22.2 },
+    ]);
+    const at = (t: string) => texts.indexOf(t);
+    assert.ok(texts.includes('Neck Finish O/D'), 'the custom check is not on the page');
+    // In the dimensional block, which on this fixture is the only one drawn.
+    assert.ok(at('DIMENSIONAL CHECKS') < at('Neck Finish O/D'), 'it was not placed in its block');
+    // Its own tolerance is stated like any other characteristic's, 21.8–22.2
+    // being 22 ± 0.2.
+    assert.ok(texts.includes('22.00 ± 0.20 mm'), 'its own tolerance is not printed');
+    assert.ok(texts.includes('QC PASSED'), 'a custom check was not judged');
+  });
+
+  test('...and one that fails is a failure like any other', () => {
+    /* It counts. A custom row that could not fail would be decoration on a
+       document that clears goods. */
+    const texts = pageOf([
+      { name: 'Closure O/D', section: 'dimensional', value: 0.4, specified: true },
+      { name: 'Neck Finish O/D', section: 'dimensional', value: 25, min: 21.8, max: 22.2 },
+    ]);
+    assert.ok(texts.includes('QC FAILED'), 'a custom check that failed did not fail the set');
+  });
+
+  test('a reading the specification did not place is named, never dropped', () => {
+    /* Silently leaving a recorded reading off a certificate is the one
+       failure this cannot have, so an unplaced row gets its own block. */
+    const texts = pageOf([
+      { name: 'Closure O/D', section: 'dimensional', value: 0.4 },
+      { name: 'Something nobody sectioned', value: 0.35 },
+    ]);
+    assert.ok(texts.includes('OTHER CHECKS'));
+    assert.ok(texts.includes('Something nobody sectioned'));
+  });
+
+  test('the verdict is derived from the readings', () => {
+    assert.ok(pageOf([{ name: 'Closure O/D', section: 'dimensional', value: 0.4 }]).includes('QC PASSED'));
+    assert.ok(pageOf([{ name: 'Closure O/D', section: 'dimensional', value: 9 }]).includes('QC FAILED'));
+  });
+
+  test('a block of single figures is headed Average Value, not Minimum / Maximum', () => {
+    /* 2026-10-21, the client reading four averages under a *Minimum /
+       Maximum* banner: *"When we choose single value then write Average value
+       instead of max min"*. A header is per table and an answer is per row,
+       so where **no** row carries a range there is nothing for the pair to
+       hold and the side is one column saying what the figures are. */
+    const texts = pageOf([
+      { name: 'Closure O/D', section: 'dimensional', value: 0.4 },
+      { name: 'Cap Weight', section: 'dimensional', value: 0.35 },
+    ]);
+    assert.ok(texts.includes('Average Value'), 'the Actual side is not headed by what is under it');
+    assert.ok(!texts.includes('Actual'), 'the pair banner is still drawn over one column');
+    // Neither side has sub-columns now, so the words are off the block
+    // entirely rather than one of them surviving on the Specification side.
+    assert.equal(texts.filter((t) => t === 'Minimum').length, 0, 'a sub-column heading survived');
+    assert.equal(texts.filter((t) => t === 'Maximum').length, 0, 'a sub-column heading survived');
+    assert.equal(texts.filter((t) => t === '0.40 mm').length, 1, 'the reading is printed twice');
+  });
+
+  test('...and a mixed block keeps the pair, with the single answer spanning it', () => {
+    /* The header can only describe what every row has, so one range is
+       enough to keep Minimum and Maximum — and the average beside it is still
+       written once across the two, never under *Minimum* claiming to be the
+       lowest piece observed. */
+    const def = buildCoaPdf(certificate([
+      { name: 'Closure O/D', section: 'dimensional', value: 0.35, value_max: 0.45, ranged: 1 },
+      { name: 'Cap Weight', section: 'dimensional', value: 0.4 },
+    ]));
+    const texts = textsOf(def);
+    assert.ok(texts.includes('Actual'), 'the pair banner was dropped on a block that has a range');
+    assert.equal(texts.filter((t) => t === 'Minimum').length, 1, 'the Specification side still has a pair');
+    assert.ok(spansTwo(def, '0.40 mm'), 'the single answer does not span the two Actual cells');
+  });
+
+  test('complied is a pass with no figure, and the words beat the default wording', () => {
+    /* 2026-10-21, the client: *"in some cases we just write complied"*, then
+       *"add the fitment text too"* — their own fitment block reads *Ok* and
+       *No leakage found* rather than Pass, Pass. */
+    const texts = pageOf([
+      { name: 'Closure O/D', section: 'dimensional', value: null, complied: 1 },
+      { name: 'Leakage', section: 'fitment', kind: 'boolean', value: 1, observation: 'No leakage found' },
+    ]);
+    assert.ok(texts.includes('Complied'), 'a complied dimension did not say so');
+    // Nothing numeric under it, so *Average Value* would describe nothing —
+    // it takes the word the blocks either side of it already use. Not the
+    // pair banner either: `Actual` over Minimum/Maximum would be two
+    // sub-columns with one word to put in them.
+    assert.ok(!texts.includes('Average Value'), 'a block with no figures is headed Average Value');
+    assert.ok(!texts.includes('Actual'), 'the pair banner was drawn over a single word');
+    assert.ok(texts.includes('No leakage found'), 'the fitment wording was dropped');
+    assert.ok(!texts.includes('Pass'), 'the default wording printed over the words written');
+    assert.ok(texts.includes('QC PASSED'), 'complied was not read as a pass');
+  });
+
+  test('and a range still fills both ends rather than spanning them', () => {
+    /* The half that must not move: an observed span is two figures, and this
+       is what every certificate on file carries. */
+    const def = buildCoaPdf(certificate([
+      { name: 'Closure O/D', section: 'dimensional', value: 0.35, value_max: 0.45, ranged: 1 },
+    ]));
+    const texts = textsOf(def);
+    assert.ok(texts.includes('0.35 mm') && texts.includes('0.45 mm'), 'the two ends are not both printed');
+    assert.ok(!spansTwo(def, '0.35 mm'), 'a real range was collapsed into one cell');
+  });
+});

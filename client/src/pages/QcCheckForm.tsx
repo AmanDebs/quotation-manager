@@ -8,7 +8,6 @@ import {
 } from '../components/ui';
 import { CoaExtraFields } from '../components/CoaExtraFields';
 import { CoaHeaderFields } from '../components/CoaHeaderFields';
-import { PdfLink } from '../components/PdfLink';
 import { useUnsavedChanges } from '../lib/useUnsavedChanges';
 import { fmtDate, today } from '../lib/format';
 
@@ -295,7 +294,7 @@ export default function QcCheckFormPage({ certify }: {
    * The readings are what counts as dirty; the header fields carry defaults
    * and are not a change by themselves.
    */
-  const { markSaved, pdf, prompt } = useUnsavedChanges(values, {
+  const { markSaved, prompt } = useUnsavedChanges(values, {
     run: () => add.mutateAsync(),
     can: Object.keys(values).length > 0,
     message: editing
@@ -507,16 +506,11 @@ export default function QcCheckFormPage({ certify }: {
             * without knowing which spec it was judged by is how a batch gets
             * passed against somebody else's.
             */}
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-            <span className="text-xs text-slate-500">
-              {specOwner === 'customer'
-                ? <>Inspected against <b>{full?.customer_name}</b>&rsquo;s own specification.</>
-                : <>Inspected against the product&rsquo;s default specification.</>}
-            </span>
-            <PdfLink href={`/api/pdf/qc-report/${job.id}`} guard={pdf} title="Quality report">
-              Quality report (PDF)
-            </PdfLink>
-          </div>
+          <p className="mb-3 text-xs text-slate-500">
+            {specOwner === 'customer'
+              ? <>Inspected against <b>{full?.customer_name}</b>&rsquo;s own specification.</>
+              : <>Inspected against the product&rsquo;s default specification.</>}
+          </p>
 
           {/*
             What a correction is, said before the readings rather than left to

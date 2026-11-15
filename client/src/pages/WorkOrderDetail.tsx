@@ -257,11 +257,6 @@ export default function WorkOrderDetailPage() {
         }
         actions={
           <div className="flex flex-wrap items-center gap-2">
-            {can('qc') && (
-              <PdfLink href={`/api/pdf/qc-report/${job.id}`} guard={pdf} title="Every inspection on this job, with the tolerance each reading was judged against">
-                📄 QC Report
-              </PdfLink>
-            )}
             {can('output', 'full') && <Button variant="secondary" onClick={() => setLogging(true)}>Log output</Button>}
             {/*
               **One quality button, not two** (2026-10-27). *Record QC check*

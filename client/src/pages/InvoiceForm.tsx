@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
-import { useCan, useUser } from '../App';
+import { useUser } from '../App';
 import type { Invoice, LineItem, TaxType, Settings, ColumnConfig, PackingListItem, Product } from '../types';
 import { Button, Input, Textarea, Select, Field, PageHeader, ErrorText, Card, StatusBadge, SettledDocumentType, FIELD_GRID, TH_CLASS } from '../components/ui';
 import { PdfLink } from '../components/PdfLink';
@@ -97,7 +97,6 @@ export default function InvoiceFormPage() {
   const [search] = useSearchParams();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const can = useCan();
   const isNew = !id;
   // Who is filling this in — see the prepared-by default below.
   const user = useUser();
@@ -379,21 +378,6 @@ export default function InvoiceFormPage() {
                   <Button variant="secondary" disabled={!existing!.packing}>📦 Packing List</Button>
                 </PdfLink>
                 <PdfLink href={`/api/pdf/invoice-with-packing/${id}`} guard={pdf} blocked={pdfBlocked}><Button>📄+📦 Both</Button></PdfLink>
-                {/*
-                  * The quality summary that ships with the shipment. The
-                  * standalone report is the `qc` function and so is offered
-                  * only to somebody who has it; the combined file is the
-                  * invoice, and goes to whoever may send the invoice — which
-                  * is the whole point of it existing.
-                  */}
-                {can('qc') && (
-                  <PdfLink href={`/api/pdf/invoice-qc-report/${id}`} guard={pdf}>
-                    <Button variant="secondary">🔬 QC Report</Button>
-                  </PdfLink>
-                )}
-                <PdfLink href={`/api/pdf/invoice-with-qc/${id}`} guard={pdf} blocked={pdfBlocked}>
-                  <Button variant="secondary">📄+🔬 Invoice &amp; QC</Button>
-                </PdfLink>
                 <FollowupButton docType="invoice" docId={Number(id)} customerId={existing!.customer_id} />
                 {/* The ↩ Credit Note button went with the sidebar entry on
                     2026-09-20 ("Remove credit note"); a note already on file

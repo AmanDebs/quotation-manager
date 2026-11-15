@@ -550,7 +550,6 @@ function Register() {
                 <th className="pb-2 pr-3">Inspector</th>
                 <th className="pb-2 pr-3 text-right">Readings</th>
                 <th className="pb-2 pr-3">Result</th>
-                <th className="pb-2" />
               </tr>
             </thead>
             <tbody>
@@ -576,14 +575,6 @@ function Register() {
                     {r.measured}/{r.readings}
                   </td>
                   <td className="py-2 pr-3">{verdictPill(r)}</td>
-                  <td className="py-2 pr-3">
-                    <a
-                      href={`/api/pdf/qc-report/${r.work_order_id}`}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="text-xs text-brand-600 hover:underline"
-                    >PDF</a>
-                  </td>
                 </tr>
               ))}
             </tbody>
