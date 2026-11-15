@@ -14,7 +14,7 @@ import { progressFor, progressForMany, LIVE_OK } from '../services/production.js
 import { despatchedByOrder, lastTripForLine } from '../services/despatch.js';
 import { materialCostByWorkOrder } from '../services/costing.js';
 import {
-  paramsFor, checksForWorkOrder, summaryForWorkOrder, specOwner, qcSectionOf,
+  paramsFor, checksForWorkOrder, summaryForWorkOrder, specOwner, qcSectionOf, withResolvedParams,
   RESULT_FAILED_SQL, RESULT_DECIDED_SQL,
 } from '../services/qc.js';
 import { requirementForJob, snapshotRecipe, recipeDiffers } from '../services/recipe.js';
@@ -98,9 +98,22 @@ function getFull(req: AuthedRequest, id: number, costs?: Map<number, number>) {
   wo.dispatched = sent
     ? { ...sent, last_trip: lastTripForLine(Number(wo.order_id), line) }
     : { qty: 0, packs: 0, trips: 0, last_date: '', last_trip: null };
+  /*
+   * Whose tolerances this job answers to, and the list the correction page
+   * draws its rows from. Resolved before the lots, because the readings a
+   * certificate prints are reached through `batchesFor` rather than through
+   * the block below — so a reading orphaned by an edit to the specification
+   * has to be read back against this list on both paths or the certificate's
+   * own page goes on drawing it as a check nobody specified.
+   */
+  const forCustomer = wo.customer_id as number | null;
+  const specParams = paramsFor(wo.product_id as number | null, forCustomer);
   // The lots this job has made, each with what was booked into it, its final
   // check and its certificate. Derived on read like the progress above it.
-  wo.batches = batchesFor(id);
+  wo.batches = batchesFor(id).map((b) => ({
+    ...b,
+    final_checks: withResolvedParams(specParams, b.final_checks),
+  }));
   // What the material issued to this job has cost, at the moving average in
   // force when each issue was made. Zero means nothing has been issued yet,
   // which is a real answer — unlike an uncosted product, whose need is
@@ -111,11 +124,13 @@ function getFull(req: AuthedRequest, id: number, costs?: Map<number, number>) {
   // everything passed, the same distinction `has_recipe` draws for material.
   // Whose specification applies is part of the answer, not a detail: the same
   // part is measured to different tolerances for different customers.
-  const forCustomer = wo.customer_id as number | null;
   wo.qc = {
-    params: paramsFor(wo.product_id as number | null, forCustomer),
+    params: specParams,
     spec_owner: specOwner(wo.product_id as number | null, forCustomer),
-    checks: checksForWorkOrder(id),
+    // A reading whose link to the specification was broken by an edit is read
+    // back against the list in force, so the correction page draws it in the
+    // characteristic's own row rather than beside it as one nobody specified.
+    checks: withResolvedParams(specParams, checksForWorkOrder(id)),
     summary: summaryForWorkOrder(id, wo.product_id as number | null, forCustomer),
   };
   // What this job will eat, if the product has a recipe at all. `has_recipe`

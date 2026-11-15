@@ -1124,10 +1124,14 @@ CREATE INDEX IF NOT EXISTS idx_qc_checks_wo ON qc_checks(work_order_id);
 CREATE TABLE IF NOT EXISTS qc_results (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   check_id INTEGER NOT NULL REFERENCES qc_checks(id) ON DELETE CASCADE,
-  -- ON DELETE SET NULL, not a hard reference: the spec is rewritten whole
-  -- every time it is edited, and a result must survive that. Everything
-  -- needed to read one is copied below, so the link is a convenience for
-  -- grouping and nothing depends on it still pointing somewhere.
+  -- ON DELETE SET NULL, not a hard reference: a characteristic can be taken
+  -- off a specification, and a reading of it must survive that. Everything
+  -- needed to read one is copied below, so nothing printed depends on the
+  -- link -- but the correction page reads an unlinked reading as a check
+  -- nobody specified, so it is not merely a convenience either. The write
+  -- keeps a surviving characteristic's id rather than reinserting the list
+  -- (PUT /products/:id/qc-params), and `withResolvedParams` reads the
+  -- readings already orphaned back against the list in force.
   param_id INTEGER REFERENCES product_qc_params(id) ON DELETE SET NULL,
   -- Kept so a result still reads after its parameter is renamed or removed.
   name TEXT NOT NULL DEFAULT '',

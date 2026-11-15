@@ -210,29 +210,54 @@ productsRouter.put('/:id/qc-params', requirePermission('qc', 'full'), (req, res)
    * Written into whichever list was named, so saving a customer's spec never
    * disturbs the default and vice versa. Sending an empty list for a customer
    * therefore *removes* their override and puts them back on the default —
-   * which is the only way to undo one, and the reason the DELETE is scoped the
-   * same way as the INSERT.
+   * which is the only way to undo one, and the reason the write below is
+   * scoped the same way whichever rows it touches.
    */
   const customerId = numOrNull(req.body?.customer_id);
   if (customerId && !db.prepare('SELECT id FROM customers WHERE id = ?').get(customerId)) {
     return res.status(400).json({ error: 'That customer no longer exists' });
   }
   transaction(() => {
-    db.prepare(
+    /*
+     * **A characteristic that survives an edit keeps its id**, which is what
+     * keeps every reading already taken against it linked to it (2026-11-15,
+     * the client on a correction page drawing each of their characteristics
+     * twice: *"make it better and user friendly"*).
+     *
+     * This list used to be deleted and reinserted whole, the shape every
+     * item table here uses — and `qc_results.param_id` is `ON DELETE SET
+     * NULL`, so **adding one characteristic orphaned every reading on file
+     * for that product**. Measured before the fix: a three-characteristic
+     * spec with one inspection against it, given a fourth characteristic,
+     * came back with all three results reading `param_id: null` and the
+     * whole list renumbered. Nothing printed changes — the name, the
+     * section and the tolerance are copied onto the result, which is what
+     * the schema's own note means by *nothing depends on it still pointing
+     * somewhere* — but the correction page reads an unlinked result as a
+     * check nobody specified, so it drew the specification's own rows empty
+     * beside the readings as custom ones.
+     *
+     * Matched on **the id the editor already sends back** (`QcSpecModal`
+     * round-trips what it loaded), scoped to the rows this save is allowed
+     * to touch — so an id from another product, from the other list, or one
+     * somebody invented is read as a new row rather than trusted, the rule
+     * a stored vocabulary follows here. *Copy from* strips ids deliberately,
+     * so a copied list is new rows, which is what it is.
+     */
+    const live = db.prepare(
       customerId
-        ? 'DELETE FROM product_qc_params WHERE product_id = ? AND customer_id = ?'
-        : 'DELETE FROM product_qc_params WHERE product_id = ? AND customer_id IS NULL'
-    ).run(...(customerId ? [id, customerId] : [id]) as never[]);
-    const ins = db.prepare(
-      `INSERT INTO product_qc_params (product_id, customer_id, name, kind, section, ranged, unit, min_value, max_value, notes, sort_order)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    );
-    lines.forEach((r, i) => {
+        ? 'SELECT id FROM product_qc_params WHERE product_id = ? AND customer_id = ?'
+        : 'SELECT id FROM product_qc_params WHERE product_id = ? AND customer_id IS NULL'
+    ).all(...(customerId ? [id, customerId] : [id]) as never[]) as { id: number }[];
+    const mine = new Set(live.map((p) => Number(p.id)));
+
+    const kept = new Set<number>();
+    const cols = lines.map((r) => {
       const kind = String(r.kind ?? 'numeric');
-      ins.run(
-        id, customerId, String(r.name).trim(), kind,
+      return [
+        String(r.name).trim(), kind,
         // A value this build does not know is read as **no section** rather
-        // than stored â€” the rule a stored vocabulary follows here, so a
+        // than stored — the rule a stored vocabulary follows here, so a
         // renamed block cannot put a characteristic somewhere nothing draws.
         qcSectionOf(r.section),
         // Observed as a min and a max across the batch. Meaningless on a
@@ -242,9 +267,40 @@ productsRouter.put('/:id/qc-params', requirePermission('qc', 'full'), (req, res)
         // A pass/fail check has no tolerance to hold.
         kind === 'boolean' ? null : numOrNull(r.min_value),
         kind === 'boolean' ? null : numOrNull(r.max_value),
-        String(r.notes ?? ''), i
-      );
+        String(r.notes ?? ''),
+      ] as const;
     });
+
+    const upd = db.prepare(
+      `UPDATE product_qc_params
+          SET name = ?, kind = ?, section = ?, ranged = ?, unit = ?,
+              min_value = ?, max_value = ?, notes = ?, sort_order = ?
+        WHERE id = ?`
+    );
+    const ins = db.prepare(
+      `INSERT INTO product_qc_params (product_id, customer_id, name, kind, section, ranged, unit, min_value, max_value, notes, sort_order)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    );
+    lines.forEach((r, i) => {
+      const existing = Number(r.id);
+      if (existing > 0 && mine.has(existing) && !kept.has(existing)) {
+        kept.add(existing);
+        upd.run(...cols[i], i, existing);
+        return;
+      }
+      ins.run(id, customerId, ...cols[i], i);
+    });
+    /*
+     * Only what this save left out, so a row nobody named goes and takes its
+     * readings' link with it — which is right: that characteristic is no
+     * longer on the specification, and the readings print as what they were,
+     * their own name and tolerance having been copied onto them.
+     */
+    for (const p of live) {
+      if (!kept.has(Number(p.id))) {
+        db.prepare('DELETE FROM product_qc_params WHERE id = ?').run(Number(p.id));
+      }
+    }
   });
   res.json({ items: paramsFor(id, customerId), owner: specOwner(id, customerId), customer_id: customerId });
 });

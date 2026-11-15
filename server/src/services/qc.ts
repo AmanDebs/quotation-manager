@@ -222,6 +222,65 @@ export function paramsFor(productId: number | null, customerId?: number | null):
   ).all(productId) as unknown as QcParam[];
 }
 
+/**
+ * **Which characteristic a reading is of**, for a reading whose link to the
+ * specification was broken (2026-11-15, the client on a correction page
+ * drawing each of their characteristics twice: *"make it better and user
+ * friendly"*).
+ *
+ * `qc_results.param_id` is `ON DELETE SET NULL` because the specification
+ * used to be deleted and reinserted whole on every edit, and the schema's own
+ * note says *nothing depends on it still pointing somewhere*. That stopped
+ * being true when the correction page was built: it reads an unlinked result
+ * as **a check nobody specified**, so after any edit to a product's
+ * specification every reading already on file drew as a custom row beside the
+ * specification's own row, empty — measured, a three-characteristic list given
+ * a fourth came back with all three readings orphaned. The write no longer
+ * does that (`PUT /products/:id/qc-params` keeps a surviving characteristic's
+ * id); this is what the readings already on file are read back through.
+ *
+ * **Derived on read rather than written back**, the call this module makes
+ * about every verdict it reports: nothing is corrected behind anybody's back,
+ * and the next ordinary save of that inspection stores the link for good,
+ * since the page sends the parameter it drew the row under.
+ *
+ * Matched on **name and kind**, and deliberately on nothing else: a tolerance
+ * corrected or a block re-sectioned leaves the reading carrying what it was
+ * taken against — which is the whole reason those are copied onto it — and
+ * both are still the same characteristic. Three things stop it claiming a
+ * reading that is genuinely nobody's:
+ *
+ * - a characteristic **two rows of one list answer to** is left alone, there
+ *   being no way to say which;
+ * - one **another reading in the same inspection already holds** is left
+ *   alone, or the form would draw two answers in one row and keep the second;
+ * - and a reading matching **nothing in force** stays what it is, which is
+ *   what a check added on the spot has always been.
+ */
+export function withResolvedParams(params: QcParam[], checks: QcCheck[]): QcCheck[] {
+  if (!params.length) return checks;
+  const byName = new Map<string, QcParam | null>();
+  for (const p of params) {
+    const key = `${p.name.trim().toLowerCase()}\u0000${p.kind}`;
+    // Named twice in one list: there is no answer, so there is no match.
+    byName.set(key, byName.has(key) ? null : p);
+  }
+  return checks.map((c) => {
+    if (!c.results.some((r) => r.param_id === null)) return c;
+    const taken = new Set(c.results.map((r) => r.param_id).filter((x): x is number => x !== null));
+    return {
+      ...c,
+      results: c.results.map((r) => {
+        if (r.param_id !== null) return r;
+        const p = byName.get(`${(r.name ?? '').trim().toLowerCase()}\u0000${r.kind}`);
+        if (!p || taken.has(p.id)) return r;
+        taken.add(p.id);
+        return { ...r, param_id: p.id };
+      }),
+    };
+  });
+}
+
 /** Whose specification is being applied — for the screen and the report. */
 export function specOwner(productId: number | null, customerId?: number | null): 'customer' | 'default' | 'none' {
   if (!productId) return 'none';

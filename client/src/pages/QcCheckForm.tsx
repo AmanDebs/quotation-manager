@@ -7,6 +7,7 @@ import {
   Button, Input, Select, Field, Card, PageHeader, ErrorText, EmptyState, TH_CLASS, FIELD_GRID,
 } from '../components/ui';
 import { CoaExtraFields } from '../components/CoaExtraFields';
+import { Icon } from '../components/icons';
 import { CoaHeaderFields } from '../components/CoaHeaderFields';
 import { useUnsavedChanges } from '../lib/useUnsavedChanges';
 import { printedCheck } from '../lib/qc';
@@ -251,6 +252,22 @@ export default function QcCheckFormPage({ certify }: {
     }
     return f;
   });
+
+  /*
+   * How many header cells the certificate actually prints, for the line the
+   * folded panel states. Read off the live tick-list where somebody has
+   * touched one and off the server's own answer otherwise, so the line says
+   * what is about to be saved rather than what was loaded.
+   */
+  const printedCells = (headerFields ?? []).filter(
+    (f) => (header ? !header.hidden.includes(f.key) : !f.hidden)
+  ).length;
+  /*
+   * Folded on a correction and open while certifying — see the panel itself.
+   * It is plain state rather than a URL filter: which part of a form is open
+   * is a preference about this visit, not something to bookmark or send.
+   */
+  const [coaOpen, setCoaOpen] = useState(!!certify);
 
   const after = () => {
     queryClient.invalidateQueries({ queryKey: ['work-order', String(id)] });
@@ -691,13 +708,18 @@ export default function QcCheckFormPage({ certify }: {
             <p className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
               Correcting the inspection of <b>{fmtDate(editing.date)}</b>
               {editing.shift ? ` · ${editing.shift}` : ''}
-              {editing.inspector ? ` · ${editing.inspector}` : ''}. It keeps that date and inspector — this is a
-              figure being put right, not a second inspection.
-              {cert && (batch?.coa_draft
-                ? <> Certificate <b>{cert.coa_no}</b> is a draft and prints these readings: correct them below,
-                  then <b>Save &amp; issue</b> to put it back out under the same number.</>
-                : <> Certificate <b>{cert.coa_no}</b> has been issued, so its readings are settled — its date,
-                  its approver and what it prints are not.</>)}
+              {editing.inspector ? ` · ${editing.inspector}` : ''} — the same inspection put right, not a
+              second one.
+              {/*
+                The issued case is deliberately not named here: the panel over
+                the readings says it where it can be acted on, beside the
+                button that undoes it, and a sentence saying it twice is one
+                people stop reading.
+              */}
+              {cert && batch?.coa_draft && (
+                <> <b>{cert.coa_no}</b> prints these readings — <b>Save &amp; issue</b> puts it back out
+                  under the same number.</>
+              )}
             </p>
           )}
 
@@ -744,20 +766,60 @@ export default function QcCheckFormPage({ certify }: {
               two controls over one fact waiting to disagree. What differs is
               the batch number, which is asked once: a lot's number is fixed
               the moment it is on paper.
+
+              **Folded on a correction**, and that is the whole of what the
+              client meant by this page (2026-11-15, over a certificate whose
+              readings began below the fold: *"make it better and user
+              friendly"*). The panel is nineteen controls deep — two fields,
+              thirteen header cells and the extra details — and on a
+              correction every one of them is already right: somebody came to
+              put a reading straight. Closed it is a line stating what the
+              certificate says, which is the fact worth having on screen while
+              typing into the table under it; open it is exactly what it was.
+              Certifying opens it, there being nothing on it yet to state.
             */}
             {(certify || cert) && (
               <div className="mb-3 rounded-lg bg-slate-50 p-3 ring-1 ring-slate-200">
-                <p className="mb-2 text-xs text-slate-500">
-                  {certify
-                    ? `This opens a batch covering everything this job has made and not yet
-                       certified, records the inspection against it, and issues the certificate. The
-                       batch is dated by the last shift in it.`
-                    : `Everything ${cert!.coa_no} says about itself, beside the readings it prints.
-                       This panel is the certificate's and reaches every batch it covers; the
-                       readings below are ${batch!.number}'s own. Which batches it covers is not a
-                       correction — a certificate over different batches is a different certificate.`}
-                </p>
-                <div className={FIELD_GRID}>
+                {cert && (
+                  <button
+                    type="button"
+                    onClick={() => setCoaOpen((o) => !o)}
+                    className="flex w-full items-center gap-2 text-left"
+                  >
+                    <Icon
+                      name="chevron-right"
+                      className={`h-4 w-4 shrink-0 text-slate-400 transition-transform${coaOpen ? ' rotate-90' : ''}`}
+                    />
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        What the certificate says
+                      </span>
+                      {/*
+                        The three facts somebody correcting a reading would
+                        want in front of them, and the count of what the
+                        header prints — so a cell ticked off is visible
+                        without opening the panel to look for it.
+                      */}
+                      <span className="block truncate text-sm text-slate-700">
+                        {coa.coa_date ? fmtDate(coa.coa_date) : 'no date'}
+                        {' · '}{coa.approved_by || 'nobody named'}
+                        {' · '}{printedCells} of {(headerFields ?? []).length} header cells printed
+                        {coa.extra.length ? ` · ${coa.extra.length} extra` : ''}
+                      </span>
+                    </span>
+                    <span className="shrink-0 text-xs text-brand-600">{coaOpen ? 'Hide' : 'Change'}</span>
+                  </button>
+                )}
+                {coaOpen && (
+                  <>
+                {certify && (
+                  <p className="mb-2 text-xs text-slate-500">
+                    This opens a batch covering everything this job has made and not yet certified,
+                    records the inspection against it, and issues the certificate. The batch is dated
+                    by the last shift in it.
+                  </p>
+                )}
+                <div className={`${FIELD_GRID}${cert ? ' mt-3' : ''}`}>
                   {certify && (
                     <Field label="Batch number">
                       <Input
@@ -796,6 +858,19 @@ export default function QcCheckFormPage({ certify }: {
                 <div className="mt-3 border-t border-slate-200 pt-3">
                   <CoaExtraFields rows={coa.extra} onChange={(extra) => setCoa({ ...coa, extra })} />
                 </div>
+                {/*
+                  Said where it can be acted on rather than over the panel:
+                  which batches a certificate covers is not something this
+                  page changes, and a certificate over a different set is a
+                  different certificate.
+                */}
+                {cert && (
+                  <p className="mt-3 text-xs text-slate-400">
+                    This reaches every batch {cert.coa_no} covers. The readings below are {batch!.number}&rsquo;s own.
+                  </p>
+                )}
+                  </>
+                )}
               </div>
             )}
 
