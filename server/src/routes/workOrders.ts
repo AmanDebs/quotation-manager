@@ -22,7 +22,7 @@ import { insertJob, plannedDateError, type OrderRef } from '../services/orderJob
 import { syncOrderStatus } from '../services/orderStatus.js';
 import { syncJobStatus, DUE_TO_START } from '../services/jobStatus.js';
 import { requirePermission, type AuthedRequest } from '../middleware/auth.js';
-import { readyLines } from '../services/dispatchReady.js';
+import { readyLines, qcQueue } from '../services/dispatchReady.js';
 import { notifyAwaitingRelease } from '../services/handoffMail.js';
 import { scopeClause, canAccessCustomer } from '../middleware/scope.js';
 import { resolveCompanyId } from '../services/companies.js';
@@ -356,8 +356,14 @@ workOrdersRouter.get('/qc-checks/export', requirePermission('qc'), (req: AuthedR
  * that route for.
  */
 workOrdersRouter.get('/qc-pending', requirePermission('qc'), (req: AuthedRequest, res) => {
-  const rows = readyLines(req).rows.filter((r) => r.qc_hold);
-  res.json({ rows, pending: rows.length });
+  /*
+   * Three lists since 2026-11-15, and `pending` still counts the first alone
+   * — it is what *held* means and what every link into this page is about.
+   * The other two are work the page could not previously show at all; the
+   * tab counts them separately, so neither figure has to stand for both.
+   */
+  const { rows, uncertified, unspecified } = qcQueue(req);
+  res.json({ rows, uncertified, unspecified, pending: rows.length });
 });
 
 /**

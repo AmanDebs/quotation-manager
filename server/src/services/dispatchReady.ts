@@ -1,7 +1,7 @@
 import { db } from '../db/connection.js';
 import { round2, PIECES_ORDERED_SQL } from './totals.js';
 import { LIVE_OK } from './production.js';
-import { qcBlockError } from './qc.js';
+import { qcBlockError, specOwner } from './qc.js';
 import { advanceBlockError } from './despatchLimits.js';
 import { approvalsForOrders, deskApprovalError } from './dispatchApproval.js';
 import { scopeClause } from '../middleware/scope.js';
@@ -89,6 +89,8 @@ export interface ReadyLine {
   order_date: string;
   customer_name: string;
   order_line: number;
+  /** The catalogue row, where the line names one — null on a custom line. */
+  product_id: number | null;
   product_name: string | null;
   description: string;
   color: string;
@@ -331,6 +333,7 @@ export function readyLines(
       order_date: c.r.order_date,
       customer_name: c.r.customer_name ?? '',
       order_line: c.r.line,
+      product_id: c.r.product_id,
       product_name: c.r.product_name,
       description: c.r.description,
       color: c.r.color,
@@ -358,5 +361,120 @@ export function readyLines(
     ready: out.filter((r) => r.ready > 0 && !r.held).length,
     held: out.filter((r) => r.held).length,
     awaiting: out.filter((r) => r.awaiting > 0).length,
+  };
+}
+
+/**
+ * A product that has been made and cannot be certified at all, because
+ * nobody has said what to measure.
+ */
+export interface UnspecifiedProduct {
+  product_id: number;
+  product_name: string;
+  /** Open order lines of it that have been made and not yet sent. */
+  lines: number;
+  /** Pieces made across them — what is standing there uncertifiable. */
+  made: number;
+  /** One of the orders, so the row can link somewhere, and who it is for. */
+  order_id: number;
+  customer_name: string;
+}
+
+/**
+ * **What is there to certify**, in the three shapes that question has.
+ *
+ * 2026-11-15, walking the whole COA process end to end: the queue was the
+ * lines the QC gate is **holding**, and on a book with 80,000 pieces of an
+ * unspecified product made and 50,000 more made since a certificate was
+ * issued, the Quality page said *"Nothing is waiting to be inspected. Every
+ * line that has been made is either certified or needs no specification."*
+ * Both halves were misleading, and the second was the expensive one: *needs
+ * no specification* reads as a decision where it means nobody has written
+ * one. Neither case was reachable from this page at all.
+ *
+ * So the queue answers in three parts, and they do not overlap:
+ *
+ * - **`rows`** — held, which is what it always was and what the count means.
+ *   `qcBlockError`'s own sentence, so the queue cannot disagree with the gate.
+ * - **`uncertified`** — a line with a certificate already on it and output
+ *   nobody has put on one since. The gate is satisfied by **one** cleared lot
+ *   (`lotsForLine`, and a partial shipment is normal), so a second run was
+ *   invisible here however much of it was made. It is not held and is not
+ *   drawn as held; it is the ordinary *and now certify the rest* of a job
+ *   that keeps running.
+ * - **`unspecified`** — made, and nothing can be certified until somebody
+ *   writes the specification. Grouped **by product**, because that is the
+ *   unit of the work: one specification covers every line of it, and a list
+ *   per line would ask for the same thing five times.
+ *
+ * All three are `readyLines`' own candidates, so each inherits that function's
+ * scope and its rules: goods still here (made, within what was ordered, not
+ * yet sent), made-here, never a charge line, never a cancelled or completed
+ * order. Goods that have **gone** are off all three — a certificate for them
+ * is late rather than pending, and this is a queue of work in hand.
+ */
+export function qcQueue(req: AuthedRequest): {
+  rows: ReadyLine[];
+  uncertified: ReadyLine[];
+  unspecified: UnspecifiedProduct[];
+} {
+  const all = readyLines(req).rows;
+  const rows = all.filter((r) => r.qc_hold);
+  const rest = all.filter((r) => !r.qc_hold);
+
+  /*
+   * Whose tolerances each line answers to. The specification in force is the
+   * **order's customer's** where they have one, which is why this asks per
+   * line rather than per product — `qcBlockError` reads it the same way, so a
+   * line it passes over for want of a specification is a line that lands
+   * below rather than one that quietly disappears.
+   */
+  const orderIds = [...new Set(rest.map((r) => r.order_id))];
+  const customerOf = new Map<number, number | null>();
+  if (orderIds.length) {
+    for (const o of db.prepare(
+      `SELECT id, customer_id FROM orders WHERE id IN (${orderIds.map(() => '?').join(',')})`
+    ).all(...orderIds) as { id: number; customer_id: number | null }[]) {
+      customerOf.set(Number(o.id), o.customer_id == null ? null : Number(o.customer_id));
+    }
+  }
+  const specified = (r: ReadyLine) =>
+    r.product_id != null && specOwner(r.product_id, customerOf.get(r.order_id) ?? null) !== 'none';
+
+  const unlotted = (r: ReadyLine) => r.jobs.reduce((n, j) => n + (Number(j.unlotted) || 0), 0);
+
+  const uncertified = rest.filter((r) => specified(r) && unlotted(r) > 0);
+
+  /*
+   * One row per product, not per line. A **custom line naming no product**
+   * cannot appear: there is no catalogue row to write a specification
+   * against, and the way out of that is to name a product on the line rather
+   * than anything this list could offer.
+   */
+  const byProduct = new Map<number, UnspecifiedProduct>();
+  for (const r of rest) {
+    if (r.product_id == null || specified(r)) continue;
+    const seen = byProduct.get(r.product_id);
+    if (seen) {
+      seen.lines += 1;
+      seen.made = round2(seen.made + r.made);
+      continue;
+    }
+    byProduct.set(r.product_id, {
+      product_id: r.product_id,
+      product_name: r.product_name || r.description || '',
+      lines: 1,
+      made: r.made,
+      order_id: r.order_id,
+      customer_name: r.customer_name,
+    });
+  }
+
+  return {
+    rows,
+    uncertified,
+    // Most made first: the biggest pile of uncertifiable goods is the
+    // specification worth writing first.
+    unspecified: [...byProduct.values()].sort((a, b) => b.made - a.made),
   };
 }

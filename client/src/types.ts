@@ -761,12 +761,28 @@ export interface DespatchItem {
  * now. Derived on the server from the same guards `POST /despatches` runs, so
  * `held` is the sentence the save itself would give rather than a copy of it.
  */
+/**
+ * A product made and not certifiable at all, because nobody has written its
+ * specification — the third list on the Quality queue, grouped by product
+ * because one specification covers every line of it.
+ */
+export interface UnspecifiedProduct {
+  product_id: number;
+  product_name: string;
+  lines: number;
+  made: number;
+  order_id: number;
+  customer_name: string;
+}
+
 export interface ReadyLine {
   order_id: number;
   order_number: string;
   order_date: string;
   customer_name: string;
   order_line: number;
+  /** The catalogue row, where the line names one — null on a custom line. */
+  product_id: number | null;
   product_name: string | null;
   description: string;
   color: string;

@@ -9,7 +9,7 @@ import {
   DownloadButton, SegmentedTabs, TH_CLASS,
 } from '../components/ui';
 import { useCan } from '../App';
-import type { ReadyLine } from '../types';
+import type { ReadyLine, UnspecifiedProduct } from '../types';
 import { fmtQty } from '../lib/format';
 import { fmtDate } from '../lib/format';
 import { useUrlFilter } from '../lib/useUrlFilter';
@@ -481,106 +481,217 @@ function Pending() {
   const mayInspect = can('qc', 'full');
   const { data, isPending } = useQuery({
     queryKey: ['qc-pending'],
-    queryFn: () => api.get<{ rows: ReadyLine[]; pending: number }>('/api/work-orders/qc-pending'),
+    queryFn: () => api.get<{
+      rows: ReadyLine[]; uncertified: ReadyLine[]; unspecified: UnspecifiedProduct[]; pending: number;
+    }>('/api/work-orders/qc-pending'),
   });
   const rows = data?.rows ?? [];
+  const uncertified = data?.uncertified ?? [];
+  const unspecified = data?.unspecified ?? [];
   if (isPending) return <div className="py-8 text-center text-sm text-slate-400">Loading…</div>;
+
+  /*
+   * One table, two readings of it. The rows are the same shape and the same
+   * press; what differs is the figure that says why the row is here — what is
+   * **held up** on a line waiting for its first certificate, and what has been
+   * **made since** on a line that already has one. A second table would be the
+   * same markup twice, waiting to come apart.
+   */
+  const table = (list: ReadyLine[], kind: 'held' | 'since') => (
+    <table className="w-full text-sm">
+      <thead>
+        <tr className={TH_CLASS}>
+          <th className="pb-2 pr-3">Sales Order</th>
+          <th className="pb-2 pr-3">Customer</th>
+          <th className="pb-2 pr-3">Item</th>
+          <th className="pb-2 pr-3">Colour</th>
+          <th className="pb-2 pr-3">Job</th>
+          <th className="pb-2 pr-3 text-right">Made</th>
+          <th className="pb-2 pr-3 text-right">{kind === 'held' ? 'To ship' : 'Not certified'}</th>
+          {mayInspect && <th className="pb-2" />}
+        </tr>
+      </thead>
+      <tbody>
+        {list.map((r) => (
+          <tr key={`${r.order_id}:${r.order_line}`} className="border-b border-slate-100 last:border-0 hover:bg-slate-50">
+            <td className="whitespace-nowrap py-2 pr-3">
+              <Link to={`/orders/${r.order_id}`} className="text-brand-600 hover:underline">{r.order_number}</Link>
+            </td>
+            <td className="max-w-[12rem] truncate py-2 pr-3" title={r.customer_name}>{r.customer_name}</td>
+            <td className="max-w-[16rem] py-2 pr-3">
+              <div className="truncate" title={r.description}>{r.product_name || r.description || '—'}</div>
+              {/*
+                Why it is held, said only where the row has no button: with
+                one it is noise on every line, and without one it is the
+                only thing that says what to do next.
+              */}
+              {mayInspect && kind === 'held' && r.qc_hold && !r.jobs.some((j) => j.unlotted > 0) && (
+                <div className="text-xs text-amber-700">{r.qc_hold}</div>
+              )}
+            </td>
+            <td className="whitespace-nowrap py-2 pr-3 text-slate-500">
+              {r.color || <span className="text-slate-300">—</span>}
+            </td>
+            {/*
+              The answer to "is it connected to the work order": a check is
+              recorded against a job, so the job is the way out of this
+              list. A split run names both, since either may be the one
+              that was measured.
+            */}
+            <td className="whitespace-nowrap py-2 pr-3">
+              {r.jobs.length === 0 ? <span className="text-slate-300">—</span> : r.jobs.map((j, i) => (
+                <span key={j.id}>
+                  {i > 0 && <span className="text-slate-300"> · </span>}
+                  <Link to={`/work-orders/${j.id}`} className="text-brand-600 hover:underline">{j.number}</Link>
+                </span>
+              ))}
+            </td>
+            <td className="whitespace-nowrap py-2 pr-3 text-right tabular-nums">{fmtQty(r.made)}</td>
+            {/*
+              What this row is about. On a held line it is what is standing
+              there unable to ship; on one already certified it is the output
+              nobody has put on a certificate — which is the figure the press
+              below is about to sweep.
+            */}
+            <td className="whitespace-nowrap py-2 pr-3 text-right font-medium tabular-nums">
+              {kind === 'held'
+                ? fmtQty(Math.max(0, Math.min(r.made, r.ordered) - r.sent))
+                : fmtQty(r.jobs.reduce((n, j) => n + (j.unlotted || 0), 0))}
+            </td>
+            {/*
+              One press per job with something to sweep. A split run is two
+              jobs and either may be the one to certify, so each gets its
+              own button carrying its number — rare, and the alternative is
+              a button that picks one of them silently.
+            */}
+            {mayInspect && (
+              <td className="whitespace-nowrap py-2 text-right">
+                {(() => {
+                  const ready = r.jobs.filter((j) => j.unlotted > 0);
+                  if (!ready.length) {
+                    return (
+                      <span className="text-xs text-slate-400" title={r.qc_hold ?? undefined}>
+                        {r.qc_hold ? 'See the job' : '—'}
+                      </span>
+                    );
+                  }
+                  return ready.map((j) => (
+                    <Button
+                      key={j.id}
+                      variant={kind === 'held' ? 'primary' : 'secondary'}
+                      className="ml-1"
+                      title={`Inspect everything ${j.number} has made and not yet certified, and issue the COA`}
+                      // Back to this queue afterwards rather than to the job:
+                      // somebody certifying works down a list, and the page
+                      // they came from is the one to come back to.
+                      onClick={() => navigate(`/work-orders/${j.id}/certify?from=quality`)}
+                    >
+                      {ready.length > 1 ? `Certify ${j.number}` : 'Certify'}
+                    </Button>
+                  ));
+                })()}
+              </td>
+            )}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+
+  if (!rows.length && !uncertified.length && !unspecified.length) {
+    return (
+      <Card>
+        <EmptyState message="Nothing to certify. Every line that has been made is on a certificate, and every product that has been made has a specification to certify it against." />
+      </Card>
+    );
+  }
+
   return (
-    <Card className="overflow-x-auto">
-      {rows.length === 0 ? (
-        <EmptyState message="Nothing is waiting to be inspected. Every line that has been made is either certified or needs no specification." />
-      ) : (
-        <table className="w-full text-sm">
-          <thead>
-            <tr className={TH_CLASS}>
-              <th className="pb-2 pr-3">Sales Order</th>
-              <th className="pb-2 pr-3">Customer</th>
-              <th className="pb-2 pr-3">Item</th>
-              <th className="pb-2 pr-3">Colour</th>
-              <th className="pb-2 pr-3">Job</th>
-              <th className="pb-2 pr-3 text-right">Made</th>
-              <th className="pb-2 pr-3 text-right">To ship</th>
-              {mayInspect && <th className="pb-2" />}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r) => (
-              <tr key={`${r.order_id}:${r.order_line}`} className="border-b border-slate-100 last:border-0 hover:bg-slate-50">
-                <td className="whitespace-nowrap py-2 pr-3">
-                  <Link to={`/orders/${r.order_id}`} className="text-brand-600 hover:underline">{r.order_number}</Link>
-                </td>
-                <td className="max-w-[12rem] truncate py-2 pr-3" title={r.customer_name}>{r.customer_name}</td>
-                <td className="max-w-[16rem] py-2 pr-3">
-                  <div className="truncate" title={r.description}>{r.product_name || r.description || '—'}</div>
-                  {/*
-                    Why it is held, said only where the row has no button: with
-                    one it is noise on every line, and without one it is the
-                    only thing that says what to do next.
-                  */}
-                  {mayInspect && r.qc_hold && !r.jobs.some((j) => j.unlotted > 0) && (
-                    <div className="text-xs text-amber-700">{r.qc_hold}</div>
-                  )}
-                </td>
-                <td className="whitespace-nowrap py-2 pr-3 text-slate-500">
-                  {r.color || <span className="text-slate-300">—</span>}
-                </td>
-                {/*
-                  The answer to "is it connected to the work order": a check is
-                  recorded against a job, so the job is the way out of this
-                  list. A split run names both, since either may be the one
-                  that was measured.
-                */}
-                <td className="whitespace-nowrap py-2 pr-3">
-                  {r.jobs.length === 0 ? <span className="text-slate-300">—</span> : r.jobs.map((j, i) => (
-                    <span key={j.id}>
-                      {i > 0 && <span className="text-slate-300"> · </span>}
-                      <Link to={`/work-orders/${j.id}`} className="text-brand-600 hover:underline">{j.number}</Link>
-                    </span>
-                  ))}
-                </td>
-                <td className="whitespace-nowrap py-2 pr-3 text-right tabular-nums">{fmtQty(r.made)}</td>
-                {/* What is actually held up: made, within what was ordered,
-                    and not yet gone. The figure that says whether this row
-                    matters today. */}
-                <td className="whitespace-nowrap py-2 pr-3 text-right font-medium tabular-nums">
-                  {fmtQty(Math.max(0, Math.min(r.made, r.ordered) - r.sent))}
-                </td>
-                {/*
-                  One press per job with something to sweep. A split run is two
-                  jobs and either may be the one to certify, so each gets its
-                  own button carrying its number — rare, and the alternative is
-                  a button that picks one of them silently.
-                */}
-                {mayInspect && (
-                  <td className="whitespace-nowrap py-2 text-right">
-                    {(() => {
-                      const ready = r.jobs.filter((j) => j.unlotted > 0);
-                      if (!ready.length) {
-                        return (
-                          <span className="text-xs text-slate-400" title={r.qc_hold ?? undefined}>
-                            {r.qc_hold ? 'See the job' : '—'}
-                          </span>
-                        );
-                      }
-                      return ready.map((j) => (
-                        <Button
-                          key={j.id}
-                          className="ml-1"
-                          title={`Inspect everything ${j.number} has made and not yet certified, and issue the COA`}
-                          onClick={() => navigate(`/work-orders/${j.id}/certify`)}
-                        >
-                          {ready.length > 1 ? `Certify ${j.number}` : 'Certify'}
-                        </Button>
-                      ));
-                    })()}
-                  </td>
-                )}
-              </tr>
-            ))}
-          </tbody>
-        </table>
+    <div className="space-y-4">
+      {/*
+        Held first, because it is the only one of the three that stops
+        something: these are the lines the QC gate names when the goods are
+        asked to go out.
+      */}
+      {rows.length > 0 && (
+        <Card title="Waiting for a certificate" className="overflow-x-auto">
+          {table(rows, 'held')}
+        </Card>
       )}
-    </Card>
+      {/*
+        **Made since the last certificate** (2026-11-15). The gate is
+        satisfied by one cleared lot on a line, so a job that keeps running
+        after its first COA was invisible here however much it made — and
+        nothing else asks. It is not held and is not drawn as held; it is the
+        ordinary *now certify the rest*.
+      */}
+      {uncertified.length > 0 && (
+        <Card title="Made since the last certificate" className="overflow-x-auto">
+          <p className="mb-2 text-xs text-slate-500">
+            These lines already carry a certificate, so nothing is held up — but this much has been made
+            since and is on no certificate.
+          </p>
+          {table(uncertified, 'since')}
+        </Card>
+      )}
+      {/*
+        **Nothing can be certified for these at all**, which is the one the
+        page used to answer with *"needs no specification"* — a sentence that
+        reads as a decision where it means nobody has written one. By product,
+        because one specification covers every line of it.
+      */}
+      {unspecified.length > 0 && (
+        <Card title="No specification yet" className="overflow-x-auto">
+          <p className="mb-2 text-xs text-slate-500">
+            Made, and nothing can be certified until somebody says what to measure. A specification is
+            per product and covers every order of it.
+            {mayInspect && <> <b>Copy from</b> on the editor takes another product&rsquo;s list as a starting point.</>}
+          </p>
+          <table className="w-full text-sm">
+            <thead>
+              <tr className={TH_CLASS}>
+                <th className="pb-2 pr-3">Product</th>
+                <th className="pb-2 pr-3">For</th>
+                <th className="pb-2 pr-3 text-right">Order lines</th>
+                <th className="pb-2 pr-3 text-right">Made</th>
+                {mayInspect && <th className="pb-2" />}
+              </tr>
+            </thead>
+            <tbody>
+              {unspecified.map((p) => (
+                <tr key={p.product_id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50">
+                  <td className="max-w-[20rem] truncate py-2 pr-3" title={p.product_name}>{p.product_name}</td>
+                  <td className="max-w-[14rem] truncate py-2 pr-3 text-slate-500" title={p.customer_name}>
+                    {p.lines > 1 ? `${p.customer_name} and others` : p.customer_name}
+                  </td>
+                  <td className="whitespace-nowrap py-2 pr-3 text-right tabular-nums">{p.lines}</td>
+                  <td className="whitespace-nowrap py-2 pr-3 text-right font-medium tabular-nums">{fmtQty(p.made)}</td>
+                  {mayInspect && (
+                    <td className="whitespace-nowrap py-2 text-right">
+                      {/*
+                        Straight to the editor for that product rather than to
+                        the catalogue: the list is paged and searching for the
+                        name again is the step this row exists to save. The
+                        search goes with it, so the page lands on the row even
+                        if the deep link finds nothing to open.
+                      */}
+                      <Button
+                        variant="secondary"
+                        onClick={() => navigate(
+                          `/products?q=${encodeURIComponent(p.product_name)}&qc=${p.product_id}`
+                        )}
+                      >
+                        Write the specification
+                      </Button>
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Card>
+      )}
+    </div>
   );
 }
 
@@ -613,14 +724,26 @@ export default function QualityPage() {
   // — a tab that only counts once you are on it is a tab nobody opens.
   const { data } = useQuery({
     queryKey: ['qc-pending'],
-    queryFn: () => api.get<{ rows: ReadyLine[]; pending: number }>('/api/work-orders/qc-pending'),
+    queryFn: () => api.get<{
+      rows: ReadyLine[]; uncertified: ReadyLine[]; unspecified: UnspecifiedProduct[]; pending: number;
+    }>('/api/work-orders/qc-pending'),
   });
-  const waiting = data?.pending ?? 0;
+  /*
+   * **Everything the tab has to show, not only what is held** (2026-11-15).
+   * `pending` is still the held count and still what the sentence about
+   * dispatch means; the tab is a to-do, and one reading 0 over two sections
+   * of work below it is the same thing the empty state used to say wrongly.
+   * A product with no specification counts once however many lines carry it,
+   * which is the unit of the work.
+   */
+  const waiting = (data?.pending ?? 0)
+    + (data?.uncertified?.length ?? 0)
+    + (data?.unspecified?.length ?? 0);
   const subtitle = tab === 'coa'
     ? 'Every Certificate of Analysis issued, and whether the goods have gone'
     : tab === 'inspections'
       ? 'Every inspection recorded, against the tolerance it was judged by'
-      : 'Made and cannot ship until it is inspected and certified';
+      : 'What is made and still wants a certificate';
   return (
     <div>
       {/*

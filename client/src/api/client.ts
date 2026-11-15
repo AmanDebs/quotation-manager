@@ -1,8 +1,20 @@
 export class ApiError extends Error {
   status: number;
-  constructor(status: number, message: string) {
+  /**
+   * The refusal's own body, where it had one.
+   *
+   * Most refusals are a sentence and nothing else, and the sentence is what a
+   * form prints. A few carry what they did **before** refusing — `/certify`
+   * answers 409 over a lot it has just opened and inspected, because the
+   * inspection really happened and the certificate is what could not be
+   * issued — and a caller that could only see the message would report that
+   * as a save which failed. Parsed once here rather than re-read per caller.
+   */
+  data?: Record<string, unknown>;
+  constructor(status: number, message: string, data?: Record<string, unknown>) {
     super(message);
     this.status = status;
+    this.data = data;
   }
 }
 
@@ -35,14 +47,16 @@ async function request<T>(method: string, url: string, body?: unknown): Promise<
   });
   if (!res.ok) {
     let message = `Request failed (${res.status})`;
+    let body: Record<string, unknown> | undefined;
     try {
       const data = await res.json();
+      if (data && typeof data === 'object') body = data as Record<string, unknown>;
       if (data?.error) message = data.error;
     } catch { /* non-JSON error body */ }
     if (res.status === 401 && !EXPECTS_401.some((p) => url.startsWith(p))) {
       unauthorizedHandler?.();
     }
-    throw new ApiError(res.status, message);
+    throw new ApiError(res.status, message, body);
   }
   return res.json() as Promise<T>;
 }

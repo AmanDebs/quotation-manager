@@ -2,7 +2,7 @@ import './helpers/scratch.js';
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { db } from '../src/db/connection.js';
-import { readyLines } from '../src/services/dispatchReady.js';
+import { readyLines, qcQueue } from '../src/services/dispatchReady.js';
 import { qcBlockError } from '../src/services/qc.js';
 import { advanceBlockError } from '../src/services/despatchLimits.js';
 import { setApproval, deskApprovalError, releasedLines } from '../src/services/dispatchApproval.js';
@@ -829,5 +829,189 @@ describe('what one press can certify, on the Quality queue', () => {
     assert.equal(jobs.length, 2);
     assert.deepEqual(jobs.map((j) => j.unlotted), [4000, 0],
       'one button, on the job that has something to sweep');
+  });
+});
+
+/**
+ * **What is there to certify**, in the three shapes that question has
+ * (2026-11-15, walking the COA process end to end). The queue was the lines
+ * the gate is *holding*, which left two kinds of work invisible: a job that
+ * kept running after its first certificate, and a product nobody has written
+ * a specification for. The page said *"Nothing is waiting to be inspected"*
+ * over both.
+ *
+ * Most of these are about the three lists not overlapping: a line in two of
+ * them would be the same work counted twice, and the tab counts them.
+ */
+describe('what is there to certify', () => {
+  /** A lot of this job's output, certified — the state the gate is satisfied by. */
+  function certify(jobId: number, qty: number, number = `B/T/${++seq}`): number {
+    const id = Number((db.prepare(
+      `INSERT INTO batches (number, work_order_id, date, coa_no, coa_date)
+       VALUES (?, ?, '2026-10-02', ?, '2026-10-03') RETURNING id`
+    ).get(number, jobId, `COA/T/${seq}`) as { id: number }).id);
+    book(jobId, qty, id);
+    const checkId = Number(db.prepare(
+      "INSERT INTO qc_checks (work_order_id, batch_id, date, inspector) VALUES (?, ?, '2026-10-02', 'QC')"
+    ).run(jobId, id).lastInsertRowid);
+    db.prepare(
+      `INSERT INTO qc_results (check_id, name, kind, unit, value, min_value, max_value, sort_order)
+       VALUES (?, 'Wall thickness', 'numeric', 'mm', 0.4, 0.3, 0.5, 0)`
+    ).run(checkId);
+    return id;
+  }
+
+  const queueFor = (orderId: number) => {
+    const q = qcQueue(req);
+    return {
+      held: q.rows.filter((r) => r.order_id === orderId),
+      uncertified: q.uncertified.filter((r) => r.order_id === orderId),
+      unspecified: q.unspecified,
+    };
+  };
+
+  test('a line with a specification and no certificate is held, and only held', () => {
+    const p = makeProduct({ spec: true });
+    const o = makeOrder([{ productId: p, pcs: 20000 }]);
+    book(makeJob(o, 0, p, 20000), 12000);
+    const q = queueFor(o);
+    assert.equal(q.held.length, 1);
+    assert.ok(q.held[0].qc_hold, 'the gate says nothing about a line it is holding');
+    assert.equal(q.uncertified.length, 0, 'a held line is counted twice');
+    assert.equal(q.unspecified.filter((u) => u.product_id === p).length, 0);
+  });
+
+  test('output made since a certificate is uncertified, and is not held', () => {
+    /* The gate is satisfied by **one** cleared lot on a line, so a job that
+       keeps running was invisible here however much it made — which is the
+       case this list exists for. */
+    const p = makeProduct({ spec: true });
+    const o = makeOrder([{ productId: p, pcs: 50000 }]);
+    const job = makeJob(o, 0, p, 50000);
+    certify(job, 12000);
+    book(job, 8000);
+    const q = queueFor(o);
+    assert.equal(q.held.length, 0, 'a line with a certificate is not held');
+    assert.equal(q.uncertified.length, 1);
+    assert.equal(
+      q.uncertified[0].jobs.reduce((n, j) => n + j.unlotted, 0), 8000,
+      'the figure is what is on no certificate, not what was made',
+    );
+  });
+
+  test('...and nothing is uncertified once every shift is in a lot', () => {
+    const p = makeProduct({ spec: true });
+    const o = makeOrder([{ productId: p, pcs: 50000 }]);
+    certify(makeJob(o, 0, p, 50000), 12000);
+    const q = queueFor(o);
+    assert.equal(q.uncertified.length, 0);
+    assert.equal(q.held.length, 0);
+  });
+
+  test('a product nobody has specified is listed once, by product', () => {
+    /* One specification covers every line of it, so a list per line would ask
+       for the same thing twice. */
+    const p = makeProduct();
+    const o = makeOrder([{ productId: p, pcs: 20000 }, { productId: p, pcs: 30000 }]);
+    book(makeJob(o, 0, p, 20000), 12000);
+    book(makeJob(o, 1, p, 30000), 5000);
+    const q = queueFor(o);
+    const mine = q.unspecified.filter((u) => u.product_id === p);
+    assert.equal(mine.length, 1, 'the same product was listed twice');
+    assert.equal(mine[0].lines, 2);
+    assert.equal(mine[0].made, 17000, 'the figure is what is standing there uncertifiable');
+    assert.equal(q.held.length, 0, 'an unspecified line cannot be held — there is nothing to measure');
+    assert.equal(q.uncertified.length, 0);
+  });
+
+  test('and a customer-only specification is no specification for anybody else', () => {
+    /* `specOwner`'s own rule, which is also `qcBlockError`'s: a customer's
+       rows **replace** the default rather than adding to it, so a product
+       specified for one buyer has no opinion about another's order — and a
+       line the gate passes over for want of one has to land here rather than
+       quietly disappear. */
+    const p = makeProduct();
+    const mine = makeCustomer();
+    db.prepare(
+      `INSERT INTO product_qc_params (product_id, customer_id, name, kind, unit, min_value, max_value, sort_order)
+       VALUES (?, ?, 'Wall thickness', 'numeric', 'mm', 0.3, 0.5, 0)`
+    ).run(p, mine);
+
+    const theirs = makeOrder([{ productId: p, pcs: 20000 }]);
+    book(makeJob(theirs, 0, p, 20000), 12000);
+    assert.equal(
+      queueFor(theirs).unspecified.filter((u) => u.product_id === p).length, 1,
+      'another customer’s order was treated as specified',
+    );
+
+    /*
+     * And the customer it **was** written for reads as specified — which only
+     * shows on a line the gate is not holding, since a held line never
+     * reaches this question. So: their order, certified once and run on. It
+     * belongs under *made since*, and reading the default alone would put a
+     * certified line under *no specification yet* instead.
+     */
+    const ours = Number(db.prepare(
+      "INSERT INTO orders (number, date, customer_id, currency, status) VALUES (?, '2026-10-01', ?, 'INR', 'scheduled')"
+    ).run(`SO/T/${++seq}`, mine).lastInsertRowid);
+    db.prepare(
+      `INSERT INTO order_items (order_id, product_id, description, qty, unit, total_pcs, is_charge, sort_order)
+       VALUES (?, ?, 'Line 0', 50, 'per 1000', 50000, 0, 0)`
+    ).run(ours, p);
+    const job = makeJob(ours, 0, p, 50000);
+    const lot = Number((db.prepare(
+      `INSERT INTO batches (number, work_order_id, date, coa_no, coa_date)
+       VALUES (?, ?, '2026-10-02', ?, '2026-10-03') RETURNING id`
+    ).get(`B/T/${++seq}`, job, `COA/T/${seq}`) as { id: number }).id);
+    book(job, 12000, lot);
+    const checkId = Number(db.prepare(
+      "INSERT INTO qc_checks (work_order_id, batch_id, date, inspector) VALUES (?, ?, '2026-10-02', 'QC')"
+    ).run(job, lot).lastInsertRowid);
+    db.prepare(
+      `INSERT INTO qc_results (check_id, name, kind, unit, value, min_value, max_value, sort_order)
+       VALUES (?, 'Wall thickness', 'numeric', 'mm', 0.4, 0.3, 0.5, 0)`
+    ).run(checkId);
+    book(job, 8000);
+
+    const q = queueFor(ours);
+    assert.equal(q.uncertified.length, 1, 'a line specified for its own customer was not read as specified');
+    assert.equal(
+      q.unspecified.filter((u) => u.order_id === ours).length, 0,
+      'a certified line was listed as having no specification',
+    );
+  });
+
+  test('a custom line naming no product is in none of the three', () => {
+    /* There is no catalogue row to write a specification against, so this
+       list could offer nothing to do about it. */
+    const o = makeOrder([{ productId: null, pcs: 20000 }]);
+    book(makeJob(o, 0, null, 20000), 12000);
+    const q = queueFor(o);
+    assert.equal(q.held.length, 0);
+    assert.equal(q.uncertified.length, 0);
+    assert.equal(q.unspecified.filter((u) => u.order_id === o).length, 0, 'a line naming no product reached the list');
+  });
+
+  test('and goods that have gone are off all three', () => {
+    /* `readyLines`' own scope: this is a queue of work in hand, and a
+       certificate for goods already shipped is late rather than pending. */
+    const p = makeProduct();
+    const o = makeOrder([{ productId: p, pcs: 20000 }]);
+    book(makeJob(o, 0, p, 20000), 12000);
+    ship(o, 0, 12000);
+    const q = queueFor(o);
+    assert.equal(q.held.length, 0);
+    assert.equal(q.uncertified.length, 0);
+    assert.equal(q.unspecified.filter((u) => u.product_id === p).length, 0);
+  });
+
+  test('the biggest pile of uncertifiable goods is first', () => {
+    const small = makeProduct();
+    const big = makeProduct();
+    const o = makeOrder([{ productId: small, pcs: 20000 }, { productId: big, pcs: 90000 }]);
+    book(makeJob(o, 0, small, 20000), 1000);
+    book(makeJob(o, 1, big, 90000), 60000);
+    const list = queueFor(o).unspecified.filter((u) => [small, big].includes(u.product_id));
+    assert.deepEqual(list.map((u) => u.product_id), [big, small]);
   });
 });

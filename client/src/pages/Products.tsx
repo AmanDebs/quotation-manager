@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import { useCan } from '../App';
@@ -98,6 +98,15 @@ export default function ProductsPage() {
    * the view is bookmarkable.
    */
   const [showDisabled, setShowDisabled] = useUrlFilter('disabled');
+  /*
+   * **Which product's specification to open**, so the Quality queue can send
+   * somebody straight to the thing to do rather than to the catalogue to
+   * find it again (2026-11-15). In the URL like every other state on this
+   * page, and it carries the search with it — so if the row is not on the
+   * page the link still lands on it filtered, with its own QC button, rather
+   * than on nothing.
+   */
+  const [qcParam, setQcParam] = useUrlFilter('qc');
   const [editing, setEditing] = useState<Product | Omit<Product, 'id'> | null>(null);
   const [recipeFor, setRecipeFor] = useState<Product | null>(null);
   const [qcFor, setQcFor] = useState<Product | null>(null);
@@ -115,6 +124,16 @@ export default function ProductsPage() {
     `/api/products?q=${encodeURIComponent(q)}&type=${encodeURIComponent(type)}&missing=${encodeURIComponent(missing)}${showDisabled ? '' : '&active=1'}`
   );
   const products = list.rows;
+  /*
+   * Opened once the list holds it, and the parameter is cleared with the
+   * dialog — a link that kept it would reopen the editor every time somebody
+   * came back to this page with the Back button.
+   */
+  useEffect(() => {
+    if (!qcParam) return;
+    const wanted = products.find((p) => String(p.id) === qcParam);
+    if (wanted) setQcFor(wanted);
+  }, [qcParam, products]);
   /*
    * The gaps in the catalogue, each a count that is also the button that shows
    * them (2026-10-16, the client: *"Is there a way to show products which have
@@ -424,7 +443,9 @@ export default function ProductsPage() {
 
       {importing && <ProductImportModal onClose={() => setImporting(false)} />}
       {recipeFor && <RecipeModal product={recipeFor} onClose={() => setRecipeFor(null)} />}
-      {qcFor && <QcSpecModal product={qcFor} onClose={() => setQcFor(null)} />}
+      {qcFor && (
+        <QcSpecModal product={qcFor} onClose={() => { setQcFor(null); if (qcParam) setQcParam(''); }} />
+      )}
     </div>
   );
 }

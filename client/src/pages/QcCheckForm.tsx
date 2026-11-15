@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { api } from '../api/client';
+import { api, ApiError } from '../api/client';
 import type { CoaExtra, CoaField, CoaHeaderConfig, QcCheck, WorkOrder } from '../types';
 import {
   Button, Input, Select, Field, Card, PageHeader, ErrorText, EmptyState, TH_CLASS, FIELD_GRID,
@@ -349,7 +349,17 @@ export default function QcCheckFormPage({ certify }: {
       markSaved();
       after();
       if (cert) queryClient.invalidateQueries({ queryKey: ['coa-register'] });
-      navigate(coaBatchId ? '/quality' : `/work-orders/${id}?tab=${certify || batch ? 'batches' : 'quality'}`);
+      /*
+       * **Back where the press came from.** A certificate opened from the
+       * register goes back to the register, and one pressed on the Quality
+       * queue (`?from=quality`) back to the queue — somebody certifying works
+       * down a list, and landing on the job each time is a navigation back
+       * per certificate. Everything else goes to the job: its Batches tab
+       * where a lot is in play, its Quality tab otherwise.
+       */
+      navigate(coaBatchId || params.get('from') === 'quality'
+        ? '/quality'
+        : `/work-orders/${id}?tab=${certify || batch ? 'batches' : 'quality'}`);
     },
   });
   /*
@@ -369,6 +379,23 @@ export default function QcCheckFormPage({ certify }: {
       queryClient.invalidateQueries({ queryKey: ['coa-register'] });
     },
   });
+  /*
+   * **An inspection that failed is not a save that failed** (2026-11-15,
+   * walking the process end to end). `/certify` opens the lot, records the
+   * readings and *then* refuses the certificate when they do not pass — the
+   * record of an inspection that really happened is kept, which is right —
+   * and the page printed that 409 as a plain red error, so somebody who had
+   * just filled in nineteen rows was told it had not worked. It had: pressing
+   * again answered *"every shift booked on this job is already in a batch"*,
+   * which is a dead end with no sentence explaining how it got there.
+   *
+   * The refusal carries the lot it wrote, so the page says what happened and
+   * what is left to decide rather than reporting a failure.
+   */
+  const refusedBatch = add.error instanceof ApiError
+    ? (add.error.data?.batch as { id: number; number: string } | undefined)
+    : undefined;
+
   const removeCheck = useMutation({
     mutationFn: (checkId: number) => api.del(`/api/work-orders/qc-checks/${checkId}`),
     onSuccess: after,
@@ -1091,7 +1118,17 @@ export default function QcCheckFormPage({ certify }: {
                 {allChecks.length - done} not checked — that is recorded as unmeasured
               </span>
             )}
-            <ErrorText error={add.error} />
+            {refusedBatch ? (
+              <span className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                Recorded, and <b>not</b> certified: {add.error?.message} Decide what happens to batch{' '}
+                <b>{refusedBatch.number}</b> — rework it and inspect again, or scrap it —{' '}
+                <Link to={`/work-orders/${id}?tab=batches`} className="font-medium underline">
+                  on the job&rsquo;s Certificates tab
+                </Link>.
+              </span>
+            ) : (
+              <ErrorText error={add.error} />
+            )}
             {/*
               One press for the whole document, and on a **draft** the ordinary
               end of a correction is putting it back out — so *Save & issue* is
