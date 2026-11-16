@@ -79,6 +79,38 @@ function ProductImage({ value, onChange }: { value: string; onChange: (v: string
   );
 }
 
+/**
+ * The output rate as the list shows it: the figure the production planner
+ * would use, which is the typed one where there is one and the measurement
+ * from the shift book otherwise.
+ *
+ * Marked `*` when typed, the same marker the planner's own queue uses — the
+ * two screens say one thing about the same fact. A blank recedes to an
+ * em-dash rather than reading as a fault, and is never 0: nothing stated and
+ * nothing booked means the planner cannot date a job of it at all, which the
+ * *with no output rate* chip counts.
+ */
+function rateCell(p: Product) {
+  const typed = p.pcs_per_day != null && p.pcs_per_day > 0;
+  const rate = typed ? Number(p.pcs_per_day) : (p.measured_pcs_per_day ?? null);
+  if (rate == null) return <span className="text-slate-300">—</span>;
+  return `${Math.round(rate).toLocaleString('en-IN')}${typed ? '*' : ''}`;
+}
+
+/** Which of the two it is, and — where it is an override — what it is over. */
+function rateTitle(p: Product): string | undefined {
+  const typed = p.pcs_per_day != null && p.pcs_per_day > 0;
+  const m = p.measured_pcs_per_day;
+  const days = p.measured_days ?? 0;
+  if (typed) {
+    return m != null
+      ? `Typed on the product. The shifts booked so far work out at ${Math.round(m).toLocaleString('en-IN')}/day over ${days} day${days === 1 ? '' : 's'}`
+      : 'Typed on the product — nothing has been booked for it yet';
+  }
+  if (m != null) return `Measured from ${days} day${days === 1 ? '' : 's'} of shifts already booked`;
+  return 'No rate yet — the production planner cannot work out how long a job of this takes, so somebody has to date it by hand';
+}
+
 export default function ProductsPage() {
   const queryClient = useQueryClient();
   /*
@@ -292,6 +324,15 @@ export default function ProductsPage() {
                 <th className="pb-2 pr-3">Unit</th>
                 <th className="pb-2 pr-3 text-right">Default Price</th>
                 <th className="pb-2 pr-3 text-right">Weight</th>
+                {/*
+                  Beside Weight, the other fact the floor needs about a
+                  product rather than the three packing figures that read
+                  together after it (2026-11-16, the client: *"Add rate column
+                  in products"*). Without it a rate could only be seen by
+                  opening each dialog in turn, which is the thing the gap
+                  chips were added to end one row over.
+                */}
+                <th className="pb-2 pr-3 text-right">Output / day</th>
                 <th className="pb-2 pr-3 text-right">Pcs / Box</th>
                 <th className="pb-2 pr-3 text-right">20ft</th>
                 <th className="pb-2 pr-3 text-right">40ft</th>
@@ -322,6 +363,16 @@ export default function ProductsPage() {
                   <td className="py-2 pr-3">{p.unit}</td>
                   <td className="py-2 pr-3 text-right">{p.unit_price ? p.unit_price.toLocaleString('en-IN') : '—'}</td>
                   <td className="py-2 pr-3 text-right tabular-nums">{p.weight_grams != null ? `${p.weight_grams.toLocaleString('en-IN')} g` : '—'}</td>
+                  {/*
+                    The rate **in force** — what the planner would actually
+                    use — rather than the typed column alone, which is blank
+                    on nearly every row and would read as *no rate* on a
+                    product the floor has been making for months. A typed
+                    figure is marked with a `*`, the planner's own marker, so
+                    an override is visible down the column without opening
+                    anything; the hover says which it is and what it is over.
+                  */}
+                  <td className="py-2 pr-3 text-right tabular-nums" title={rateTitle(p)}>{rateCell(p)}</td>
                   <td className="py-2 pr-3 text-right tabular-nums">{p.pcs_per_pack?.toLocaleString('en-IN') ?? '—'}</td>
                   <td className="py-2 pr-3 text-right tabular-nums">{p.qty_20ft?.toLocaleString('en-IN') ?? '—'}</td>
                   <td className="py-2 pr-3 text-right tabular-nums">{p.qty_40ft?.toLocaleString('en-IN') ?? '—'}</td>
@@ -440,7 +491,11 @@ export default function ProductsPage() {
                   * typed here is visibly typed over something rather than
                   * into a void.
                   */}
-                <Field label="Output (good pcs / day)">
+                {/* Across both columns: the definition is three lines in a
+                    half-width cell, which made this field twice the height of
+                    the two beside it and left a hole next to it. It also puts
+                    the two container figures back together under it. */}
+                <Field label="Output per day" className="sm:col-span-2">
                   <Input
                     type="number"
                     min={0}
@@ -449,10 +504,23 @@ export default function ProductsPage() {
                     value={editing.pcs_per_day ?? ''}
                     onChange={(e) => set({ pcs_per_day: numOrNull(e.target.value) })}
                   />
-                  <div className="mt-1 text-xs text-slate-400">
-                    {editing.measured_pcs_per_day != null
-                      ? `The shifts booked so far work out at ${Math.round(editing.measured_pcs_per_day).toLocaleString('en-IN')}/day over ${editing.measured_days ?? 0} day${editing.measured_days === 1 ? '' : 's'} — leave blank to use that`
-                      : 'Nothing has been booked for this product yet, so this is the only figure there is'}
+                  {/*
+                    * Said in full because this is the one field on the page
+                    * nobody has seen before, and every part of it can be read
+                    * two ways: a day or a shift, good pieces or everything
+                    * moulded. The plant runs two shifts, so a figure given
+                    * per shift would halve every job the planner dates.
+                    */}
+                  <div className="mt-1 space-y-0.5 text-xs text-slate-400">
+                    <div>
+                      Good pieces this product makes in <strong>one day</strong> — both shifts together,
+                      rejects not counted. The planner divides what is left to make by this to get the days.
+                    </div>
+                    <div>
+                      {editing.measured_pcs_per_day != null
+                        ? `The shifts booked so far work out at ${Math.round(editing.measured_pcs_per_day).toLocaleString('en-IN')}/day over ${editing.measured_days ?? 0} day${editing.measured_days === 1 ? '' : 's'} — leave blank to use that.`
+                        : 'Nothing has been booked for this product yet, so this is the only figure there is.'}
+                    </div>
                   </div>
                 </Field>
                 <Field label="Boxes per 20ft">
