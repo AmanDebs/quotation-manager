@@ -33,3 +33,21 @@ export function monthsBetween(from: string, to: string): string[] {
   }
   return out;
 }
+
+/**
+ * `date` plus `days`, both `YYYY-MM-DD`, in **UTC** so no timezone touches it:
+ * `new Date('2026-10-02')` reads as UTC midnight and is then asked about
+ * locally, which lands the answer a day out on either side of Greenwich.
+ *
+ * Blank where the date cannot be read, so a caller shows nothing rather than
+ * a confident wrong day.
+ *
+ * It lived in `services/reports.ts` until the production planner wanted it
+ * too (2026-11-16), and moved here for the reason `monthsBetween` did: a
+ * shared fact belongs out of the file that happened to need it first.
+ */
+export function addDaysIso(date: string, days: number): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+  if (!m) return '';
+  return new Date(Date.UTC(+m[1], +m[2] - 1, +m[3] + days)).toISOString().slice(0, 10);
+}

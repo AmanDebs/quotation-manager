@@ -247,6 +247,13 @@ CREATE TABLE IF NOT EXISTS products (
   -- the catalogue is quoted, priced and recipe'd on. Nullable: blank means
   -- not recorded, which is a different claim from 0 g.
   weight_grams REAL,
+  -- Good pieces a production day, for planning how long a job takes
+  -- (2026-11-16). Nullable, and blank means **not stated** rather than 0: a
+  -- rate of zero would make every job infinitely long. It is the second
+  -- answer, not the first -- `services/outputRate.ts` measures the rate from
+  -- the shifts already booked for the product and reads this only where that
+  -- product has never run.
+  pcs_per_day REAL,
   -- Make or buy. 1 = moulded here, so a sales order line for it raises a work
   -- order and the QC gate asks for a pass; 0 = bought in and sold on, so
   -- neither applies -- there is no job to inspect. Defaults to 1 because that

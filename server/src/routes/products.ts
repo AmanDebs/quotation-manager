@@ -4,6 +4,7 @@ import { requirePermission } from '../middleware/auth.js';
 import { paramsFor, qcSectionOf, specOwner, specOverrides } from '../services/qc.js';
 import { IMPORT_FIELDS, buildImport, decodeUpload, identityKey, type BuildOptions } from '../services/productImport.js';
 import { recipeFor } from '../services/recipe.js';
+import { NO_RATE_SQL } from '../services/outputRate.js';
 import { PRODUCT_TYPES, isProductType, guessProductType } from '../services/productType.js';
 import { listBody } from '../services/pagination.js';
 import { searchClause } from '../services/search.js';
@@ -28,7 +29,7 @@ const madeHere = (v: unknown) => (v == null || v === '' ? 1 : Number(v) ? 1 : 0)
  * `values()` below picks a row's blank fallback purely by membership in this
  * list, so a numeric column left out of it would be written as `''`.
  */
-const packingFields = ['pcs_per_pack', 'qty_20ft', 'qty_40ft', 'weight_grams'] as const;
+const packingFields = ['pcs_per_pack', 'qty_20ft', 'qty_40ft', 'weight_grams', 'pcs_per_day'] as const;
 const numOrNull = (v: unknown) => (v === '' || v === null || v === undefined || Number.isNaN(Number(v)) ? null : Number(v));
 
 /**
@@ -105,18 +106,20 @@ productsRouter.post('/import', requirePermission('product', 'full'), (req, res) 
   const importCols = ['name', 'description', 'hsn_code', 'unit', 'unit_price', 'country_of_origin', 'color', 'product_type', ...packingFields] as const;
   /*
    * The same reasoning as the photo, one step further. A row being *updated*
-   * keeps its type and its weight when the sheet has no such column: those two
-   * are filled in by hand or by the boot pass, and a price list — which is what
-   * most of these sheets are — would otherwise blank every one of them on the
-   * next import. Every other column stays unconditional, as it always was: the
-   * sheet is the catalogue's own record of them.
+   * keeps its type, its weight and its output rate when the sheet has no such
+   * column: those three are filled in by hand or measured, and a price list —
+   * which is what most of these sheets are — would otherwise blank every one of
+   * them on the next import. The rate is the sharpest case, no spreadsheet
+   * having ever carried one, so `mapped('pcs_per_day')` is false always and an
+   * import can only ever leave it alone. Every other column stays
+   * unconditional, as it always was: the sheet is the catalogue's own record.
    */
   const mapped = (c: string) => {
     const idx = result.mapping[c as keyof typeof result.mapping];
     return idx !== undefined && idx >= 0;
   };
   const updateCols = importCols.filter((c) =>
-    (c !== 'product_type' && c !== 'weight_grams') || mapped(c));
+    (c !== 'product_type' && c !== 'weight_grams' && c !== 'pcs_per_day') || mapped(c));
   const insert = db.prepare(
     `INSERT INTO products (${importCols.join(', ')}) VALUES (${importCols.map(() => '?').join(', ')})`
   );
@@ -392,6 +395,14 @@ productsRouter.get('/', (req, res) => {
      * this chip exists to find.
      */
     qc: 'NOT EXISTS (SELECT 1 FROM product_qc_params q WHERE q.product_id = products.id AND q.customer_id IS NULL)',
+    /*
+     * Neither measured nor stated, so the production planner cannot say how
+     * long a job of it takes and somebody has to date that job by hand
+     * (2026-11-16). The measured half is what makes this chip shrink on its
+     * own: a product named here leaves the moment the floor books a shift
+     * against it.
+     */
+    rate: NO_RATE_SQL,
   };
   /*
    * Snapshot before the gap clause goes on, because the three counts below
@@ -463,6 +474,7 @@ productsRouter.get('/', (req, res) => {
       missing_weight: gapCount(GAPS.weight),
       missing_recipe: gapCount(GAPS.recipe),
       missing_qc: gapCount(GAPS.qc),
+      missing_rate: gapCount(GAPS.rate),
       disabled: Number(off.c),
     },
   });

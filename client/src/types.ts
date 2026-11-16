@@ -197,6 +197,12 @@ export interface Product {
    */
   weight_grams: number | null;
   /**
+   * Good pieces a production day — the second answer the planner reads, after
+   * the rate measured from the shifts already booked. Null means not stated,
+   * where 0 would mean a job that never finishes.
+   */
+  pcs_per_day?: number | null;
+  /**
    * 1 = in the catalogue; 0 = taken out of it, so the pickers stop offering
    * it. Optional and absent reads as in use, like `made_here` above.
    */
@@ -1307,6 +1313,43 @@ export interface DueGroup {
   undated: { count: number; due: number; invoices: DueInvoice[] };
 }
 export interface DueReport { today: string; window_days: number; until: string; groups: DueGroup[]; undated_count: number }
+
+/**
+ * How fast a product is made, and where that figure came from — the screen
+ * says which, so a measurement over two days can be disagreed with.
+ */
+export interface OutputRate {
+  product_id: number;
+  pcs_per_day: number;
+  source: 'measured' | 'stated';
+  days: number;
+  last_run: string;
+}
+
+/** A job as the production planner would date it. Nothing is written yet. */
+export interface PlannedJob {
+  id: number;
+  number: string;
+  product_id: number | null;
+  customer_name: string;
+  item: string;
+  order_id: number;
+  order_number: string;
+  /** Pieces still to make, which is what the days are computed from. */
+  pieces: number;
+  /** When the customer needs it, or null where nothing on file says. */
+  due: string | null;
+  rate: OutputRate | null;
+  days: number | null;
+  planned_start: string;
+  planned_end: string;
+  /** The plan finishes after the customer's own date. */
+  late: boolean;
+  /** Why it could not be dated; null means it was. */
+  blocked: 'no-rate' | 'nothing-left' | null;
+}
+
+export interface PlanPreview { start: string; jobs: PlannedJob[] }
 
 export interface MaterialSchedule {
   dates: string[];

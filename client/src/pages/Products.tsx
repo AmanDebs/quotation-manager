@@ -47,7 +47,7 @@ const empty: Omit<Product, 'id'> = {
   // already on file changes.
   name: '', description: '', hsn_code: '', unit: 'per 1000', unit_price: 0, country_of_origin: 'India',
   image: '', color: '', pcs_per_pack: null, qty_20ft: null, qty_40ft: null,
-  product_type: 'other', weight_grams: null, made_here: 1,
+  product_type: 'other', weight_grams: null, pcs_per_day: null, made_here: 1,
 };
 
 /** Blank must stay blank — 0 boxes per container is a real, different claim. */
@@ -116,7 +116,7 @@ export default function ProductsPage() {
   const can = useCan();
   // the import and edit controls
   const isManager = can('product','full');
-  const list = usePagedList<Product, { missing_weight: number; missing_recipe: number; missing_qc: number; disabled: number }>(
+  const list = usePagedList<Product, { missing_weight: number; missing_recipe: number; missing_qc: number; missing_rate: number; disabled: number }>(
     ['products', q, type, missing, showDisabled],
     // `active=1` unless the tick is on. Server-side because this list is
     // paged: a tick that dropped rows from the page in hand would filter one
@@ -163,6 +163,20 @@ export default function ProductsPage() {
       count: list.summary?.missing_qc ?? 0,
       label: 'with no QC spec',
       title: 'What to measure and what passes. Without one the QC gate holds nothing up for it, so the goods ship uninspected',
+    },
+    /*
+     * The fourth gap (2026-11-16). Unlike the three above it, this one
+     * **closes itself**: a product leaves this count the moment the floor
+     * books a shift against it, since the rate is measured from the shift
+     * book first and read off the catalogue only where the product has never
+     * run. So it names the new items and the ones nobody has made yet, which
+     * is exactly the list the production planner cannot date a job for.
+     */
+    {
+      key: 'rate',
+      count: list.summary?.missing_rate ?? 0,
+      label: 'with no output rate',
+      title: 'Good pieces a day. Measured from the shifts already booked where the product has run; without either the production planner cannot work out how long a job of it takes and somebody has to date that job by hand',
     },
   ];
   const offCount = list.summary?.disabled ?? 0;
@@ -416,6 +430,21 @@ export default function ProductsPage() {
                 </Field>
                 <Field label="Pcs / Box">
                   <Input type="number" min={0} step="any" value={editing.pcs_per_pack ?? ''} onChange={(e) => set({ pcs_per_pack: numOrNull(e.target.value) })} />
+                </Field>
+                {/*
+                  * What the production planner computes a job's length from
+                  * (2026-11-16). **The second answer, not the first**: the
+                  * rate is measured from the shifts already booked wherever
+                  * the product has run, and this is read only where it has
+                  * not — a new mould, or the first order for an item. So a
+                  * blank here is not a gap on a product the floor is already
+                  * making, which is what the Products page's own chip counts.
+                  */}
+                <Field label="Output (good pcs / day)">
+                  <Input type="number" min={0} step="any" value={editing.pcs_per_day ?? ''} onChange={(e) => set({ pcs_per_day: numOrNull(e.target.value) })} />
+                  <div className="mt-1 text-xs text-slate-400">
+                    Used only where the floor has never booked a shift for this product
+                  </div>
                 </Field>
                 <Field label="Boxes per 20ft">
                   <Input type="number" min={0} step="any" value={editing.qty_20ft ?? ''} onChange={(e) => set({ qty_20ft: numOrNull(e.target.value) })} />

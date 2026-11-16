@@ -54,6 +54,10 @@ export default function PlanJobsModal({ jobs, onClose, onPlanned }: {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['work-orders'] });
       queryClient.invalidateQueries({ queryKey: ['orders'] });
+      // The order book's lines view prints each line's Start and Finish from
+      // its jobs, so it goes stale after a bulk plan — the grid's own save has
+      // invalidated it all along and this did not.
+      queryClient.invalidateQueries({ queryKey: ['order-lines'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard'] });
       onPlanned();
     },

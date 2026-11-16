@@ -1,7 +1,7 @@
 import { db } from '../db/connection.js';
 import { ORDER_JOB_END } from './production.js';
 import { round2 } from './totals.js';
-import { monthsBetween } from './months.js';
+import { monthsBetween, addDaysIso } from './months.js';
 import { STATUS_SQL, statusSqlFor } from './proformaStatus.js';
 import { trackerRows, type InvoiceHead, type TrackerRow } from './invoiceTracker.js';
 
@@ -260,11 +260,7 @@ export function daysBetween(from: string, to: string): number | null {
   return Math.round(ms / 86_400_000);
 }
 
-export function addDaysIso(date: string, days: number): string {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
-  if (!m) return '';
-  return new Date(Date.UTC(+m[1], +m[2] - 1, +m[3] + days)).toISOString().slice(0, 10);
-}
+export { addDaysIso };
 
 /**
  * The client's own colours: red once the date has passed, yellow for the

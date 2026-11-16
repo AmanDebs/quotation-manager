@@ -1,0 +1,181 @@
+import './helpers/scratch.js';
+import { test, describe } from 'node:test';
+import assert from 'node:assert/strict';
+import { db } from '../src/db/connection.js';
+import { outputRates, outputRateFor, NO_RATE_SQL } from '../src/services/outputRate.js';
+import { makeCustomer, makeOrder } from './helpers/factory.js';
+
+/**
+ * How fast a product is made — the figure the production planner computes a
+ * job's length from (2026-11-16).
+ *
+ * Most of these are about the two ways a rate can be quietly wrong: measured
+ * in the wrong currency, which makes every duration short, or measured per
+ * shift rather than per day, which halves them on a plant that runs two.
+ */
+
+let seq = 0;
+const product = (name = `Rate product ${++seq}`, pcsPerDay: number | null = null): number =>
+  Number((db.prepare('INSERT INTO products (name, pcs_per_day) VALUES (?, ?) RETURNING id')
+    .get(name, pcsPerDay) as { id: number }).id);
+
+function job(productId: number | null, qty = 1_00_000): number {
+  const order = makeOrder({ customerId: makeCustomer(), currency: 'INR' });
+  return Number((db.prepare(
+    `INSERT INTO work_orders (number, order_id, order_line, product_id, qty_planned)
+     VALUES (?, ?, 0, ?, ?) RETURNING id`
+  ).get(`WO/R-${++seq}`, order, productId, qty) as { id: number }).id);
+}
+
+/** A shift booked against a job, optionally into a lot. */
+function shift(jobId: number, date: string, ok: number, o: Partial<{ shift: string; reject: number; batchId: number }> = {}) {
+  db.prepare(
+    `INSERT INTO production_entries (work_order_id, batch_id, date, shift, qty_ok, qty_reject)
+     VALUES (?, ?, ?, ?, ?, ?)`
+  ).run(jobId, o.batchId ?? null, date, o.shift ?? 'A', ok, o.reject ?? 0);
+}
+
+/** A lot on that job, scrapped and never dispatched — so its output is gone. */
+function scrappedLot(jobId: number): number {
+  return Number((db.prepare(
+    `INSERT INTO batches (work_order_id, number, date, disposition) VALUES (?, ?, '2026-11-01', 'scrapped') RETURNING id`
+  ).get(jobId, `B/R-${++seq}`) as { id: number }).id);
+}
+
+const rateOf = (p: number) => outputRates([p]).get(p) ?? null;
+
+describe('the measured output rate', () => {
+  test('is good pieces over the days they were booked on', () => {
+    const p = product();
+    const w = job(p);
+    shift(w, '2026-11-01', 20_000);
+    shift(w, '2026-11-02', 30_000);
+    const r = rateOf(p)!;
+    assert.equal(r.pcs_per_day, 25_000);
+    assert.equal(r.source, 'measured');
+    assert.equal(r.days, 2);
+    assert.equal(r.last_run, '2026-11-02');
+  });
+
+  /**
+   * The plant runs two shifts a day — their own COA reads *05032026A+B* — so
+   * counting entries rather than days would halve every duration computed
+   * from this.
+   */
+  test('two shifts on one day are one day', () => {
+    const p = product();
+    const w = job(p);
+    shift(w, '2026-11-01', 20_000, { shift: 'A' });
+    shift(w, '2026-11-01', 20_000, { shift: 'B' });
+    const r = rateOf(p)!;
+    assert.equal(r.days, 1);
+    assert.equal(r.pcs_per_day, 40_000);
+  });
+
+  /** It is the product's rate, not one job's: the same item pools. */
+  test('every job of the product pools into one rate', () => {
+    const p = product();
+    shift(job(p), '2026-11-01', 10_000);
+    shift(job(p), '2026-11-02', 30_000);
+    assert.equal(rateOf(p)!.pcs_per_day, 20_000);
+  });
+
+  /**
+   * **The currency has to match the target.** A job's balance is
+   * `qty_planned − LIVE_OK`, so a rate measured over output a later decision
+   * condemned would be a rate of pieces that no longer exist — and every
+   * duration computed from it short.
+   */
+  test('a scrapped lot does not flatter it', () => {
+    const p = product();
+    const w = job(p);
+    shift(w, '2026-11-01', 20_000);
+    shift(w, '2026-11-02', 80_000, { batchId: scrappedLot(w) });
+    const r = rateOf(p)!;
+    assert.equal(r.pcs_per_day, 10_000, 'the condemned 80,000 was counted');
+    assert.equal(r.days, 2, 'the day it was booked on still happened');
+  });
+
+  /** Rejects are not good pieces, and a rate of good pieces leaves them out. */
+  test('rejects are not counted', () => {
+    const p = product();
+    shift(job(p), '2026-11-01', 9_000, { reject: 1_000 });
+    assert.equal(rateOf(p)!.pcs_per_day, 9_000);
+  });
+
+  /**
+   * Never a guess and never zero — the `hasRecipe: false` rule. A zero would
+   * make every job of it infinitely long rather than undatable, which is the
+   * worse of the two failures because it looks like an answer.
+   */
+  test('a product that has never run and states nothing has no rate at all', () => {
+    const p = product();
+    assert.equal(rateOf(p), null);
+    assert.equal(outputRateFor(p), null);
+    assert.equal(outputRateFor(null), null);
+  });
+
+  test('and a day that produced nothing good is not a rate of zero', () => {
+    const p = product();
+    const w = job(p);
+    shift(w, '2026-11-01', 5_000, { batchId: scrappedLot(w) });
+    assert.equal(rateOf(p), null, 'a rate of 0 would be a job that never finishes');
+  });
+});
+
+describe('the stated output rate', () => {
+  test('fills the gap for a product that has never run', () => {
+    const p = product(`Stated ${++seq}`, 50_000);
+    const r = rateOf(p)!;
+    assert.equal(r.pcs_per_day, 50_000);
+    assert.equal(r.source, 'stated');
+    assert.equal(r.days, 0);
+  });
+
+  /**
+   * The client's own answer when asked: the shift book is what the plant did,
+   * where a typed figure is what somebody believes.
+   */
+  test('and the shift book beats it where the product has run', () => {
+    const p = product(`Both ${++seq}`, 50_000);
+    shift(job(p), '2026-11-01', 12_000);
+    const r = rateOf(p)!;
+    assert.equal(r.pcs_per_day, 12_000);
+    assert.equal(r.source, 'measured');
+  });
+
+  /** Blank is not zero — the rule `masters.ts` states about `cavities`. */
+  test('a blank figure is no answer rather than a rate of nothing', () => {
+    const p = product();
+    db.prepare('UPDATE products SET pcs_per_day = NULL WHERE id = ?').run(p);
+    assert.equal(rateOf(p), null);
+    db.prepare('UPDATE products SET pcs_per_day = 0 WHERE id = ?').run(p);
+    assert.equal(rateOf(p), null, 'a stated zero is not a rate either');
+  });
+
+  test('several products are answered in one call, and one with nothing is simply absent', () => {
+    const measured = product();
+    shift(job(measured), '2026-11-01', 7_000);
+    const stated = product(`Stated ${++seq}`, 3_000);
+    const neither = product();
+    const got = outputRates([measured, stated, neither, 0, -1]);
+    assert.deepEqual([...got.keys()].sort((a, b) => a - b), [measured, stated].sort((a, b) => a - b));
+  });
+});
+
+/** The clause behind the Products page's *N with no output rate* chip. */
+describe('which products the catalogue cannot date a job for', () => {
+  const noRate = (id: number) => Number((db.prepare(
+    `SELECT COUNT(*) AS c FROM products WHERE id = ? AND ${NO_RATE_SQL}`
+  ).get(id) as { c: number }).c) === 1;
+
+  test('names the ones with neither a measurement nor a figure', () => {
+    const bare = product();
+    const stated = product(`Stated ${++seq}`, 1_000);
+    const run = product();
+    shift(job(run), '2026-11-01', 1_000);
+    assert.equal(noRate(bare), true);
+    assert.equal(noRate(stated), false);
+    assert.equal(noRate(run), false, 'a product the floor has run needs no typed figure');
+  });
+});

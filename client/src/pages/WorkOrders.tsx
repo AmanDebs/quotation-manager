@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
-import type { WorkOrder, WorkOrderStatus } from '../types';
+import type { WorkOrder, WorkOrderStatus, PlannedJob } from '../types';
 import { PageHeader, Card, Button, EmptyState, ErrorText, ExportTabs, Input, Pagination, SegmentedTabs, Select, CAPTION_CLASS, TH_CLASS } from '../components/ui';
 import { useCompanies } from '../components/CompanySelect';
 import { JobDateCell } from './Orders';
@@ -10,13 +10,14 @@ import { Icon } from '../components/icons';
 import { ColumnFilter, FilteredByStrip } from '../components/ColumnFilter';
 import { useColumnFilters, type ColumnFilterSpec } from '../lib/useColumnFilters';
 import PlanJobsModal from '../components/PlanJobsModal';
+import PlanQueueModal from '../components/PlanQueueModal';
 import { LogOutput } from '../components/LogOutputModal';
 import { useCan } from '../App';
 import { fmtQty, fmtDate } from '../lib/format';
 import { useUrlFilter } from '../lib/useUrlFilter';
 import { usePagedList, PAGE_SIZE } from '../lib/usePagedList';
 import { useUnsavedChanges } from '../lib/useUnsavedChanges';
-import { jobDateOf, jobDateColumn, jobDateIsRevision, type JobDateField } from '../lib/jobDates';
+import { jobDateOf, jobDateColumn, jobDateIsRevision, jobDateField, type JobDateField } from '../lib/jobDates';
 
 /**
  * Every job across every order — the shop floor's own view.
@@ -224,7 +225,7 @@ function dateSpan(group: WorkOrder[]): { from: string; to: string } {
  * Escape puts an untouched cell back. Everything returns to text when the page
  * is saved and the pending edits are cleared.
  */
-function DateCell({ value, editable, pending, open, onOpen, onClose, onChange, title }: {
+function DateCell({ value, editable, pending, open, onOpen, onClose, onChange, onStep, title }: {
   value: string;
   editable: boolean;
   pending: boolean;
@@ -232,6 +233,8 @@ function DateCell({ value, editable, pending, open, onOpen, onClose, onChange, t
   onOpen: () => void;
   onClose: () => void;
   onChange: (v: string) => void;
+  /** Move to the next date box on the page, or the one before it. */
+  onStep?: (by: 1 | -1) => void;
   title?: string;
 }) {
   if (editable && open) {
@@ -244,7 +247,23 @@ function DateCell({ value, editable, pending, open, onOpen, onClose, onChange, t
         title={title}
         onChange={(e) => onChange(e.target.value)}
         onBlur={() => { if (!pending) onClose(); }}
-        onKeyDown={(e) => { if (e.key === 'Escape') onClose(); }}
+        /*
+         * **Enter and Tab walk the page** (2026-11-16). Only one cell is ever
+         * a box — that is what keeps the table quiet — so without this every
+         * date is its own mouse trip, which on 65 unplanned jobs is 130 of
+         * them and is half of why nobody fills this in.
+         *
+         * Tab is taken over rather than left to the browser: the next cell's
+         * input does not exist in the DOM until `editing` points at it, so
+         * the browser's own focus move would land somewhere unrelated and
+         * leave the box behind it open.
+         */
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') { onClose(); return; }
+          if (!onStep) return;
+          if (e.key === 'Enter') { e.preventDefault(); onStep(1); return; }
+          if (e.key === 'Tab') { e.preventDefault(); onStep(e.shiftKey ? -1 : 1); }
+        }}
       />
     );
   }
@@ -307,6 +326,7 @@ export default function WorkOrdersPage() {
    */
   const [ticked, setTicked] = useState<Set<number>>(new Set());
   const [planModal, setPlanModal] = useState(false);
+  const [queueModal, setQueueModal] = useState(false);
   /*
    * The planning grid (2026-09-29, the client: *"I can record all the dates in
    * a single page"*). `Plan jobs…` beside it writes **one** date across a
@@ -487,6 +507,34 @@ export default function WorkOrdersPage() {
    * saved: these are the same pending edits as any typed by hand, and any one
    * of them can be corrected on its own row before Save.
    */
+  /*
+   * What the queue planner is asked about: the ticked jobs, or — with none
+   * ticked — every job on the page that has **no start date yet**, which is
+   * the queue somebody actually faces (65 of 84 on the live book). Jobs that
+   * already have a plan are left out of the default rather than silently
+   * re-planned; ticking one is how you ask for that.
+   */
+  const queueTarget = ticked.size
+    ? jobs.filter((w) => ticked.has(w.id) && plannable(w))
+    : jobs.filter((w) => plannable(w) && !jobDateOf(w, 'planned_start') && !jobDateOf(w, 'revised_start'));
+
+  /*
+   * The planner's answer, staged as ordinary pending edits — the same path
+   * `setGroupDate` takes, and the reason this feature adds no writer: each
+   * date lands in the column that job's own state allows, the sticky bar
+   * counts them, and one Save sends the one `POST /plan` that has always
+   * written a plan. Nothing is saved until that press, so a queue can be
+   * worked out twice and the second answer simply replaces the first.
+   */
+  const stagePlan = (plan: PlannedJob[]) => {
+    for (const p of plan) {
+      const w = jobs.find((j) => j.id === p.id);
+      if (!w || !p.planned_start || !p.planned_end) continue;
+      setDate(w, jobDateField(w, false), p.planned_start);
+      setDate(w, jobDateField(w, true), p.planned_end);
+    }
+  };
+
   const setGroupDate = (orderId: number, group: WorkOrder[], end: boolean, value: string) => {
     setGroupDates((g) => ({ ...g, [orderId]: { ...g[orderId], [end ? 'end' : 'start']: value } }));
     for (const j of group) setDate(j, jobDateColumn(jobDateIsRevision(j, end), end), value);
@@ -531,6 +579,32 @@ export default function WorkOrdersPage() {
   const groupsOpenByDefault = expandGroups || hunting;
   const groupIsOpen = (orderId: number) =>
     (toggledGroups.has(orderId) ? !groupsOpenByDefault : groupsOpenByDefault);
+  /*
+   * Every date box on the page, in reading order — what Enter and Tab step
+   * through. Built from the same `open` rule the rows are drawn by, so a
+   * folded order's jobs are skipped: stepping into a cell nobody can see
+   * would type a date into a row that is not on screen.
+   *
+   * Exactly one cell per date is editable (`jobDateField` — planned while
+   * that column is blank, revised after), which is what makes this a flat
+   * list rather than four columns of maybes. It is read off the server's row
+   * rather than off the pending edits, so the walk does not shift under
+   * somebody mid-way down the page.
+   */
+  const dateCells: string[] = [];
+  if (planning && mayPlan) {
+    for (const w of jobs) {
+      const inGroup = (jobsPerOrder.get(w.order_id) ?? 0) > 1;
+      if ((inGroup && !groupIsOpen(w.order_id)) || !plannable(w)) continue;
+      dateCells.push(`${w.id}:${jobDateField(w, false)}`, `${w.id}:${jobDateField(w, true)}`);
+    }
+  }
+  /** The next box along, or none at the end of the page — never wrapping. */
+  const stepCell = (key: string, by: 1 | -1) => {
+    const i = dateCells.indexOf(key);
+    setEditing(i < 0 ? null : dateCells[i + by] ?? null);
+  };
+
   const toggleGroup = (orderId: number) => setToggledGroups((prev) => {
     const next = new Set(prev);
     if (next.has(orderId)) next.delete(orderId); else next.add(orderId);
@@ -707,7 +781,34 @@ export default function WorkOrdersPage() {
             Plan {ticked.size || ''} job{ticked.size === 1 ? '' : 's'}…
           </Button>
         )}
+        {/*
+          * The other half of planning, and the one this page was missing: the
+          * dialog beside it writes **one** date across a ticked set, which is
+          * right for jobs sharing a slot and no use at all for a book where
+          * every job runs on its own dates. This works them out — a queue, a
+          * start date, and each job's length from how fast that product
+          * actually goes.
+          */}
+        {planning && mayPlan && (
+          <Button
+            variant="secondary"
+            disabled={queueTarget.length === 0}
+            onClick={() => setQueueModal(true)}
+            title={queueTarget.length
+              ? 'Lay these jobs out one after another from a start date, and date them from how fast each product goes'
+              : 'Every job on this page already has a start date — tick the ones to re-plan'}
+          >
+            Work out dates for {queueTarget.length || ''}…
+          </Button>
+        )}
       </div>
+      {queueModal && (
+        <PlanQueueModal
+          jobs={queueTarget}
+          onClose={() => setQueueModal(false)}
+          onStage={stagePlan}
+        />
+      )}
       {planModal && (
         <PlanJobsModal
           jobs={jobs.filter((w) => ticked.has(w.id))}
@@ -1272,11 +1373,21 @@ export default function WorkOrdersPage() {
                             <DateCell
                               value={dateValue(w, field)}
                               editable={editable}
-                              pending={!!dates[w.id]?.[field]}
+                              /*
+                               * Staged, not truthy: a cell **cleared to
+                               * blank** is a real pending edit — the server
+                               * reads a blank as *clear this column* — and
+                               * testing the value lost its tint and let the
+                               * blur close it with the clear still waiting.
+                               */
+                              pending={field in (dates[w.id] ?? {})}
                               open={editing === `${w.id}:${field}`}
                               onOpen={() => setEditing(`${w.id}:${field}`)}
-                              onClose={() => setEditing(null)}
+                              /* Only if it is still the open one — a step has
+                                 already moved on by the time this fires. */
+                              onClose={() => setEditing((cur) => (cur === `${w.id}:${field}` ? null : cur))}
                               onChange={(v) => setDate(w, field, v)}
+                              onStep={(by) => stepCell(`${w.id}:${field}`, by)}
                               title={editable
                                 ? revised
                                   ? `${w.number} — the revised ${word}; the original stays as it was recorded`

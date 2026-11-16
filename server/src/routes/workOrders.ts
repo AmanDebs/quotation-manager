@@ -10,7 +10,9 @@ import { coaWhere } from '../services/coaRegister.js';
 import {
   coaHeaderFields, coaHeaderError, cleanCoaHeader, buyerOrderFrom,
 } from '../services/coaHeader.js';
-import { progressFor, progressForMany, LIVE_OK } from '../services/production.js';
+import { progressFor, progressForMany, LIVE_OK, ORDER_DUE } from '../services/production.js';
+import { outputRates } from '../services/outputRate.js';
+import { layOutQueue, byDue, type QueueJob } from '../services/jobPlan.js';
 import { despatchedByOrder, lastTripForLine } from '../services/despatch.js';
 import { materialCostByWorkOrder } from '../services/costing.js';
 import {
@@ -506,6 +508,96 @@ workOrdersRouter.get('/:id', requirePermission('work_order'), (req: AuthedReques
  *
  * `work_order: full`, like editing a job — Production and the super admin.
  */
+/**
+ * What a queue of jobs would be dated, **without writing anything**
+ * (2026-11-16, the client: *"look a better way to plan our production"*).
+ *
+ * The planner's half of the act: it takes the jobs and a start date and
+ * answers with the dates they would get, how many days each is, and — the
+ * part no screen in this app could answer before — **which of them would
+ * finish after the customer's own date**. The press that follows is the
+ * existing `POST /plan` with those dates in it, so this adds a planner
+ * without adding a writer: every guard, the one transaction and the
+ * `plannedDateError` routing stay exactly where they are.
+ *
+ * A **POST that writes nothing**, because eighty job ids do not belong in a
+ * query string. The prefill endpoints' rule still holds in full — a read may
+ * not write, and this one does not.
+ *
+ * `work_order: full`, the cell `POST /plan` itself carries: this is the
+ * planning act read out loud, and it names every job's customer and figures.
+ *
+ * Declared **above `/:id`**, the trap this router records twice.
+ */
+workOrdersRouter.post('/plan/preview', requirePermission('work_order', 'full'), (req: AuthedRequest, res) => {
+  const body = req.body ?? {};
+  const raw = Array.isArray(body.ids) ? body.ids : [];
+  if (!raw.length) return res.status(400).json({ error: 'Tick at least one job to plan' });
+  const ids = raw.map((n: unknown) => Number(n));
+  // Refused, not dropped — `POST /plan`'s own rule: a preview quietly missing
+  // the job somebody meant to plan is a plan they would then save.
+  if (ids.some((n: number) => !Number.isInteger(n) || n <= 0)) {
+    return res.status(400).json({ error: 'Every job to plan needs an id' });
+  }
+  if (new Set(ids).size !== ids.length) return res.status(400).json({ error: 'The same job was sent twice' });
+  const start = String(body.start ?? '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(start)) return res.status(400).json({ error: 'Name the day the queue starts' });
+
+  const rows = ids.map((id: number) => accessible(req, id));
+  if (rows.some((r: Record<string, unknown> | undefined) => !r)) return res.status(404).json({ error: 'Work order not found' });
+  const jobs = rows as Record<string, unknown>[];
+  const closed = jobs.filter((j) => ['done', 'cancelled'].includes(String(j.status)));
+  if (closed.length) {
+    return res.status(409).json({
+      error: `${closed.map((j) => j.number).join(', ')} ${closed.length === 1 ? 'is' : 'are'} already completed or cancelled and cannot be planned.`,
+    });
+  }
+
+  /*
+   * When each order is due, so the plan can say which promises it breaks.
+   * `ORDER_DUE` is the one answer every other screen reads — the order's own
+   * date where it states one, else the floor's own job dates — rather than a
+   * second reading of the same columns.
+   */
+  const orderIds = [...new Set(jobs.map((j) => Number(j.order_id)))];
+  const due = new Map<number, string | null>();
+  if (orderIds.length) {
+    const marks = orderIds.map(() => '?').join(',');
+    for (const r of db.prepare(
+      `SELECT o.id AS id, ${ORDER_DUE('o')} AS due FROM orders o WHERE o.id IN (${marks})`
+    ).all(...(orderIds as never[])) as Record<string, unknown>[]) {
+      due.set(Number(r.id), (String(r.due ?? '') || null));
+    }
+  }
+
+  const queue: QueueJob[] = jobs.map((j) => ({
+    id: Number(j.id),
+    number: String(j.number ?? ''),
+    product_id: j.product_id === null || j.product_id === undefined ? null : Number(j.product_id),
+    customer_name: String(j.customer_name ?? ''),
+    item: String(j.item_label ?? ''),
+    order_id: Number(j.order_id),
+    order_number: String(j.order_number ?? ''),
+    /*
+     * What is left to make. `made` on the list row is already the `LIVE_OK`
+     * sum `progressFor` reports, so this is that function's own balance read
+     * off a row we have rather than a second query per job — and in the same
+     * currency as the rate, which is good pieces.
+     */
+    pieces: Math.max(0, Number(j.qty_planned ?? 0) - Number(j.made ?? 0)),
+    due: due.get(Number(j.order_id)) ?? null,
+  }));
+
+  /*
+   * The order the client sent, unless it asked for none — then soonest
+   * customer date first, which is where a planner starts. Either way the
+   * screen can reorder and ask again, and nothing is written until Save.
+   */
+  const ordered = body.keep_order === true ? queue : [...queue].sort(byDue);
+  const rates = outputRates(ordered.map((j) => j.product_id ?? 0));
+  return res.json({ start, jobs: layOutQueue(ordered, rates, start) });
+});
+
 workOrdersRouter.post('/plan', requirePermission('work_order', 'full'), (req: AuthedRequest, res) => {
   const body = req.body ?? {};
   const perJob = Array.isArray(body.jobs);

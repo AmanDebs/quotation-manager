@@ -379,6 +379,17 @@ addColumnIfMissing('products', 'qty_40ft', 'REAL');
  * matching two of the words stays `other`; see `guessProductType`.
  */
 addColumnIfMissing('products', 'weight_grams', 'REAL');
+/*
+ * Good pieces a production day (2026-11-16), so the app can work out how long
+ * a job takes instead of asking somebody to know it.
+ *
+ * Nullable and nothing fills it in, `weight_grams`' own rule: blank means not
+ * stated, where 0 would mean a job never finishes. It is also the **second**
+ * answer — `services/outputRate.ts` measures the rate from the shift book
+ * first and reads this only for a product that has never run, which is the
+ * gap measurement cannot fill by its nature.
+ */
+addColumnIfMissing('products', 'pcs_per_day', 'REAL');
 // Make or buy (2026-09-11). Default 1: every product on file was made here as far as the app knew.
 addColumnIfMissing('products', 'made_here', 'INTEGER NOT NULL DEFAULT 1');
 if (addColumnIfMissing('products', 'product_type', "TEXT NOT NULL DEFAULT 'other'")) {
