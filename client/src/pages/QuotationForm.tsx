@@ -8,6 +8,7 @@ import { PdfLink } from '../components/PdfLink';
 import CompanySelect from '../components/CompanySelect';
 import {
   CustomerSelect, DocNumber, IncoTermsInput, PaymentTermsInput, DeliveryTimelineInput, ContainersInput, HeaderCharges, DeskPersonInput,
+  DocumentDiscount,
 } from '../components/DocFields';
 import LineItemsEditor from '../components/LineItemsEditor';
 import FollowupButton from '../components/FollowupButton';
@@ -40,6 +41,8 @@ interface Draft {
   notes: string;
   freight: number;
   insurance: number;
+  /** The document's own discount, off the lines before tax. */
+  discount_pct: number;
   inco_terms: string;
   container_count: string;
   prepared_by: string;
@@ -55,7 +58,7 @@ const emptyDraft = (): Draft => ({
   // across a timezone boundary; it is a default and stays editable.
   customer_id: '', enquiry_id: null, date: today(), currency: 'INR',
   validity_date: addDays(today(), DEFAULT_VALIDITY_DAYS),
-  payment_terms: '', delivery_terms: '', notes: '', freight: 0, insurance: 0,
+  payment_terms: '', delivery_terms: '', notes: '', freight: 0, insurance: 0, discount_pct: 0,
   inco_terms: '', container_count: '', prepared_by: '', tax_type: 'igst',
   is_export: 0, column_config: newColumnConfig(), items: [],
 });
@@ -93,6 +96,7 @@ export default function QuotationFormPage() {
         notes: existing.notes,
         freight: existing.freight ?? 0,
         insurance: existing.insurance ?? 0,
+        discount_pct: existing.discount_pct ?? 0,
         inco_terms: existing.inco_terms ?? '',
         container_count: existing.container_count ?? '',
         prepared_by: existing.prepared_by ?? '',
@@ -523,6 +527,21 @@ export default function QuotationFormPage() {
               />
             </>
           )}
+          {/*
+            * Under the table rather than in Details: it is arithmetic over the
+            * lines, and it is read against the `Lines:` figure the editor
+            * prints directly above it. Outside the read-only branch as well,
+            * because a converted quotation is frozen and still has to state
+            * the discount its own PDF prints — it draws nothing where there is
+            * none, so the ordinary locked page is unchanged.
+            */}
+          <DocumentDiscount
+            value={draft.discount_pct}
+            items={draft.items}
+            currency={draft.currency}
+            showTax={draft.tax_type !== 'none'}
+            onChange={(pct) => set({ discount_pct: pct })}
+          />
         </Card>
 
         {/* Saved through its own endpoint, so it needs an id — and it stays

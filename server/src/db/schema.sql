@@ -319,6 +319,23 @@ CREATE TABLE IF NOT EXISTS quotations (
   approved_at TEXT NOT NULL DEFAULT '',
   approval_note TEXT NOT NULL DEFAULT '',
   column_config TEXT NOT NULL DEFAULT '{}',
+  -- The document's own discount, off the lines before tax (2026-11-16, the
+  -- client: *"Add a discount option in PI and quotation"*). A percentage
+  -- rather than a lump sum, because that is what is negotiated and because it
+  -- follows a corrected quantity instead of quietly becoming the wrong
+  -- fraction of it; `discount_amount` is what `computeTotals` stamped it at,
+  -- the way `subtotal` and `tax_total` below are.
+  --
+  -- Not a charge line, which is how freight is entered: freight is a separate
+  -- supply and wants a rate of its own, where a discount reduces the goods'
+  -- own value and so follows their own rates. See `computeTotals`.
+  --
+  -- On all four selling documents and not only the two that offer the field,
+  -- so the figure carries along the chain: an order booked from a discounted
+  -- proforma whose total jumped back up would contradict the document the
+  -- buyer paid the advance against.
+  discount_pct REAL NOT NULL DEFAULT 0,
+  discount_amount REAL NOT NULL DEFAULT 0,
   subtotal REAL NOT NULL DEFAULT 0,
   tax_total REAL NOT NULL DEFAULT 0,
   grand_total REAL NOT NULL DEFAULT 0,
@@ -425,6 +442,9 @@ CREATE TABLE IF NOT EXISTS orders (
   notes TEXT NOT NULL DEFAULT '',
   column_config TEXT NOT NULL DEFAULT '{}',
   created_by INTEGER REFERENCES users(id),
+  -- The document's own discount. See the note on `quotations.discount_pct`.
+  discount_pct REAL NOT NULL DEFAULT 0,
+  discount_amount REAL NOT NULL DEFAULT 0,
   subtotal REAL NOT NULL DEFAULT 0,
   tax_total REAL NOT NULL DEFAULT 0,
   grand_total REAL NOT NULL DEFAULT 0,
@@ -522,6 +542,9 @@ CREATE TABLE IF NOT EXISTS proforma_invoices (
   approved_at TEXT NOT NULL DEFAULT '',
   approval_note TEXT NOT NULL DEFAULT '',
   column_config TEXT NOT NULL DEFAULT '{}',
+  -- The document's own discount. See the note on `quotations.discount_pct`.
+  discount_pct REAL NOT NULL DEFAULT 0,
+  discount_amount REAL NOT NULL DEFAULT 0,
   subtotal REAL NOT NULL DEFAULT 0,
   tax_total REAL NOT NULL DEFAULT 0,
   grand_total REAL NOT NULL DEFAULT 0,
@@ -610,6 +633,9 @@ CREATE TABLE IF NOT EXISTS commercial_invoices (
   approved_at TEXT NOT NULL DEFAULT '',
   approval_note TEXT NOT NULL DEFAULT '',
   column_config TEXT NOT NULL DEFAULT '{}',
+  -- The document's own discount. See the note on `quotations.discount_pct`.
+  discount_pct REAL NOT NULL DEFAULT 0,
+  discount_amount REAL NOT NULL DEFAULT 0,
   subtotal REAL NOT NULL DEFAULT 0,
   tax_total REAL NOT NULL DEFAULT 0,
   grand_total REAL NOT NULL DEFAULT 0,

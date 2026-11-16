@@ -32,3 +32,30 @@ export function piecesOrdered(it: { qty?: number | null; unit?: string | null; t
   if (per == null || it.qty == null) return null;
   return Number(it.qty) * per || 0;
 }
+
+/**
+ * The quantity a line is billed on — the client's copy of `billedQty` in
+ * `server/src/services/totals.ts`, which is the authority. Everything drawn
+ * from it on screen is a preview of what the server will compute on save, so
+ * the two have to agree or the figure under the table reads differently from
+ * the saved document.
+ *
+ * It lives here rather than inside `LineItemsEditor` because two screens now
+ * ask it: that editor, for each line's own amount, and `DocumentDiscount`,
+ * which needs the lines added up to say what a percentage takes off them. A
+ * second copy is how the two would come to disagree about one document.
+ */
+export function billedQty(
+  it: { qty?: number | null; unit?: string | null; total_pcs?: number | null; pcs_per_pack?: number | null; is_charge?: number | boolean }
+): number | null {
+  // A charge bills at quantity 1, so its price is its amount.
+  if (it.is_charge) return 1;
+  const per = piecesPerBillingUnitOf(it);
+  if (per && it.total_pcs != null) return it.total_pcs / per;
+  if (it.qty != null) return it.qty;
+  return it.total_pcs ?? null;
+}
+
+/** What the lines come to before any document-level discount. */
+export const linesTotal = (items: { unit_price: number; qty?: number | null; unit?: string | null; total_pcs?: number | null; pcs_per_pack?: number | null; is_charge?: number | boolean }[]): number =>
+  items.reduce((s, it) => s + (billedQty(it) ?? 0) * (Number(it.unit_price) || 0), 0);

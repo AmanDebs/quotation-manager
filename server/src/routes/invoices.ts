@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { db, transaction } from '../db/connection.js';
 import { nextNumber, exportChangeError, numberInUseError } from '../services/numbering.js';
 import { exportOnlyInvoice } from '../services/permissions.js';
-import { computeTotals, round2, type LineItemInput } from '../services/totals.js';
+import { clampDiscountPct, computeTotals, round2, type LineItemInput } from '../services/totals.js';
 import { allows, type AuthedRequest } from '../middleware/auth.js';
 import { scopeClause, canAccessCustomer, linkError, customerChangeError, raiseForError } from '../middleware/scope.js';
 import { resolveCompanyId, foreignBankError } from '../services/companies.js';
@@ -302,8 +302,8 @@ function syncPackingList(invoiceId: number, userId: number, packing: PackingInpu
   });
 }
 
-function saveItems(invoiceId: number, items: LineItemInput[], taxType: 'none' | 'cgst_sgst' | 'igst', freight: number, insurance: number, currency: string) {
-  const totals = computeTotals(items, taxType, freight, insurance, currency);
+function saveItems(invoiceId: number, items: LineItemInput[], taxType: 'none' | 'cgst_sgst' | 'igst', freight: number, insurance: number, currency: string, discountPct = 0) {
+  const totals = computeTotals(items, taxType, freight, insurance, currency, 0, discountPct);
   db.prepare('DELETE FROM invoice_items WHERE invoice_id = ?').run(invoiceId);
   const ins = db.prepare(
     `INSERT INTO invoice_items (invoice_id, product_id, description, hsn_code, qty, unit, unit_price, tax_pct, amount, color, packs, pcs_per_pack, total_pcs, qty_20ft, qty_40ft, is_charge, custom1, custom2, custom3, image, sort_order)
@@ -315,13 +315,13 @@ function saveItems(invoiceId: number, items: LineItemInput[], taxType: 'none' | 
       it.qty_20ft ?? null, it.qty_40ft ?? null, it.is_charge ? 1 : 0,
       it.custom1 ?? '', it.custom2 ?? '', it.custom3 ?? '', it.image ?? '', i)
   );
-  db.prepare('UPDATE commercial_invoices SET subtotal = ?, tax_total = ?, grand_total = ? WHERE id = ?').run(
-    totals.subtotal, totals.tax_total, totals.grand_total, invoiceId
+  db.prepare('UPDATE commercial_invoices SET discount_amount = ?, subtotal = ?, tax_total = ?, grand_total = ? WHERE id = ?').run(
+    totals.discount_amount, totals.subtotal, totals.tax_total, totals.grand_total, invoiceId
   );
 }
 
 const headerFields = [
-  'date', 'customer_id', 'pi_id', 'order_id', 'consignee', 'ship_to_name', 'ship_to_gstin', 'notify_party', 'currency', 'freight', 'insurance',
+  'date', 'customer_id', 'pi_id', 'order_id', 'consignee', 'ship_to_name', 'ship_to_gstin', 'notify_party', 'currency', 'freight', 'insurance', 'discount_pct',
   'shipping_details', 'bank_account', 'inco_terms', 'payment_terms',
   'is_export', 'country_of_origin', 'port_of_loading', 'port_of_discharge', 'final_destination',
   'notify_party_2', 'method_of_despatch', 'lot_no', 'prepared_by', 'arn_ref',
@@ -342,6 +342,7 @@ function headerValues(body: Record<string, unknown>, existing?: Record<string, u
     currency: String(v('currency', 'INR')),
     freight: Number(v('freight', 0)),
     insurance: Number(v('insurance', 0)),
+    discount_pct: clampDiscountPct(v('discount_pct', 0)),
     shipping_details: String(v('shipping_details')),
     bank_account: String(v('bank_account')),
     inco_terms: String(v('inco_terms')),
@@ -468,6 +469,11 @@ const invoiceColumns: Column<Row>[] = [
   { header: 'INCO', value: (r) => str(r.inco_terms) },
   { header: 'Discharge port', value: (r) => str(r.port_of_discharge) },
   { header: 'Currency', value: (r) => str(r.currency) },
+  // The document's own discount, beside the subtotal it has already come off
+  // (2026-11-16). Stated rather than left implicit between the lines' gross
+  // and the net total, which is exactly what somebody opens a spreadsheet to
+  // check.
+  { header: 'Discount', value: (r) => num(r.discount_amount), type: 'money' },
   { header: 'Subtotal', value: (r) => num(r.subtotal), type: 'money' },
   { header: 'Freight', value: (r) => num(r.freight), type: 'money' },
   { header: 'Insurance', value: (r) => num(r.insurance), type: 'money' },
@@ -603,7 +609,7 @@ invoicesRouter.post('/', (req: AuthedRequest, res) => {
     // PATCH below, so the form need never PUT over a date.
     const due = String(body.due_date ?? '').trim();
     if (/^\d{4}-\d{2}-\d{2}$/.test(due)) db.prepare('UPDATE commercial_invoices SET due_date = ? WHERE id = ?').run(due, id);
-    saveItems(id, (body.items ?? []) as LineItemInput[], h.tax_type, h.freight, h.insurance, h.currency);
+    saveItems(id, (body.items ?? []) as LineItemInput[], h.tax_type, h.freight, h.insurance, h.currency, h.discount_pct);
     syncPackingList(id, req.user!.id, body.packing as PackingInput | undefined);
     return id;
   });
@@ -679,7 +685,7 @@ invoicesRouter.put('/:id', (req: AuthedRequest, res) => {
       ...(headerFields.map((f) => (h as Record<string, unknown>)[f]) as never[]),
       id
     );
-    if (Array.isArray(body.items)) saveItems(id, body.items as LineItemInput[], h.tax_type, h.freight, h.insurance, h.currency);
+    if (Array.isArray(body.items)) saveItems(id, body.items as LineItemInput[], h.tax_type, h.freight, h.insurance, h.currency, h.discount_pct);
     syncPackingList(id, req.user!.id, body.packing as PackingInput | undefined);
     resetApprovalOnEdit('commercial_invoices', id);
   });

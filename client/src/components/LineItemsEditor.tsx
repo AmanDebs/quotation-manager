@@ -6,7 +6,7 @@ import { Button, Input, Select, SearchSelect, type SearchOption, TH_CLASS } from
 import { fmtMoney, fmtDate } from '../lib/format';
 import { shrinkImage } from '../lib/image';
 import { unitOptions, productTypeLabel } from '../pages/Products';
-import { PIECES_PER_BILLING_UNIT, piecesPerBillingUnitOf } from '../lib/pieces';
+import { PIECES_PER_BILLING_UNIT, billedQty } from '../lib/pieces';
 import { DEFAULT_TAX_PCT } from '../lib/tax';
 
 /**
@@ -122,23 +122,6 @@ const showsPer1000Rate = (unit: string | undefined) => {
   const per = PIECES_PER_BILLING_UNIT[unit ?? ''];
   return per !== undefined && per !== 1000;
 };
-
-/**
- * Boxes × pcs/box decides the quantity when the rate is priced per piece —
- * **including per box**, whose divisor is the line's own pack size rather than
- * a constant, so Total Qty over it is the box count the rate charges against.
- * Otherwise the typed Qty stands, and failing that Total Qty is taken at face
- * value in whatever the rate basis is — quotations and proformas have no Qty
- * field, so a kg-priced line has nowhere else to say how much is being sold.
- */
-function billedQty(it: LineItem): number | null {
-  // A charge bills at quantity 1, so its price is its amount.
-  if (it.is_charge) return 1;
-  const per = piecesPerBillingUnitOf(it);
-  if (per && it.total_pcs != null) return it.total_pcs / per;
-  if (it.qty != null) return it.qty;
-  return it.total_pcs ?? null;
-}
 
 /**
  * Shared line-item grid for quotations, orders, proforma invoices and

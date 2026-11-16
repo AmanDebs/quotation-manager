@@ -32,6 +32,17 @@ export interface ComputedItem extends LineItemInput {
 
 export interface Totals {
   items: ComputedItem[];
+  /**
+   * What the document's own discount takes off the lines. 0 on every document
+   * that states none, which is every one raised before the field existed —
+   * see `discountPct` below.
+   *
+   * The lines added up **before** it is `subtotal + discount_amount`, which is
+   * what the items table's own closing TOTAL row states; all three figures go
+   * through `round2`, so that addition is exact rather than nearly exact.
+   */
+  discount_amount: number;
+  /** The taxable value: the lines, less the discount. */
   subtotal: number;
   tax_total: number;
   /**
@@ -43,6 +54,18 @@ export interface Totals {
 }
 
 export const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
+
+/**
+ * A document's discount percentage, held to 0–100.
+ *
+ * `computeTotals` clamps too, which is what guarantees no total can go
+ * negative whatever is on the row — but the figure has to be clamped **where
+ * it is stored** as well, or the band prints *Less Discount @ 150%* over a
+ * deduction of 100%: a label claiming more than it took. One rule, one name,
+ * read by every route that writes the column.
+ */
+export const clampDiscountPct = (v: unknown): number =>
+  Math.min(100, Math.max(0, Number(v) || 0));
 
 /**
  * Pieces in one billing unit, for the rate bases that are priced off a piece
@@ -170,6 +193,32 @@ export function billedQty(
  * saved. There is a test asserting exactly that across the combination matrix,
  * because "strictly additive" is the kind of claim that is easy to make and
  * expensive to be wrong about.
+ *
+ * `discountPct` is the document's own discount (2026-11-16, the client: *"Add a
+ * discount option in PI and quotation"*), and it is the second figure here
+ * charged on the whole document rather than on a line — deliberately, and the
+ * distinction from freight is the whole of why it is not a charge line.
+ *
+ * Freight is a **separate supply** bundled into the sale, so it wants a rate of
+ * its own and belongs on a line that carries one; that is the reasoning the
+ * header Freight and Insurance boxes were removed from the forms for. A
+ * discount is not a supply at all — it is a **reduction of the goods' own
+ * value**, so under GST it comes off the taxable value (s.15(3)(a)) and the tax
+ * on what is left follows the goods' own rates. Apportionment is therefore the
+ * correct treatment here rather than a workaround for a missing rate, and a
+ * flat percentage needs none: it scales every line's taxable value by the same
+ * factor, so it scales the tax by the same factor. One multiplication, exact.
+ *
+ * **The lines keep their gross amounts.** Only the document's figures move, so
+ * the proforma's derived per-1000 rate stays the list rate and reads as an
+ * arithmetic chain beside the discount rather than as a second deduction from
+ * a figure already net.
+ *
+ * Clamped to 0–100, which is a hard invariant rather than tidiness: above 100
+ * the grand total goes negative, and a negative total reaches the customer as
+ * an amount in words. Below 0 it would be a surcharge wearing the word
+ * *discount*. Like `tcsPct` it defaults to 0, where every figure is what it
+ * was before this existed.
  */
 export function computeTotals(
   items: LineItemInput[],
@@ -177,7 +226,8 @@ export function computeTotals(
   freight = 0,
   insurance = 0,
   currency = '',
-  tcsPct = 0
+  tcsPct = 0,
+  discountPct = 0
 ): Totals {
   const computed: ComputedItem[] = items.map((it) => {
     // Derived, then stamped back onto the row, so what is stored can never
@@ -204,13 +254,41 @@ export function computeTotals(
     };
   });
 
-  const subtotal = round2(computed.reduce((s, it) => s + it.amount, 0));
+  /*
+   * The lines added up, before the document's own discount. The items table's
+   * closing TOTAL row states this figure, which is why the discount and the
+   * net total are printed under it rather than over it.
+   *
+   * **Every line, a charge included.** A percentage off the document means a
+   * percentage off what the lines come to, and that is the only reading the
+   * band can show: *Gross Amount 1,10,000 / Less Discount @ 5% 5,500 / TOTAL
+   * PRICE 1,04,500* reproduces, where discounting the goods alone would print
+   * a figure that is not the stated percentage of the figure above it. The
+   * legacy header freight and insurance are **not** discounted — they are
+   * added after the subtotal, which the band shows plainly — and those boxes
+   * have been off the forms since 2026-09-07, so a charge line is the one
+   * route freight takes now.
+   */
+  const lines_total = round2(computed.reduce((s, it) => s + it.amount, 0));
+  const discountPctClamped = Math.min(100, Math.max(0, Number(discountPct) || 0));
+  const discount_amount = discountPctClamped > 0 ? round2(lines_total * (discountPctClamped / 100)) : 0;
+  // The taxable value. Named `subtotal` because that is what it has always
+  // been — the base the charges are added to and the tax is charged on — and
+  // because nothing downstream reads it as the sum of the lines: every caller
+  // either stamps it or prints it as TOTAL PRICE.
+  const subtotal = round2(lines_total - discount_amount);
   const charges = (freight || 0) + (insurance || 0);
   const taxable = round2(subtotal + charges);
 
   let tax_total = 0;
   if (taxType !== 'none') {
-    const onItems = computed.reduce((s, it) => s + it.amount * ((it.tax_pct ?? 0) / 100), 0);
+    /*
+     * A flat percentage off every line scales each line's taxable value by the
+     * same factor, so it scales the tax by the same factor:
+     * `Σ(aᵢ(1−d)·rᵢ) = (1−d)·Σ(aᵢrᵢ)`. No apportionment, and exact.
+     */
+    const onItems = computed.reduce((s, it) => s + it.amount * ((it.tax_pct ?? 0) / 100), 0)
+      * (1 - discountPctClamped / 100);
     /**
      * Header freight and insurance are taxed too. They used to be added into
      * `taxable` and then left out of `tax_total`, which under-charged GST by
@@ -226,12 +304,18 @@ export function computeTotals(
      * `charges × rate`, and where they differ it is the invoice's own
      * weighted rate rather than a rate picked from one arbitrary line.
      *
-     * A price-only document (no quantities, so `subtotal` is 0) has no rate
+     * A price-only document (no quantities, so the lines total 0) has no rate
      * to follow and no value to tax, so the charges attract nothing.
+     *
+     * The weights are over `lines_total`, not over the discounted `subtotal`:
+     * they are shares of the goods and must sum to 1, and a discount changes
+     * neither the proportions nor the fact that the freight itself is not
+     * discounted. So freight tax is unmoved by a discount on the goods, which
+     * is correct.
      */
-    const onCharges = charges > 0 && subtotal > 0
+    const onCharges = charges > 0 && lines_total > 0
       ? computed.reduce(
-          (s, it) => s + charges * (it.amount / subtotal) * ((it.tax_pct ?? 0) / 100),
+          (s, it) => s + charges * (it.amount / lines_total) * ((it.tax_pct ?? 0) / 100),
           0
         )
       : 0;
@@ -245,5 +329,5 @@ export function computeTotals(
 
   let grand_total = round2(taxable + tax_total + tcs_amount);
   if (currency === 'INR') grand_total = Math.round(grand_total);
-  return { items: computed, subtotal, tax_total, tcs_amount, grand_total };
+  return { items: computed, discount_amount, subtotal, tax_total, tcs_amount, grand_total };
 }

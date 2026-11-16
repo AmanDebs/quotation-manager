@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { db, transaction } from '../db/connection.js';
 import { quotationTypeChangeError, nextNumber } from '../services/numbering.js';
-import { computeTotals, type LineItemInput } from '../services/totals.js';
+import { clampDiscountPct, computeTotals, type LineItemInput } from '../services/totals.js';
 import type { AuthedRequest } from '../middleware/auth.js';
 import { scopeClause, canAccessCustomer, customerChangeError, raiseForError } from '../middleware/scope.js';
 import { submit, decide, resetApprovalOnEdit, blockUnapprovedTransition, exemptApprovalError , mayApprove } from '../services/approval.js';
@@ -55,9 +55,10 @@ function saveItems(
   taxType: 'none' | 'cgst_sgst' | 'igst',
   freight: number,
   insurance: number,
-  currency: string
+  currency: string,
+  discountPct = 0
 ) {
-  const totals = computeTotals(items, taxType, freight, insurance, currency);
+  const totals = computeTotals(items, taxType, freight, insurance, currency, 0, discountPct);
   db.prepare('DELETE FROM quotation_items WHERE quotation_id = ?').run(quotationId);
   const ins = db.prepare(
     `INSERT INTO quotation_items (quotation_id, product_id, description, hsn_code, qty, unit, unit_price, tax_pct, amount, color, packs, pcs_per_pack, total_pcs, qty_20ft, qty_40ft, is_charge, custom1, custom2, custom3, image, sort_order)
@@ -69,8 +70,8 @@ function saveItems(
       it.qty_20ft ?? null, it.qty_40ft ?? null, it.is_charge ? 1 : 0,
       it.custom1 ?? '', it.custom2 ?? '', it.custom3 ?? '', it.image ?? '', i)
   );
-  db.prepare('UPDATE quotations SET subtotal = ?, tax_total = ?, grand_total = ? WHERE id = ?').run(
-    totals.subtotal, totals.tax_total, totals.grand_total, quotationId
+  db.prepare('UPDATE quotations SET discount_amount = ?, subtotal = ?, tax_total = ?, grand_total = ? WHERE id = ?').run(
+    totals.discount_amount, totals.subtotal, totals.tax_total, totals.grand_total, quotationId
   );
 }
 
@@ -234,6 +235,11 @@ const quotationColumns: Column<Row>[] = [
   { header: 'Issued by', value: (r) => str(r.company_name) },
   { header: 'Type', value: (r) => (num(r.is_export) ? 'Export' : 'Domestic') },
   { header: 'Currency', value: (r) => str(r.currency) },
+  // The document's own discount, beside the subtotal it has already come off
+  // (2026-11-16). Stated rather than left implicit between the lines' gross
+  // and the net total, which is exactly what somebody opens a spreadsheet to
+  // check.
+  { header: 'Discount', value: (r) => num(r.discount_amount), type: 'money' },
   { header: 'Subtotal', value: (r) => num(r.subtotal), type: 'money' },
   { header: 'Freight', value: (r) => num(r.freight), type: 'money' },
   { header: 'Insurance', value: (r) => num(r.insurance), type: 'money' },
@@ -309,8 +315,8 @@ quotationsRouter.post('/', (req: AuthedRequest, res) => {
   const result = transaction(() => {
     const number = nextNumber('quotation', { companyId, date: String(body.date ?? '') });
     const info = db.prepare(
-      `INSERT INTO quotations (number, revision, date, customer_id, enquiry_id, currency, validity_date, payment_terms, delivery_terms, notes, freight, insurance, inco_terms, container_count, prepared_by, tax_type, is_export, created_by, column_config, company_id, status)
-       VALUES (?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft')`
+      `INSERT INTO quotations (number, revision, date, customer_id, enquiry_id, currency, validity_date, payment_terms, delivery_terms, notes, freight, insurance, discount_pct, inco_terms, container_count, prepared_by, tax_type, is_export, created_by, column_config, company_id, status)
+       VALUES (?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft')`
     ).run(
       number,
       String(body.date ?? new Date().toISOString().slice(0, 10)),
@@ -326,6 +332,7 @@ quotationsRouter.post('/', (req: AuthedRequest, res) => {
       String(body.notes ?? ''),
       Number(body.freight ?? 0),
       Number(body.insurance ?? 0),
+      clampDiscountPct(body.discount_pct),
       String(body.inco_terms ?? ''),
       String(body.container_count ?? ''),
       // The desk name, then the account's own, which is the order the form's
@@ -342,7 +349,7 @@ quotationsRouter.post('/', (req: AuthedRequest, res) => {
       companyId
     );
     const id = Number(info.lastInsertRowid);
-    saveItems(id, (body.items ?? []) as LineItemInput[], taxType, Number(body.freight ?? 0), Number(body.insurance ?? 0), String(body.currency ?? 'INR'));
+    saveItems(id, (body.items ?? []) as LineItemInput[], taxType, Number(body.freight ?? 0), Number(body.insurance ?? 0), String(body.currency ?? 'INR'), Number(body.discount_pct ?? 0));
     // Inside the transaction: an enquiry marked quoted with no quotation to
     // show for it would be exactly the kind of drift status syncing exists to
     // prevent.
@@ -377,9 +384,13 @@ quotationsRouter.put('/:id', (req: AuthedRequest, res) => {
   const currency = String(body.currency ?? existing.currency);
   const freight = Number(body.freight ?? existing.freight ?? 0);
   const insurance = Number(body.insurance ?? existing.insurance ?? 0);
+  // Falls back to the stored figure, like freight beside it: a PUT that says
+  // nothing about the discount leaves it alone, where `?? 0` would have every
+  // save that omits the field quietly give the money back.
+  const discountPct = clampDiscountPct(body.discount_pct ?? existing.discount_pct);
   transaction(() => {
     db.prepare(
-      `UPDATE quotations SET number = ?, date = ?, customer_id = ?, currency = ?, validity_date = ?, payment_terms = ?, delivery_terms = ?, notes = ?, freight = ?, insurance = ?, inco_terms = ?, container_count = ?, prepared_by = ?, tax_type = ?, is_export = ?, column_config = ? WHERE id = ?`
+      `UPDATE quotations SET number = ?, date = ?, customer_id = ?, currency = ?, validity_date = ?, payment_terms = ?, delivery_terms = ?, notes = ?, freight = ?, insurance = ?, discount_pct = ?, inco_terms = ?, container_count = ?, prepared_by = ?, tax_type = ?, is_export = ?, column_config = ? WHERE id = ?`
     ).run(
       String(body.number ?? existing.number),
       String(body.date ?? existing.date),
@@ -391,6 +402,7 @@ quotationsRouter.put('/:id', (req: AuthedRequest, res) => {
       String(body.notes ?? ''),
       freight,
       insurance,
+      discountPct,
       String(body.inco_terms ?? ''),
       String(body.container_count ?? ''),
       String(body.prepared_by ?? ''),
@@ -399,7 +411,7 @@ quotationsRouter.put('/:id', (req: AuthedRequest, res) => {
       JSON.stringify(body.column_config ?? JSON.parse(String(existing.column_config || '{}'))),
       id
     );
-    if (Array.isArray(body.items)) saveItems(id, body.items as LineItemInput[], taxType, freight, insurance, currency);
+    if (Array.isArray(body.items)) saveItems(id, body.items as LineItemInput[], taxType, freight, insurance, currency, discountPct);
     resetApprovalOnEdit('quotations', id);
     // The validity date may have moved in either direction. Inside the same
     // transaction, and after resetApprovalOnEdit, so an extension that also
@@ -541,8 +553,8 @@ quotationsRouter.post('/:id/revise', (req: AuthedRequest, res) => {
       // question the first round did. Without it the link dies at the first
       // renegotiation — the original is superseded and excluded from the
       // count, and the new one points at nothing.
-      `INSERT INTO quotations (number, revision, date, customer_id, company_id, enquiry_id, currency, validity_date, payment_terms, delivery_terms, notes, internal_notes, freight, insurance, inco_terms, container_count, prepared_by, tax_type, is_export, column_config, created_by, status, subtotal, tax_total, grand_total)
-       SELECT number, ?, ?, customer_id, company_id, enquiry_id, currency, validity_date, payment_terms, delivery_terms, notes, internal_notes, freight, insurance, inco_terms, container_count, prepared_by, tax_type, is_export, column_config, ?, 'negotiating', subtotal, tax_total, grand_total
+      `INSERT INTO quotations (number, revision, date, customer_id, company_id, enquiry_id, currency, validity_date, payment_terms, delivery_terms, notes, internal_notes, freight, insurance, discount_pct, inco_terms, container_count, prepared_by, tax_type, is_export, column_config, created_by, status, discount_amount, subtotal, tax_total, grand_total)
+       SELECT number, ?, ?, customer_id, company_id, enquiry_id, currency, validity_date, payment_terms, delivery_terms, notes, internal_notes, freight, insurance, discount_pct, inco_terms, container_count, prepared_by, tax_type, is_export, column_config, ?, 'negotiating', discount_amount, subtotal, tax_total, grand_total
        FROM quotations WHERE id = ?`
     ).run(maxRev.r + 1, new Date().toISOString().slice(0, 10), req.user!.id, id);
     const newId = Number(info.lastInsertRowid);
@@ -600,8 +612,8 @@ quotationsRouter.post('/:id/duplicate', (req: AuthedRequest, res) => {
     // Inside the transaction, like every other number this app issues.
     const number = nextNumber('quotation', { companyId: Number(existing.company_id), date: today });
     const info = db.prepare(
-      `INSERT INTO quotations (number, revision, date, customer_id, company_id, currency, validity_date, payment_terms, delivery_terms, notes, freight, insurance, inco_terms, container_count, prepared_by, tax_type, is_export, column_config, created_by, status, subtotal, tax_total, grand_total)
-       SELECT ?, 0, ?, customer_id, company_id, currency, ?, payment_terms, delivery_terms, notes, freight, insurance, inco_terms, container_count, prepared_by, tax_type, is_export, column_config, ?, 'draft', subtotal, tax_total, grand_total
+      `INSERT INTO quotations (number, revision, date, customer_id, company_id, currency, validity_date, payment_terms, delivery_terms, notes, freight, insurance, discount_pct, inco_terms, container_count, prepared_by, tax_type, is_export, column_config, created_by, status, discount_amount, subtotal, tax_total, grand_total)
+       SELECT ?, 0, ?, customer_id, company_id, currency, ?, payment_terms, delivery_terms, notes, freight, insurance, discount_pct, inco_terms, container_count, prepared_by, tax_type, is_export, column_config, ?, 'draft', discount_amount, subtotal, tax_total, grand_total
        FROM quotations WHERE id = ?`
     ).run(number, today, validity >= today ? validity : '', req.user!.id, id);
     const newId = Number(info.lastInsertRowid);

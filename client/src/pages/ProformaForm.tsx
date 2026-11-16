@@ -8,6 +8,7 @@ import { PdfLink } from '../components/PdfLink';
 import CompanySelect, { useCompanies } from '../components/CompanySelect';
 import {
   CustomerSelect, DocNumber, IncoTermsInput, PaymentTermsInput, ContainersInput, PortOfLoadingInput, HeaderCharges, ShipToFields, DeskPersonInput,
+  DocumentDiscount,
 } from '../components/DocFields';
 import LineItemsEditor from '../components/LineItemsEditor';
 import ReadOnlyItems from '../components/ReadOnlyItems';
@@ -44,6 +45,8 @@ interface Draft {
   notify_party: string;
   freight: number;
   insurance: number;
+  /** The document's own discount, off the lines before tax. */
+  discount_pct: number;
   lead_time: string;
   bank_account: string;
   inco_terms: string;
@@ -81,7 +84,7 @@ interface Draft {
 
 const emptyDraft = (): Draft => ({
   customer_id: '', quotation_id: null, date: today(), currency: 'INR', consignee: '', ship_to_name: '', ship_to_gstin: '', notify_party: '',
-  freight: 0, insurance: 0, lead_time: '', bank_account: '', inco_terms: '', payment_terms: '',
+  freight: 0, insurance: 0, discount_pct: 0, lead_time: '', bank_account: '', inco_terms: '', payment_terms: '',
   delivery_terms: '',
   // Offered for a week unless somebody says otherwise. Derived from the
   // draft's own date rather than the clock, so the two cannot disagree
@@ -139,7 +142,7 @@ export default function ProformaFormPage() {
   useEffect(() => {
     if (existing) {
       const {
-        id: _id, status: _s, subtotal: _st, tax_total: _tt, grand_total: _gt,
+        id: _id, status: _s, discount_amount: _da, subtotal: _st, tax_total: _tt, grand_total: _gt,
         customer_name: _cn, quotation_number: _qn, payments: _p, amount_received: _ar,
         approval_status: _as, approved_at: _aa, approval_note: _an, approved_by_name: _ab, created_by_name: _cb,
         ...rest
@@ -610,6 +613,19 @@ export default function ProformaFormPage() {
             currency={draft.currency}
             items={draft.items}
             onChange={(patch) => set(patch)}
+          />
+          {/*
+            * Under the table because it is arithmetic over the lines, and
+            * drawn on a locked proforma too — one booked into an order is
+            * frozen and still has to state the discount its own PDF prints.
+            * It draws nothing where there is none.
+            */}
+          <DocumentDiscount
+            value={draft.discount_pct}
+            items={draft.items}
+            currency={draft.currency}
+            showTax={draft.tax_type !== 'none'}
+            onChange={(pct) => set({ discount_pct: pct })}
           />
         </Card>
 

@@ -9,6 +9,7 @@ import { PdfLink } from '../components/PdfLink';
 import CompanySelect from '../components/CompanySelect';
 import {
   CustomerSelect, DocNumber, IncoTermsInput, PaymentTermsInput, PortOfLoadingInput, HeaderCharges, ShipToFields, DeskPersonInput,
+  DocumentDiscount,
 } from '../components/DocFields';
 import LineItemsEditor from '../components/LineItemsEditor';
 import FollowupButton from '../components/FollowupButton';
@@ -41,6 +42,8 @@ interface Draft {
   notify_party: string;
   freight: number;
   insurance: number;
+  /** Carried from the order or proforma behind this invoice; see the form. */
+  discount_pct: number;
   shipping_details: string;
   bank_account: string;
   inco_terms: string;
@@ -85,7 +88,7 @@ const emptyPackingItem = (): PackingListItem => ({
 
 const emptyDraft = (): Draft => ({
   customer_id: '', pi_id: null, date: today(), currency: 'INR', consignee: '', ship_to_name: '', ship_to_gstin: '', notify_party: '',
-  freight: 0, insurance: 0, shipping_details: '', bank_account: '', inco_terms: '', payment_terms: '',
+  freight: 0, insurance: 0, discount_pct: 0, shipping_details: '', bank_account: '', inco_terms: '', payment_terms: '',
   is_export: 0, country_of_origin: '', port_of_loading: '', port_of_discharge: '', final_destination: '',
   notify_party_2: '', method_of_despatch: '', lot_no: '', arn_ref: '', prepared_by: '',
   remarks: '', tax_type: 'igst', column_config: newColumnConfig(), items: [],
@@ -211,7 +214,7 @@ export default function InvoiceFormPage() {
   useEffect(() => {
     if (existing) {
       const {
-        id: _id, status: _s, subtotal: _st, tax_total: _tt, grand_total: _gt,
+        id: _id, status: _s, discount_amount: _da, subtotal: _st, tax_total: _tt, grand_total: _gt,
         customer_name: _cn, pi_number: _pn, variance: _v, payments: _p, amount_received: _ar, balance_due: _bd, advance_applied: _av,
         approval_status: _as, approved_at: _aa, approval_note: _an, approved_by_name: _ab, created_by_name: _cb,
         packing: _pk,
@@ -591,6 +594,23 @@ export default function InvoiceFormPage() {
             items={draft.items}
             onChange={(patch) => set(patch)}
           />
+          {/*
+            * Drawn **only where a value already stands** — the Containers and
+            * TCS rule. The client asked for the discount on the quotation and
+            * the proforma, which are the two offer documents, so this form
+            * does not invite one; but an order booked from a discounted
+            * proforma carries the figure, and money in the total with nothing
+            * on screen to see or clear it is the `HeaderCharges` hazard.
+            */}
+          {!!draft.discount_pct && (
+            <DocumentDiscount
+              value={draft.discount_pct}
+              items={draft.items}
+              currency={draft.currency}
+              showTax={draft.tax_type !== 'none'}
+              onChange={(pct) => set({ discount_pct: pct })}
+            />
+          )}
         </Card>
 
         <Card

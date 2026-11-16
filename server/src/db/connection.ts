@@ -897,6 +897,24 @@ if (Number(booked.changes) > 0) {
   }
 }
 
+/*
+ * The document's own discount (2026-11-16, the client: *"Add a discount option
+ * in PI and quotation"*), on all four selling documents so the figure carries
+ * along the chain rather than vanishing when an order is booked.
+ *
+ * Additive and 0 on every row already on file, which is what makes it safe to
+ * turn on: at 0 `computeTotals` returns exactly what it returned before the
+ * column existed, so the next ordinary save of any document restates nothing.
+ * **No index** — the `batches.disposition` trap read before it bites: an index
+ * in `schema.sql` naming a column the migration has not added yet kills the
+ * boot on a database migrated from an earlier version, and nothing here needs
+ * one anyway.
+ */
+for (const t of ['quotations', 'proforma_invoices', 'orders', 'commercial_invoices']) {
+  addColumnIfMissing(t, 'discount_pct', 'REAL NOT NULL DEFAULT 0');
+  addColumnIfMissing(t, 'discount_amount', 'REAL NOT NULL DEFAULT 0');
+}
+
 // Starter note presets so the feature is useful immediately.
 const presetRow = db.prepare('SELECT id, note_presets FROM companies WHERE is_default = 1 ORDER BY id LIMIT 1').get() as
   { id: number; note_presets: string } | undefined;

@@ -628,8 +628,42 @@ export interface MoneyRow {
  */
 function totalsRows(doc: Row, currency: string, grandLabel: string, items: Row[] = []): MoneyRow[] {
   const bandRows: MoneyRow[] = [];
-  const hasExtras = Number(doc.freight) || Number(doc.insurance) || doc.tax_total > 0 || roundOffOf(doc) !== 0;
-  bandRows.push({ label: 'TOTAL PRICE', value: fmtMoney(doc.subtotal, currency), band: hasExtras ? true : false });
+  /*
+   * The document's own discount (2026-11-16). Three rows where there is one,
+   * none where there is not — so every document already raised prints exactly
+   * the band it printed before, which is what makes the whole column safe to
+   * add to a function all four selling documents close on.
+   *
+   * The **first row is always the sum of the amount column**: the gross where
+   * there is a discount, the subtotal where there is not. That is what makes
+   * `buildProformaPdf`'s `.slice(1)` keep meaning what it meant — it drops this
+   * row because the items table's own closing TOTAL row already states it —
+   * while the net TOTAL PRICE survives, which it would not if the discount
+   * were inserted above it.
+   *
+   * Printed as `Less Discount`, the symmetric form of the `Add Freight` and
+   * `Add IGST` rows below it, so the verb carries the sign rather than a minus
+   * nobody else on the band uses. The percentage is printed exactly as it is
+   * stored rather than rounded for the label: a rounded one would not
+   * reproduce the figure beside it.
+   */
+  const discount = round2(Number(doc.discount_amount) || 0);
+  const grossOfLines = round2(Number(doc.subtotal) + discount);
+  const hasExtras = !!(Number(doc.freight) || Number(doc.insurance) || doc.tax_total > 0
+    || discount > 0 || roundOffOf(doc) !== 0);
+  bandRows.push({
+    label: discount > 0 ? 'Gross Amount' : 'TOTAL PRICE',
+    value: fmtMoney(discount > 0 ? grossOfLines : doc.subtotal, currency),
+    band: hasExtras && discount === 0,
+  });
+  if (discount > 0) {
+    const pct = Number(doc.discount_pct) || 0;
+    bandRows.push({
+      label: pct > 0 ? `Less Discount @ ${pct}%` : 'Less Discount',
+      value: fmtMoney(discount, currency),
+    });
+    bandRows.push({ label: 'TOTAL PRICE', value: fmtMoney(doc.subtotal, currency), band: true });
+  }
   if (Number(doc.freight) && Number(doc.insurance)) {
     bandRows.push({ label: 'Indicative Freight & Insurance', value: fmtMoney(Number(doc.freight) + Number(doc.insurance), currency) });
   } else {

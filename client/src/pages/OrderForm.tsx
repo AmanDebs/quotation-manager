@@ -8,6 +8,7 @@ import { PdfLink } from '../components/PdfLink';
 import CompanySelect from '../components/CompanySelect';
 import {
   CustomerSelect, DocNumber, IncoTermsInput, PaymentTermsInput, ContainersInput, HeaderCharges, DeskPersonInput,
+  DocumentDiscount,
 } from '../components/DocFields';
 import DispatchTab from '../components/DispatchTab';
 import LineItemsEditor from '../components/LineItemsEditor';
@@ -51,6 +52,8 @@ interface Draft {
   payment_terms: string;
   freight: number;
   insurance: number;
+  /** Carried from the proforma this order was booked from; see the form. */
+  discount_pct: number;
   inco_terms: string;
   container_count: string;
   advance_due: number;
@@ -74,7 +77,7 @@ interface Draft {
 const emptyDraft = (): Draft => ({
   customer_id: '', quotation_id: null, date: today(), is_export: 0, coa_required: 0,
   order_through: 'Phone', spoc: '', po_number: '', po_date: '',
-  currency: 'INR', tax_type: 'igst', payment_terms: '', freight: 0, insurance: 0,
+  currency: 'INR', tax_type: 'igst', payment_terms: '', freight: 0, insurance: 0, discount_pct: 0,
   inco_terms: '', container_count: '', advance_due: 0, advance_amount: 0, advance_received_date: '',
   destination: '', port_of_discharge: '', transport: '', freight_terms: '', promised_date: '', scheduled_date: '',
   revised_date: '', actual_production_date: '', remarks: '', notes: '', column_config: newColumnConfig(), items: [],
@@ -108,7 +111,7 @@ export default function OrderFormPage() {
   useEffect(() => {
     if (existing) {
       const {
-        id: _id, number: _n, status: _s, subtotal: _st, tax_total: _tt, grand_total: _gt,
+        id: _id, number: _n, status: _s, discount_amount: _da, subtotal: _st, tax_total: _tt, grand_total: _gt,
         customer_name: _cn, quotation_number: _qn, created_by_name: _cb,
         dispatched_value: _dv, pending_value: _pv, fully_dispatched: _fd, any_dispatched: _ad,
         proformas: _pf, invoices: _iv,
@@ -581,6 +584,23 @@ export default function OrderFormPage() {
             items={draft.items}
             onChange={(patch) => set(patch)}
           />
+          {/*
+            * Drawn **only where a value already stands** — the Containers and
+            * TCS rule. The client asked for the discount on the quotation and
+            * the proforma, which are the two offer documents, so this form
+            * does not invite one; but an order booked from a discounted
+            * proforma carries the figure, and money in the total with nothing
+            * on screen to see or clear it is the `HeaderCharges` hazard.
+            */}
+          {!!draft.discount_pct && (
+            <DocumentDiscount
+              value={draft.discount_pct}
+              items={draft.items}
+              currency={draft.currency}
+              showTax={draft.tax_type !== 'none'}
+              onChange={(pct) => set({ discount_pct: pct })}
+            />
+          )}
         </Card>
 
         {/* The old Dispatch Progress card lived here. It has moved to the

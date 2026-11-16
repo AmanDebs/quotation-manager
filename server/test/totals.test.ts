@@ -235,3 +235,139 @@ describe('piecesOrdered', () => {
     }
   });
 });
+
+/**
+ * The document's own discount (2026-11-16, the client: *"Add a discount option
+ * in PI and quotation"*).
+ *
+ * Most of these are about what must **not** move. The discount went into the
+ * one function every document in this app saves through, and the server
+ * recomputes on every save — so a default that shifted anything would restate
+ * the amounts of every document already raised the next time somebody edited
+ * it.
+ */
+describe('document discount', () => {
+  const line = { description: 'Preform', qty: 1000, unit: 'unit', unit_price: 100, tax_pct: 18 };
+
+  /** The claim the whole change rests on, across the combinations. */
+  test('at nothing, every figure is what it was before the discount existed', () => {
+    for (const taxType of ['none', 'cgst_sgst', 'igst'] as const) {
+      for (const currency of ['INR', 'USD', 'EUR']) {
+        for (const freight of [0, 1800]) {
+          const withOut = computeTotals([line], taxType, freight, 0, currency);
+          const withZero = computeTotals([line], taxType, freight, 0, currency, 0, 0);
+          assert.deepEqual(withZero, withOut, `${taxType}/${currency}/${freight}`);
+          assert.equal(withOut.discount_amount, 0);
+        }
+      }
+    }
+  });
+
+  test('comes off the lines, and the subtotal is what is left', () => {
+    const t = computeTotals([line], 'none', 0, 0, 'USD', 0, 5);
+    assert.equal(t.discount_amount, 5000);
+    assert.equal(t.subtotal, 95000);
+    assert.equal(t.grand_total, 95000);
+  });
+
+  /**
+   * The gross is read back off the document as `subtotal + discount_amount`,
+   * which is what the PDF prints as *Gross Amount* and what the items table's
+   * own closing TOTAL row states. Every one of the three goes through `round2`,
+   * so that addition has to be exact rather than nearly exact.
+   */
+  test('the subtotal and the discount add back to the lines exactly', () => {
+    for (const pct of [1, 2.5, 5, 7.3, 12.5, 33.333, 97.7]) {
+      const t = computeTotals([{ ...line, unit_price: 3.017 }], 'igst', 0, 0, 'USD', 0, pct);
+      assert.equal(round2(t.subtotal + t.discount_amount), 3017, `at ${pct}%`);
+    }
+  });
+
+  /**
+   * Under GST a discount shown on the document comes off the taxable value, so
+   * the tax follows it down. Charging tax on the gross would overstate it by
+   * the tax on money nobody is being asked for.
+   */
+  test('tax is charged on the balance, not on the gross', () => {
+    const t = computeTotals([line], 'igst', 0, 0, 'USD', 0, 10);
+    assert.equal(t.subtotal, 90000);
+    assert.equal(t.tax_total, 16200); // 18% of 90,000, not of 100,000
+    assert.equal(t.grand_total, 106200);
+  });
+
+  /** Lines at different rates each follow their own, which one multiplication over the sum does not. */
+  test('a mixed-rate document taxes each line at its own rate after the discount', () => {
+    const t = computeTotals(
+      [{ ...line, unit_price: 100, tax_pct: 18 }, { ...line, unit_price: 50, tax_pct: 5 }],
+      'igst', 0, 0, 'USD', 0, 10
+    );
+    assert.equal(t.subtotal, 135000); // 90% of 150,000
+    // 18% of 90,000 + 5% of 45,000
+    assert.equal(t.tax_total, round2(90000 * 0.18 + 45000 * 0.05));
+  });
+
+  /**
+   * Freight is added after the subtotal and is not discounted, which the band
+   * shows plainly — so the tax on it must not move either. The apportionment
+   * weights are shares of the goods and have to keep summing to 1.
+   */
+  test('leaves the tax on header freight alone', () => {
+    const plain = computeTotals([line], 'igst', 1800, 0, 'USD');
+    const cut = computeTotals([line], 'igst', 1800, 0, 'USD', 0, 10);
+    assert.equal(round2(plain.tax_total - 100000 * 0.18), round2(cut.tax_total - 90000 * 0.18));
+    // And the freight itself is still in the total at face value.
+    assert.equal(cut.subtotal, 90000);
+    assert.equal(cut.grand_total, round2(90000 + 1800 + cut.tax_total));
+  });
+
+  /**
+   * A charge line is discounted with the goods — a percentage off the document
+   * is a percentage off what the lines come to, and it is the only reading the
+   * printed band reproduces.
+   */
+  test('a charge line is discounted with the goods', () => {
+    const t = computeTotals(
+      [line, { description: 'Tooling', unit_price: 10000, tax_pct: 18, is_charge: 1 }],
+      'none', 0, 0, 'USD', 0, 5
+    );
+    assert.equal(t.discount_amount, 5500); // 5% of 110,000, the lines total
+    assert.equal(t.subtotal, 104500);
+  });
+
+  /** The lines keep their gross amounts, so the derived per-1000 rate on the
+   *  proforma stays the list rate rather than reading as a second deduction. */
+  test('does not touch the line amounts', () => {
+    const t = computeTotals([line], 'igst', 0, 0, 'USD', 0, 25);
+    assert.equal(t.items[0].amount, 100000);
+  });
+
+  /**
+   * A hard invariant rather than tidiness: above 100 the grand total goes
+   * negative, and a negative total reaches the customer as an amount in words.
+   */
+  test('is clamped to 0 and 100, so no total can go negative', () => {
+    const over = computeTotals([line], 'igst', 0, 0, 'USD', 0, 150);
+    assert.equal(over.discount_amount, 100000);
+    assert.equal(over.subtotal, 0);
+    assert.equal(over.grand_total, 0);
+    const under = computeTotals([line], 'igst', 0, 0, 'USD', 0, -20);
+    assert.equal(under.discount_amount, 0);
+    assert.equal(under.subtotal, 100000);
+  });
+
+  /** The rupee is rounded once, at the end, as it always is here. */
+  test('rides through the rupee rounding rather than round it twice', () => {
+    const t = computeTotals([{ ...line, unit_price: 3.017 }], 'igst', 0, 0, 'INR', 0, 7.3);
+    assert.equal(t.discount_amount, 220.24);
+    assert.equal(t.subtotal, 2796.76);
+    assert.equal(t.grand_total, Math.round(2796.76 * 1.18));
+  });
+
+  /** A price-only document has nothing to discount and must not divide by it. */
+  test('a document with no quantities is unmoved', () => {
+    const t = computeTotals([{ description: 'Preform', qty: null, unit: 'per 1000', unit_price: 26 }], 'igst', 1800, 0, 'USD', 0, 10);
+    assert.equal(t.discount_amount, 0);
+    assert.equal(t.subtotal, 0);
+    assert.equal(t.tax_total, 0);
+  });
+});

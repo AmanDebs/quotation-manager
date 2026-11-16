@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { LineItem } from '../types';
 import { Button, Input, Select, Textarea, Field, StaticValue, useReadOnlyFields } from './ui';
 import { fmtMoney } from '../lib/format';
+import { linesTotal } from '../lib/pieces';
 
 /**
  * A document's own number, shown but not editable.
@@ -646,6 +647,83 @@ export function HeaderCharges({
       <Button variant="secondary" className="mt-2" onClick={move}>
         Move into a charge line{rate ? ` at ${rate}%` : ''}
       </Button>
+    </div>
+  );
+}
+
+/**
+ * The document's own discount (2026-11-16, the client: *"Add a discount option
+ * in PI and quotation"*).
+ *
+ * **A percentage off the lines, not a charge line and not a per-line column.**
+ * A charge line is how freight is entered, and the distinction is the reason:
+ * freight is a separate supply that wants a tax rate of its own, where a
+ * discount reduces the goods' own value and so follows the goods' own rates —
+ * `computeTotals` states it in full. A per-line column was the other candidate
+ * and was rejected on measurement: both item tables are already at their width
+ * limit (the editor carries a 1060px floor and the quotation PDF leaves its
+ * description 93.8pt), and a per-item concession is already expressible by
+ * quoting that item's own rate, which is what this desk does.
+ *
+ * **It is a preview, not the arithmetic.** The server recomputes on save, so
+ * every figure here goes through `billedQty` — the same rule, shared from
+ * `lib/pieces.ts` rather than copied — and the percentage is clamped to the
+ * same 0–100 the server clamps to, so what is shown is what is stored.
+ *
+ * It sits under the line-items table rather than in Details because it is
+ * arithmetic over the lines, and it is read against the `Lines:` figure the
+ * editor prints a few pixels above it.
+ */
+export function DocumentDiscount({
+  value, items, currency, showTax, disabled, onChange,
+}: {
+  value: number;
+  items: LineItem[];
+  currency: string;
+  /** Whether this document charges tax, so the note can say what it is charged on. */
+  showTax?: boolean;
+  disabled?: boolean;
+  onChange: (pct: number) => void;
+}) {
+  const pct = Math.min(100, Math.max(0, Number(value) || 0));
+  const gross = linesTotal(items);
+  const off = Math.round((gross * (pct / 100) + Number.EPSILON) * 100) / 100;
+
+  // Nothing at all on a read-only document that states no discount: an empty
+  // field on a frozen page is the dead box `StaticValue` drops for the same
+  // reason. Stated where there is one, since it is money off the total.
+  const readOnly = useReadOnlyFields();
+  if (readOnly && pct <= 0) return null;
+
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-slate-100 pt-3 text-sm">
+      <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Discount</span>
+      {readOnly ? (
+        <span className="font-semibold tabular-nums text-slate-700">{pct}%</span>
+      ) : (
+        <div className="flex items-center gap-1">
+          <Input
+            type="number"
+            min={0}
+            max={100}
+            step="any"
+            className="w-20"
+            value={value || ''}
+            placeholder="0"
+            disabled={disabled}
+            onChange={(e) => onChange(e.target.value === '' ? 0 : Math.min(100, Math.max(0, Number(e.target.value))))}
+          />
+          <span className="text-slate-400">%</span>
+        </div>
+      )}
+      <span className="text-xs text-slate-500">
+        {pct > 0
+          ? <>
+              {pct}% of {fmtMoney(gross, currency)} = <strong className="tabular-nums text-slate-700">{fmtMoney(off, currency)}</strong> off
+              {showTax ? ', and tax is charged on what is left' : ''}
+            </>
+          : 'Off the lines above, before tax. Leave blank for none.'}
+      </span>
     </div>
   );
 }

@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { db, transaction } from '../db/connection.js';
 import { checkDocument } from '../services/documentChecks.js';
 import { nextNumber, exportChangeError } from '../services/numbering.js';
-import { computeTotals, round2, type LineItemInput } from '../services/totals.js';
+import { clampDiscountPct, computeTotals, round2, type LineItemInput } from '../services/totals.js';
 import { productionByOrder, ORDER_DUE, ORDER_DUE_FROM_JOBS } from '../services/production.js';
 import { despatchedByOrder } from '../services/despatch.js';
 import { orderMaterialCost } from '../services/costing.js';
@@ -225,7 +225,7 @@ function getFull(id: number, req?: AuthedRequest) {
 
 const headerFields = [
   'date', 'customer_id', 'quotation_id', 'is_export', 'coa_required', 'order_through', 'spoc', 'po_number', 'po_date',
-  'currency', 'tax_type', 'payment_terms', 'freight', 'insurance', 'inco_terms', 'container_count',
+  'currency', 'tax_type', 'payment_terms', 'freight', 'insurance', 'discount_pct', 'inco_terms', 'container_count',
   'advance_due', 'advance_amount', 'advance_received_date', 'destination', 'port_of_discharge', 'transport', 'freight_terms',
   'promised_date', 'scheduled_date', 'revised_date', 'actual_production_date', 'remarks', 'notes',
 ] as const;
@@ -251,6 +251,7 @@ function headerValues(body: Record<string, unknown>, existing?: Record<string, u
     payment_terms: String(v('payment_terms')),
     freight: Number(v('freight', 0)),
     insurance: Number(v('insurance', 0)),
+    discount_pct: clampDiscountPct(v('discount_pct', 0)),
     inco_terms: String(v('inco_terms')),
     container_count: String(v('container_count')),
     advance_due: Number(v('advance_due', 0)),
@@ -269,8 +270,8 @@ function headerValues(body: Record<string, unknown>, existing?: Record<string, u
   };
 }
 
-function saveItems(orderId: number, items: OrderItemInput[], taxType: 'none' | 'cgst_sgst' | 'igst', freight: number, insurance: number, currency: string) {
-  const totals = computeTotals(items, taxType, freight, insurance, currency);
+function saveItems(orderId: number, items: OrderItemInput[], taxType: 'none' | 'cgst_sgst' | 'igst', freight: number, insurance: number, currency: string, discountPct = 0) {
+  const totals = computeTotals(items, taxType, freight, insurance, currency, 0, discountPct);
   db.prepare('DELETE FROM order_items WHERE order_id = ?').run(orderId);
   const ins = db.prepare(
     `INSERT INTO order_items (order_id, product_id, description, hsn_code, code, qty, unit, unit_price, tax_pct, amount,
@@ -286,8 +287,8 @@ function saveItems(orderId: number, items: OrderItemInput[], taxType: 'none' | '
       String(src.supplier ?? ''), String(src.scheduled_date ?? ''), String(src.dispatched_date ?? ''),
       it.custom1 ?? '', it.custom2 ?? '', it.custom3 ?? '', it.image ?? '', i);
   });
-  db.prepare('UPDATE orders SET subtotal = ?, tax_total = ?, grand_total = ? WHERE id = ?').run(
-    totals.subtotal, totals.tax_total, totals.grand_total, orderId
+  db.prepare('UPDATE orders SET discount_amount = ?, subtotal = ?, tax_total = ?, grand_total = ? WHERE id = ?').run(
+    totals.discount_amount, totals.subtotal, totals.tax_total, totals.grand_total, orderId
   );
 }
 
@@ -965,6 +966,13 @@ ordersRouter.get('/prefill/from-quotation/:quotationId', (req: AuthedRequest, re
     container_count: q.container_count,
     freight: q.freight,
     insurance: q.insurance,
+    /*
+     * The discount carries forward with the money it reduces. Without it the
+     * next document's total jumps back up and contradicts the one the buyer is
+     * holding — which is why the column is on all four selling documents and
+     * not only the two whose forms offer the field.
+     */
+    discount_pct: q.discount_pct ?? 0,
     spoc: q.prepared_by,
     column_config: JSON.parse(String(q.column_config || '{}')),
     items,
@@ -1016,6 +1024,8 @@ ordersRouter.get('/prefill/from-proforma/:piId', (req: AuthedRequest, res) => {
     container_count: pi.container_count,
     freight: pi.freight,
     insurance: pi.insurance,
+    // See the note on `prefill/from-quotation` above.
+    discount_pct: pi.discount_pct ?? 0,
     destination: pi.final_destination,
     port_of_discharge: pi.port_of_discharge,
     po_number: pi.po_number,
@@ -1066,7 +1076,7 @@ ordersRouter.post('/', (req: AuthedRequest, res) => {
       String(body.status ?? 'pending')
     );
     const id = Number(info.lastInsertRowid);
-    saveItems(id, (body.items ?? []) as OrderItemInput[], h.tax_type, h.freight, h.insurance, h.currency);
+    saveItems(id, (body.items ?? []) as OrderItemInput[], h.tax_type, h.freight, h.insurance, h.currency, h.discount_pct);
 
     /**
      * Booked from a proforma: point that proforma at this order.
@@ -1132,7 +1142,7 @@ ordersRouter.put('/:id', (req: AuthedRequest, res) => {
       id
     );
     if (Array.isArray(body.items)) {
-      saveItems(id, body.items as OrderItemInput[], h.tax_type, h.freight, h.insurance, h.currency);
+      saveItems(id, body.items as OrderItemInput[], h.tax_type, h.freight, h.insurance, h.currency, h.discount_pct);
       // A new line gets its job, a corrected quantity moves an untouched one,
       // a line that is gone cancels its unstarted job. The floor's own
       // arrangements are left alone — `syncOrderJobs` says exactly where.
