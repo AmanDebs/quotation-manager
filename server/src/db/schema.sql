@@ -249,10 +249,13 @@ CREATE TABLE IF NOT EXISTS products (
   weight_grams REAL,
   -- Good pieces a production day, for planning how long a job takes
   -- (2026-11-16). Nullable, and blank means **not stated** rather than 0: a
-  -- rate of zero would make every job infinitely long. It is the second
-  -- answer, not the first -- `services/outputRate.ts` measures the rate from
-  -- the shifts already booked for the product and reads this only where that
-  -- product has never run.
+  -- rate of zero would make every job infinitely long.
+  --
+  -- It **overrides** the rate `services/outputRate.ts` measures from the
+  -- shifts already booked, which is the default under it: the measurement is
+  -- a mean over the days a shift was booked, so one bulk or back-dated entry
+  -- pulls it up hard and somebody has to be able to say so. Blank on nearly
+  -- every row, which is the measurement doing the work.
   pcs_per_day REAL,
   -- Make or buy. 1 = moulded here, so a sales order line for it raises a work
   -- order and the QC gate asks for a pass; 0 = bought in and sold on, so

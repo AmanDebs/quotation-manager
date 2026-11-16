@@ -4,7 +4,7 @@ import { requirePermission } from '../middleware/auth.js';
 import { paramsFor, qcSectionOf, specOwner, specOverrides } from '../services/qc.js';
 import { IMPORT_FIELDS, buildImport, decodeUpload, identityKey, type BuildOptions } from '../services/productImport.js';
 import { recipeFor } from '../services/recipe.js';
-import { NO_RATE_SQL } from '../services/outputRate.js';
+import { NO_RATE_SQL, measuredRates } from '../services/outputRate.js';
 import { PRODUCT_TYPES, isProductType, guessProductType } from '../services/productType.js';
 import { listBody } from '../services/pagination.js';
 import { searchClause } from '../services/search.js';
@@ -468,8 +468,24 @@ productsRouter.get('/', (req, res) => {
   const off = db.prepare(
     `SELECT COUNT(*) AS c FROM products WHERE ${[...baseWhere, 'active = 0'].join(' AND ')}`
   ).get(...(baseParams as never[])) as { c: number };
+  /*
+   * What the shift book says each of these makes in a day, beside whatever
+   * figure the catalogue states. The typed figure **overrides** it, so the
+   * dialog has to be able to show what is being overridden — a box that
+   * silently replaces a measurement is how somebody types 50,000 over a
+   * 3,57,500 they never saw.
+   *
+   * Over the page's own rows, so it is bounded by the page rather than by the
+   * catalogue; the unpaged reading above is the line-item picker, which has
+   * no use for it and returned before this.
+   */
+  const measured = measuredRates(body.rows.map((r) => Number((r as { id: number }).id)));
   res.json({
     ...body,
+    rows: body.rows.map((r) => {
+      const m = measured.get(Number((r as { id: number }).id));
+      return { ...(r as object), measured_pcs_per_day: m ? m.pcs_per_day : null, measured_days: m ? m.days : 0 };
+    }),
     summary: {
       missing_weight: gapCount(GAPS.weight),
       missing_recipe: gapCount(GAPS.recipe),

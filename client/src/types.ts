@@ -197,11 +197,18 @@ export interface Product {
    */
   weight_grams: number | null;
   /**
-   * Good pieces a production day — the second answer the planner reads, after
-   * the rate measured from the shifts already booked. Null means not stated,
-   * where 0 would mean a job that never finishes.
+   * Good pieces a production day. Stated, it **overrides** the rate measured
+   * from the shifts already booked; null means not stated, where 0 would mean
+   * a job that never finishes.
    */
   pcs_per_day?: number | null;
+  /**
+   * What the shift book says this product makes in a day, and over how many
+   * days — read-only, and sent so the dialog can show what a typed figure
+   * would be overriding. Null where the floor has never booked a shift.
+   */
+  measured_pcs_per_day?: number | null;
+  measured_days?: number;
   /**
    * 1 = in the catalogue; 0 = taken out of it, so the pickers stop offering
    * it. Optional and absent reads as in use, like `made_here` above.
@@ -1324,6 +1331,8 @@ export interface OutputRate {
   source: 'measured' | 'stated';
   days: number;
   last_run: string;
+  /** What the shift book said, where a typed figure is overriding it. */
+  measured?: { pcs_per_day: number; days: number; last_run: string };
 }
 
 /** A job as the production planner would date it. Nothing is written yet. */

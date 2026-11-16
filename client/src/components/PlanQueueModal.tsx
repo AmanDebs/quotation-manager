@@ -38,7 +38,9 @@ const BLOCKED: Record<string, string> = {
   'nothing-left': 'nothing left to make',
 };
 
-const rateLabel = (p: PlannedJob): string => (p.rate ? `${fmtQty(p.rate.pcs_per_day)}/day` : '—');
+/** A typed figure is marked, so an override is visible without hovering for it. */
+const rateLabel = (p: PlannedJob): string =>
+  (p.rate ? `${fmtQty(p.rate.pcs_per_day)}/day${p.rate.source === 'stated' ? '*' : ''}` : '—');
 
 /**
  * Where the figure came from, on the hover rather than in the cell — spelled
@@ -47,9 +49,15 @@ const rateLabel = (p: PlannedJob): string => (p.rate ? `${fmtQty(p.rate.pcs_per_
  */
 const rateTitle = (p: PlannedJob): string | undefined => {
   if (!p.rate) return undefined;
-  return p.rate.source === 'measured'
-    ? `Measured from ${p.rate.days} day${p.rate.days === 1 ? '' : 's'} of shifts already booked, the last on ${fmtDate(p.rate.last_run)}`
-    : 'Stated on the product — the floor has never booked a shift for it';
+  if (p.rate.source === 'measured') {
+    return `Measured from ${p.rate.days} day${p.rate.days === 1 ? '' : 's'} of shifts already booked, the last on ${fmtDate(p.rate.last_run)}`;
+  }
+  // An override is printed **against** what it overrides: a figure typed over
+  // a measurement nobody saw is how a wrong one goes unnoticed.
+  const m = p.rate.measured;
+  return m
+    ? `Typed on the product. The shifts already booked work out at ${fmtQty(m.pcs_per_day)}/day over ${m.days} day${m.days === 1 ? '' : 's'}`
+    : 'Typed on the product — the floor has never booked a shift for it';
 };
 
 export default function PlanQueueModal({ jobs, onClose, onStage }: {
@@ -90,7 +98,7 @@ export default function PlanQueueModal({ jobs, onClose, onStage }: {
     setOrder(list);
   };
 
-  const num = 'whitespace-nowrap py-1.5 pr-3 text-right tabular-nums';
+  const num = 'whitespace-nowrap py-1.5 pr-2 text-right tabular-nums';
 
   return (
     <Modal title={`Plan ${jobs.length} job${jobs.length === 1 ? '' : 's'}`} onClose={onClose} wide>
@@ -102,7 +110,9 @@ export default function PlanQueueModal({ jobs, onClose, onStage }: {
           </label>
           <p className="text-xs text-slate-500">
             One queue, one job at a time, seven days a week. Each job takes
-            what is left to make divided by how fast that product goes.
+            what is left to make divided by how fast that product goes —
+            measured from the shifts already booked, or <strong>*</strong> where
+            a figure is typed on the product. Hover a rate to see which.
           </p>
         </div>
 
@@ -114,13 +124,13 @@ export default function PlanQueueModal({ jobs, onClose, onStage }: {
             <table className="w-full text-sm">
               <thead>
                 <tr className={TH_CLASS}>
-                  <th className="pb-2 pr-3">Job</th>
-                  <th className="pb-2 pr-3">Item</th>
-                  <th className="pb-2 pr-3 text-right">To make</th>
-                  <th className="pb-2 pr-3">Rate</th>
-                  <th className="pb-2 pr-3 text-right">Days</th>
-                  <th className="pb-2 pr-3">Start → Finish</th>
-                  <th className="pb-2 pr-3">Needed</th>
+                  <th className="pb-2 pr-2">Job</th>
+                  <th className="pb-2 pr-2">Item</th>
+                  <th className="pb-2 pr-2 text-right">To make</th>
+                  <th className="pb-2 pr-2">Rate</th>
+                  <th className="pb-2 pr-2 text-right">Days</th>
+                  <th className="pb-2 pr-2">Start → Finish</th>
+                  <th className="pb-2 pr-2">Needed</th>
                   <th className="pb-2" />
                 </tr>
               </thead>
@@ -129,21 +139,21 @@ export default function PlanQueueModal({ jobs, onClose, onStage }: {
                   <tr key={p.id} className={`border-t border-slate-100 ${p.blocked ? 'text-slate-400' : ''}`}>
                     {/* The customer under the job number, so neither column
                         has to be wide enough for both. */}
-                    <td className="whitespace-nowrap py-1.5 pr-3">
+                    <td className="whitespace-nowrap py-1.5 pr-2">
                       <div className="font-medium">{p.number}</div>
-                      <div className="max-w-[9rem] truncate text-xs text-slate-400" title={p.customer_name}>{p.customer_name}</div>
+                      <div className="max-w-[8rem] truncate text-xs text-slate-400" title={p.customer_name}>{p.customer_name}</div>
                     </td>
-                    <td className="max-w-[9rem] truncate py-1.5 pr-3" title={p.item}>{p.item || '—'}</td>
+                    <td className="max-w-[9rem] truncate py-1.5 pr-2" title={p.item}>{p.item || '—'}</td>
                     <td className={num}>{fmtQty(p.pieces)}</td>
                     <td className={`${num} text-xs`} title={rateTitle(p)}>{rateLabel(p)}</td>
                     <td className={num}>{p.days ?? '—'}</td>
-                    <td className={`py-1.5 pr-3 ${p.late ? 'font-semibold text-red-600' : ''}`}>
+                    <td className={`py-1.5 pr-2 ${p.late ? 'font-semibold text-red-600' : ''}`}>
                       {p.blocked
                         ? <span className="text-xs">{BLOCKED[p.blocked] ?? p.blocked}</span>
                         : <span className="whitespace-nowrap">{fmtDate(p.planned_start)} → {fmtDate(p.planned_end)}</span>}
                     </td>
                     {/* The customer's own date, so a late plan says what it is late against. */}
-                    <td className={`whitespace-nowrap py-1.5 pr-3 text-xs ${p.late ? 'text-red-600' : 'text-slate-400'}`}>
+                    <td className={`whitespace-nowrap py-1.5 pr-2 text-xs ${p.late ? 'text-red-600' : 'text-slate-400'}`}>
                       {p.due ? fmtDate(p.due) : '—'}
                     </td>
                     <td className="whitespace-nowrap py-1.5 text-right">

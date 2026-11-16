@@ -433,17 +433,26 @@ export default function ProductsPage() {
                 </Field>
                 {/*
                   * What the production planner computes a job's length from
-                  * (2026-11-16). **The second answer, not the first**: the
-                  * rate is measured from the shifts already booked wherever
-                  * the product has run, and this is read only where it has
-                  * not — a new mould, or the first order for an item. So a
-                  * blank here is not a gap on a product the floor is already
-                  * making, which is what the Products page's own chip counts.
+                  * (2026-11-16). Typed, it **overrides** the rate measured
+                  * from the shifts already booked — and the measurement is
+                  * the placeholder, so the box shows what will be used while
+                  * staying empty (`coaHeaderFields`' own rule) and a figure
+                  * typed here is visibly typed over something rather than
+                  * into a void.
                   */}
                 <Field label="Output (good pcs / day)">
-                  <Input type="number" min={0} step="any" value={editing.pcs_per_day ?? ''} onChange={(e) => set({ pcs_per_day: numOrNull(e.target.value) })} />
+                  <Input
+                    type="number"
+                    min={0}
+                    step="any"
+                    placeholder={editing.measured_pcs_per_day != null ? String(Math.round(editing.measured_pcs_per_day)) : undefined}
+                    value={editing.pcs_per_day ?? ''}
+                    onChange={(e) => set({ pcs_per_day: numOrNull(e.target.value) })}
+                  />
                   <div className="mt-1 text-xs text-slate-400">
-                    Used only where the floor has never booked a shift for this product
+                    {editing.measured_pcs_per_day != null
+                      ? `The shifts booked so far work out at ${Math.round(editing.measured_pcs_per_day).toLocaleString('en-IN')}/day over ${editing.measured_days ?? 0} day${editing.measured_days === 1 ? '' : 's'} — leave blank to use that`
+                      : 'Nothing has been booked for this product yet, so this is the only figure there is'}
                   </div>
                 </Field>
                 <Field label="Boxes per 20ft">

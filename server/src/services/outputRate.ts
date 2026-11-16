@@ -19,8 +19,16 @@ import { round2 } from './totals.js';
  * shift the floor has ever booked, and `work_orders.product_id` says what
  * each of them was making — so for any product that has run before, how fast
  * it goes is **measured, with nobody typing anything**, and it gets truer
- * every time a shift is logged.
+ * every time a shift is logged. That measurement is the **default**; a figure
+ * typed on the product overrides it, for the reasons `outputRates` gives.
  */
+
+export interface Measured {
+  pcs_per_day: number;
+  /** Days of shift book behind it, and the last of them. */
+  days: number;
+  last_run: string;
+}
 
 export interface OutputRate {
   product_id: number;
@@ -32,6 +40,12 @@ export interface OutputRate {
   days: number;
   /** The last day booked, so a stale measurement can be seen to be stale. */
   last_run: string;
+  /**
+   * What the shift book says, where a **stated** figure is being used instead
+   * — so an override can be read against the thing it overrides rather than
+   * silently replacing it. Absent on a measured rate, where it *is* the rate.
+   */
+  measured?: Measured;
 }
 
 /**
@@ -64,6 +78,30 @@ const MEASURED_SQL = `
     JOIN work_orders w ON w.id = e.work_order_id
    WHERE w.product_id IS NOT NULL AND e.date <> ''`;
 
+/** What the shift book says about each product named, where it says anything. */
+export function measuredRates(productIds: number[]): Map<number, Measured> {
+  const ids = [...new Set(productIds.filter((n) => Number.isInteger(n) && n > 0))];
+  const out = new Map<number, Measured>();
+  if (!ids.length) return out;
+  const rows = db.prepare(
+    `${MEASURED_SQL} AND w.product_id IN (${ids.map(() => '?').join(',')}) GROUP BY w.product_id`
+  ).all(...(ids as never[])) as Record<string, unknown>[];
+  for (const r of rows) {
+    const days = Number(r.days) || 0;
+    const pieces = Number(r.pieces) || 0;
+    // Output booked and then entirely condemned is a real day with nothing to
+    // show for it; a rate of zero would make every job infinitely long, so the
+    // product reads as unmeasured rather than as instant.
+    if (days <= 0 || pieces <= 0) continue;
+    out.set(Number(r.product_id), {
+      pcs_per_day: round2(pieces / days),
+      days,
+      last_run: String(r.last_run ?? ''),
+    });
+  }
+  return out;
+}
+
 /**
  * The rate for each product named, or no entry at all where the record is
  * silent — **never a guess and never 0**, the rule `hasRecipe: false` states
@@ -71,51 +109,51 @@ const MEASURED_SQL = `
  * weight. A job whose product has no rate is one the planner dates by hand,
  * and the screen says so; a zero would be a duration of infinity.
  *
- * **Measured beats stated** (the client's own answer when asked): the shift
- * book is what the plant did, where the typed figure is what somebody
- * believes. The typed one is what covers a product that has never run — a new
- * mould, or the first order for an item — which is the gap measurement cannot
- * fill by its nature. One line here to flip the precedence if that is ever
- * wanted.
+ * **A stated figure wins, and the measurement is the default under it**
+ * (2026-11-16, the client, having read a measured 3,57,500/day off their own
+ * book: *"Yes, make the typed figure win"*). It shipped the other way round
+ * that morning, on their own answer when asked, and the first screenful
+ * showed why that was wrong: the measurement is a **mean over the days a
+ * shift was booked**, so one bulk or back-dated entry — a week's output keyed
+ * to a single date — pulls it up hard, and under measured-first there was no
+ * way to say so. A box that is ignored wherever it would matter is not an
+ * override.
+ *
+ * So this is the rule the rest of this codebase already follows about a
+ * derived figure: **what somebody typed beats what was worked out**. The
+ * packing weights, the box counts and the shipping marks all say the same
+ * thing — what the scale said beats what the catalogue guessed. And the
+ * measurement is still what fills the box for every product nobody has typed
+ * one for, which on this catalogue is nearly all of them.
+ *
+ * Where a stated figure overrides a real measurement, **the measurement rides
+ * along** so the screen can print the override against the thing it overrides
+ * rather than quietly replacing it.
  */
 export function outputRates(productIds: number[]): Map<number, OutputRate> {
   const ids = [...new Set(productIds.filter((n) => Number.isInteger(n) && n > 0))];
   const out = new Map<number, OutputRate>();
   if (!ids.length) return out;
-  const marks = ids.map(() => '?').join(',');
 
-  const measured = db.prepare(
-    `${MEASURED_SQL} AND w.product_id IN (${marks}) GROUP BY w.product_id`
-  ).all(...(ids as never[])) as Record<string, unknown>[];
-  for (const r of measured) {
-    const days = Number(r.days) || 0;
-    const pieces = Number(r.pieces) || 0;
-    // Output booked and then entirely condemned is a real day with nothing to
-    // show for it; a rate of zero would make every job infinitely long, so the
-    // product reads as unmeasured and falls through to its stated figure.
-    if (days <= 0 || pieces <= 0) continue;
-    out.set(Number(r.product_id), {
-      product_id: Number(r.product_id),
-      pcs_per_day: round2(pieces / days),
-      source: 'measured',
-      days,
-      last_run: String(r.last_run ?? ''),
-    });
-  }
-
+  const measured = measuredRates(ids);
   const stated = db.prepare(
-    `SELECT id, pcs_per_day FROM products WHERE pcs_per_day IS NOT NULL AND pcs_per_day > 0 AND id IN (${marks})`
+    `SELECT id, pcs_per_day FROM products WHERE pcs_per_day IS NOT NULL AND pcs_per_day > 0 AND id IN (${ids.map(() => '?').join(',')})`
   ).all(...(ids as never[])) as Record<string, unknown>[];
   for (const r of stated) {
     const id = Number(r.id);
-    if (out.has(id)) continue;
+    const evidence = measured.get(id);
     out.set(id, {
       product_id: id,
       pcs_per_day: round2(Number(r.pcs_per_day) || 0),
       source: 'stated',
       days: 0,
       last_run: '',
+      ...(evidence ? { measured: evidence } : {}),
     });
+  }
+  for (const [id, m] of measured) {
+    if (out.has(id)) continue;
+    out.set(id, { product_id: id, source: 'measured', ...m });
   }
   return out;
 }
