@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { db, transaction } from '../db/connection.js';
 import { requirePermission } from '../middleware/auth.js';
-import { paramsFor, qcSectionOf, specOwner } from '../services/qc.js';
+import { paramsFor, qcSectionOf, specOwner, specOverrides } from '../services/qc.js';
 import { IMPORT_FIELDS, buildImport, decodeUpload, identityKey, type BuildOptions } from '../services/productImport.js';
 import { recipeFor } from '../services/recipe.js';
 import { PRODUCT_TYPES, isProductType, guessProductType } from '../services/productType.js';
@@ -182,6 +182,10 @@ productsRouter.get('/:id/qc-params', (req, res) => {
     items: paramsFor(id, customerId),
     owner: specOwner(id, customerId),
     customer_id: customerId,
+    // Who else has written their own list for this product, so the editor can
+    // offer a copy of one — and offer only the buyers who have something to
+    // copy, rather than the whole customer book.
+    overrides: specOverrides(id),
   });
 });
 

@@ -281,6 +281,49 @@ export function withResolvedParams(params: QcParam[], checks: QcCheck[]): QcChec
   });
 }
 
+/** A buyer who has written their own list for this product, and how long it is. */
+export interface SpecOverride {
+  customer_id: number;
+  customer_name: string;
+  /** Characteristics on it — what makes the picker worth reading before picking. */
+  count: number;
+}
+
+/**
+ * **Who has their own specification for this product.**
+ *
+ * Asked for so the editor can copy one buyer's list onto another (2026-11-16,
+ * the client: *"Add option to copy from customer like there is option to copy
+ * from another product"*). It is the list of real answers rather than the
+ * customer book: on a book of several hundred buyers a picker offering all of
+ * them would answer *"they have no specification to copy"* to almost every
+ * press, which is the dead control this codebase keeps refusing.
+ *
+ * The **default is not in here** and is offered separately by the editor,
+ * since it is a list this product always has rather than a buyer who happens
+ * to hold one.
+ */
+export function specOverrides(productId: number | null): SpecOverride[] {
+  if (!productId) return [];
+  const rows = db.prepare(
+    `SELECT q.customer_id AS customer_id,
+            COALESCE(c.name, '') AS customer_name,
+            COUNT(*) AS count
+       FROM product_qc_params q
+       JOIN customers c ON c.id = q.customer_id
+      WHERE q.product_id = ? AND q.customer_id IS NOT NULL
+      GROUP BY q.customer_id, c.name
+      ORDER BY c.name`
+  ).all(productId) as Record<string, unknown>[];
+  // Built rather than cast: the driver hands back its own row objects, and a
+  // count read straight off one is not a number the client can rely on.
+  return rows.map((r) => ({
+    customer_id: Number(r.customer_id),
+    customer_name: String(r.customer_name ?? ''),
+    count: Number(r.count),
+  }));
+}
+
 /** Whose specification is being applied — for the screen and the report. */
 export function specOwner(productId: number | null, customerId?: number | null): 'customer' | 'default' | 'none' {
   if (!productId) return 'none';

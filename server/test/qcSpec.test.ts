@@ -2,7 +2,9 @@ import './helpers/scratch.js';
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { db } from '../src/db/connection.js';
-import { paramsFor, specOwner, withResolvedParams, checksForWorkOrder } from '../src/services/qc.js';
+import {
+  paramsFor, specOwner, specOverrides, withResolvedParams, checksForWorkOrder,
+} from '../src/services/qc.js';
 import type { QcCheck } from '../src/services/qc.js';
 import { makeCustomer, makeOrder } from './helpers/factory.js';
 
@@ -247,5 +249,66 @@ describe('a reading whose link to the specification was broken', () => {
     assert.equal(out[0].passed, check.passed);
     assert.equal(out[0].failed_count, check.failed_count);
     assert.equal(out[0].results[0].ok, check.results[0].ok);
+  });
+});
+
+/**
+ * **Who has their own list for this product**, which is what the editor's
+ * *copy from another customer* picker offers (2026-11-16, the client: *"Add
+ * option to copy from customer like there is option to copy from another
+ * product"*).
+ *
+ * The point of asking the server at all is that it answers with **real**
+ * options: on a book of several hundred buyers a picker built from the
+ * customer list would say *"they have no specification to copy"* to almost
+ * every press.
+ */
+describe('who has their own specification for a product', () => {
+  test('names each buyer who holds one, and how long it is', () => {
+    const p = makeProduct();
+    const a = makeCustomer('Acme Maschinenbau GmbH');
+    const b = makeCustomer('Bharat Engineering Works');
+    addParam(p, null, 'Wall thickness', 0.3, 0.5);
+    addParam(p, a, 'Wall thickness', 0.38, 0.42);
+    addParam(p, b, 'Wall thickness', 0.35, 0.45);
+    addParam(p, b, 'Flatness', 0, 0.1);
+
+    assert.deepEqual(specOverrides(p), [
+      { customer_id: a, customer_name: 'Acme Maschinenbau GmbH', count: 1 },
+      { customer_id: b, customer_name: 'Bharat Engineering Works', count: 2 },
+    ]);
+  });
+
+  test('and the default is not one of them', () => {
+    /* It is a list this product always has rather than a buyer who happens to
+       hold one, so the editor offers it separately. */
+    const p = makeProduct();
+    addParam(p, null, 'Wall thickness', 0.3, 0.5);
+    assert.deepEqual(specOverrides(p), []);
+  });
+
+  test('a product nobody has overridden offers nothing, and so the picker is not drawn', () => {
+    assert.deepEqual(specOverrides(makeProduct()), []);
+    assert.deepEqual(specOverrides(null), []);
+  });
+
+  test('another product’s overrides are not this one’s', () => {
+    const mine = makeProduct();
+    const theirs = makeProduct();
+    addParam(theirs, makeCustomer(), 'Wall thickness', 0.38, 0.42);
+    assert.deepEqual(specOverrides(mine), []);
+    assert.equal(specOverrides(theirs).length, 1);
+  });
+
+  test('and a buyer put back on the default leaves the list', () => {
+    /* Removing every row is how an override is undone, so the picker has to
+       stop offering a list that is no longer there. */
+    const p = makeProduct();
+    const c = makeCustomer();
+    addParam(p, c, 'Wall thickness', 0.38, 0.42);
+    assert.equal(specOverrides(p).length, 1);
+
+    db.prepare('DELETE FROM product_qc_params WHERE product_id = ? AND customer_id = ?').run(p, c);
+    assert.deepEqual(specOverrides(p), []);
   });
 });

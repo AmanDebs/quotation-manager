@@ -80,6 +80,13 @@ export default function QcSpecModal({ product, onClose }: { product: Product; on
    * nineteen rows to correct rather than nineteen rows to type.
    */
   const [copyFrom, setCopyFrom] = useState('');
+  /*
+   * And the same question one axis over: **this product's list as another
+   * buyer has it**. Held apart from `copyFrom` because the two pickers are
+   * two different questions, and picking in one clears the other so the row
+   * never shows two sources for one set of rows.
+   */
+  const [copyWho, setCopyWho] = useState('');
   const [copyNote, setCopyNote] = useState('');
   // Empty string is the product's default spec, which is what NULL means in
   // the column — not "no customer chosen yet".
@@ -128,25 +135,62 @@ export default function QcSpecModal({ product, onClose }: { product: Product; on
   const inherited = !!customerId && saved?.owner === 'default';
 
   /*
+   * What this product's list could be filled from, besides another product:
+   * **the default**, where a buyer's own list is being written, and **every
+   * buyer who holds one**, which the server sends rather than the client
+   * guessing from the customer book — only real answers, with their length
+   * beside each so the pick can be judged before it is made.
+   *
+   * The list being edited is never offered to itself.
+   */
+  const copySources = [
+    ...(customerId ? [{ value: 'default', label: 'Every customer (the default)' }] : []),
+    ...(saved?.overrides ?? [])
+      .filter((o) => String(o.customer_id) !== customerId)
+      .map((o) => ({
+        value: String(o.customer_id),
+        label: `${o.customer_name} — ${o.count} characteristic${o.count === 1 ? '' : 's'}`,
+      })),
+  ];
+
+  /*
    * Fetched on the press rather than held for every product in the catalogue,
    * and **nothing is replaced when the source has none**: silently emptying
    * the editor would read as the copy having worked.
+   *
+   * One mutation over both pickers, because what differs between them is the
+   * URL and the name in the note — two would be two ways of filling one
+   * editor, waiting to come to disagree about what a copy does.
    */
   const copy = useMutation({
-    mutationFn: (id: string) => api.get<QcSpecResponse>(`/api/products/${id}/qc-params`),
-    onSuccess: (res, id) => {
-      const from = products.find((pr) => String(pr.id) === id);
+    mutationFn: ({ kind, id }: { kind: 'product' | 'customer'; id: string }) =>
+      api.get<QcSpecResponse>(
+        kind === 'product'
+          ? `/api/products/${id}/qc-params`
+          // This product, as that buyer holds it. The default is `id` of
+          // `default`, which is the same route with nobody named.
+          : `/api/products/${product.id}/qc-params${id === 'default' ? '' : `?customer_id=${id}`}`
+      ),
+    onSuccess: (res, { kind, id }) => {
+      const from = kind === 'product'
+        ? products.find((pr) => String(pr.id) === id)?.name ?? 'That product'
+        : id === 'default'
+          ? 'the default list'
+          // Named from the answer that offered them rather than from the
+          // customer book, which is scoped and need not carry that buyer.
+          : (saved?.overrides ?? []).find((o) => String(o.customer_id) === id)?.customer_name
+            ?? 'that customer';
       const items = res.items ?? [];
       if (!items.length) {
-        setCopyNote(`${from?.name ?? 'That product'} has no specification to copy.`);
+        setCopyNote(`${from === 'the default list' ? 'The default list' : from} has no specification to copy.`);
         return;
       }
       // The id is the source row's, so it is dropped: these are new rows on
-      // this product until Save writes them.
-      setLines(items.map(({ name, kind, section, ranged, unit, min_value, max_value, notes }) => ({
-        name, kind, section, ranged, unit, min_value, max_value, notes,
+      // this list until Save writes them.
+      setLines(items.map(({ name, kind: k, section, ranged, unit, min_value, max_value, notes }) => ({
+        name, kind: k, section, ranged, unit, min_value, max_value, notes,
       })));
-      setCopyNote(`${items.length} characteristic${res.items.length === 1 ? '' : 's'} copied from ${from?.name ?? 'that product'} — correct them and Save.`);
+      setCopyNote(`${items.length} characteristic${items.length === 1 ? '' : 's'} copied from ${from} — correct them and Save.`);
     },
   });
 
@@ -160,7 +204,16 @@ export default function QcSpecModal({ product, onClose }: { product: Product; on
         <Select
           className="w-64"
           value={customerId}
-          onChange={(e) => setCustomerId(e.target.value)}
+          onChange={(e) => {
+            // Switching whose list is being edited reloads the rows from the
+            // server, so a copy that filled them is discarded — and a note
+            // still describing it would be the page saying something untrue
+            // about what is on screen.
+            setCustomerId(e.target.value);
+            setCopyFrom('');
+            setCopyWho('');
+            setCopyNote('');
+          }}
         >
           <option value="">Every customer (the default)</option>
           {customers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
@@ -186,8 +239,9 @@ export default function QcSpecModal({ product, onClose }: { product: Product; on
           title="Fills the rows below with that product's default specification, for you to correct"
           onChange={(v) => {
             setCopyFrom(v);
+            setCopyWho('');
             setCopyNote('');
-            if (v) copy.mutate(v);
+            if (v) copy.mutate({ kind: 'product', id: v });
           }}
           options={products
             .filter((pr) => pr.id !== product.id)
@@ -197,11 +251,47 @@ export default function QcSpecModal({ product, onClose }: { product: Product; on
               hint: [pr.color, pr.product_type].filter(Boolean).join(' · '),
             }))}
         />
+        {/*
+          **Or this product's own list for another buyer** (2026-11-16, the
+          client: *"Add option to copy from customer like there is option to
+          copy from another product"*). The same need one axis over: a buyer's
+          override is the default with a few numbers moved, so writing a second
+          buyer's meant typing all nineteen rows again — and it reads the other
+          way too, a list that has become what the plant actually works to
+          being copied onto the default.
+
+          Drawn only where there is something to copy, the rule a column of
+          em-dashes follows: on a product nobody has overridden, and with no
+          default to offer, this is a control whose every answer would be
+          *nothing to copy*.
+        */}
+        {copySources.length > 0 && (
+          <>
+            <span className="text-xs text-slate-400">or</span>
+            <Select
+              className="w-64"
+              value={copyWho}
+              title="Fills the rows below with that list, for you to correct"
+              onChange={(e) => {
+                const v = e.target.value;
+                setCopyWho(v);
+                setCopyFrom('');
+                setCopyNote('');
+                if (v) copy.mutate({ kind: 'customer', id: v });
+              }}
+            >
+              <option value="">Another customer’s list…</option>
+              {copySources.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </Select>
+          </>
+        )}
         {copy.isPending && <span className="text-xs text-slate-400">Reading…</span>}
         {!!copyNote && <span className="text-xs text-slate-500">{copyNote}</span>}
         {!copy.isPending && !copyNote && (
           <span className="text-xs text-slate-400">
-            Replaces the rows below with that product’s default list. Nothing is saved until you press Save.
+            Replaces the rows below. Nothing is saved until you press Save.
           </span>
         )}
       </div>

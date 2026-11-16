@@ -561,10 +561,23 @@ export type QcSpecOwner = 'customer' | 'default' | 'none';
  * it is, because "these are the tolerances" and "these are *your* tolerances"
  * are different sentences and the list alone cannot tell them apart.
  */
+/** A buyer with their own list for this product, and how long it is. */
+export interface SpecOverride {
+  customer_id: number;
+  customer_name: string;
+  count: number;
+}
+
 export interface QcSpecResponse {
   items: QcParam[];
   owner: QcSpecOwner;
   customer_id: number | null;
+  /**
+   * Who else has written their own list for this product. Only buyers who
+   * actually hold one, so the copy picker offers real answers rather than the
+   * whole customer book.
+   */
+  overrides?: SpecOverride[];
 }
 
 /** What to measure on a product, and what passes. Rewritten whole, like a recipe. */
