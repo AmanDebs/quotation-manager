@@ -410,7 +410,7 @@ export default function ProductsPage() {
             </Field>
             <div className="sm:col-span-2 rounded-lg border border-slate-200 bg-slate-50/40 p-3">
               <div className={`mb-2 ${CAPTION_CLASS}`}>
-                Packing &amp; weight — used by the container planner and material planning
+                Packing, weight &amp; output — used by the container planner, material planning and the production planner
               </div>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <Field label="Weight (g per piece)">
