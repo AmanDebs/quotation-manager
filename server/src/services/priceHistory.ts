@@ -116,7 +116,7 @@ interface Row {
  * proforma is still a real price that was agreed, so unlike the sales book
  * this never reads `order_id`.
  */
-function parts(docs: BookDoc[], productId: number, companyId: number): { sql: string[]; params: unknown[] } {
+function parts(docs: BookDoc[], productId: number, f: ReportFilter): { sql: string[]; params: unknown[] } {
   const sql: string[] = [];
   const params: unknown[] = [];
 
@@ -128,16 +128,26 @@ function parts(docs: BookDoc[], productId: number, companyId: number): { sql: st
            it.qty AS qty, it.total_pcs AS total_pcs,
            COALESCE(it.unit_price, 0) AS unit_price, COALESCE(it.amount, 0) AS amount`;
 
+  /*
+   * Each clause is emitted **and** its parameter pushed in the same step, the
+   * rule `bookParts` states: three parts share one `params`, so a clause
+   * added without its push shifts every parameter after it in silence.
+   *
+   * The export flag is the document's own — a product priced on an export
+   * order and on a domestic quotation is two sides of the same book, and each
+   * point is placed by the document it was quoted on.
+   */
   const tail = (table: string, fk: string, parent: string, alias: string) => {
     params.push(productId);
-    const company = companyId > 0 ? ` AND ${alias}.company_id = ?` : '';
-    if (companyId > 0) params.push(companyId);
+    let narrow = '';
+    if (f.companyId > 0) { narrow += ` AND ${alias}.company_id = ?`; params.push(f.companyId); }
+    if (f.isExport === 0 || f.isExport === 1) { narrow += ` AND ${alias}.is_export = ?`; params.push(f.isExport); }
     return `
       FROM ${table} it
       JOIN ${parent} ${alias} ON ${alias}.id = it.${fk}
       JOIN customers c ON c.id = ${alias}.customer_id
      WHERE COALESCE(it.is_charge, 0) = 0
-       AND it.product_id = ?${company}`;
+       AND it.product_id = ?${narrow}`;
   };
 
   if (docs.includes('order')) {
@@ -191,7 +201,7 @@ export function priceHistory(f: ReportFilter, q: PriceQuery): PriceHistory {
   };
   if (!product || !q.docs.length) return empty;
 
-  const built = parts(q.docs, q.productId, f.companyId);
+  const built = parts(q.docs, q.productId, f);
   const where: string[] = [];
   const params: unknown[] = [...built.params];
 

@@ -22,26 +22,26 @@ let seq = 0;
 const product = (name = `Product ${++seq}`): number =>
   Number((db.prepare('INSERT INTO products (name) VALUES (?) RETURNING id').get(name) as { id: number }).id);
 
-function order(customerId: number, date: string, o: Partial<{ status: string; currency: string; company: number }> = {}): number {
+function order(customerId: number, date: string, o: Partial<{ status: string; currency: string; company: number; isExport: number }> = {}): number {
   return Number((db.prepare(
-    `INSERT INTO orders (number, date, customer_id, company_id, currency, tax_type, status)
-     VALUES (?, ?, ?, ?, ?, 'none', ?) RETURNING id`
-  ).get(`SO/P-${++seq}`, date, customerId, o.company ?? 1, o.currency ?? 'USD', o.status ?? 'pending') as { id: number }).id);
+    `INSERT INTO orders (number, date, customer_id, company_id, currency, tax_type, status, is_export)
+     VALUES (?, ?, ?, ?, ?, 'none', ?, ?) RETURNING id`
+  ).get(`SO/P-${++seq}`, date, customerId, o.company ?? 1, o.currency ?? 'USD', o.status ?? 'pending', o.isExport ?? 0) as { id: number }).id);
 }
 
-function pi(customerId: number, date: string, o: Partial<{ status: string; orderId: number | null; validity: string; currency: string }> = {}): number {
+function pi(customerId: number, date: string, o: Partial<{ status: string; orderId: number | null; validity: string; currency: string; isExport: number }> = {}): number {
   return Number((db.prepare(
-    `INSERT INTO proforma_invoices (number, date, customer_id, company_id, currency, order_id, status, validity_date)
-     VALUES (?, ?, ?, 1, ?, ?, ?, ?) RETURNING id`
+    `INSERT INTO proforma_invoices (number, date, customer_id, company_id, currency, order_id, status, validity_date, is_export)
+     VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?) RETURNING id`
   ).get(`PI/P-${++seq}`, date, customerId, o.currency ?? 'USD', o.orderId ?? null,
-    o.status ?? 'sent', o.validity ?? '') as { id: number }).id);
+    o.status ?? 'sent', o.validity ?? '', o.isExport ?? 0) as { id: number }).id);
 }
 
-function quotation(customerId: number, date: string, o: Partial<{ status: string; superseded: number | null; currency: string }> = {}): number {
+function quotation(customerId: number, date: string, o: Partial<{ status: string; superseded: number | null; currency: string; isExport: number }> = {}): number {
   return Number((db.prepare(
-    `INSERT INTO quotations (number, date, customer_id, company_id, currency, tax_type, status, superseded_by)
-     VALUES (?, ?, ?, 1, ?, 'none', ?, ?) RETURNING id`
-  ).get(`QT/P-${++seq}`, date, customerId, o.currency ?? 'USD', o.status ?? 'draft', o.superseded ?? null) as { id: number }).id);
+    `INSERT INTO quotations (number, date, customer_id, company_id, currency, tax_type, status, superseded_by, is_export)
+     VALUES (?, ?, ?, 1, ?, 'none', ?, ?, ?) RETURNING id`
+  ).get(`QT/P-${++seq}`, date, customerId, o.currency ?? 'USD', o.status ?? 'draft', o.superseded ?? null, o.isExport ?? 0) as { id: number }).id);
 }
 
 /** A goods line, in the shape all three item tables share. */
@@ -268,5 +268,48 @@ describe('the price history of a product', () => {
     assert.deepEqual(r.incomparable, []);
     assert.equal(r.product_name.startsWith('Product'), true);
     assert.deepEqual(priceHistory(ALL, { productId: 999999, docs: DOCS }).product_name, '');
+  });
+});
+
+/**
+ * Export or domestic (2026-11-16). Each point is placed by **its own
+ * document's** flag, which is the defect worth catching here: a filter
+ * applied to the first part of a three-part union leaves the other two whole,
+ * and *Export* then charts domestic prices.
+ */
+describe('one side of the book', () => {
+  test('each part follows its own document, and the two sides are every point', () => {
+    const c = makeCustomer();
+    const p = product();
+    line('order_items', 'order_id', order(c, '2026-01-01', { isExport: 1 }), p, { price: 10 });
+    line('pi_items', 'pi_id', pi(c, '2026-02-01', { isExport: 0 }), p, { price: 20 });
+    line('quotation_items', 'quotation_id', quotation(c, '2026-03-01', { isExport: 1 }), p, { price: 30 });
+    const docs = (isExport: 0 | 1 | null) => priceHistory({ ...ALL, isExport }, { productId: p, docs: DOCS })
+      .series.flatMap((s) => s.points).map((x) => x.doc).sort();
+    assert.deepEqual(docs(1), ['order', 'quotation']);
+    assert.deepEqual(docs(0), ['proforma']);
+    assert.equal(docs(1).length + docs(0).length, docs(null).length, 'a point is on exactly one side');
+  });
+
+  /** The weight-basis list is fed by the same rows, so it narrows with them. */
+  test('the incomparable lines narrow too', () => {
+    const c = makeCustomer();
+    const p = product();
+    line('order_items', 'order_id', order(c, '2026-01-01', { isExport: 1 }), p, { price: 128.4, unit: 'kg' });
+    line('order_items', 'order_id', order(c, '2026-01-02', { isExport: 0 }), p, { price: 99, unit: 'kg' });
+    const rates = (isExport: 0 | 1 | null) => priceHistory({ ...ALL, isExport }, { productId: p, docs: DOCS })
+      .incomparable.map((x) => x.unit_price);
+    assert.deepEqual(rates(1), [128.4]);
+    assert.deepEqual(rates(0), [99]);
+    assert.deepEqual(rates(null).sort((a, b) => a - b), [99, 128.4]);
+  });
+
+  /** Silence is every document — what every caller that predates this gets. */
+  test('absent narrows nothing', () => {
+    const c = makeCustomer();
+    const p = product();
+    line('order_items', 'order_id', order(c, '2026-01-01', { isExport: 1 }), p, { price: 10 });
+    line('order_items', 'order_id', order(c, '2026-01-02', { isExport: 0 }), p, { price: 20 });
+    assert.equal(pointsOf(p).length, 2);
   });
 });

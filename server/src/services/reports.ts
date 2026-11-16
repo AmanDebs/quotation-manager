@@ -32,6 +32,19 @@ export interface ReportFilter {
   scope: { sql: string; params: unknown[] };
   /** 0 means every selling entity. */
   companyId: number;
+  /**
+   * Export (1) or domestic (0) documents alone; **absent or null is both**
+   * (2026-11-16, the client: *"Add export domestic filter in reports"*).
+   *
+   * Silence meaning *every document* is what keeps every caller that predates
+   * this reading as it did, and is what the page shows until somebody picks a
+   * side. It is read off **each document's own `is_export`** — the sheet is
+   * about proformas, or invoices, or the three selling documents, and a
+   * line's side is its document's rather than its customer's: the customer
+   * book is no guide here, Aglo selling abroad through Dubai and Mauritius
+   * intermediaries registered in India.
+   */
+  isExport?: 0 | 1 | null;
 }
 
 export interface PivotRow {
@@ -101,6 +114,10 @@ function scoped(f: ReportFilter, alias: string, extra: string[], params: unknown
   const all = [...params];
   if (f.scope.sql) { where.push(f.scope.sql); all.push(...f.scope.params); }
   if (f.companyId > 0) { where.push(`${alias}.company_id = ?`); all.push(f.companyId); }
+  // Every sheet this serves is one document table, and that table carries its
+  // own flag, so the whole export/domestic filter is this one line: the four
+  // pivots narrow together or not at all.
+  if (f.isExport === 0 || f.isExport === 1) { where.push(`${alias}.is_export = ?`); all.push(f.isExport); }
   return { where: where.length ? `WHERE ${where.join(' AND ')}` : '', params: all };
 }
 
@@ -421,13 +438,24 @@ interface BookRow {
  * `c.id` cover all three — a scope clause per alias would be three chances to
  * forget one.
  */
-function bookParts(docs: BookDoc[], companyId: number): { sql: string[]; params: unknown[] } {
+function bookParts(docs: BookDoc[], f: ReportFilter): { sql: string[]; params: unknown[] } {
   const sql: string[] = [];
   const params: unknown[] = [];
-  const company = (alias: string) => {
-    if (!(companyId > 0)) return '';
-    params.push(companyId);
-    return ` AND ${alias}.company_id = ?`;
+  /**
+   * The company and the export flag, per part and against that part's own
+   * document — a sales order is export or domestic by `orders.is_export`, a
+   * proforma by its own, a quotation by its own.
+   *
+   * One function emits the clause **and** pushes its parameter, in the same
+   * step, which is what keeps three parts' placeholders and `params` in step:
+   * written as two statements, a clause added to one part and a push added to
+   * another is a silent shift of every parameter after it.
+   */
+  const narrow = (alias: string) => {
+    let out = '';
+    if (f.companyId > 0) { out += ` AND ${alias}.company_id = ?`; params.push(f.companyId); }
+    if (f.isExport === 0 || f.isExport === 1) { out += ` AND ${alias}.is_export = ?`; params.push(f.isExport); }
+    return out;
   };
   const head = (doc: BookDoc, alias: string, dest: string) => `
     SELECT '${doc}' AS doc, ${alias}.id AS doc_id, ${alias}.number AS number, ${alias}.date AS date,
@@ -447,7 +475,7 @@ function bookParts(docs: BookDoc[], companyId: number): { sql: string[]; params:
       JOIN customers c ON c.id = o.customer_id
       LEFT JOIN products pr ON pr.id = it.product_id
      WHERE COALESCE(it.is_charge, 0) = 0
-       AND o.status <> 'cancelled'${company('o')}`);
+       AND o.status <> 'cancelled'${narrow('o')}`);
   }
   if (docs.includes('proforma')) {
     // Open means **not booked**: `order_id` is the back-pointer booking sets,
@@ -460,7 +488,7 @@ function bookParts(docs: BookDoc[], companyId: number): { sql: string[]; params:
      WHERE COALESCE(it.is_charge, 0) = 0
        AND pi.order_id IS NULL
        AND pi.status <> 'cancelled'
-       AND ${statusSqlFor('pi')} <> 'expired'${company('pi')}`);
+       AND ${statusSqlFor('pi')} <> 'expired'${narrow('pi')}`);
   }
   if (docs.includes('quotation')) {
     // A quotation is converted when a proforma **names** it, which is the test
@@ -475,7 +503,7 @@ function bookParts(docs: BookDoc[], companyId: number): { sql: string[]; params:
      WHERE COALESCE(it.is_charge, 0) = 0
        AND q.superseded_by IS NULL
        AND q.status NOT IN ('rejected', 'expired')
-       AND NOT EXISTS (SELECT 1 FROM proforma_invoices x WHERE x.quotation_id = q.id)${company('q')}`);
+       AND NOT EXISTS (SELECT 1 FROM proforma_invoices x WHERE x.quotation_id = q.id)${narrow('q')}`);
   }
   return { sql, params };
 }
@@ -496,7 +524,7 @@ export function bookReport(
   const empty: BookReport = { by: opts.by, included: docs, groups: [], totals: [], unplaced: 0 };
   if (!docs.length) return empty;
 
-  const parts = bookParts(docs, f.companyId);
+  const parts = bookParts(docs, f);
   if (!parts.sql.length) return empty;
 
   /*

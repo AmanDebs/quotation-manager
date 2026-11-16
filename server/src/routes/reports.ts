@@ -23,9 +23,28 @@ import { priceHistory, type PriceHistory } from '../services/priceHistory.js';
  */
 export const reportsRouter = Router();
 
+/**
+ * Export or domestic documents alone, under the same `export=1|0` key the
+ * order book, the Work Orders list, the despatch register and the four
+ * document lists already answer to — so the habit learned on one works here,
+ * and a link carries one meaning wherever it is pasted.
+ *
+ * **An unknown value is ignored rather than refused**, this codebase's rule
+ * about every key it does not know: a stale or hand-typed link gives the
+ * whole book rather than an empty sheet that reads as a fault.
+ */
+const exportFlag = (req: AuthedRequest): 0 | 1 | null =>
+  req.query.export === '1' ? 1 : req.query.export === '0' ? 0 : null;
+
+/**
+ * Every sheet and every download goes through this one builder, which is why
+ * the filter above is one line rather than six: a tab added later is narrowed
+ * by construction rather than by remembering.
+ */
 const filter = (req: AuthedRequest, column: string): ReportFilter => ({
   scope: scopeClause(req, column),
   companyId: Number(req.query.company) > 0 ? Number(req.query.company) : 0,
+  isExport: exportFlag(req),
 });
 
 const todayIso = () => new Date().toISOString().slice(0, 10);

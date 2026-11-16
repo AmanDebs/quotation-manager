@@ -20,19 +20,23 @@ import { makeCustomer, makeUser, makeInvoice, makePayment } from './helpers/fact
 const ALL: ReportFilter = { scope: { sql: '', params: [] }, companyId: 0 };
 let seq = 0;
 
-function order(customerId: number, o: Partial<{ status: string; revised: string; scheduled: string; promised: string; company: number }> = {}): number {
+function order(customerId: number, o: Partial<{ status: string; revised: string; scheduled: string; promised: string; company: number; isExport: number }> = {}): number {
   return Number((db.prepare(
-    `INSERT INTO orders (number, date, customer_id, company_id, currency, tax_type, status, revised_date, scheduled_date, promised_date)
-     VALUES (?, '2026-09-01', ?, ?, 'USD', 'none', ?, ?, ?, ?) RETURNING id`
-  ).get(`SO/R-${++seq}`, customerId, o.company ?? 1, o.status ?? 'pending', o.revised ?? '', o.scheduled ?? '', o.promised ?? '') as { id: number }).id);
+    `INSERT INTO orders (number, date, customer_id, company_id, currency, tax_type, status, revised_date, scheduled_date, promised_date, is_export)
+     VALUES (?, '2026-09-01', ?, ?, 'USD', 'none', ?, ?, ?, ?, ?) RETURNING id`
+  ).get(`SO/R-${++seq}`, customerId, o.company ?? 1, o.status ?? 'pending', o.revised ?? '', o.scheduled ?? '', o.promised ?? '', o.isExport ?? 0) as { id: number }).id);
 }
 
-function pi(customerId: number, o: Partial<{ status: string; orderId: number | null; validity: string; total: number; currency: string; spoc: string; company: number }> = {}): number {
+/** The commercial invoice's own side of the book; the column defaults to 0. */
+const setExport = (id: number, flag: number) =>
+  db.prepare('UPDATE commercial_invoices SET is_export = ? WHERE id = ?').run(flag, id);
+
+function pi(customerId: number, o: Partial<{ status: string; orderId: number | null; validity: string; total: number; currency: string; spoc: string; company: number; isExport: number }> = {}): number {
   return Number((db.prepare(
-    `INSERT INTO proforma_invoices (number, date, customer_id, company_id, currency, order_id, grand_total, status, validity_date, prepared_by)
-     VALUES (?, '2026-09-01', ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`
+    `INSERT INTO proforma_invoices (number, date, customer_id, company_id, currency, order_id, grand_total, status, validity_date, prepared_by, is_export)
+     VALUES (?, '2026-09-01', ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`
   ).get(`PI/R-${++seq}`, customerId, o.company ?? 1, o.currency ?? 'USD', o.orderId ?? null, o.total ?? 1000,
-    o.status ?? 'sent', o.validity ?? '', o.spoc ?? 'Meisha') as { id: number }).id);
+    o.status ?? 'sent', o.validity ?? '', o.spoc ?? 'Meisha', o.isExport ?? 0) as { id: number }).id);
 }
 
 const rowsOf = (p: ReturnType<typeof plannedReport>, customerId: number) => p.rows.filter((r) => r.customer_id === customerId);
@@ -237,11 +241,11 @@ function line(
     o.price ?? 100, o.amount ?? 1000, o.charge ?? 0);
 }
 
-function quotation(customerId: number, o: Partial<{ status: string; superseded: number | null; currency: string }> = {}): number {
+function quotation(customerId: number, o: Partial<{ status: string; superseded: number | null; currency: string; isExport: number }> = {}): number {
   return Number((db.prepare(
-    `INSERT INTO quotations (number, date, customer_id, company_id, currency, tax_type, status, superseded_by)
-     VALUES (?, '2026-09-01', ?, 1, ?, 'none', ?, ?) RETURNING id`
-  ).get(`QT/R-${++seq}`, customerId, o.currency ?? 'USD', o.status ?? 'draft', o.superseded ?? null) as { id: number }).id);
+    `INSERT INTO quotations (number, date, customer_id, company_id, currency, tax_type, status, superseded_by, is_export)
+     VALUES (?, '2026-09-01', ?, 1, ?, 'none', ?, ?, ?) RETURNING id`
+  ).get(`QT/R-${++seq}`, customerId, o.currency ?? 'USD', o.status ?? 'draft', o.superseded ?? null, o.isExport ?? 0) as { id: number }).id);
 }
 
 const linesFor = (customerId: number, by: 'customer' | 'country' = 'customer') =>
@@ -396,5 +400,130 @@ describe('the sales book', () => {
     assert.deepEqual(mine.map((l) => l.doc), ['order']);
     assert.deepEqual(only.included, ['order']);
     assert.deepEqual(bookReport(ALL, { by: 'customer', docs: [] }).groups, []);
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * Export and domestic
+ * ------------------------------------------------------------------ */
+
+/**
+ * One side of the selling book or the other (2026-11-16, the client: *"Add
+ * export domestic filter in reports"*).
+ *
+ * Most of these assert the invariant the company filter is held to: **the two
+ * halves partition the unfiltered whole**, nothing dropped and nothing
+ * counted twice. A filter that quietly loses a document is how a sheet comes
+ * to understate what is planned or what is owed, and it looks exactly like a
+ * narrower book.
+ */
+describe('export and domestic', () => {
+  const EXPORT: ReportFilter = { ...ALL, isExport: 1 };
+  const DOMESTIC: ReportFilter = { ...ALL, isExport: 0 };
+  const sum = (p: ReturnType<typeof plannedReport>, customerId: number) =>
+    rowsOf(p, customerId).reduce((n, r) => n + r.total, 0);
+
+  test('each pivot reads one side, and the two sides are the whole sheet', () => {
+    const c = makeCustomer();
+    pi(c, { isExport: 1, status: 'in_production', orderId: order(c, { revised: '2026-09-20' }), total: 100 });
+    pi(c, { isExport: 0, status: 'in_production', orderId: order(c, { revised: '2026-09-20' }), total: 7 });
+    assert.equal(sum(plannedReport(EXPORT), c), 100);
+    assert.equal(sum(plannedReport(DOMESTIC), c), 7);
+    assert.equal(sum(plannedReport(ALL), c), 107, 'the halves do not add up to the whole');
+  });
+
+  test('and so does yet to be scheduled', () => {
+    const c = makeCustomer();
+    pi(c, { isExport: 1, status: 'sent', total: 100 });
+    pi(c, { isExport: 0, status: 'order_confirmed', total: 7 });
+    assert.deepEqual(rowsOf(unscheduledReport(EXPORT), c).map((r) => r.cells), [{ pending: 100 }]);
+    assert.deepEqual(rowsOf(unscheduledReport(DOMESTIC), c).map((r) => r.cells), [{ confirmed: 7 }]);
+    assert.equal(sum(unscheduledReport(ALL), c), 107);
+  });
+
+  /**
+   * The commercial invoice has been export-only since 2026-09-16, so on a
+   * book kept since then *Domestic* here is empty — which is the record
+   * rather than a defect, and is why the page says so beside the control. A
+   * legacy domestic invoice is still a real one and still reported.
+   */
+  test('dispatch by month, where domestic is the legacy invoices alone', () => {
+    const c = makeCustomer();
+    const ex = makeInvoice({ customerId: c, currency: 'USD', total: 100, date: '2026-04-15' });
+    setExport(ex, 1);
+    makeInvoice({ customerId: c, currency: 'USD', total: 7, date: '2026-04-20' });   // domestic, as the column defaults
+    assert.equal(sum(dispatchReport(EXPORT, '2026-04-01', '2026-04-30'), c), 100);
+    assert.equal(sum(dispatchReport(DOMESTIC, '2026-04-01', '2026-04-30'), c), 7);
+    assert.equal(sum(dispatchReport(ALL, '2026-04-01', '2026-04-30'), c), 107);
+  });
+
+  test('and the due list', () => {
+    const c = makeCustomer('Due Sides');
+    const setDue = (id: number, due: string) => db.prepare('UPDATE commercial_invoices SET due_date = ? WHERE id = ?').run(due, id);
+    const ex = makeInvoice({ customerId: c, currency: 'USD', total: 100 });
+    setDue(ex, '2026-09-16'); setExport(ex, 1);
+    const dom = makeInvoice({ customerId: c, currency: 'USD', total: 7 });
+    setDue(dom, '2026-09-16');
+    const due = (f: ReportFilter) => dueReport(f, '2026-09-15').groups
+      .filter((g) => g.customer_id === c).reduce((n, g) => n + g.due, 0);
+    assert.equal(due(EXPORT), 100);
+    assert.equal(due(DOMESTIC), 7);
+    assert.equal(due(ALL), 107);
+  });
+
+  /**
+   * On the sales book each of the three parts is read against **its own**
+   * document's flag — the defect this catches is a filter applied to the
+   * first part of the union alone, which leaves the other two whole and makes
+   * *Export* report domestic business.
+   */
+  test('the sales book places each line by its own document', () => {
+    const c = makeCustomer();
+    line('order_items', 'order_id', order(c, { isExport: 1 }), { amount: 1000 });
+    line('pi_items', 'pi_id', pi(c, { isExport: 0, orderId: null }), { amount: 200 });
+    line('quotation_items', 'quotation_id', quotation(c, { isExport: 1 }), { amount: 30 });
+    const lines = (f: ReportFilter) => bookReport(f, { by: 'customer', docs: ALL_DOCS })
+      .groups.flatMap((g) => g.lines).filter((l) => l.customer_id === c);
+    assert.deepEqual(lines(EXPORT).map((l) => [l.doc, l.amount]).sort(), [['order', 1000], ['quotation', 30]]);
+    assert.deepEqual(lines(DOMESTIC).map((l) => [l.doc, l.amount]), [['proforma', 200]]);
+    assert.equal(lines(EXPORT).length + lines(DOMESTIC).length, lines(ALL).length, 'a line is on exactly one side');
+  });
+
+  /**
+   * The customer book is no guide to which side a document is on — Aglo sells
+   * abroad through Dubai and Mauritius intermediaries who are registered in
+   * India, and the customer import carried no country column at all. So the
+   * flag read is the document's, and a domestic order for a customer marked
+   * export is domestic business.
+   */
+  test('it is the document that is export, not the customer', () => {
+    const c = makeCustomer();
+    db.prepare('UPDATE customers SET is_export = 1, country = ? WHERE id = ?').run('Mozambique', c);
+    line('order_items', 'order_id', order(c, { isExport: 0 }), { amount: 500 });
+    const lines = (f: ReportFilter) => bookReport(f, { by: 'customer', docs: ALL_DOCS })
+      .groups.flatMap((g) => g.lines).filter((l) => l.customer_id === c);
+    assert.equal(lines(EXPORT).length, 0);
+    assert.deepEqual(lines(DOMESTIC).map((l) => l.amount), [500]);
+  });
+
+  /** Silence is every document — what every caller that predates this gets. */
+  test('absent or null narrows nothing', () => {
+    const c = makeCustomer();
+    pi(c, { isExport: 1, status: 'sent', total: 100 });
+    pi(c, { isExport: 0, status: 'sent', total: 7 });
+    assert.equal(sum(unscheduledReport({ scope: { sql: '', params: [] }, companyId: 0 }), c), 107);
+    assert.equal(sum(unscheduledReport({ ...ALL, isExport: null }), c), 107);
+  });
+
+  /** It narrows **with** the other filters rather than replacing them. */
+  test('it ands with the company filter', () => {
+    const c = makeCustomer();
+    const second = Number((db.prepare("INSERT INTO companies (company_name) VALUES ('Sides Co') RETURNING id").get() as { id: number }).id);
+    pi(c, { isExport: 1, status: 'sent', total: 100 });
+    pi(c, { isExport: 1, status: 'sent', total: 40, company: second });
+    pi(c, { isExport: 0, status: 'sent', total: 7, company: second });
+    assert.equal(sum(unscheduledReport({ ...EXPORT, companyId: second }), c), 40);
+    assert.equal(sum(unscheduledReport({ ...DOMESTIC, companyId: second }), c), 7);
+    assert.equal(sum(unscheduledReport({ ...ALL, companyId: second }), c), 47);
   });
 });

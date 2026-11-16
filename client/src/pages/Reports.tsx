@@ -10,7 +10,7 @@ import type {
   BookReport, BookDoc, PriceHistory, PriceSeries, PricePoint, Customer, Product,
 } from '../types';
 import {
-  PageHeader, Card, Select, Input, SegmentedTabs, EmptyState, DownloadButton,
+  PageHeader, Card, Select, Input, SegmentedTabs, ExportTabs, EmptyState, DownloadButton,
   SearchSelect, TH_CLASS, CAPTION_CLASS, BAND_CLASS,
 } from '../components/ui';
 // The dashboard's own palette rather than a second one — see its comment.
@@ -106,6 +106,13 @@ export default function ReportsPage() {
   const [viewRaw, setView] = useUrlFilter('view');
   const view: View = (tabs.find((t) => t.key === viewRaw) ?? tabs[0])?.key ?? 'planned';
   const [company, setCompany] = useUrlFilter('company');
+  /*
+   * Export or domestic, over every sheet (2026-11-16, the client: *"Add export
+   * domestic filter in reports"*). Under the same `export=1|0` key the order
+   * book and the registers use, and in the URL like every filter here, so a
+   * narrowed sheet is a link somebody can send.
+   */
+  const [exportFilter, setExportFilter] = useUrlFilter('export');
   const [from, setFrom] = useUrlFilter('from');
   const [to, setTo] = useUrlFilter('to');
   // The sheets are read per person — *Meisha Total*, *Tannistha Total* — so a
@@ -135,6 +142,9 @@ export default function ReportsPage() {
 
   const params = new URLSearchParams();
   if (company) params.set('company', company);
+  // Every tab is narrowed by it, and the download reads this same string, so
+  // the file holds what the screen holds without a second thought.
+  if (exportFilter) params.set('export', exportFilter);
   if (view === 'dispatch') {
     if (from) params.set('from', from);
     if (to) params.set('to', to);
@@ -157,10 +167,16 @@ export default function ReportsPage() {
     enabled: tabs.length > 0 && (view !== 'price-history' || !!product),
   });
 
-  /** Every list link keeps the company the report is showing. */
+  /**
+   * Every list link keeps the company and the export side the report is
+   * showing — both under the keys those lists read themselves, so a cell
+   * opens the same half of the book it was summed from rather than widening
+   * back to the whole of it.
+   */
   const listUrl = (path: string, extra: Record<string, string> = {}) => {
     const p = new URLSearchParams();
     if (company) p.set('company', company);
+    if (exportFilter) p.set('export', exportFilter);
     for (const [k, v] of Object.entries(extra)) if (v) p.set(k, v);
     return p.toString() ? `${path}?${p}` : path;
   };
@@ -217,6 +233,12 @@ export default function ReportsPage() {
       />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
+        {/*
+          First in the row, as on the order book and the two registers, and
+          deliberately not up among the tabs: those are *views* of this page,
+          where this says which half of the book each of them reads.
+        */}
+        <ExportTabs value={exportFilter} onChange={setExportFilter} />
         {companies.length > 1 && (
           <Select className="w-48" value={company} onChange={(e) => setCompany(e.target.value)}>
             <option value="">All companies</option>
@@ -284,6 +306,19 @@ export default function ReportsPage() {
             <input type="checkbox" checked={subtotals === '1'} onChange={(e) => setSubtotals(e.target.checked ? '1' : '')} />
             Subtotal per SPOC
           </label>
+        )}
+        {/*
+          The one place the filter's answer needs explaining. These two sheets
+          are built from commercial invoices, and the commercial invoice has
+          been export-only since 2026-09-16 — a domestic sale is invoiced in
+          Tally — so *Domestic* here is the invoices raised before that rule
+          and nothing since. An empty sheet with nothing to say why reads as a
+          fault, which is what this one line is for.
+        */}
+        {exportFilter === '0' && (view === 'dispatch' || view === 'due') && (
+          <span className="text-xs text-slate-500" title="POST /api/invoices refuses a domestic invoice, so nothing new is raised on this side of the book">
+            The commercial invoice is export-only — a domestic sale is invoiced in Tally, so only invoices raised before that rule are here.
+          </span>
         )}
         {present.length === 1
           ? <span className="text-sm text-slate-500">All figures in {present[0]}.</span>
