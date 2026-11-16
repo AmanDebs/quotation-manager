@@ -1297,6 +1297,8 @@ export interface DispatchReport extends ReportPivot { from: string; to: string }
 export type DueColour = 'red' | 'yellow' | 'green';
 export interface DueInvoice {
   id: number; number: string; date: string; grand_total: number; balance_due: number;
+  /** The invoice's Prepared By — the sheet's SPOC column, a fact per invoice. */
+  spoc: string;
   due_date: string; due_on_arrival: boolean; days_to_due: number | null; colour: DueColour | null;
 }
 export interface DueGroup {

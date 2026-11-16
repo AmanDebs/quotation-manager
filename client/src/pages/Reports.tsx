@@ -200,15 +200,33 @@ export default function ReportsPage() {
           : (data as ReportPivot | DispatchReport).rows;
   // Every currency present, biggest book first — each gets its own block.
   const present = currenciesByWeight(currencyRows);
-  const spocs = data && view !== 'book' && view !== 'price-history' && !('groups' in data)
-    ? [...new Set((data as ReportPivot | DispatchReport).rows.map((r) => r.spoc))].sort()
-    : [];
+  /*
+   * The people on the sheet. The three pivots carry a SPOC per row; the Due
+   * list carries one per **invoice** (2026-11-16), so it is read out of the
+   * groups' own invoices — one list, so the picker offers exactly who is on
+   * the sheet in front of it whichever sheet that is.
+   */
+  const spocs = !data || view === 'book' || view === 'price-history'
+    ? []
+    : 'groups' in data
+      ? [...new Set((data as DueReport).groups.flatMap((g) => [...g.invoices, ...g.undated.invoices]).map((i) => i.spoc))].sort()
+      : [...new Set((data as ReportPivot | DispatchReport).rows.map((r) => r.spoc))].sort();
   /*
    * No `currency` on the download: the sheet shows every currency now, and
    * the route's own rule is that without one every row goes with its currency
    * in a column — so the file holds what the screen holds by doing nothing.
    */
-  const exportHref = `/api/reports/${view}/export${query ? `?${query}` : ''}`;
+  const exportHref = (() => {
+    /*
+     * The SPOC is a **screen** filter — the server answers with every row and
+     * the page narrows them, so picking a person costs no refetch — but the
+     * file still has to hold what the screen holds, which is the one rule
+     * every export here is written to. So it rides the download href alone.
+     */
+    const q = new URLSearchParams(query);
+    if (spoc && view !== 'book' && view !== 'price-history') q.set('spoc', spoc);
+    return `/api/reports/${view}/export${q.toString() ? `?${q}` : ''}`;
+  })();
 
   if (tabs.length === 0) return <EmptyState message="Nothing here is yours to read." />;
 
@@ -295,7 +313,14 @@ export default function ReportsPage() {
             <Input type="date" className="w-40" value={to || fy.to} onChange={(e) => setTo(e.target.value === fy.to ? '' : e.target.value)} />
           </>
         )}
-        {view !== 'due' && spocs.length > 0 && (
+        {/*
+          Offered on the Due list too since its rows carry a SPOC: a column
+          somebody can read and not filter by, on a page where every other
+          sheet's does, is the odd control out. The **subtotal** tick below
+          is still not — that regroups a pivot's rows by person, which is
+          `PivotTable`'s own shape and not this customer-wise list's.
+        */}
+        {spocs.length > 0 && (
           <Select className="w-40" value={spoc} onChange={(e) => setSpoc(e.target.value)}>
             <option value="">All SPOCs</option>
             {spocs.map((s) => <option key={s} value={s}>{s || '— none —'}</option>)}
@@ -338,7 +363,7 @@ export default function ReportsPage() {
       ) : view === 'book' ? (
         <BookTable report={data as BookReport} currencies={present} listUrl={listUrl} />
       ) : view === 'due' ? (
-        <DueTable report={data as DueReport} currencies={present} listUrl={listUrl} />
+        <DueTable report={data as DueReport} currencies={present} spoc={spoc} listUrl={listUrl} />
       ) : (
         <Pivot view={view} data={data as ReportPivot | DispatchReport} currencies={present} spoc={spoc} subtotals={!spoc && subtotals === '1'} listUrl={listUrl} />
       )}
@@ -452,15 +477,45 @@ const DOT: Record<DueColour, string> = { red: 'bg-red-500', yellow: 'bg-amber-40
  * them — see `PivotTable`, where a card each was tried and refused. The
  * legend is drawn once under the lot, being the same legend either way.
  */
-function DueTable({ report, currencies, listUrl }: {
+function DueTable({ report, currencies, spoc, listUrl }: {
   report: DueReport;
   currencies: string[];
+  /** One person's invoices only; blank means everybody. */
+  spoc: string;
   listUrl: (path: string, extra?: Record<string, string>) => string;
 }) {
-  const used = currencies.filter((c) => report.groups.some((g) => g.currency === c));
+  /*
+   * Narrowed to one person, **the figures narrow with the rows**: a
+   * customer's line is the sum of the invoices under it, so filtering the
+   * rows and leaving the total alone would print a figure over invoices the
+   * table does not show. The server answers with everything and the page
+   * narrows, the rule the three pivots beside this already follow — and a
+   * customer left with nothing is dropped rather than drawn empty.
+   */
+  const picked = !spoc ? report.groups : report.groups
+    .map((g) => {
+      const invoices = g.invoices.filter((i) => i.spoc === spoc);
+      const undated = g.undated.invoices.filter((i) => i.spoc === spoc);
+      return {
+        ...g,
+        invoices,
+        invoiced: invoices.reduce((n, i) => n + i.grand_total, 0),
+        due: invoices.reduce((n, i) => n + i.balance_due, 0),
+        undated: { count: undated.length, due: undated.reduce((n, i) => n + i.balance_due, 0), invoices: undated },
+      };
+    })
+    .filter((g) => g.invoices.length > 0 || g.undated.count > 0);
+  const used = currencies.filter((c) => picked.some((g) => g.currency === c));
   const num = 'whitespace-nowrap py-1.5 pr-3 text-right tabular-nums';
   if (used.length === 0) {
-    return <Card><EmptyState message={`Nothing overdue or falling due by ${fmtDate(report.until)}.`} /></Card>;
+    return (
+      <Card>
+        <EmptyState message={spoc
+          ? `Nothing of ${spoc}'s is overdue or falls due by ${fmtDate(report.until)}.`
+          : `Nothing overdue or falling due by ${fmtDate(report.until)}.`}
+        />
+      </Card>
+    );
   }
   const named = used.length > 1;
   return (
@@ -470,6 +525,8 @@ function DueTable({ report, currencies, listUrl }: {
           <thead>
             <tr className={TH_CLASS}>
               <th className="pb-2 pr-3">Customer / Invoice</th>
+              {/* Beside the customer, where the three pivots put theirs. */}
+              <th className="pb-2 pr-3">SPOC</th>
               <th className="pb-2 pr-3">Invoice date</th>
               <th className="pb-2 pr-3 text-right">Invoice amount</th>
               <th className="pb-2 pr-3 text-right">Due amount</th>
@@ -478,12 +535,12 @@ function DueTable({ report, currencies, listUrl }: {
             </tr>
           </thead>
           {used.flatMap((currency) => {
-            const groups = report.groups.filter((g) => g.currency === currency);
+            const groups = picked.filter((g) => g.currency === currency);
             const sum = (pick: (g: DueGroup) => number) => groups.reduce((n, g) => n + pick(g), 0);
             return [
               named ? (
                 <tbody key={`band|${currency}`}>
-                  <tr><td colSpan={6} className={BAND_CLASS}>{currency || '—'}</td></tr>
+                  <tr><td colSpan={7} className={BAND_CLASS}>{currency || '—'}</td></tr>
                 </tbody>
               ) : null,
               ...groups.map((g) => (
@@ -491,20 +548,40 @@ function DueTable({ report, currencies, listUrl }: {
                   <tr className="bg-slate-50 font-semibold">
                     <td className="whitespace-nowrap py-2 pr-3">
                       <Link to={`/customers/${g.customer_id}`} className="text-brand-600 hover:underline">{g.customer_name}</Link>
+                      {/*
+                        What is listed under this customer, dated and undated
+                        alike. A group can be here for its undated invoices
+                        alone, and counting only the dated ones read **0
+                        invoices** over an invoice printed on the next line —
+                        found in the render, and true of the sheet before the
+                        SPOC filter made it easy to land on.
+                      */}
                       <span className="ml-2 text-xs font-normal text-slate-400">
-                        {g.invoices.length} invoice{g.invoices.length === 1 ? '' : 's'}
+                        {g.invoices.length > 0 && `${g.invoices.length} invoice${g.invoices.length === 1 ? '' : 's'}`}
+                        {g.invoices.length > 0 && g.undated.count > 0 && ' · '}
+                        {g.undated.count > 0 && `${g.undated.count} with no due date`}
                       </span>
                     </td>
                     <td />
-                    <td className={num}>{fmtMoneyRound(g.invoiced, currency)}</td>
+                    <td />
+                    {/*
+                      These two figures are the **dated** invoices' — the ones
+                      that fall in the window, which is what the sheet is of —
+                      so with none of them an em-dash says *nothing is due in
+                      the window* where ₹0 would say *they owe nothing*, which
+                      the undated line below contradicts.
+                    */}
+                    <td className={num}>{g.invoices.length > 0 ? fmtMoneyRound(g.invoiced, currency) : <span className="text-slate-300">—</span>}</td>
                     <td className={num}>
-                      <Link
-                        to={listUrl('/payments', { view: 'receivables', customer_id: String(g.customer_id), status: 'pending' })}
-                        className="rounded px-1 hover:bg-brand-50 hover:text-brand-700"
-                        title="Open the Receivables tracker for this customer"
-                      >
-                        {fmtMoneyRound(g.due, currency)}
-                      </Link>
+                      {g.invoices.length > 0 ? (
+                        <Link
+                          to={listUrl('/payments', { view: 'receivables', customer_id: String(g.customer_id), status: 'pending' })}
+                          className="rounded px-1 hover:bg-brand-50 hover:text-brand-700"
+                          title="Open the Receivables tracker for this customer"
+                        >
+                          {fmtMoneyRound(g.due, currency)}
+                        </Link>
+                      ) : <span className="text-slate-300">—</span>}
                     </td>
                     <td colSpan={2} />
                   </tr>
@@ -514,6 +591,8 @@ function DueTable({ report, currencies, listUrl }: {
                         {inv.colour && <span className={`mr-2 inline-block h-2 w-2 rounded-full ${DOT[inv.colour]}`} />}
                         <Link to={`/invoices/${inv.id}`} className="font-medium hover:underline">{inv.number}</Link>
                       </td>
+                      {/* Blank recedes rather than reading as a fault — the em-dash rule. */}
+                      <td className="whitespace-nowrap py-1.5 pr-3">{inv.spoc || <span className="text-slate-300">—</span>}</td>
                       <td className="whitespace-nowrap py-1.5 pr-3">{fmtDate(inv.date)}</td>
                       <td className={num}>{fmtMoney(inv.grand_total, currency)}</td>
                       <td className={`${num} font-semibold`}>{fmtMoney(inv.balance_due, currency)}</td>
@@ -531,7 +610,7 @@ function DueTable({ report, currencies, listUrl }: {
                   ))}
                   {g.undated.count > 0 && (
                     <tr className="text-slate-500">
-                      <td className="py-1.5 pl-6 pr-3" colSpan={3}>
+                      <td className="py-1.5 pl-6 pr-3" colSpan={4}>
                         No due date recorded:{' '}
                         {g.undated.invoices.map((inv, i) => (
                           <span key={inv.id}>{i > 0 && ', '}<Link to={`/invoices/${inv.id}`} className="hover:underline">{inv.number}</Link></span>
@@ -545,7 +624,7 @@ function DueTable({ report, currencies, listUrl }: {
               )),
               <tbody key={`total|${currency}`}>
                 <tr className="border-t-2 border-slate-300 font-semibold">
-                  <td className="py-2 pr-3" colSpan={2}>Grand Total{named ? ` — ${currency || '—'}` : ''}</td>
+                  <td className="py-2 pr-3" colSpan={3}>Grand Total{named ? ` — ${currency || '—'}` : ''}</td>
                   <td className={num}>{fmtMoneyRound(sum((g) => g.invoiced), currency)}</td>
                   <td className={num}>{fmtMoneyRound(sum((g) => g.due), currency)}</td>
                   <td colSpan={2} />

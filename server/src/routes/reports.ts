@@ -67,12 +67,25 @@ function sendXlsx(res: Response, name: string, cols: Column<Row>[], rows: Row[])
   res.send(buildXlsx(name, cols, rows));
 }
 
-function pivotXlsx(res: Response, name: string, p: Pivot, labels: (col: string) => string, currency: string) {
-  const rows: Row[] = (currency ? p.rows.filter((r) => r.currency === currency) : p.rows)
+function pivotXlsx(res: Response, name: string, p: Pivot, labels: (col: string) => string, currency: string, spoc = '') {
+  /*
+   * `?spoc=` narrows to one person, and the Grand Total is then **that
+   * person's rows added up** rather than the server's own figure — the rule
+   * the screen's own filter follows, and what makes the file hold what the
+   * screen holds. The page sends it whenever its SPOC picker is set.
+   */
+  const picked = p.rows.filter((r) => (!currency || r.currency === currency) && (!spoc || r.spoc === spoc));
+  const rows: Row[] = picked
     .map((r: PivotRow) => ({ customer: r.customer_name, spoc: r.spoc, currency: r.currency, ...r.cells, total: r.total }));
   for (const t of p.totals) {
     if (currency && t.currency !== currency) continue;
-    rows.push({ customer: 'Grand Total', spoc: '', currency: t.currency, ...t.cells, total: t.total });
+    const mine = picked.filter((r) => r.currency === t.currency);
+    if (spoc && !mine.length) continue;
+    const cells = spoc
+      ? Object.fromEntries(p.columns.map((c) => [c, mine.reduce((n, r) => n + (r.cells[c] ?? 0), 0)]))
+      : t.cells;
+    const total = spoc ? mine.reduce((n, r) => n + r.total, 0) : t.total;
+    rows.push({ customer: 'Grand Total', spoc: '', currency: t.currency, ...cells, total });
   }
   const cols: Column<Row>[] = [
     { header: 'Customer', value: (r) => String(r.customer ?? '') },
@@ -94,19 +107,39 @@ const monthLabel = (ym: string) => {
   return m >= 1 && m <= 12 ? `${MONTHS[m - 1]} ${y}` : ym;
 };
 const currencyOf = (req: AuthedRequest) => String(req.query.currency ?? '').trim().toUpperCase();
+/**
+ * One person's rows alone, which the page's SPOC picker sends on the
+ * download href (and only there — the JSON routes answer with every row and
+ * the screen narrows them, so picking a person costs no refetch). Without it
+ * the file would hold a book the screen does not show, which is the one rule
+ * every export here is written to.
+ */
+const spocOf = (req: AuthedRequest) => String(req.query.spoc ?? '').trim();
 
-function dueXlsx(res: Response, d: DueReport, currency: string) {
+function dueXlsx(res: Response, d: DueReport, currency: string, spoc: string) {
   const rows: Row[] = [];
   const status = (c: string | null) => (c === 'red' ? 'Overdue' : c === 'yellow' ? 'Due within 7 days' : c === 'green' ? 'Due in 8-14 days' : 'No due date');
   for (const g of d.groups) {
     if (currency && g.currency !== currency) continue;
-    for (const i of [...g.invoices, ...g.undated.invoices]) {
-      rows.push({ customer: g.customer_name, currency: g.currency, number: i.number, date: i.date, amount: i.grand_total, due: i.balance_due, due_date: i.due_date, basis: i.due_on_arrival ? 'on arrival' : '', days: i.days_to_due, status: status(i.colour) });
+    // Narrowed to one person, the customer's own line is **their** invoices
+    // added up rather than the group's figure, or the file would state a
+    // total over rows it does not carry.
+    const dated = g.invoices.filter((i) => !spoc || i.spoc === spoc);
+    const undated = g.undated.invoices.filter((i) => !spoc || i.spoc === spoc);
+    if (!dated.length && !undated.length) continue;
+    for (const i of [...dated, ...undated]) {
+      rows.push({ customer: g.customer_name, spoc: i.spoc, currency: g.currency, number: i.number, date: i.date, amount: i.grand_total, due: i.balance_due, due_date: i.due_date, basis: i.due_on_arrival ? 'on arrival' : '', days: i.days_to_due, status: status(i.colour) });
     }
-    rows.push({ customer: `${g.customer_name} Total`, currency: g.currency, number: '', date: '', amount: g.invoiced, due: g.due + g.undated.due, due_date: '', basis: '', days: null, status: '' });
+    const invoiced = spoc ? dated.reduce((n, i) => n + i.grand_total, 0) : g.invoiced;
+    const due = spoc
+      ? [...dated, ...undated].reduce((n, i) => n + i.balance_due, 0)
+      : g.due + g.undated.due;
+    rows.push({ customer: `${g.customer_name} Total`, spoc: '', currency: g.currency, number: '', date: '', amount: invoiced, due, due_date: '', basis: '', days: null, status: '' });
   }
   sendXlsx(res, 'Due', [
     { header: 'Customer', value: (r) => String(r.customer) },
+    // Beside the customer, where the other three sheets' own SPOC column is.
+    { header: 'SPOC', value: (r) => String(r.spoc ?? '') },
     { header: 'Currency', value: (r) => String(r.currency) },
     { header: 'Invoice', value: (r) => String(r.number) },
     { header: 'Invoice date', value: (r) => (r.date as string) || null, type: 'date' },
@@ -128,18 +161,18 @@ function dispatchRange(req: AuthedRequest): { from: string; to: string } {
 
 // The exports, declared above the JSON routes they mirror.
 reportsRouter.get('/planned/export', requirePermission('proforma'), (req: AuthedRequest, res) => {
-  pivotXlsx(res, 'Planned for production', plannedReport(filter(req, 'p.customer_id')), dayLabel, currencyOf(req));
+  pivotXlsx(res, 'Planned for production', plannedReport(filter(req, 'p.customer_id')), dayLabel, currencyOf(req), spocOf(req));
 });
 reportsRouter.get('/unscheduled/export', requirePermission('proforma'), (req: AuthedRequest, res) => {
   const labels: Record<string, string> = { pending: 'Pending', confirmed: 'Confirmed - not scheduled' };
-  pivotXlsx(res, 'Yet to be scheduled', unscheduledReport(filter(req, 'p.customer_id')), (c) => labels[c] ?? c, currencyOf(req));
+  pivotXlsx(res, 'Yet to be scheduled', unscheduledReport(filter(req, 'p.customer_id')), (c) => labels[c] ?? c, currencyOf(req), spocOf(req));
 });
 reportsRouter.get('/dispatch/export', requirePermission('invoice'), (req: AuthedRequest, res) => {
   const { from, to } = dispatchRange(req);
-  pivotXlsx(res, 'Dispatch by month', dispatchReport(filter(req, 'i.customer_id'), from, to), monthLabel, currencyOf(req));
+  pivotXlsx(res, 'Dispatch by month', dispatchReport(filter(req, 'i.customer_id'), from, to), monthLabel, currencyOf(req), spocOf(req));
 });
 reportsRouter.get('/due/export', requirePermission('payment'), (req: AuthedRequest, res) => {
-  dueXlsx(res, dueReport(filter(req, 'i.customer_id'), todayIso()), currencyOf(req));
+  dueXlsx(res, dueReport(filter(req, 'i.customer_id'), todayIso()), currencyOf(req), spocOf(req));
 });
 
 reportsRouter.get('/planned', requirePermission('proforma'), (req: AuthedRequest, res) => {

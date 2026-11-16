@@ -222,6 +222,14 @@ export type DueColour = 'red' | 'yellow' | 'green';
 
 export interface DueInvoice {
   id: number; number: string; date: string; grand_total: number; balance_due: number;
+  /**
+   * The invoice's **Prepared By** — the sheet's SPOC column, and the same
+   * column the three pivots beside this one read (2026-11-16, the client:
+   * *"Add spoc column in this sheet"*). It is a fact about the invoice
+   * rather than about the customer, so it rides the row: one buyer's two
+   * invoices can be two people's to chase.
+   */
+  spoc: string;
   due_date: string; due_on_arrival: boolean;
   /** Negative when overdue; null when there is no due date to count to. */
   days_to_due: number | null;
@@ -279,11 +287,19 @@ export function dueReport(f: ReportFilter, today: string, windowDays = 14): DueR
   const q = scoped(f, 'i', [], []);
   const heads = db.prepare(
     `SELECT i.id, i.number, i.date, i.customer_id, COALESCE(c.name, '') AS customer_name,
-            i.currency, i.is_export, i.grand_total, i.due_date
+            i.currency, i.is_export, i.grand_total, i.due_date,
+            COALESCE(i.prepared_by, '') AS spoc
        FROM commercial_invoices i LEFT JOIN customers c ON c.id = i.customer_id
        ${q.where}
       ORDER BY i.date, i.id`
-  ).all(...(q.params as never[])) as unknown as InvoiceHead[];
+  ).all(...(q.params as never[])) as unknown as (InvoiceHead & { spoc: string })[];
+  /*
+   * Carried beside the tracker's own rows rather than added to `InvoiceHead`:
+   * `trackerRows` owns what a receivable is, and the SPOC is this sheet's
+   * column — widening that type would put it on the Receivables tracker too,
+   * which is a different screen nobody asked about.
+   */
+  const spocOf = new Map(heads.map((h) => [h.id, String(h.spoc ?? '').trim()]));
   const until = addDaysIso(today, windowDays);
   const groups = new Map<string, DueGroup>();
   const groupFor = (r: TrackerRow) => {
@@ -297,7 +313,7 @@ export function dueReport(f: ReportFilter, today: string, windowDays = 14): DueR
   };
   for (const r of trackerRows(heads, false)) {
     if (r.balance_due <= 0) continue;
-    const base = { id: r.id, number: r.number, date: r.date, grand_total: r.grand_total, balance_due: r.balance_due, due_date: r.due_date, due_on_arrival: r.due_on_arrival };
+    const base = { id: r.id, number: r.number, date: r.date, grand_total: r.grand_total, balance_due: r.balance_due, spoc: spocOf.get(r.id) ?? '', due_date: r.due_date, due_on_arrival: r.due_on_arrival };
     if (!r.due_date) {
       const g = groupFor(r);
       g.undated.count += 1;

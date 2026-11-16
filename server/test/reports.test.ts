@@ -210,6 +210,41 @@ describe('due', () => {
     const groups = dueReport(ALL, '2026-09-15').groups.filter((g) => g.customer_id === c);
     assert.deepEqual(groups.map((g) => [g.currency, g.due]), [['INR', 20], ['USD', 10]]);
   });
+
+  /**
+   * Who to chase (2026-11-16, the client: *"Add spoc column in this sheet"*).
+   *
+   * It is the invoice's own **Prepared By**, the column the three pivots
+   * beside this one read — and it rides the invoice rather than the customer
+   * group, which is the case worth pinning: one buyer's two invoices can be
+   * two people's to chase, and a SPOC on the group would have to pick one.
+   */
+  test('each invoice names who prepared it, and one customer can be two people’s', () => {
+    const c = makeCustomer('Two Desks');
+    const setSpoc = (id: number, who: string) => db.prepare('UPDATE commercial_invoices SET prepared_by = ? WHERE id = ?').run(who, id);
+    const a = makeInvoice({ customerId: c, currency: 'USD', total: 10 }); setDue(a, '2026-09-16'); setSpoc(a, 'Meisha');
+    const b = makeInvoice({ customerId: c, currency: 'USD', total: 20 }); setDue(b, '2026-09-17'); setSpoc(b, 'Tannistha');
+    const [g] = dueReport(ALL, '2026-09-15').groups.filter((x) => x.customer_id === c);
+    // In due-date order, as the sheet lists them.
+    assert.deepEqual(g.invoices.map((i) => [i.id, i.spoc]), [[a, 'Meisha'], [b, 'Tannistha']]);
+  });
+
+  /** An invoice nobody put their name on reads blank, never null — the cell draws a dash. */
+  test('and an unnamed one is blank rather than null', () => {
+    const c = makeCustomer('No Desk');
+    const a = makeInvoice({ customerId: c, currency: 'USD', total: 10 }); setDue(a, '2026-09-16');
+    const [g] = dueReport(ALL, '2026-09-15').groups.filter((x) => x.customer_id === c);
+    assert.equal(g.invoices[0].spoc, '');
+  });
+
+  /** The undated invoices are listed apart and carry it too, being invoices. */
+  test('the undated invoices carry it as well', () => {
+    const c = makeCustomer('Undated Desk');
+    const a = makeInvoice({ customerId: c, currency: 'INR', total: 700 });
+    db.prepare('UPDATE commercial_invoices SET prepared_by = ? WHERE id = ?').run('Rumela', a);
+    const [g] = dueReport(ALL, '2026-09-15').groups.filter((x) => x.customer_id === c);
+    assert.deepEqual(g.undated.invoices.map((i) => i.spoc), ['Rumela']);
+  });
 });
 
 /* ------------------------------------------------------------------ *
