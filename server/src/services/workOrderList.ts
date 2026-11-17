@@ -291,8 +291,30 @@ export function jobSummary(f: JobFilters) {
             -- the reason the queue above it is: a count of the page in hand
             -- shrinks as you page through it.
             (SELECT COUNT(*) FROM f WHERE due_to_start = 1) AS awaiting,
+            -- Jobs nobody has **dated**, which is not the same queue as the
+            -- one above: status = 'planned' means *not released to the
+            -- floor*, and a job can carry dates and still be sitting there.
+            -- (No backticks in this comment -- the whole statement is a
+            -- template literal, and one closes it.) This is
+            -- the queue the planner actually works through, and it has to be
+            -- measured over the whole filtered set for the reason the others
+            -- are -- the button that opens the planner used to count the page
+            -- in hand, which is how one press planned 35 of 131 jobs and the
+            -- next press laid its own 35 on top of them.
+            (SELECT COUNT(*) FROM f
+              WHERE status NOT IN ('done','cancelled')
+                AND COALESCE(NULLIF(revised_start, ''), planned_start) = '') AS undated,
+            -- How far out the work on screen is planned. A fact about the
+            -- plant when nothing is filtered, which is the default view, and
+            -- about whatever is filtered when something is -- the rule every
+            -- figure in this fold follows.
+            (SELECT COALESCE(MAX(COALESCE(NULLIF(revised_end, ''), planned_end)), '') FROM f
+              WHERE status NOT IN ('done','cancelled')) AS planned_to,
             COALESCE((SELECT SUM(qty_planned) FROM f), 0) AS planned,
             COALESCE((SELECT SUM(${LIVE_OK('e')}) FROM production_entries e
                        WHERE e.work_order_id IN (SELECT id FROM f)), 0) AS made`
-  ).get(...(params as never[])) as { jobs: number; unplanned: number; planned: number; made: number };
+  ).get(...(params as never[])) as {
+    jobs: number; unplanned: number; awaiting: number;
+    undated: number; planned_to: string; planned: number; made: number;
+  };
 }

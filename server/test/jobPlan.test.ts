@@ -25,6 +25,10 @@ const job = (o: Partial<QueueJob> = {}): QueueJob => ({
   pieces: o.pieces ?? 1_00_000,
   due: o.due === undefined ? null : o.due,
   due_source: o.due_source ?? (o.due ? 'order' : 'none'),
+  // Pass-through for the screen, which has to route each computed date into
+  // the column that job's own state allows now that most of a queue is not
+  // on the page. Nothing in this file reads it.
+  current: o.current ?? { planned_start: '', planned_end: '', revised_start: '', revised_end: '' },
 });
 
 const rate = (productId: number, pcsPerDay: number): [number, OutputRate] =>
@@ -299,5 +303,149 @@ describe('the rule a queue opens on', () => {
 
   test('and the default is still soonest customer date first', () => {
     assert.equal(SORTS.due, byDue);
+  });
+});
+
+/**
+ * The plant runs several jobs at once (2026-11-17).
+ *
+ * `lanes` was fixed at one until the client's own Work Orders page was read
+ * at the size of a real book, and the fixture had hidden two things at once:
+ * a plan laid on a single line makes any real order book years long, and a
+ * queue that knows nothing about the dates already on the floor lays itself
+ * straight over them.
+ *
+ * Most of these are about what must **not** move. The first is the one that
+ * keeps every figure measured before this true.
+ */
+describe('laying a queue across the plant', () => {
+  /** Days a plan occupies, counted per job — the load the plant carries. */
+  const load = (plan: ReturnType<typeof layOutQueue>) => {
+    const days = new Map<string, number>();
+    for (const p of plan) {
+      if (p.blocked) continue;
+      for (let d = p.planned_start; d <= p.planned_end;) {
+        days.set(d, (days.get(d) ?? 0) + 1);
+        const t = new Date(`${d}T00:00:00Z`);
+        t.setUTCDate(t.getUTCDate() + 1);
+        d = t.toISOString().slice(0, 10);
+      }
+    }
+    return days;
+  };
+
+  const three = () => [
+    job({ pieces: 1_00_000, product_id: 1 }),
+    job({ pieces: 1_00_000, product_id: 1 }),
+    job({ pieces: 1_00_000, product_id: 1 }),
+  ];
+  const rates = () => new Map([rate(1, 50_000)]);
+
+  /**
+   * The invariant that let this ship: every duration, span and refusal
+   * measured before `lanes` existed was measured against one line, so one
+   * line has to stay exactly what it was.
+   */
+  test('one line is the queue end to end, exactly as it was', () => {
+    const jobs = three();
+    const was = layOutQueue(jobs, rates(), '2026-11-17');
+    const now = layOutQueue(jobs, rates(), '2026-11-17', { lanes: 1 });
+    assert.deepEqual(now.map((p) => [p.planned_start, p.planned_end]), was.map((p) => [p.planned_start, p.planned_end]));
+    assert.deepEqual(was.map((p) => p.planned_start), ['2026-11-17', '2026-11-19', '2026-11-21']);
+  });
+
+  /** Two lines means two jobs start together, and the third follows one. */
+  test('a job goes on the line that frees first', () => {
+    const plan = layOutQueue(three(), rates(), '2026-11-17', { lanes: 2 });
+    assert.deepEqual(plan.map((p) => p.planned_start), ['2026-11-17', '2026-11-17', '2026-11-19']);
+  });
+
+  /**
+   * The one claim the whole model rests on: whatever the queue, no day ever
+   * carries more jobs than the plant has lines. Asserted across the plan
+   * rather than per row, because an off-by-one in a cursor is invisible on
+   * any single job.
+   */
+  test('no day ever carries more jobs than the plant has lines', () => {
+    const jobs = Array.from({ length: 20 }, (_, i) => job({ pieces: (i % 5 + 1) * 40_000, product_id: 1 }));
+    for (const lanes of [1, 2, 3, 6]) {
+      const busiest = Math.max(...load(layOutQueue(jobs, rates(), '2026-11-17', { lanes })).values());
+      assert.ok(busiest <= lanes, `${lanes} lines carried ${busiest} jobs on one day`);
+    }
+  });
+
+  /**
+   * What stops a second press landing on the first. A line committed until
+   * the 30th takes nothing before the 1st, however early the queue starts.
+   */
+  test('a line busy until a date takes nothing before it', () => {
+    const jobs = [
+      job({ pieces: 10_00_000, product_id: 1 }),   // 20 days, on the free line
+      job({ pieces: 1_00_000, product_id: 1 }),
+      job({ pieces: 1_00_000, product_id: 1 }),
+    ];
+    const plan = layOutQueue(jobs, rates(), '2026-11-17', {
+      lanes: 2, freeFrom: ['2026-12-01', '2026-11-20'],
+    });
+    // The long job fills the line that frees on the 20th to the 9th, so the
+    // next two go on the committed line — on the 1st, never before it.
+    assert.deepEqual(plan.map((p) => p.planned_start), ['2026-11-20', '2026-12-01', '2026-12-03']);
+  });
+
+  /** A line free before the queue opens is still not asked to start earlier. */
+  test('a free line does not pull a job before the start date', () => {
+    const plan = layOutQueue(three(), rates(), '2026-11-17', { lanes: 2, freeFrom: ['2026-01-01', '2026-02-01'] });
+    assert.ok(plan.every((p) => p.planned_start >= '2026-11-17'));
+  });
+
+  /**
+   * Fewer committed lines than the plant has: the rest are free from the
+   * start, and the queue fills those before it waits for the busy one —
+   * which is the point of knowing the plant's size at all.
+   */
+  test('lines nothing is committed to are free from the start', () => {
+    const plan = layOutQueue(three(), rates(), '2026-11-17', { lanes: 3, freeFrom: ['2026-12-01'] });
+    assert.deepEqual(plan.map((p) => p.planned_start), ['2026-11-17', '2026-11-17', '2026-11-19']);
+    assert.ok(plan.every((p) => p.planned_end < '2026-12-01'), 'nothing waits on the committed line');
+  });
+
+  /** A figure that is not a number of lines is one line, never none. */
+  test('a nonsense line count is one line', () => {
+    for (const lanes of [0, -4, Number.NaN, 0.4]) {
+      const plan = layOutQueue(three(), rates(), '2026-11-17', { lanes });
+      assert.deepEqual(plan.map((p) => p.planned_start), ['2026-11-17', '2026-11-19', '2026-11-21']);
+    }
+  });
+
+  /**
+   * The span is the calendar, and the line-days are the work. On several
+   * lines they are different numbers, and the screen says so — a summary
+   * reading *126 production days* over a thirty-day span is a figure that
+   * reads as a contradiction.
+   */
+  test('the summary spans the plan, not the first and last rows', () => {
+    const plan = layOutQueue(three(), rates(), '2026-11-17', { lanes: 2 });
+    const s = summarise(plan);
+    assert.equal(s.from, '2026-11-17');
+    assert.equal(s.to, '2026-11-20');
+    assert.equal(s.days, 6, 'line-days are the work, which two lines absorb in four calendar days');
+  });
+
+  /** One book in one order lays out one way, whatever the plant's size. */
+  test('a tie between two free lines is settled', () => {
+    const jobs = three();
+    const a = layOutQueue(jobs, rates(), '2026-11-17', { lanes: 3 });
+    const b = layOutQueue(jobs, rates(), '2026-11-17', { lanes: 3 });
+    assert.deepEqual(a.map((p) => p.planned_start), b.map((p) => p.planned_start));
+  });
+
+  /** A job nobody can date still takes no line, as it took no slot before. */
+  test('a job that cannot be dated occupies no line', () => {
+    const plan = layOutQueue(
+      [job({ pieces: 1_00_000, product_id: 1 }), job({ pieces: 1_00_000, product_id: 99 }), job({ pieces: 1_00_000, product_id: 1 })],
+      rates(), '2026-11-17', { lanes: 1 },
+    );
+    assert.equal(plan[1].blocked, 'no-rate');
+    assert.equal(plan[2].planned_start, '2026-11-19', 'the job after it keeps the date it would have had');
   });
 });

@@ -3,7 +3,7 @@ import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { api } from '../api/client';
 import { useCan } from '../App';
-import type { WorkOrder, PlannedJob, PlanPreview, PlanSortKey } from '../types';
+import type { PlannedJob, PlanPreview, PlanSortKey } from '../types';
 import { Button, Input, Select, Modal, ErrorText, TH_CLASS } from './ui';
 import { fmtDate, fmtQty, today } from '../lib/format';
 
@@ -152,14 +152,33 @@ const DUE_NOTE: Record<string, string> = {
   none: 'Nothing on this sales order says when the customer needs it, so nothing here can say whether the plan is late. Put a date on the order line (the Promised column on the sales order) to see it.',
 };
 
-export default function PlanQueueModal({ jobs, onClose, onStage }: {
-  jobs: WorkOrder[];
+export default function PlanQueueModal({ queue, replan, onClose, onStage }: {
+  /**
+   * The jobs to plan, **over the whole filtered list rather than the page**.
+   * Ids rather than rows: most of a 131-job queue is not on screen, and the
+   * preview answers about every one of them in full.
+   */
+  queue: number[];
+  /**
+   * Jobs that already carry a plan and have not started — what a **re-plan**
+   * is about. Offered rather than assumed: giving a job new dates moves a
+   * date somebody may have told a customer, so it is a press.
+   */
+  replan: number[];
   onClose: () => void;
   /** Hands the dated rows back to the list, which stages them like any typed date. */
   onStage: (plan: PlannedJob[]) => void;
 }) {
   const can = useCan();
   const [start, setStart] = useState(today());
+  /**
+   * Jobs the plant runs at once. Blank means *what the shift book says*,
+   * which is the answer in nearly every case — a figure typed here wins, the
+   * rule a typed output rate follows over a measured one.
+   */
+  const [lanes, setLanes] = useState('');
+  /** Whether the already-dated jobs have been pulled into the queue. */
+  const [withReplan, setWithReplan] = useState(false);
   const [sort, setSort] = useState<PlanSortKey>('due');
   /*
    * The order to run them in. Empty until somebody moves a row — the rule
@@ -170,15 +189,20 @@ export default function PlanQueueModal({ jobs, onClose, onStage }: {
   /** Jobs taken out of this queue. Reversible, and never written anywhere. */
   const [dropped, setDropped] = useState<Set<number>>(new Set());
 
+  const asked = useMemo(
+    () => (withReplan ? [...queue, ...replan] : queue),
+    [queue, replan, withReplan],
+  );
   const ids = useMemo(
-    () => (order.length ? order : jobs.map((j) => j.id)).filter((id) => !dropped.has(id)),
-    [jobs, order, dropped],
+    () => (order.length ? order : asked).filter((id) => !dropped.has(id)),
+    [asked, order, dropped],
   );
 
   const preview = useQuery({
-    queryKey: ['plan-preview', ids.join(','), start, sort, order.length > 0],
+    queryKey: ['plan-preview', ids.join(','), start, sort, order.length > 0, lanes],
     queryFn: () => api.post<PlanPreview>('/api/work-orders/plan/preview', {
       ids, start, sort, keep_order: order.length > 0,
+      ...(Number(lanes) >= 1 ? { lanes: Number(lanes) } : {}),
     }),
     enabled: !!start && ids.length > 0,
     /*
@@ -192,6 +216,8 @@ export default function PlanQueueModal({ jobs, onClose, onStage }: {
 
   const rows = preview.data?.jobs ?? [];
   const summary = preview.data?.summary;
+  /** What the shift book says the plant runs at once, under the typed box. */
+  const measured = preview.data?.lanes_measured;
   const datable = rows.filter((p) => !p.blocked);
   const baseYear = (summary?.from || start).slice(0, 4);
 
@@ -233,12 +259,74 @@ export default function PlanQueueModal({ jobs, onClose, onStage }: {
               {order.length > 0 && <option value="manual">The order you have put them in</option>}
             </Select>
           </label>
-          <p className="max-w-[22rem] pb-1 text-xs text-slate-500">
-            One queue, one job at a time, seven days a week. Each job takes
-            what is <strong>left to make</strong> divided by how fast that
-            product goes.
+          {/*
+            How big the plant is. Measured from the shift book — how many jobs
+            the floor actually books output against on a typical day — and
+            typed over where somebody knows better, the rule the output rate
+            beside it already follows.
+
+            This is the figure that decides whether the plan is usable at all:
+            laid on one line, the open book on the client's own screen is over
+            two years of work, which is not a plan anybody works to.
+          */}
+          <label className="text-sm">
+            <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Lines at once</span>
+            <Input
+              type="number" min={1} max={50} className="w-24 text-right"
+              value={lanes}
+              placeholder={measured ? String(measured.lanes) : '1'}
+              onChange={(e) => setLanes(e.target.value)}
+              title={measured && measured.days
+                ? `The floor books ${measured.lanes} job${measured.lanes === 1 ? '' : 's'} on a typical day, measured over ${measured.days} day${measured.days === 1 ? '' : 's'} of shifts (busiest ${measured.busiest}, average ${measured.mean}). Leave blank to use that.`
+                : 'Nothing has been booked yet, so this starts at one line. Type what the plant runs at once.'}
+            />
+          </label>
+          <p className="max-w-[20rem] pb-1 text-xs text-slate-500">
+            Each job takes what is <strong>left to make</strong> divided by how
+            fast that product goes, and runs on the line that frees first.
+            Seven days a week.
           </p>
         </div>
+
+        {/*
+          What the plant is already committed to, stated before the press
+          rather than discovered afterwards. The lines are filled **as they
+          come free**, so a second press can no longer lay its queue on top of
+          the first — which is exactly what it did, measured, before this.
+        */}
+        {preview.data && (
+          <p className="text-xs text-slate-500">
+            {preview.data.committed_to ? (
+              <>
+                <strong className="text-slate-700">{preview.data.committed_jobs} job{preview.data.committed_jobs === 1 ? '' : 's'}</strong>{' '}
+                already have dates and run to <strong className="tabular-nums text-slate-700">{planDay(preview.data.committed_to, baseYear)}</strong>.
+                {' '}This queue takes each line as it comes free.
+              </>
+            ) : (
+              <>Nothing else is planned, so all {preview.data.lanes} line{preview.data.lanes === 1 ? '' : 's'} are free from the start date.</>
+            )}
+            {replan.length > 0 && (
+              <>
+                {' '}
+                {withReplan ? (
+                  <>
+                    Re-planning {replan.length} job{replan.length === 1 ? '' : 's'} that already carry dates.{' '}
+                    <button className="underline hover:text-slate-700" onClick={() => { setOrder([]); setWithReplan(false); }}>
+                      Leave them alone
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button className="underline hover:text-slate-700" onClick={() => { setOrder([]); setWithReplan(true); }}>
+                      Re-plan the {replan.length} dated job{replan.length === 1 ? '' : 's'}
+                    </button>
+                    {' '}that have not started as well.
+                  </>
+                )}
+              </>
+            )}
+          </p>
+        )}
 
         {/* The decision, before the rows rather than under them. */}
         {summary && (
@@ -249,8 +337,16 @@ export default function PlanQueueModal({ jobs, onClose, onStage }: {
             <span className="text-slate-500">
               <strong className="tabular-nums text-slate-700">{fmtQty(summary.pieces)}</strong> pcs
             </span>
-            <span className="text-slate-500">
-              <strong className="tabular-nums text-slate-700">{summary.days}</strong> production day{summary.days === 1 ? '' : 's'}
+            {/*
+              Line-days, not calendar days, and the two are different facts on
+              a plant of several lines: how much line time the work costs,
+              against how long the calendar takes to absorb it. Saying
+              *production days* over a span a third as long was the figure
+              reading as a contradiction.
+            */}
+            <span className="text-slate-500" title={`Line time the work costs, across ${preview.data?.lanes ?? 1} line${(preview.data?.lanes ?? 1) === 1 ? '' : 's'}. The span beside it is what that comes to on the calendar.`}>
+              <strong className="tabular-nums text-slate-700">{summary.days}</strong> line-day{summary.days === 1 ? '' : 's'}
+              {(preview.data?.lanes ?? 1) > 1 && <span className="text-slate-400"> on {preview.data?.lanes} lines</span>}
             </span>
             <span className="tabular-nums text-slate-700">{planSpan(summary.from, summary.to)}</span>
             <span className="grow" />

@@ -13,7 +13,20 @@ import type { OutputRate } from './outputRate.js';
  * **One queue for the whole plant** — the client's own answer when asked,
  * over a queue per machine. Nothing here knows about a machine, so nothing
  * had to come back onto a job (plant, machine, mould and process left it on
- * 2026-09-25 at their word), and two jobs never run at once.
+ * 2026-09-25 at their word).
+ *
+ * **But the plant runs more than one job at a time**, and until 2026-11-17
+ * this file assumed it ran exactly one. That assumption is what made the
+ * plan unusable at the size of a real book rather than a fixture: at the
+ * rates their own shift book reports, the open order book on the client's
+ * screen is something over two years of work on a single line. `lanes` is
+ * how many jobs the plant carries at once — **measured** from the shift book
+ * by `plantLanes()`, never guessed — and it takes nothing back from the
+ * removal of the Machine field: one number about the whole plant, nothing
+ * stored on a job, and no queue per machine.
+ *
+ * It defaults to **one**, which is this function exactly as it was, so every
+ * figure measured before it existed still holds.
  *
  * **Seven production days a week**, also their answer, which is why there is
  * no working-day calendar anywhere in this file: the arithmetic is plain
@@ -48,6 +61,25 @@ export interface QueueJob {
    * every row reads as.
    */
   due_source: DueSource;
+  /**
+   * The job's own four date columns as it holds them **now**.
+   *
+   * The screen stages each computed date into the column the job's state
+   * allows — `planned_X` while that column is blank and `revised_X` after,
+   * which is the rule `plannedDateError` guards with — and it decided that
+   * from the row it had drawn. Once the queue is the whole plant's rather
+   * than the page's, **most of these jobs are not on screen**, so the row
+   * travels with the plan. It is the same rule applied by the same function
+   * on the same four values, not a second opinion about where a date goes.
+   */
+  current: JobDates;
+}
+
+export interface JobDates {
+  planned_start: string;
+  planned_end: string;
+  revised_start: string;
+  revised_end: string;
 }
 
 /** @see ORDER_DUE_SOURCE */
@@ -88,7 +120,13 @@ export interface PlanSummary {
   late: number;
   /** How many have no customer date to be judged against at all. */
   undated: number;
-  /** Pieces the plan commits to making, and the production days to make them. */
+  /**
+   * Pieces the plan commits to making, and the **line-days** to make them —
+   * the sum of each job's own duration, which on a plant of several lines is
+   * longer than the span below rather than equal to it. Two different facts,
+   * and the screen names them differently: how much line time the work costs,
+   * and how long the calendar takes to absorb it.
+   */
   pieces: number;
   days: number;
   /** The span the plan occupies — blank where it dates nothing. */
@@ -109,7 +147,11 @@ export function summarise(plan: PlannedJob[]): PlanSummary {
     undated: dated.filter((p) => !p.due).length,
     pieces: dated.reduce((sum, p) => sum + p.pieces, 0),
     days: dated.reduce((sum, p) => sum + (p.days ?? 0), 0),
-    from: dated[0]?.planned_start ?? '',
+    // A minimum rather than the first row's, for the reason `to` is a
+    // maximum: on a plant of several lines the first job in the queue is the
+    // one on the line that frees first, and taking either off the ends of the
+    // list would be true only of a queue laid on one line.
+    from: dated.reduce((first, p) => (!first || p.planned_start < first ? p.planned_start : first), ''),
     // The last **finish**, which on a queue laid end to end is the last row's
     // — but taken as a maximum rather than off the tail, so this stays true
     // of any order the rows arrive in.
@@ -118,12 +160,31 @@ export function summarise(plan: PlannedJob[]): PlanSummary {
 }
 
 /**
- * Lay the jobs out end to end from `start`, in the order given.
+ * How big the plant is, and what is already on it. Both default to the single
+ * empty line this function assumed before 2026-11-17, so a caller that says
+ * nothing gets exactly the behaviour every earlier measurement was taken
+ * against.
+ */
+export interface QueueShape {
+  /** Jobs the plant runs at once — `plantLanes()`'s measured figure. */
+  lanes?: number;
+  /**
+   * When each line comes free from the work already committed —
+   * `linesFreeFrom()`. **This is what stops a second press planning on top of
+   * the first**, which is the defect that made the planner unusable on a book
+   * of more than one page: it laid every queue from the date it was given and
+   * knew nothing about the dates already on the floor.
+   */
+  freeFrom?: string[];
+}
+
+/**
+ * Lay the jobs out across the plant's lines from `start`, in the order given.
  *
- * `endᵢ = startᵢ + daysᵢ − 1` and `startᵢ₊₁ = endᵢ + 1`, so a one-day job
- * starts and finishes on the same day and the next one begins the morning
- * after — no gap and no overlap, which is the invariant the tests assert
- * across the whole queue rather than per row.
+ * `endᵢ = startᵢ + daysᵢ − 1`, and the next job on a line begins the morning
+ * after the last one on it ended — no gap and no overlap **on any line**,
+ * which is the invariant the tests assert across the whole queue rather than
+ * per row. On one line that is a single chain, which is what this was.
  *
  * **A job that cannot be dated takes no slot.** With no rate there is no
  * honest duration to give it (`hasRecipe: false`'s rule — never a guess,
@@ -143,8 +204,20 @@ export function layOutQueue(
   jobs: QueueJob[],
   rates: Map<number, OutputRate>,
   start: string,
+  shape: QueueShape = {},
 ): PlannedJob[] {
-  let cursor = start;
+  const lanes = Math.max(1, Math.floor(shape.lanes ?? 1) || 1);
+  /*
+   * One cursor per line: the day that line can take work, which is the day it
+   * comes free from what is already committed, or the queue's own start where
+   * that is later. A line nothing is committed to is free from the start, and
+   * with one line and nothing committed this is `[start]` — the single cursor
+   * this function used to carry.
+   */
+  const cursor = Array.from({ length: lanes }, (_, i) => {
+    const free = shape.freeFrom?.[i] ?? '';
+    return free > start ? free : start;
+  });
   return jobs.map((j) => {
     const rate = j.product_id ? rates.get(j.product_id) ?? null : null;
     const base = { ...j, rate, days: null, planned_start: '', planned_end: '', late: false, late_days: 0 };
@@ -155,9 +228,17 @@ export function layOutQueue(
     // for a setup and a run, and a duration of zero would put two jobs on one
     // day in a queue that is one at a time by construction.
     const days = Math.max(1, Math.ceil(j.pieces / rate.pcs_per_day));
-    const planned_start = cursor;
+    /*
+     * **The line that frees first**, which is the whole of what `lanes` adds:
+     * list scheduling, the way a planner reads a board. Ties take the lowest
+     * index, so one book in one order always lays out the same way — the
+     * total-ordering rule `SORTS` follows for its own reason.
+     */
+    let lane = 0;
+    for (let i = 1; i < lanes; i++) if (cursor[i] < cursor[lane]) lane = i;
+    const planned_start = cursor[lane];
     const planned_end = addDaysIso(planned_start, days - 1);
-    cursor = addDaysIso(planned_end, 1);
+    cursor[lane] = addDaysIso(planned_end, 1);
     const late = !!j.due && !!planned_end && planned_end > j.due;
     return {
       ...base,

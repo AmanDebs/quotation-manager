@@ -13,6 +13,7 @@ import {
 import { progressFor, progressForMany, LIVE_OK, ORDER_DUE, ORDER_DUE_SOURCE } from '../services/production.js';
 import { outputRates } from '../services/outputRate.js';
 import { layOutQueue, byDue, summarise, SORTS, type QueueJob, type DueSource, type SortKey } from '../services/jobPlan.js';
+import { plantLanes, linesFreeFrom, MAX_LANES } from '../services/plantLoad.js';
 import { despatchedByOrder, lastTripForLine } from '../services/despatch.js';
 import { materialCostByWorkOrder } from '../services/costing.js';
 import {
@@ -591,6 +592,12 @@ workOrdersRouter.post('/plan/preview', requirePermission('work_order', 'full'), 
     pieces: Math.max(0, Number(j.qty_planned ?? 0) - Number(j.made ?? 0)),
     due: due.get(Number(j.order_id))?.due ?? null,
     due_source: due.get(Number(j.order_id))?.source ?? 'none',
+    current: {
+      planned_start: String(j.planned_start ?? ''),
+      planned_end: String(j.planned_end ?? ''),
+      revised_start: String(j.revised_start ?? ''),
+      revised_end: String(j.revised_end ?? ''),
+    },
   }));
 
   /*
@@ -607,11 +614,79 @@ workOrdersRouter.post('/plan/preview', requirePermission('work_order', 'full'), 
   const sort = String(body.sort ?? 'due') as SortKey;
   const ordered = body.keep_order === true ? queue : [...queue].sort(SORTS[sort] ?? byDue);
   const rates = outputRates(ordered.map((j) => j.product_id ?? 0));
-  const plan = layOutQueue(ordered, rates, start);
+
+  /*
+   * How big the plant is, and what is already on it.
+   *
+   * Both are the server's to answer and neither can be the screen's: the
+   * grid holds one **page** of jobs, so a planner pressing the button from
+   * page two has no idea what page one committed the floor to — which is
+   * exactly how this produced plans with three jobs on a plant it modelled as
+   * running one. The lane count is measured, and a typed figure wins over it
+   * the way a typed output rate wins over a measured one.
+   */
+  const measured = plantLanes();
+  const asked = Number(body.lanes);
+  const lanes = Number.isFinite(asked) && asked >= 1 ? Math.min(Math.floor(asked), MAX_LANES) : measured.lanes;
+  /*
+   * Excluding this queue's own jobs: a job about to be given new dates is not
+   * a commitment, and letting the dates it holds now push its own replacement
+   * outwards is how a re-plan walks the whole book forward a month at a time.
+   */
+  const lines = linesFreeFrom(lanes, ids);
+  const plan = layOutQueue(ordered, rates, start, { lanes, freeFrom: lines.free_from });
   // The summary is the server's, not the screen's: it is a fold of the same
   // rows and a second one on the client is how the figure over a table comes
   // to describe a different set from the rows under it.
-  return res.json({ start, jobs: plan, summary: summarise(plan) });
+  return res.json({
+    start,
+    jobs: plan,
+    summary: summarise(plan),
+    lanes,
+    lanes_measured: measured,
+    committed_to: lines.committed_to,
+    committed_jobs: lines.jobs,
+  });
+});
+
+/**
+ * The queue to plan, over **the whole filtered list rather than the page**
+ * (2026-11-17).
+ *
+ * The grid handed the planner its own rows, so on the client's book of 174
+ * jobs the button read *Work out dates for 35* — one page of four — and each
+ * press laid its 35 from the date in the box, over whatever the last press
+ * had already committed. The scope is the plant's, so the queue has to be
+ * too, and this answers it under the list's own filters: narrow the list to
+ * one customer and you plan that customer's jobs.
+ *
+ * Two lists, because they are two different acts. `undated` is the first
+ * plan — jobs nobody has dated — and is the safe default. `dated` is jobs
+ * that carry a plan and have not started, which is what a **re-plan** is
+ * about; it is offered rather than assumed, because dating a job again moves
+ * a date somebody may have given a customer.
+ *
+ * Ids only: the screen already has every row it can draw, and the ones it
+ * cannot draw it does not need — the preview answers about them in full.
+ */
+workOrdersRouter.get('/plan/queue', requirePermission('work_order', 'full'), (req: AuthedRequest, res) => {
+  const { sql, params } = jobListWhere(jobFilters(req));
+  const rows = db.prepare(
+    `SELECT id, planned_start, revised_start, made, qty_planned FROM (${sql}) q
+      WHERE status NOT IN ('done','cancelled') ${JOB_ORDER}`
+  ).all(...(params as never[])) as Record<string, unknown>[];
+
+  const undated: number[] = [];
+  const dated: number[] = [];
+  for (const r of rows) {
+    const id = Number(r.id);
+    if (!String(r.planned_start ?? '') && !String(r.revised_start ?? '')) { undated.push(id); continue; }
+    // Dated **and not started**: a job the floor has booked output against is
+    // running, and re-dating it would restate a plan the shift book has
+    // already overtaken.
+    if (!(Number(r.made ?? 0) > 0)) dated.push(id);
+  }
+  return res.json({ undated, dated });
 });
 
 workOrdersRouter.post('/plan', requirePermission('work_order', 'full'), (req: AuthedRequest, res) => {

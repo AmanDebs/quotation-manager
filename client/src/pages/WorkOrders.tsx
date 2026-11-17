@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { api } from '../api/client';
-import type { WorkOrder, WorkOrderStatus, PlannedJob } from '../types';
+import type { WorkOrder, WorkOrderStatus, PlannedJob, PlanQueue } from '../types';
 import { PageHeader, Card, Button, EmptyState, ErrorText, ExportTabs, Input, Pagination, SegmentedTabs, Select, CAPTION_CLASS, TH_CLASS } from '../components/ui';
 import { useCompanies } from '../components/CompanySelect';
 import { JobDateCell } from './Orders';
@@ -442,7 +442,10 @@ export default function WorkOrdersPage() {
   if (openOnly && statusTicked.length === 0) query.set('open', '1');
   for (const [k, v] of columns.params) query.set(k, v);
 
-  const list = usePagedList<WorkOrder, { jobs: number; unplanned?: number; awaiting?: number; planned: number; made: number }>(['work-orders', 'all', query.toString()], `/api/work-orders?${query.toString()}`);
+  const list = usePagedList<WorkOrder, {
+    jobs: number; unplanned?: number; awaiting?: number; undated?: number;
+    planned_to?: string; planned: number; made: number;
+  }>(['work-orders', 'all', query.toString()], `/api/work-orders?${query.toString()}`);
   const jobs = list.rows;
 
   /*
@@ -514,9 +517,30 @@ export default function WorkOrdersPage() {
    * already have a plan are left out of the default rather than silently
    * re-planned; ticking one is how you ask for that.
    */
-  const queueTarget = ticked.size
-    ? jobs.filter((w) => ticked.has(w.id) && plannable(w))
-    : jobs.filter((w) => plannable(w) && !jobDateOf(w, 'planned_start') && !jobDateOf(w, 'revised_start'));
+  /*
+   * The queue, over **the whole filtered list rather than the page**.
+   *
+   * It was the page's, and at the size of a real book that was not a scoping
+   * detail but the defect: on the client's 174 jobs the button read *Work out
+   * dates for 35* — one page of four — and each press laid its own 35 from
+   * the date in the box with no idea what the last press had committed the
+   * floor to. Measured on a planted book of 63 jobs over two pages, the two
+   * presses between them put two or three jobs on 84 of the 196 days covered.
+   *
+   * Asked under the list's own query string, so narrowing the list narrows
+   * the queue: filter to one customer and you plan that customer's jobs.
+   * Ticking jobs still wins, which is how one order is planned on its own.
+   */
+  const planQueue = useQuery({
+    queryKey: ['work-orders', 'plan-queue', query.toString()],
+    queryFn: () => api.get<PlanQueue>(`/api/work-orders/plan/queue?${query.toString()}`),
+    enabled: planning && mayPlan,
+    placeholderData: keepPreviousData,
+  });
+  const tickedIds = jobs.filter((w) => ticked.has(w.id) && plannable(w)).map((w) => w.id);
+  const queueTarget = ticked.size ? tickedIds : planQueue.data?.undated ?? [];
+  /* Jobs already dated that nobody has started — offered inside the dialog. */
+  const replanTarget = ticked.size ? [] : planQueue.data?.dated ?? [];
 
   /*
    * The planner's answer, staged as ordinary pending edits — the same path
@@ -528,8 +552,17 @@ export default function WorkOrdersPage() {
    */
   const stagePlan = (plan: PlannedJob[]) => {
     for (const p of plan) {
-      const w = jobs.find((j) => j.id === p.id);
-      if (!w || !p.planned_start || !p.planned_end) continue;
+      if (!p.planned_start || !p.planned_end) continue;
+      /*
+       * The row the plan is about, which since the queue became the **plant's
+       * rather than the page's** is usually not one of ours to find: a 131-job
+       * queue spans four pages. The preview carries each job's own four date
+       * columns for exactly this, so `jobDateField` and `setDate` — the one
+       * rule about where a date goes — apply unchanged to a job nobody can
+       * see. The pending edits are keyed by id and Save sends those, not the
+       * page, so an off-page job saves like any other.
+       */
+      const w = { id: p.id, ...p.current } as WorkOrder;
       setDate(w, jobDateField(w, false), p.planned_start);
       setDate(w, jobDateField(w, true), p.planned_end);
     }
@@ -627,6 +660,8 @@ export default function WorkOrdersPage() {
   const unplanned = summary.unplanned ?? 0;
   // Optional, for a server not yet redeployed: no key, no chip.
   const toConfirm = summary.awaiting ?? 0;
+  /** How far ahead the jobs on screen are planned — '' where none are. */
+  const plannedTo = summary.planned_to ?? '';
 
   /*
    * "It started." The other answer is a revised start date, which is the cell
@@ -719,8 +754,21 @@ export default function WorkOrdersPage() {
           />
           Open jobs only
         </label>
+        {/*
+          What is on the floor, and **how far out it runs** — the second of
+          which nothing on this page said. A planner pressing a button that
+          dates a hundred jobs is committing the plant into next year, and the
+          only screen that ever stated the span was a dialog that closes.
+          Drawn where there is a plan at all, the *Dest Port* rule.
+        */}
         <span className="ml-auto text-sm text-slate-500">
           {summary.jobs} job{summary.jobs === 1 ? '' : 's'} · {fmtQty(summary.made)} of {fmtQty(summary.planned)} pcs made
+          {plannedTo && (
+            <span title="The latest finish on the jobs shown — how far ahead the plant is committed.">
+              {' · planned to '}
+              <strong className="font-medium tabular-nums text-slate-600">{fmtDate(plannedTo)}</strong>
+            </span>
+          )}
         </span>
         {/*
           The whole page at once, and **the control is the preference**: what it
@@ -778,7 +826,9 @@ export default function WorkOrdersPage() {
             onClick={() => setPlanModal(true)}
             title={ticked.size ? undefined : 'Tick the jobs to plan first'}
           >
-            Plan {ticked.size || ''} job{ticked.size === 1 ? '' : 's'}…
+            {/* Not `{ticked.size || ''}`, which drew *Plan  jobs…* with two
+                spaces in it on every page where nothing was ticked. */}
+            {ticked.size ? `Plan ${ticked.size} job${ticked.size === 1 ? '' : 's'}…` : 'Plan jobs…'}
           </Button>
         )}
         {/*
@@ -792,19 +842,22 @@ export default function WorkOrdersPage() {
         {planning && mayPlan && (
           <Button
             variant="secondary"
-            disabled={queueTarget.length === 0}
+            /* Still worth opening with nothing undated: the dialog is where a
+               re-plan of the jobs that have not started is asked for. */
+            disabled={queueTarget.length === 0 && replanTarget.length === 0}
             onClick={() => setQueueModal(true)}
             title={queueTarget.length
-              ? 'Lay these jobs out one after another from a start date, and date them from how fast each product goes'
-              : 'Every job on this page already has a start date — tick the ones to re-plan'}
+              ? 'Lay these jobs across the plant from a start date, and date them from how fast each product goes'
+              : 'Every job on this list already has a start date — tick the ones to re-plan, or open this to re-plan the ones that have not started'}
           >
-            Work out dates for {queueTarget.length || ''}…
+            {queueTarget.length ? `Work out dates for ${queueTarget.length}…` : 'Re-plan dates…'}
           </Button>
         )}
       </div>
       {queueModal && (
         <PlanQueueModal
-          jobs={queueTarget}
+          queue={queueTarget}
+          replan={replanTarget}
           onClose={() => setQueueModal(false)}
           onStage={stagePlan}
         />

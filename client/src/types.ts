@@ -1390,6 +1390,13 @@ export interface PlannedJob {
   late_days: number;
   /** Why it could not be dated; null means it was. */
   blocked: 'no-rate' | 'nothing-left' | null;
+  /**
+   * The job's four date columns as it holds them now, so the screen can route
+   * each computed date into the column the server's own guard allows — for a
+   * job that is **not on the page**, which since the queue became the plant's
+   * rather than the page's is most of them.
+   */
+  current: { planned_start: string; planned_end: string; revised_start: string; revised_end: string };
 }
 
 /** What the whole plan comes to, folded by the server over the same rows. */
@@ -1407,7 +1414,24 @@ export interface PlanSummary {
 /** How a queue opens. @see services/jobPlan.ts */
 export type PlanSortKey = 'due' | 'shortest' | 'longest' | 'order';
 
-export interface PlanPreview { start: string; jobs: PlannedJob[]; summary: PlanSummary }
+export interface PlanPreview {
+  start: string;
+  jobs: PlannedJob[];
+  summary: PlanSummary;
+  /** Jobs the plant runs at once — what this plan was laid across. */
+  lanes: number;
+  /** What the shift book says about that, so a typed figure can be judged. */
+  lanes_measured: { lanes: number; mean: number; busiest: number; days: number };
+  /** The latest finish already on the floor, and how many jobs are on it. */
+  committed_to: string;
+  committed_jobs: number;
+}
+
+/**
+ * The queue to plan, over the whole filtered list rather than the page —
+ * jobs nobody has dated, and jobs that carry a plan and have not started.
+ */
+export interface PlanQueue { undated: number[]; dated: number[] }
 
 export interface MaterialSchedule {
   dates: string[];
