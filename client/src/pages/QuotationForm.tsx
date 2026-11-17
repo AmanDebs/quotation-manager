@@ -43,6 +43,8 @@ interface Draft {
   insurance: number;
   /** The document's own discount, off the lines before tax. */
   discount_pct: number;
+  /** The same discount stated as money, which wins where it is stated. */
+  discount_flat: number;
   inco_terms: string;
   container_count: string;
   prepared_by: string;
@@ -58,7 +60,7 @@ const emptyDraft = (): Draft => ({
   // across a timezone boundary; it is a default and stays editable.
   customer_id: '', enquiry_id: null, date: today(), currency: 'INR',
   validity_date: addDays(today(), DEFAULT_VALIDITY_DAYS),
-  payment_terms: '', delivery_terms: '', notes: '', freight: 0, insurance: 0, discount_pct: 0,
+  payment_terms: '', delivery_terms: '', notes: '', freight: 0, insurance: 0, discount_pct: 0, discount_flat: 0,
   inco_terms: '', container_count: '', prepared_by: '', tax_type: 'igst',
   is_export: 0, column_config: newColumnConfig(), items: [],
 });
@@ -97,6 +99,7 @@ export default function QuotationFormPage() {
         freight: existing.freight ?? 0,
         insurance: existing.insurance ?? 0,
         discount_pct: existing.discount_pct ?? 0,
+        discount_flat: existing.discount_flat ?? 0,
         inco_terms: existing.inco_terms ?? '',
         container_count: existing.container_count ?? '',
         prepared_by: existing.prepared_by ?? '',
@@ -536,11 +539,11 @@ export default function QuotationFormPage() {
             * none, so the ordinary locked page is unchanged.
             */}
           <DocumentDiscount
-            value={draft.discount_pct}
+            value={draft}
             items={draft.items}
             currency={draft.currency}
             showTax={draft.tax_type !== 'none'}
-            onChange={(pct) => set({ discount_pct: pct })}
+            onChange={(patch) => set(patch)}
           />
         </Card>
 

@@ -67,6 +67,58 @@ export const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 10
 export const clampDiscountPct = (v: unknown): number =>
   Math.min(100, Math.max(0, Number(v) || 0));
 
+/** A document's flat discount, which can be no less than nothing. */
+export const clampDiscountFlat = (v: unknown): number =>
+  round2(Math.max(0, Number(v) || 0));
+
+/**
+ * What a document's discount actually takes off its lines (2026-11-17, the
+ * client, the day after the percentage shipped: *"add lump sum discount
+ * also"*).
+ *
+ * **A stated amount wins; the percentage is the rule that computes one.** Both
+ * are typed, so the precedence cannot be the usual typed-beats-derived — it is
+ * decided by which is the more specific instruction. *"Take ₹5,000 off"* is an
+ * exact figure somebody agreed; *"5%"* is a rule for arriving at one. It also
+ * fails the right way round: a desk that types a flat amount over a document
+ * already carrying a percentage sees their figure used, rather than a box that
+ * does nothing while the old percentage goes on printing.
+ *
+ * In practice both are never set — the form clears one as the other is typed —
+ * so this is the rail for an API call, an older client or a restored row, not
+ * the everyday path.
+ *
+ * **Capped at the lines**, the same hard invariant the percentage has: past
+ * them the grand total goes negative, and a negative total reaches the
+ * customer as an amount in words.
+ *
+ * `share` is what the tax is scaled by, and it is derived from the **rounded**
+ * amount rather than from the percentage: that makes the taxable base exactly
+ * the subtotal the document prints, which is the figure the tax is charged on.
+ * It is also what lets a flat amount be taxed correctly with no second rule —
+ * a lump sum off the whole document is proportional across its lines, so each
+ * line still follows its own rate.
+ */
+export function discountOf(linesTotal: number, pct: unknown, flat: unknown): { amount: number; share: number } {
+  if (!(linesTotal > 0)) return { amount: 0, share: 0 };
+  const stated = clampDiscountFlat(flat);
+  const byPct = clampDiscountPct(pct);
+  const raw = stated > 0 ? stated : linesTotal * (byPct / 100);
+  const amount = round2(Math.min(linesTotal, raw));
+  return { amount, share: amount / linesTotal };
+}
+
+/**
+ * Which of the two a document is actually discounted by, so the band can print
+ * *Less Discount @ 5%* against a percentage and a bare *Less Discount* against
+ * a flat amount — a label naming a percentage the figure beside it is not is
+ * the wrong-wording defect this codebase records as a real one. Null means the
+ * amount was stated outright. One rule, read by the PDF and mirrored on the
+ * form's own hint.
+ */
+export const discountPctShown = (pct: unknown, flat: unknown): number | null =>
+  (clampDiscountFlat(flat) > 0 ? null : (clampDiscountPct(pct) || null));
+
 /**
  * Pieces in one billing unit, for the rate bases that are priced off a piece
  * count. Only these can have their quantity derived from the packing figures.
@@ -219,6 +271,11 @@ export function billedQty(
  * an amount in words. Below 0 it would be a surcharge wearing the word
  * *discount*. Like `tcsPct` it defaults to 0, where every figure is what it
  * was before this existed.
+ *
+ * `discountFlat` is the same discount stated as money rather than as a rule
+ * (2026-11-17: *"add lump sum discount also"*), and it **wins where it is
+ * stated** — see `discountOf`, which owns the precedence, the cap and the
+ * factor the tax is scaled by.
  */
 export function computeTotals(
   items: LineItemInput[],
@@ -227,7 +284,8 @@ export function computeTotals(
   insurance = 0,
   currency = '',
   tcsPct = 0,
-  discountPct = 0
+  discountPct = 0,
+  discountFlat = 0
 ): Totals {
   const computed: ComputedItem[] = items.map((it) => {
     // Derived, then stamped back onto the row, so what is stored can never
@@ -270,8 +328,10 @@ export function computeTotals(
    * route freight takes now.
    */
   const lines_total = round2(computed.reduce((s, it) => s + it.amount, 0));
-  const discountPctClamped = Math.min(100, Math.max(0, Number(discountPct) || 0));
-  const discount_amount = discountPctClamped > 0 ? round2(lines_total * (discountPctClamped / 100)) : 0;
+  // A stated amount wins over a percentage, both are capped at the lines, and
+  // `share` is what the tax is scaled by — all three in `discountOf`, which the
+  // screens read too so none of them can arrive at a different figure.
+  const { amount: discount_amount, share: discountShare } = discountOf(lines_total, discountPct, discountFlat);
   // The taxable value. Named `subtotal` because that is what it has always
   // been — the base the charges are added to and the tax is charged on — and
   // because nothing downstream reads it as the sum of the lines: every caller
@@ -283,12 +343,16 @@ export function computeTotals(
   let tax_total = 0;
   if (taxType !== 'none') {
     /*
-     * A flat percentage off every line scales each line's taxable value by the
-     * same factor, so it scales the tax by the same factor:
-     * `Σ(aᵢ(1−d)·rᵢ) = (1−d)·Σ(aᵢrᵢ)`. No apportionment, and exact.
+     * A discount off the whole document scales every line's taxable value by
+     * the same factor, so it scales the tax by the same factor:
+     * `Σ(aᵢ(1−d)·rᵢ) = (1−d)·Σ(aᵢrᵢ)`. No apportionment, and exact — and it
+     * holds for a flat amount as much as for a percentage, a lump sum off the
+     * document being proportional across its lines by construction, so each
+     * line still follows its own rate. The factor is the **rounded** discount
+     * over the lines, which makes the base exactly the printed subtotal.
      */
     const onItems = computed.reduce((s, it) => s + it.amount * ((it.tax_pct ?? 0) / 100), 0)
-      * (1 - discountPctClamped / 100);
+      * (1 - discountShare);
     /**
      * Header freight and insurance are taxed too. They used to be added into
      * `taxable` and then left out of `tax_total`, which under-charged GST by

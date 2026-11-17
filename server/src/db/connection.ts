@@ -912,6 +912,8 @@ if (Number(booked.changes) > 0) {
  */
 for (const t of ['quotations', 'proforma_invoices', 'orders', 'commercial_invoices']) {
   addColumnIfMissing(t, 'discount_pct', 'REAL NOT NULL DEFAULT 0');
+  // The same discount stated as money (2026-11-17); see `discountOf`.
+  addColumnIfMissing(t, 'discount_flat', 'REAL NOT NULL DEFAULT 0');
   addColumnIfMissing(t, 'discount_amount', 'REAL NOT NULL DEFAULT 0');
 }
 

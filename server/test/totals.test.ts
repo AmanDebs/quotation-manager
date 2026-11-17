@@ -1,7 +1,7 @@
 import './helpers/scratch.js';
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { computeTotals, billedQty, round2, piecesOrdered, piecesPerBillingUnit, piecesPerBillingUnitOf, isPieceBasis, PIECES_ORDERED_SQL } from '../src/services/totals.js';
+import { computeTotals, billedQty, round2, piecesOrdered, piecesPerBillingUnit, piecesPerBillingUnitOf, isPieceBasis, PIECES_ORDERED_SQL, discountPctShown } from '../src/services/totals.js';
 import { db } from '../src/db/connection.js';
 
 /**
@@ -369,5 +369,110 @@ describe('document discount', () => {
     assert.equal(t.discount_amount, 0);
     assert.equal(t.subtotal, 0);
     assert.equal(t.tax_total, 0);
+  });
+});
+
+/**
+ * The same discount stated as money rather than as a rule (2026-11-17, the
+ * client, the day after the percentage shipped: *"add lump sum discount
+ * also"*).
+ *
+ * Most of these are again about what must **not** move: the second input went
+ * into the same function, so a document carrying a percentage has to come out
+ * of it reading exactly what it read yesterday.
+ */
+describe('a flat discount', () => {
+  const line = { description: 'Preform', qty: 1000, unit: 'unit', unit_price: 100, tax_pct: 18 };
+
+  test('at nothing, a document on a percentage is unmoved', () => {
+    for (const taxType of ['none', 'cgst_sgst', 'igst'] as const) {
+      for (const currency of ['INR', 'USD', 'EUR']) {
+        for (const pct of [0, 5, 12.5]) {
+          const withOut = computeTotals([line], taxType, 1800, 0, currency, 0, pct);
+          const withZero = computeTotals([line], taxType, 1800, 0, currency, 0, pct, 0);
+          assert.deepEqual(withZero, withOut, `${taxType}/${currency}/${pct}`);
+        }
+      }
+    }
+  });
+
+  test('comes off the lines as the money it states', () => {
+    const t = computeTotals([line], 'none', 0, 0, 'INR', 0, 0, 5000);
+    assert.equal(t.discount_amount, 5000);
+    assert.equal(t.subtotal, 95000);
+    assert.equal(t.grand_total, 95000);
+  });
+
+  /**
+   * A lump sum off the whole document is proportional across its lines by
+   * construction, so each line still follows its own rate — no second rule,
+   * and no apportionment.
+   */
+  test('taxes each line at its own rate, as a percentage does', () => {
+    const flat = computeTotals(
+      [{ ...line, tax_pct: 18 }, { ...line, unit_price: 50, tax_pct: 5 }],
+      'igst', 0, 0, 'USD', 0, 0, 15000
+    );
+    const pct = computeTotals(
+      [{ ...line, tax_pct: 18 }, { ...line, unit_price: 50, tax_pct: 5 }],
+      'igst', 0, 0, 'USD', 0, 10
+    );
+    // 15,000 off 150,000 is the same 10%, so the two must agree figure for figure.
+    assert.deepEqual({ ...flat, items: [] }, { ...pct, items: [] });
+  });
+
+  /**
+   * The precedence, and it is the one thing a row arriving from elsewhere
+   * needs: a stated amount is an exact figure somebody agreed, where a
+   * percentage is the rule for arriving at one. The forms keep the two
+   * exclusive, so this is the rail rather than the everyday path.
+   */
+  test('a stated amount wins over a percentage', () => {
+    const t = computeTotals([line], 'none', 0, 0, 'USD', 0, 50, 2500);
+    assert.equal(t.discount_amount, 2500);
+    assert.equal(t.subtotal, 97500);
+  });
+
+  /** The same hard invariant the percentage has: no total can go negative. */
+  test('is capped at the lines, and never below nothing', () => {
+    const over = computeTotals([line], 'igst', 1800, 0, 'USD', 0, 0, 250000);
+    assert.equal(over.discount_amount, 100000);
+    assert.equal(over.subtotal, 0);
+    // The freight is added after the discount and is still owed.
+    assert.equal(over.grand_total, round2(1800 + over.tax_total));
+    const under = computeTotals([line], 'igst', 0, 0, 'USD', 0, 0, -500);
+    assert.equal(under.discount_amount, 0);
+    assert.equal(under.subtotal, 100000);
+  });
+
+  /** A price-only document has nothing to take the money off. */
+  test('a document with no quantities takes nothing off', () => {
+    const t = computeTotals([{ description: 'Preform', qty: null, unit: 'per 1000', unit_price: 26 }], 'igst', 0, 0, 'USD', 0, 0, 5000);
+    assert.equal(t.discount_amount, 0);
+    assert.equal(t.subtotal, 0);
+  });
+
+  /**
+   * The tax is scaled by the **rounded** discount over the lines, so the base
+   * it is charged on is exactly the subtotal the document prints. A figure
+   * that does not divide evenly is where that bites.
+   */
+  test('the tax base is exactly the printed subtotal', () => {
+    const t = computeTotals([{ ...line, unit_price: 3.017 }], 'igst', 0, 0, 'USD', 0, 0, 1000);
+    assert.equal(t.subtotal, 2017);
+    assert.equal(t.tax_total, round2(2017 * 0.18));
+  });
+
+  /**
+   * Which of the two the band names. A label reading *@ 5%* over a figure that
+   * is not 5% of the lines is the wrong-wording defect this codebase records
+   * as a real one.
+   */
+  test('the band names a percentage only when the percentage is what was used', () => {
+    assert.equal(discountPctShown(5, 0), 5);
+    assert.equal(discountPctShown(0, 5000), null);
+    assert.equal(discountPctShown(5, 5000), null);   // the stated amount won
+    assert.equal(discountPctShown(0, 0), null);
+    assert.equal(discountPctShown(150, 0), 100);     // clamped, so the label matches the deduction
   });
 });

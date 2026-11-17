@@ -335,6 +335,10 @@ CREATE TABLE IF NOT EXISTS quotations (
   -- proforma whose total jumped back up would contradict the document the
   -- buyer paid the advance against.
   discount_pct REAL NOT NULL DEFAULT 0,
+  -- The same discount stated as money rather than as a rule, and it wins
+  -- where it is stated. `discount_amount` is neither: it is what
+  -- `computeTotals` worked the discount out at, stamped like `subtotal`.
+  discount_flat REAL NOT NULL DEFAULT 0,
   discount_amount REAL NOT NULL DEFAULT 0,
   subtotal REAL NOT NULL DEFAULT 0,
   tax_total REAL NOT NULL DEFAULT 0,
@@ -444,6 +448,10 @@ CREATE TABLE IF NOT EXISTS orders (
   created_by INTEGER REFERENCES users(id),
   -- The document's own discount. See the note on `quotations.discount_pct`.
   discount_pct REAL NOT NULL DEFAULT 0,
+  -- The same discount stated as money rather than as a rule, and it wins
+  -- where it is stated. `discount_amount` is neither: it is what
+  -- `computeTotals` worked the discount out at, stamped like `subtotal`.
+  discount_flat REAL NOT NULL DEFAULT 0,
   discount_amount REAL NOT NULL DEFAULT 0,
   subtotal REAL NOT NULL DEFAULT 0,
   tax_total REAL NOT NULL DEFAULT 0,
@@ -544,6 +552,10 @@ CREATE TABLE IF NOT EXISTS proforma_invoices (
   column_config TEXT NOT NULL DEFAULT '{}',
   -- The document's own discount. See the note on `quotations.discount_pct`.
   discount_pct REAL NOT NULL DEFAULT 0,
+  -- The same discount stated as money rather than as a rule, and it wins
+  -- where it is stated. `discount_amount` is neither: it is what
+  -- `computeTotals` worked the discount out at, stamped like `subtotal`.
+  discount_flat REAL NOT NULL DEFAULT 0,
   discount_amount REAL NOT NULL DEFAULT 0,
   subtotal REAL NOT NULL DEFAULT 0,
   tax_total REAL NOT NULL DEFAULT 0,
@@ -635,6 +647,10 @@ CREATE TABLE IF NOT EXISTS commercial_invoices (
   column_config TEXT NOT NULL DEFAULT '{}',
   -- The document's own discount. See the note on `quotations.discount_pct`.
   discount_pct REAL NOT NULL DEFAULT 0,
+  -- The same discount stated as money rather than as a rule, and it wins
+  -- where it is stated. `discount_amount` is neither: it is what
+  -- `computeTotals` worked the discount out at, stamped like `subtotal`.
+  discount_flat REAL NOT NULL DEFAULT 0,
   discount_amount REAL NOT NULL DEFAULT 0,
   subtotal REAL NOT NULL DEFAULT 0,
   tax_total REAL NOT NULL DEFAULT 0,

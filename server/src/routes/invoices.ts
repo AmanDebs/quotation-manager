@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { db, transaction } from '../db/connection.js';
 import { nextNumber, exportChangeError, numberInUseError } from '../services/numbering.js';
 import { exportOnlyInvoice } from '../services/permissions.js';
-import { clampDiscountPct, computeTotals, round2, type LineItemInput } from '../services/totals.js';
+import { clampDiscountFlat, clampDiscountPct, computeTotals, round2, type LineItemInput } from '../services/totals.js';
 import { allows, type AuthedRequest } from '../middleware/auth.js';
 import { scopeClause, canAccessCustomer, linkError, customerChangeError, raiseForError } from '../middleware/scope.js';
 import { resolveCompanyId, foreignBankError } from '../services/companies.js';
@@ -302,8 +302,8 @@ function syncPackingList(invoiceId: number, userId: number, packing: PackingInpu
   });
 }
 
-function saveItems(invoiceId: number, items: LineItemInput[], taxType: 'none' | 'cgst_sgst' | 'igst', freight: number, insurance: number, currency: string, discountPct = 0) {
-  const totals = computeTotals(items, taxType, freight, insurance, currency, 0, discountPct);
+function saveItems(invoiceId: number, items: LineItemInput[], taxType: 'none' | 'cgst_sgst' | 'igst', freight: number, insurance: number, currency: string, discountPct = 0, discountFlat = 0) {
+  const totals = computeTotals(items, taxType, freight, insurance, currency, 0, discountPct, discountFlat);
   db.prepare('DELETE FROM invoice_items WHERE invoice_id = ?').run(invoiceId);
   const ins = db.prepare(
     `INSERT INTO invoice_items (invoice_id, product_id, description, hsn_code, qty, unit, unit_price, tax_pct, amount, color, packs, pcs_per_pack, total_pcs, qty_20ft, qty_40ft, is_charge, custom1, custom2, custom3, image, sort_order)
@@ -321,7 +321,7 @@ function saveItems(invoiceId: number, items: LineItemInput[], taxType: 'none' | 
 }
 
 const headerFields = [
-  'date', 'customer_id', 'pi_id', 'order_id', 'consignee', 'ship_to_name', 'ship_to_gstin', 'notify_party', 'currency', 'freight', 'insurance', 'discount_pct',
+  'date', 'customer_id', 'pi_id', 'order_id', 'consignee', 'ship_to_name', 'ship_to_gstin', 'notify_party', 'currency', 'freight', 'insurance', 'discount_pct', 'discount_flat',
   'shipping_details', 'bank_account', 'inco_terms', 'payment_terms',
   'is_export', 'country_of_origin', 'port_of_loading', 'port_of_discharge', 'final_destination',
   'notify_party_2', 'method_of_despatch', 'lot_no', 'prepared_by', 'arn_ref',
@@ -343,6 +343,7 @@ function headerValues(body: Record<string, unknown>, existing?: Record<string, u
     freight: Number(v('freight', 0)),
     insurance: Number(v('insurance', 0)),
     discount_pct: clampDiscountPct(v('discount_pct', 0)),
+    discount_flat: clampDiscountFlat(v('discount_flat', 0)),
     shipping_details: String(v('shipping_details')),
     bank_account: String(v('bank_account')),
     inco_terms: String(v('inco_terms')),
@@ -609,7 +610,7 @@ invoicesRouter.post('/', (req: AuthedRequest, res) => {
     // PATCH below, so the form need never PUT over a date.
     const due = String(body.due_date ?? '').trim();
     if (/^\d{4}-\d{2}-\d{2}$/.test(due)) db.prepare('UPDATE commercial_invoices SET due_date = ? WHERE id = ?').run(due, id);
-    saveItems(id, (body.items ?? []) as LineItemInput[], h.tax_type, h.freight, h.insurance, h.currency, h.discount_pct);
+    saveItems(id, (body.items ?? []) as LineItemInput[], h.tax_type, h.freight, h.insurance, h.currency, h.discount_pct, h.discount_flat);
     syncPackingList(id, req.user!.id, body.packing as PackingInput | undefined);
     return id;
   });
@@ -685,7 +686,7 @@ invoicesRouter.put('/:id', (req: AuthedRequest, res) => {
       ...(headerFields.map((f) => (h as Record<string, unknown>)[f]) as never[]),
       id
     );
-    if (Array.isArray(body.items)) saveItems(id, body.items as LineItemInput[], h.tax_type, h.freight, h.insurance, h.currency, h.discount_pct);
+    if (Array.isArray(body.items)) saveItems(id, body.items as LineItemInput[], h.tax_type, h.freight, h.insurance, h.currency, h.discount_pct, h.discount_flat);
     syncPackingList(id, req.user!.id, body.packing as PackingInput | undefined);
     resetApprovalOnEdit('commercial_invoices', id);
   });

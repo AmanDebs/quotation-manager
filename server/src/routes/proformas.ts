@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { db, transaction } from '../db/connection.js';
 import { STATUS_SQL, statusSqlFor } from '../services/proformaStatus.js';
 import { nextNumber, exportChangeError, numberInUseError } from '../services/numbering.js';
-import { clampDiscountPct, computeTotals, round2, type LineItemInput } from '../services/totals.js';
+import { clampDiscountFlat, clampDiscountPct, computeTotals, round2, type LineItemInput } from '../services/totals.js';
 import type { AuthedRequest } from '../middleware/auth.js';
 import { scopeClause, canAccessCustomer, linkError, customerChangeError, raiseForError } from '../middleware/scope.js';
 import { resolveCompanyId, foreignBankError } from '../services/companies.js';
@@ -137,8 +137,8 @@ function getFull(id: number) {
   return pi;
 }
 
-function saveItems(piId: number, items: LineItemInput[], taxType: 'none' | 'cgst_sgst' | 'igst', freight: number, insurance: number, currency: string, discountPct = 0) {
-  const totals = computeTotals(items, taxType, freight, insurance, currency, 0, discountPct);
+function saveItems(piId: number, items: LineItemInput[], taxType: 'none' | 'cgst_sgst' | 'igst', freight: number, insurance: number, currency: string, discountPct = 0, discountFlat = 0) {
+  const totals = computeTotals(items, taxType, freight, insurance, currency, 0, discountPct, discountFlat);
   db.prepare('DELETE FROM pi_items WHERE pi_id = ?').run(piId);
   const ins = db.prepare(
     `INSERT INTO pi_items (pi_id, product_id, description, hsn_code, qty, unit, unit_price, tax_pct, amount, color, packs, pcs_per_pack, total_pcs, qty_20ft, qty_40ft, is_charge, custom1, custom2, custom3, image, sort_order)
@@ -156,7 +156,7 @@ function saveItems(piId: number, items: LineItemInput[], taxType: 'none' | 'cgst
 }
 
 const headerFields = [
-  'date', 'customer_id', 'quotation_id', 'order_id', 'consignee', 'ship_to_name', 'ship_to_gstin', 'notify_party', 'currency', 'freight', 'insurance', 'discount_pct',
+  'date', 'customer_id', 'quotation_id', 'order_id', 'consignee', 'ship_to_name', 'ship_to_gstin', 'notify_party', 'currency', 'freight', 'insurance', 'discount_pct', 'discount_flat',
   'lead_time', 'bank_account', 'inco_terms', 'payment_terms', 'delivery_terms', 'validity_date',
   'is_export', 'country_of_origin', 'port_of_loading', 'port_of_discharge', 'final_destination',
   'container_count', 'partial_shipment', 'po_number', 'po_date',
@@ -179,6 +179,7 @@ function headerValues(body: Record<string, unknown>, existing?: Record<string, u
     freight: Number(v('freight', 0)),
     insurance: Number(v('insurance', 0)),
     discount_pct: clampDiscountPct(v('discount_pct', 0)),
+    discount_flat: clampDiscountFlat(v('discount_flat', 0)),
     lead_time: String(v('lead_time')),
     bank_account: String(v('bank_account')),
     inco_terms: String(v('inco_terms')),
@@ -501,6 +502,7 @@ proformasRouter.get('/prefill/from-quotation/:quotationId', (req: AuthedRequest,
      * not only the two whose forms offer the field.
      */
     discount_pct: q.discount_pct ?? 0,
+    discount_flat: q.discount_flat ?? 0,
     column_config: JSON.parse(String(q.column_config || '{}')),
     items,
   });
@@ -560,6 +562,7 @@ proformasRouter.get('/prefill/from-order/:orderId', (req: AuthedRequest, res) =>
     insurance: o.insurance,
     // The order's own, which already carries the proforma's by the same rule.
     discount_pct: o.discount_pct ?? 0,
+    discount_flat: o.discount_flat ?? 0,
     po_number: o.po_number,
     po_date: o.po_date,
     port_of_loading: first(pi.port_of_loading),
@@ -637,7 +640,7 @@ proformasRouter.post('/', (req: AuthedRequest, res) => {
       String(body.internal_notes ?? '')
     );
     const id = Number(info.lastInsertRowid);
-    saveItems(id, (body.items ?? []) as LineItemInput[], h.tax_type, h.freight, h.insurance, h.currency, h.discount_pct);
+    saveItems(id, (body.items ?? []) as LineItemInput[], h.tax_type, h.freight, h.insurance, h.currency, h.discount_pct, h.discount_flat);
     // Inside the transaction, like syncEnquiryStatus: a quotation reading
     // Accepted with no proforma to show for it would be exactly the drift
     // status syncing exists to prevent.
@@ -695,7 +698,7 @@ proformasRouter.put('/:id', (req: AuthedRequest, res) => {
       ...(headerFields.map((f) => (h as Record<string, unknown>)[f]) as never[]),
       id
     );
-    if (Array.isArray(body.items)) saveItems(id, body.items as LineItemInput[], h.tax_type, h.freight, h.insurance, h.currency, h.discount_pct);
+    if (Array.isArray(body.items)) saveItems(id, body.items as LineItemInput[], h.tax_type, h.freight, h.insurance, h.currency, h.discount_pct, h.discount_flat);
     resetApprovalOnEdit('proforma_invoices', id);
   });
   res.json(getFull(id));
@@ -860,8 +863,8 @@ proformasRouter.post('/:id/duplicate', (req: AuthedRequest, res) => {
       date: today,
     });
     const info = db.prepare(
-      `INSERT INTO proforma_invoices (number, date, customer_id, company_id, consignee, ship_to_name, ship_to_gstin, notify_party, currency, freight, insurance, discount_pct, lead_time, bank_account, inco_terms, payment_terms, delivery_terms, validity_date, is_export, country_of_origin, port_of_loading, port_of_discharge, final_destination, container_count, partial_shipment, po_number, po_date, notify_party_2, method_of_despatch, quantity_tolerance, hs_code, prepared_by, remarks, tax_type, column_config, created_by, status, discount_amount, subtotal, tax_total, grand_total)
-       SELECT ?, ?, customer_id, company_id, consignee, ship_to_name, ship_to_gstin, notify_party, currency, freight, insurance, discount_pct, lead_time, bank_account, inco_terms, payment_terms, delivery_terms, ?, is_export, country_of_origin, port_of_loading, port_of_discharge, final_destination, container_count, partial_shipment, po_number, po_date, notify_party_2, method_of_despatch, quantity_tolerance, hs_code, prepared_by, remarks, tax_type, column_config, ?, 'draft', discount_amount, subtotal, tax_total, grand_total
+      `INSERT INTO proforma_invoices (number, date, customer_id, company_id, consignee, ship_to_name, ship_to_gstin, notify_party, currency, freight, insurance, discount_pct, discount_flat, lead_time, bank_account, inco_terms, payment_terms, delivery_terms, validity_date, is_export, country_of_origin, port_of_loading, port_of_discharge, final_destination, container_count, partial_shipment, po_number, po_date, notify_party_2, method_of_despatch, quantity_tolerance, hs_code, prepared_by, remarks, tax_type, column_config, created_by, status, discount_amount, subtotal, tax_total, grand_total)
+       SELECT ?, ?, customer_id, company_id, consignee, ship_to_name, ship_to_gstin, notify_party, currency, freight, insurance, discount_pct, discount_flat, lead_time, bank_account, inco_terms, payment_terms, delivery_terms, ?, is_export, country_of_origin, port_of_loading, port_of_discharge, final_destination, container_count, partial_shipment, po_number, po_date, notify_party_2, method_of_despatch, quantity_tolerance, hs_code, prepared_by, remarks, tax_type, column_config, ?, 'draft', discount_amount, subtotal, tax_total, grand_total
        FROM proforma_invoices WHERE id = ?`
     ).run(number, today, validity >= today ? validity : '', req.user!.id, id);
     const newId = Number(info.lastInsertRowid);

@@ -54,6 +54,8 @@ interface Draft {
   insurance: number;
   /** Carried from the proforma this order was booked from; see the form. */
   discount_pct: number;
+  /** The same discount stated as money, which wins where it is stated. */
+  discount_flat: number;
   inco_terms: string;
   container_count: string;
   advance_due: number;
@@ -77,7 +79,7 @@ interface Draft {
 const emptyDraft = (): Draft => ({
   customer_id: '', quotation_id: null, date: today(), is_export: 0, coa_required: 0,
   order_through: 'Phone', spoc: '', po_number: '', po_date: '',
-  currency: 'INR', tax_type: 'igst', payment_terms: '', freight: 0, insurance: 0, discount_pct: 0,
+  currency: 'INR', tax_type: 'igst', payment_terms: '', freight: 0, insurance: 0, discount_pct: 0, discount_flat: 0,
   inco_terms: '', container_count: '', advance_due: 0, advance_amount: 0, advance_received_date: '',
   destination: '', port_of_discharge: '', transport: '', freight_terms: '', promised_date: '', scheduled_date: '',
   revised_date: '', actual_production_date: '', remarks: '', notes: '', column_config: newColumnConfig(), items: [],
@@ -594,11 +596,11 @@ export default function OrderFormPage() {
             */}
           {!!draft.discount_pct && (
             <DocumentDiscount
-              value={draft.discount_pct}
+              value={draft}
               items={draft.items}
               currency={draft.currency}
               showTax={draft.tax_type !== 'none'}
-              onChange={(pct) => set({ discount_pct: pct })}
+              onChange={(patch) => set(patch)}
             />
           )}
         </Card>

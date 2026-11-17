@@ -4,7 +4,7 @@ import type { TDocumentDefinitions, Content } from 'pdfmake/interfaces';
 import { inflateSync } from 'node:zlib';
 import { db } from '../db/connection.js';
 import { amountInWords } from './amountInWords.js';
-import { round2, isPieceBasis, piecesPerBillingUnitOf, piecesOrdered, computeTotals } from './totals.js';
+import { round2, isPieceBasis, piecesPerBillingUnitOf, piecesOrdered, computeTotals, discountPctShown } from './totals.js';
 import { invoiceReceivable, proformaAdvance, orderAdvance } from './receivables.js';
 import { batchById, lotsUnderCoa, batchesOnDespatch, batchesOnCreditNote } from './batch.js';
 import { getCompany, defaultCompany } from './companies.js';
@@ -657,9 +657,12 @@ function totalsRows(doc: Row, currency: string, grandLabel: string, items: Row[]
     band: hasExtras && discount === 0,
   });
   if (discount > 0) {
-    const pct = Number(doc.discount_pct) || 0;
+    // `@ 5%` against a percentage, a bare label against a stated amount —
+    // `discountPctShown` owns which, so the page can never name a percentage
+    // the figure beside it is not.
+    const pct = discountPctShown(doc.discount_pct, doc.discount_flat);
     bandRows.push({
-      label: pct > 0 ? `Less Discount @ ${pct}%` : 'Less Discount',
+      label: pct ? `Less Discount @ ${pct}%` : 'Less Discount',
       value: fmtMoney(discount, currency),
     });
     bandRows.push({ label: 'TOTAL PRICE', value: fmtMoney(doc.subtotal, currency), band: true });

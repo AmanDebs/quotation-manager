@@ -1111,10 +1111,12 @@ export interface Quotation {
   freight: number; insurance: number; inco_terms: string; container_count: string; prepared_by: string;
   /**
    * The document's own discount, off the lines before tax (2026-11-16).
-   * `discount_pct` is what somebody typed; `discount_amount` is what
-   * `computeTotals` stamped it at, so it is read-only here like the subtotal.
+   * `discount_pct` and `discount_flat` are the two ways of typing it — a rule
+   * or an amount, the amount winning where it is stated; `discount_amount` is
+   * what `computeTotals` worked it out at, so it is read-only here like the
+   * subtotal.
    */
-  discount_pct: number; discount_amount: number;
+  discount_pct: number; discount_flat: number; discount_amount: number;
   tax_type: TaxType; status: string; is_export: number;
   subtotal: number; tax_total: number; grand_total: number;
   superseded_by: number | null;
@@ -1161,10 +1163,12 @@ export interface Order {
   freight: number; insurance: number; inco_terms: string; container_count: string;
   /**
    * The document's own discount, off the lines before tax (2026-11-16).
-   * `discount_pct` is what somebody typed; `discount_amount` is what
-   * `computeTotals` stamped it at, so it is read-only here like the subtotal.
+   * `discount_pct` and `discount_flat` are the two ways of typing it — a rule
+   * or an amount, the amount winning where it is stated; `discount_amount` is
+   * what `computeTotals` worked it out at, so it is read-only here like the
+   * subtotal.
    */
-  discount_pct: number; discount_amount: number;
+  discount_pct: number; discount_flat: number; discount_amount: number;
   advance_due: number; advance_amount: number; advance_received_date: string;
   /**
    * What the proforma this order was booked from has actually taken in.
@@ -1427,10 +1431,12 @@ export interface Proforma {
   notify_party: string; currency: string; freight: number; insurance: number;
   /**
    * The document's own discount, off the lines before tax (2026-11-16).
-   * `discount_pct` is what somebody typed; `discount_amount` is what
-   * `computeTotals` stamped it at, so it is read-only here like the subtotal.
+   * `discount_pct` and `discount_flat` are the two ways of typing it — a rule
+   * or an amount, the amount winning where it is stated; `discount_amount` is
+   * what `computeTotals` worked it out at, so it is read-only here like the
+   * subtotal.
    */
-  discount_pct: number; discount_amount: number;
+  discount_pct: number; discount_flat: number; discount_amount: number;
   lead_time: string; bank_account: string; inco_terms: string; payment_terms: string;
   delivery_terms: string; validity_date: string; is_export: number;
   country_of_origin: string; port_of_loading: string; port_of_discharge: string;
@@ -1478,10 +1484,12 @@ export interface Invoice {
   notify_party: string; currency: string; freight: number; insurance: number;
   /**
    * The document's own discount, off the lines before tax (2026-11-16).
-   * `discount_pct` is what somebody typed; `discount_amount` is what
-   * `computeTotals` stamped it at, so it is read-only here like the subtotal.
+   * `discount_pct` and `discount_flat` are the two ways of typing it — a rule
+   * or an amount, the amount winning where it is stated; `discount_amount` is
+   * what `computeTotals` worked it out at, so it is read-only here like the
+   * subtotal.
    */
-  discount_pct: number; discount_amount: number;
+  discount_pct: number; discount_flat: number; discount_amount: number;
   shipping_details: string; bank_account: string; inco_terms: string; payment_terms: string;
   is_export: number; country_of_origin: string; port_of_loading: string; port_of_discharge: string;
   final_destination: string;

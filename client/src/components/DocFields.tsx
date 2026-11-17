@@ -674,55 +674,108 @@ export function HeaderCharges({
  * arithmetic over the lines, and it is read against the `Lines:` figure the
  * editor prints a few pixels above it.
  */
+export interface DocumentDiscountValue {
+  /** The discount as a rule. */
+  discount_pct: number;
+  /** The same discount stated as money, which wins where it is stated. */
+  discount_flat: number;
+}
+
+const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
+
+/**
+ * What the discount takes off, mirroring `discountOf` in
+ * `server/src/services/totals.ts`, which is the authority — everything drawn
+ * here is a preview of what the server computes on save, so the two have to
+ * agree or the note under the table reads differently from the saved document.
+ */
+function discountOf(gross: number, pct: number, flat: number) {
+  if (!(gross > 0)) return { amount: 0, shown: null as number | null };
+  const stated = Math.max(0, flat || 0);
+  const byPct = Math.min(100, Math.max(0, pct || 0));
+  const amount = round2(Math.min(gross, stated > 0 ? stated : gross * (byPct / 100)));
+  return { amount, shown: stated > 0 ? null : (byPct || null) };
+}
+
 export function DocumentDiscount({
   value, items, currency, showTax, disabled, onChange,
 }: {
-  value: number;
+  value: DocumentDiscountValue;
   items: LineItem[];
   currency: string;
   /** Whether this document charges tax, so the note can say what it is charged on. */
   showTax?: boolean;
   disabled?: boolean;
-  onChange: (pct: number) => void;
+  onChange: (patch: Partial<DocumentDiscountValue>) => void;
 }) {
-  const pct = Math.min(100, Math.max(0, Number(value) || 0));
   const gross = linesTotal(items);
-  const off = Math.round((gross * (pct / 100) + Number.EPSILON) * 100) / 100;
+  const { amount, shown } = discountOf(gross, value.discount_pct, value.discount_flat);
+  const stated = Math.max(0, value.discount_flat || 0) > 0;
 
   // Nothing at all on a read-only document that states no discount: an empty
   // field on a frozen page is the dead box `StaticValue` drops for the same
   // reason. Stated where there is one, since it is money off the total.
   const readOnly = useReadOnlyFields();
-  if (readOnly && pct <= 0) return null;
+  if (readOnly && amount <= 0) return null;
+
+  /*
+   * Typing into one clears the other, so the stored row is never carrying two
+   * answers to one question. The server's precedence — a stated amount wins —
+   * is the rail behind that rather than the everyday path, and it is what
+   * decides which of the two a document arriving from elsewhere is read by.
+   */
+  const setPct = (v: string) =>
+    onChange({ discount_pct: v === '' ? 0 : Math.min(100, Math.max(0, Number(v))), discount_flat: 0 });
+  const setFlat = (v: string) =>
+    onChange({ discount_flat: v === '' ? 0 : Math.max(0, Number(v)), discount_pct: 0 });
+
+  const box = (v: number, suffix: string, onType: (s: string) => void, max?: number) => (
+    <div className="flex items-center gap-1">
+      <Input
+        type="number"
+        min={0}
+        max={max}
+        step="any"
+        className="w-24"
+        value={v || ''}
+        placeholder="0"
+        disabled={disabled}
+        onChange={(e) => onType(e.target.value)}
+      />
+      <span className="text-slate-400">{suffix}</span>
+    </div>
+  );
 
   return (
     <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-slate-100 pt-3 text-sm">
       <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Discount</span>
       {readOnly ? (
-        <span className="font-semibold tabular-nums text-slate-700">{pct}%</span>
+        <span className="font-semibold tabular-nums text-slate-700">
+          {shown != null ? `${shown}%` : fmtMoney(amount, currency)}
+        </span>
       ) : (
-        <div className="flex items-center gap-1">
-          <Input
-            type="number"
-            min={0}
-            max={100}
-            step="any"
-            className="w-20"
-            value={value || ''}
-            placeholder="0"
-            disabled={disabled}
-            onChange={(e) => onChange(e.target.value === '' ? 0 : Math.min(100, Math.max(0, Number(e.target.value))))}
-          />
-          <span className="text-slate-400">%</span>
-        </div>
+        <>
+          {box(value.discount_pct, '%', setPct, 100)}
+          <span className="text-xs text-slate-400">or</span>
+          {box(value.discount_flat, currency, setFlat)}
+        </>
       )}
       <span className="text-xs text-slate-500">
-        {pct > 0
+        {amount > 0
           ? <>
-              {pct}% of {fmtMoney(gross, currency)} = <strong className="tabular-nums text-slate-700">{fmtMoney(off, currency)}</strong> off
+              {/* The stated figure leads, and the other half of the arithmetic
+                  follows it — a percentage says what it comes to, a flat
+                  amount says what percentage it works out at, so whichever was
+                  typed the reader can see both. */}
+              {shown != null
+                ? <>{shown}% of {fmtMoney(gross, currency)} = <strong className="tabular-nums text-slate-700">{fmtMoney(amount, currency)}</strong> off</>
+                : <><strong className="tabular-nums text-slate-700">{fmtMoney(amount, currency)}</strong> off {fmtMoney(gross, currency)} ({round2((amount / gross) * 100)}%)</>}
+              {stated && amount < Math.max(0, value.discount_flat || 0)
+                ? <>, capped at the lines</>
+                : ''}
               {showTax ? ', and tax is charged on what is left' : ''}
             </>
-          : 'Off the lines above, before tax. Leave blank for none.'}
+          : 'Off the lines above, before tax — a percentage, or an amount. Leave blank for none.'}
       </span>
     </div>
   );

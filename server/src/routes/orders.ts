@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { db, transaction } from '../db/connection.js';
 import { checkDocument } from '../services/documentChecks.js';
 import { nextNumber, exportChangeError } from '../services/numbering.js';
-import { clampDiscountPct, computeTotals, round2, type LineItemInput } from '../services/totals.js';
+import { clampDiscountFlat, clampDiscountPct, computeTotals, round2, type LineItemInput } from '../services/totals.js';
 import { productionByOrder, ORDER_DUE, ORDER_DUE_FROM_JOBS } from '../services/production.js';
 import { despatchedByOrder } from '../services/despatch.js';
 import { orderMaterialCost } from '../services/costing.js';
@@ -225,7 +225,7 @@ function getFull(id: number, req?: AuthedRequest) {
 
 const headerFields = [
   'date', 'customer_id', 'quotation_id', 'is_export', 'coa_required', 'order_through', 'spoc', 'po_number', 'po_date',
-  'currency', 'tax_type', 'payment_terms', 'freight', 'insurance', 'discount_pct', 'inco_terms', 'container_count',
+  'currency', 'tax_type', 'payment_terms', 'freight', 'insurance', 'discount_pct', 'discount_flat', 'inco_terms', 'container_count',
   'advance_due', 'advance_amount', 'advance_received_date', 'destination', 'port_of_discharge', 'transport', 'freight_terms',
   'promised_date', 'scheduled_date', 'revised_date', 'actual_production_date', 'remarks', 'notes',
 ] as const;
@@ -252,6 +252,7 @@ function headerValues(body: Record<string, unknown>, existing?: Record<string, u
     freight: Number(v('freight', 0)),
     insurance: Number(v('insurance', 0)),
     discount_pct: clampDiscountPct(v('discount_pct', 0)),
+    discount_flat: clampDiscountFlat(v('discount_flat', 0)),
     inco_terms: String(v('inco_terms')),
     container_count: String(v('container_count')),
     advance_due: Number(v('advance_due', 0)),
@@ -270,8 +271,8 @@ function headerValues(body: Record<string, unknown>, existing?: Record<string, u
   };
 }
 
-function saveItems(orderId: number, items: OrderItemInput[], taxType: 'none' | 'cgst_sgst' | 'igst', freight: number, insurance: number, currency: string, discountPct = 0) {
-  const totals = computeTotals(items, taxType, freight, insurance, currency, 0, discountPct);
+function saveItems(orderId: number, items: OrderItemInput[], taxType: 'none' | 'cgst_sgst' | 'igst', freight: number, insurance: number, currency: string, discountPct = 0, discountFlat = 0) {
+  const totals = computeTotals(items, taxType, freight, insurance, currency, 0, discountPct, discountFlat);
   db.prepare('DELETE FROM order_items WHERE order_id = ?').run(orderId);
   const ins = db.prepare(
     `INSERT INTO order_items (order_id, product_id, description, hsn_code, code, qty, unit, unit_price, tax_pct, amount,
@@ -973,6 +974,7 @@ ordersRouter.get('/prefill/from-quotation/:quotationId', (req: AuthedRequest, re
      * not only the two whose forms offer the field.
      */
     discount_pct: q.discount_pct ?? 0,
+    discount_flat: q.discount_flat ?? 0,
     spoc: q.prepared_by,
     column_config: JSON.parse(String(q.column_config || '{}')),
     items,
@@ -1026,6 +1028,7 @@ ordersRouter.get('/prefill/from-proforma/:piId', (req: AuthedRequest, res) => {
     insurance: pi.insurance,
     // See the note on `prefill/from-quotation` above.
     discount_pct: pi.discount_pct ?? 0,
+    discount_flat: pi.discount_flat ?? 0,
     destination: pi.final_destination,
     port_of_discharge: pi.port_of_discharge,
     po_number: pi.po_number,
@@ -1076,7 +1079,7 @@ ordersRouter.post('/', (req: AuthedRequest, res) => {
       String(body.status ?? 'pending')
     );
     const id = Number(info.lastInsertRowid);
-    saveItems(id, (body.items ?? []) as OrderItemInput[], h.tax_type, h.freight, h.insurance, h.currency, h.discount_pct);
+    saveItems(id, (body.items ?? []) as OrderItemInput[], h.tax_type, h.freight, h.insurance, h.currency, h.discount_pct, h.discount_flat);
 
     /**
      * Booked from a proforma: point that proforma at this order.
@@ -1142,7 +1145,7 @@ ordersRouter.put('/:id', (req: AuthedRequest, res) => {
       id
     );
     if (Array.isArray(body.items)) {
-      saveItems(id, body.items as OrderItemInput[], h.tax_type, h.freight, h.insurance, h.currency, h.discount_pct);
+      saveItems(id, body.items as OrderItemInput[], h.tax_type, h.freight, h.insurance, h.currency, h.discount_pct, h.discount_flat);
       // A new line gets its job, a corrected quantity moves an untouched one,
       // a line that is gone cancels its unstarted job. The floor's own
       // arrangements are left alone — `syncOrderJobs` says exactly where.

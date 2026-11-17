@@ -47,6 +47,8 @@ interface Draft {
   insurance: number;
   /** The document's own discount, off the lines before tax. */
   discount_pct: number;
+  /** The same discount stated as money, which wins where it is stated. */
+  discount_flat: number;
   lead_time: string;
   bank_account: string;
   inco_terms: string;
@@ -84,7 +86,7 @@ interface Draft {
 
 const emptyDraft = (): Draft => ({
   customer_id: '', quotation_id: null, date: today(), currency: 'INR', consignee: '', ship_to_name: '', ship_to_gstin: '', notify_party: '',
-  freight: 0, insurance: 0, discount_pct: 0, lead_time: '', bank_account: '', inco_terms: '', payment_terms: '',
+  freight: 0, insurance: 0, discount_pct: 0, discount_flat: 0, lead_time: '', bank_account: '', inco_terms: '', payment_terms: '',
   delivery_terms: '',
   // Offered for a week unless somebody says otherwise. Derived from the
   // draft's own date rather than the clock, so the two cannot disagree
@@ -621,11 +623,11 @@ export default function ProformaFormPage() {
             * It draws nothing where there is none.
             */}
           <DocumentDiscount
-            value={draft.discount_pct}
+            value={draft}
             items={draft.items}
             currency={draft.currency}
             showTax={draft.tax_type !== 'none'}
-            onChange={(pct) => set({ discount_pct: pct })}
+            onChange={(patch) => set(patch)}
           />
         </Card>
 
