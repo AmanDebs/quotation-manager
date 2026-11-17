@@ -1341,14 +1341,28 @@ export interface DueReport { today: string; window_days: number; until: string; 
  * How fast a product is made, and where that figure came from — the screen
  * says which, so a measurement over two days can be disagreed with.
  */
+/** What the shift book says about a product, and what it was taken over. */
+export interface MeasuredRate {
+  /** The median of the days booked — see `services/outputRate.ts`. */
+  pcs_per_day: number;
+  /** Their plain average. Far above the median means one bulk entry. */
+  mean_per_day: number;
+  best_day: number;
+  days: number;
+  last_run: string;
+}
+
 export interface OutputRate {
   product_id: number;
   pcs_per_day: number;
   source: 'measured' | 'stated';
   days: number;
   last_run: string;
+  /** On a measured rate, the two figures the median was taken over. */
+  mean_per_day?: number;
+  best_day?: number;
   /** What the shift book said, where a typed figure is overriding it. */
-  measured?: { pcs_per_day: number; days: number; last_run: string };
+  measured?: MeasuredRate;
 }
 
 /** A job as the production planner would date it. Nothing is written yet. */
@@ -1364,17 +1378,36 @@ export interface PlannedJob {
   pieces: number;
   /** When the customer needs it, or null where nothing on file says. */
   due: string | null;
+  /** Where that date came from — a promise, the floor's own plan, or nothing. */
+  due_source: 'order' | 'line' | 'jobs' | 'none';
   rate: OutputRate | null;
   days: number | null;
   planned_start: string;
   planned_end: string;
   /** The plan finishes after the customer's own date. */
   late: boolean;
+  /** By how many days; 0 where it is not late. */
+  late_days: number;
   /** Why it could not be dated; null means it was. */
   blocked: 'no-rate' | 'nothing-left' | null;
 }
 
-export interface PlanPreview { start: string; jobs: PlannedJob[] }
+/** What the whole plan comes to, folded by the server over the same rows. */
+export interface PlanSummary {
+  jobs: number;
+  blocked: number;
+  late: number;
+  undated: number;
+  pieces: number;
+  days: number;
+  from: string;
+  to: string;
+}
+
+/** How a queue opens. @see services/jobPlan.ts */
+export type PlanSortKey = 'due' | 'shortest' | 'longest' | 'order';
+
+export interface PlanPreview { start: string; jobs: PlannedJob[]; summary: PlanSummary }
 
 export interface MaterialSchedule {
   dates: string[];

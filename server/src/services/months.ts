@@ -51,3 +51,18 @@ export function addDaysIso(date: string, days: number): string {
   if (!m) return '';
   return new Date(Date.UTC(+m[1], +m[2] - 1, +m[3] + days)).toISOString().slice(0, 10);
 }
+
+/**
+ * Whole days from one date to another, both `YYYY-MM-DD`, in **UTC** for
+ * `addDaysIso`' own reason: read locally, a bare date is UTC midnight asked
+ * about somewhere else and the answer lands a day out either side of
+ * Greenwich. Negative where `to` is the earlier of the two; 0 where either
+ * cannot be read, so a caller shows nothing rather than a confident figure.
+ */
+export function daysBetweenIso(from: string, to: string): number {
+  const a = /^(\d{4})-(\d{2})-(\d{2})$/.exec(from);
+  const b = /^(\d{4})-(\d{2})-(\d{2})$/.exec(to);
+  if (!a || !b) return 0;
+  const ms = Date.UTC(+b[1], +b[2] - 1, +b[3]) - Date.UTC(+a[1], +a[2] - 1, +a[3]);
+  return Math.round(ms / 86_400_000);
+}

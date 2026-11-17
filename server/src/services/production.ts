@@ -112,13 +112,55 @@ export const ORDER_JOB_END = (o: string) => `(
   WHERE wd.order_id = ${o}.id AND wd.status <> 'cancelled' AND ${JOB_END('wd')} <> ''
 )`;
 
-/** The order's own date where it states one, else the floor's. */
+/**
+ * The latest date any **goods line** of the order was promised for
+ * (`order_items.scheduled_date`, the *Promised* column the line editor
+ * offers), or NULL where no line states one.
+ *
+ * **It sits above the jobs and below the order's own two columns**, which is
+ * the whole of why it belongs in the chain at all: it is a date somebody gave
+ * the buyer, so it outranks the floor's plan and is outranked by a date stated
+ * about the order as a whole. **Latest**, by `ORDER_JOB_END`'s own reasoning:
+ * the question is when the *order* is done, so the last line to fall due
+ * settles it.
+ *
+ * A charge line is skipped — freight is not goods and has nothing to be
+ * promised for — the rule every reader of an item table here follows.
+ *
+ * This is the third source the 2026-10-09 repair could have taken and did not,
+ * on the reasoning that *"no screen fills it either"*. Two things changed that:
+ * `services/orderImport.ts` has written it on every imported backlog line from
+ * the day the importer was built, and the production planner now reads a
+ * customer's date on every row it draws — so a date already on file and
+ * reachable by nobody is a worse answer than one more rung on a chain that
+ * already has three.
+ */
+export const ORDER_LINE_DUE = (o: string) => `(
+  SELECT MAX(oi.scheduled_date) FROM order_items oi
+   WHERE oi.order_id = ${o}.id AND oi.is_charge = 0 AND oi.scheduled_date <> ''
+)`;
+
+/** The order's own date where it states one, else a line's, else the floor's. */
 export const ORDER_DUE = (o: string) =>
-  `COALESCE(NULLIF(${o}.revised_date, ''), NULLIF(${o}.promised_date, ''), ${ORDER_JOB_END(o)})`;
+  `COALESCE(NULLIF(${o}.revised_date, ''), NULLIF(${o}.promised_date, ''),
+            ${ORDER_LINE_DUE(o)}, ${ORDER_JOB_END(o)})`;
+
+/**
+ * Where `ORDER_DUE` found its answer, so a screen can say whether it is
+ * reading a promise or the plant's own plan — `order` (either of the order's
+ * own columns), `line` (a goods line's promised date), `jobs` (the floor's
+ * plan, which is a plan and not a promise), or `none`.
+ */
+export const ORDER_DUE_SOURCE = (o: string) => `CASE
+  WHEN ${o}.revised_date <> '' OR ${o}.promised_date <> '' THEN 'order'
+  WHEN ${ORDER_LINE_DUE(o)} IS NOT NULL THEN 'line'
+  WHEN ${ORDER_JOB_END(o)} IS NOT NULL THEN 'jobs'
+  ELSE 'none' END`;
 
 /** Whether `ORDER_DUE` fell through to the jobs — a plan, not a promise. */
 export const ORDER_DUE_FROM_JOBS = (o: string) =>
-  `CASE WHEN ${o}.revised_date = '' AND ${o}.promised_date = '' AND ${ORDER_JOB_END(o)} IS NOT NULL
+  `CASE WHEN ${o}.revised_date = '' AND ${o}.promised_date = ''
+             AND ${ORDER_LINE_DUE(o)} IS NULL AND ${ORDER_JOB_END(o)} IS NOT NULL
         THEN 1 ELSE 0 END`;
 
 export interface Progress {

@@ -72,6 +72,78 @@ describe('the measured output rate', () => {
     assert.equal(r.pcs_per_day, 40_000);
   });
 
+  /*
+   * **The median, not the mean**, and these are the cases that say why
+   * (2026-11-17). The client's first screenful of the planner read
+   * 3,57,500/day for a 28mm preform and 25,01,125/day for a cap beside
+   * neighbours at 48,666 — the signature of one bulk or back-dated entry in
+   * an average, which adds a week to the numerator and one day to the
+   * denominator.
+   */
+  test('one bulk entry does not drag the rate up', () => {
+    const p = product();
+    const w = job(p);
+    for (const d of ['01', '02', '03', '04']) shift(w, `2026-11-${d}`, 40_000);
+    shift(w, '2026-11-05', 15_00_000);           // a week keyed to one date
+    const r = rateOf(p)!;
+    assert.equal(r.pcs_per_day, 40_000, 'the bulk day set the rate');
+    // The average rides along, because the gap between the two *is* the
+    // evidence that the shift book holds an entry worth correcting.
+    assert.equal(r.mean_per_day, 3_32_000);
+    assert.equal(r.best_day, 15_00_000);
+    assert.equal(r.days, 5);
+  });
+
+  /** On a book with nothing odd in it the two agree, so nothing moves. */
+  test('and on an honest shift book it is the average', () => {
+    const p = product();
+    const w = job(p);
+    for (const d of ['01', '02', '03']) shift(w, `2026-11-${d}`, 50_000);
+    const r = rateOf(p)!;
+    assert.equal(r.pcs_per_day, 50_000);
+    assert.equal(r.mean_per_day, 50_000);
+  });
+
+  /** An even count takes the middle of the two middles. */
+  test('an even number of days takes the middle pair', () => {
+    const p = product();
+    const w = job(p);
+    shift(w, '2026-11-01', 10_000);
+    shift(w, '2026-11-02', 20_000);
+    shift(w, '2026-11-03', 30_000);
+    shift(w, '2026-11-04', 1_00_000);
+    assert.equal(rateOf(p)!.pcs_per_day, 25_000);
+  });
+
+  /**
+   * A day that produced nothing good is evidence **against** the rate, so it
+   * counts as a zero rather than being dropped — dropping it would raise the
+   * figure on the very evidence that should lower it.
+   */
+  test('a day with nothing good to show counts as a zero', () => {
+    const p = product();
+    const w = job(p);
+    shift(w, '2026-11-01', 60_000);
+    shift(w, '2026-11-02', 50_000, { batchId: scrappedLot(w) });
+    shift(w, '2026-11-03', 40_000);
+    assert.equal(rateOf(p)!.pcs_per_day, 40_000, 'the condemned day was dropped rather than counted');
+  });
+
+  /**
+   * And where the typical day is nothing there is **no rate**, not a rate of
+   * zero — the `hasRecipe: false` rule, and the one figure that would make a
+   * job take for ever. The planner names the row and asks for a figure.
+   */
+  test('a product whose typical day yields nothing has no rate at all', () => {
+    const p = product();
+    const w = job(p);
+    const lot = scrappedLot(w);
+    shift(w, '2026-11-01', 50_000, { batchId: lot });
+    shift(w, '2026-11-02', 50_000, { batchId: lot });
+    shift(w, '2026-11-03', 90_000);
+    assert.equal(rateOf(p), null);
+  });
+
   /** It is the product's rate, not one job's: the same item pools. */
   test('every job of the product pools into one rate', () => {
     const p = product();
@@ -158,7 +230,9 @@ describe('the stated output rate', () => {
     shift(w, '2026-11-02', 30_000);
     const r = rateOf(p)!;
     assert.equal(r.pcs_per_day, 50_000);
-    assert.deepEqual(r.measured, { pcs_per_day: 20_000, days: 2, last_run: '2026-11-02' });
+    assert.deepEqual(r.measured, {
+      pcs_per_day: 20_000, mean_per_day: 20_000, best_day: 30_000, days: 2, last_run: '2026-11-02',
+    });
   });
 
   /** A product nobody has run has nothing to show beside the typed figure. */

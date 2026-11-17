@@ -1,8 +1,10 @@
 import { useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, keepPreviousData } from '@tanstack/react-query';
+import { Link } from 'react-router-dom';
 import { api } from '../api/client';
-import type { WorkOrder, PlannedJob, PlanPreview } from '../types';
-import { Button, Input, Modal, ErrorText, TH_CLASS } from './ui';
+import { useCan } from '../App';
+import type { WorkOrder, PlannedJob, PlanPreview, PlanSortKey } from '../types';
+import { Button, Input, Select, Modal, ErrorText, TH_CLASS } from './ui';
 import { fmtDate, fmtQty, today } from '../lib/format';
 
 /**
@@ -30,34 +32,124 @@ import { fmtDate, fmtQty, today } from '../lib/format';
  * answer to when an order is due, so a job whose computed finish falls after
  * it is marked — the question a planner actually has, and the one no screen
  * in this app could answer before.
+ *
+ * ---
+ *
+ * **Reworked 2026-11-17** against the client's own first screenful of it —
+ * 47 jobs — which is what showed the difference between a screen that works
+ * on a fixture and one that works on a book. Five things it got wrong at that
+ * size, each fixed here and each a rule rather than a tweak:
+ *
+ * 1. **The decision sat below the rows.** Cancel and *Fill in N dates* were
+ *    under forty-seven of them, so the only way to reach the button was to
+ *    scroll past everything the button commits to. The table scrolls **inside
+ *    itself** now under a sticky head, and the summary and the footer stay on
+ *    screen whatever the queue's length — which is also the whole of what
+ *    makes this work at two hundred jobs rather than fifty.
+ * 2. **Nothing said what the plan came to.** A planner pressing a button that
+ *    dates 47 jobs is committing the floor into January, and no figure on the
+ *    page said so. `summary` is the server's own fold of the same rows.
+ * 3. **Every rate was a bare number.** Hover is not where a fact can be read
+ *    down a column of forty-seven, and a rate is the one input the planner
+ *    has to be able to disbelieve. Each now states what it was measured over,
+ *    and marks itself where the evidence is thin, stale or skewed.
+ * 4. **Reordering was one place at a time.** Thirty-nine presses to move the
+ *    fortieth row to the front. The order is a **rule** now, picked once,
+ *    with the arrows left for the correction they are good at.
+ * 5. **Every *Needed* cell was an em-dash**, which reads as a column that
+ *    does not work rather than as a fact about the book. It is said in
+ *    words, and it says which of the two it is.
  */
 
-/** Why a row could not be dated, in the words the planner needs. */
-const BLOCKED: Record<string, string> = {
-  'no-rate': 'no output rate yet — type one on the product, or date this job by hand',
-  'nothing-left': 'nothing left to make',
-};
-
-/** A typed figure is marked, so an override is visible without hovering for it. */
-const rateLabel = (p: PlannedJob): string =>
-  (p.rate ? `${fmtQty(p.rate.pcs_per_day)}/day${p.rate.source === 'stated' ? '*' : ''}` : '—');
+/** How a queue opens, in the planner's own words. */
+const SORTS: { key: PlanSortKey; label: string }[] = [
+  { key: 'due', label: 'What the customer needs first' },
+  { key: 'shortest', label: 'Shortest jobs first' },
+  { key: 'longest', label: 'Longest jobs first' },
+  { key: 'order', label: 'Keep each sales order together' },
+];
 
 /**
- * Where the figure came from, on the hover rather than in the cell — spelled
- * out in full this column alone pushed the table four hundred pixels past the
- * dialog, and a planner table that scrolls sideways cannot be read across.
+ * A date in the plan, short enough to read down a column: *17 Nov*, with the
+ * year only where the plan crosses into another one. `fmtDate`'s own
+ * `17/11/2026` is right on a document and twice the width needed here, and
+ * this column states a pair of them on every row.
  */
-const rateTitle = (p: PlannedJob): string | undefined => {
-  if (!p.rate) return undefined;
-  if (p.rate.source === 'measured') {
-    return `Measured from ${p.rate.days} day${p.rate.days === 1 ? '' : 's'} of shifts already booked, the last on ${fmtDate(p.rate.last_run)}`;
+function planDay(iso: string, baseYear: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+  if (!m) return '—';
+  const month = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][+m[2] - 1];
+  return `${+m[3]} ${month}${m[1] === baseYear ? '' : ` '${m[1].slice(2)}`}`;
+}
+
+/** The span a whole plan occupies, said once rather than read off two rows. */
+const planSpan = (from: string, to: string): string =>
+  (from && to ? `${planDay(from, from.slice(0, 4))} → ${planDay(to, from.slice(0, 4))}` : '—');
+
+/**
+ * Whether a measured rate is worth leaning on, and if not, why — stated in
+ * the cell rather than left on a hover, because the whole queue's dates are
+ * computed from this column and a planner scanning it has to be able to see
+ * which figures to disbelieve.
+ *
+ * **Skewed** is the one that matters and the one the client met: the rate is
+ * the median of the days booked, so a mean far above it means the shift book
+ * holds a bulk or back-dated entry — a week's output keyed to one date. That
+ * is worth correcting at the source, and until it is, the median is already
+ * protecting the plan from it.
+ */
+function rateDoubt(p: PlannedJob): { mark: string; why: string } | null {
+  const r = p.rate;
+  if (!r) return null;
+  const m = r.source === 'measured' ? r : r.measured;
+  if (!m) return null;
+  const mean = 'mean_per_day' in m ? m.mean_per_day : undefined;
+  if (mean != null && m.pcs_per_day > 0 && mean > m.pcs_per_day * 1.5) {
+    return {
+      mark: 'uneven',
+      why: `The days booked are uneven — they average ${fmtQty(mean)}/day against a typical day of ${fmtQty(m.pcs_per_day)}. That is the signature of a bulk or back-dated shift entry; the plan uses the typical day, but the shift book is worth a look.`,
+    };
+  }
+  if (m.days <= 2) {
+    return {
+      mark: 'thin',
+      why: `Only ${m.days} day${m.days === 1 ? '' : 's'} of shifts behind this — enough to compute a rate and not much to judge it on. Type a figure on the product if you know better.`,
+    };
+  }
+  const months = m.last_run ? (Date.now() - Date.parse(`${m.last_run}T00:00:00Z`)) / 2_592_000_000 : 0;
+  if (months >= 6) {
+    return { mark: 'old', why: `Last run ${fmtDate(m.last_run)} — this rate is over six months old.` };
+  }
+  return null;
+}
+
+/** Where the figure came from, in full, on the hover. */
+function rateTitle(p: PlannedJob): string | undefined {
+  const r = p.rate;
+  if (!r) return undefined;
+  if (r.source === 'measured') {
+    return `A typical day of the ${r.days} the floor has booked for this product — the median, so one unusually big day cannot pull it up. Last run ${fmtDate(r.last_run)}.`;
   }
   // An override is printed **against** what it overrides: a figure typed over
   // a measurement nobody saw is how a wrong one goes unnoticed.
-  const m = p.rate.measured;
+  const m = r.measured;
   return m
-    ? `Typed on the product. The shifts already booked work out at ${fmtQty(m.pcs_per_day)}/day over ${m.days} day${m.days === 1 ? '' : 's'}`
-    : 'Typed on the product — the floor has never booked a shift for it';
+    ? `Typed on the product. The shifts already booked work out at ${fmtQty(m.pcs_per_day)}/day over ${m.days} day${m.days === 1 ? '' : 's'}.`
+    : 'Typed on the product — the floor has never booked a shift for it.';
+}
+
+/**
+ * What the *Needed by* cell says, and the point of it: a date, or **why there
+ * is not one**. An em-dash on every row of a 47-job queue reads as a column
+ * that does not work, where on the client's book it meant something precise —
+ * the two boxes that held a customer's date came off the sales order form on
+ * 2026-09-25, so nothing raised since states one anywhere.
+ */
+const DUE_NOTE: Record<string, string> = {
+  order: 'Promised on the sales order.',
+  line: 'Promised on this order line.',
+  jobs: 'Not a promise — this is the latest finish already planned on the rest of this order.',
+  none: 'Nothing on this sales order says when the customer needs it, so nothing here can say whether the plan is late. Put a date on the order line (the Promised column on the sales order) to see it.',
 };
 
 export default function PlanQueueModal({ jobs, onClose, onStage }: {
@@ -66,124 +158,259 @@ export default function PlanQueueModal({ jobs, onClose, onStage }: {
   /** Hands the dated rows back to the list, which stages them like any typed date. */
   onStage: (plan: PlannedJob[]) => void;
 }) {
+  const can = useCan();
   const [start, setStart] = useState(today());
+  const [sort, setSort] = useState<PlanSortKey>('due');
   /*
-   * The order to run them in. Empty until somebody moves a row — the server
-   * opens on soonest customer date first, which is where a planner starts,
-   * and `keep_order` is what says "this is mine now".
+   * The order to run them in. Empty until somebody moves a row — the rule
+   * above is what decides it until then, and `keep_order` is what says "this
+   * is mine now".
    */
   const [order, setOrder] = useState<number[]>([]);
-  const ids = useMemo(() => jobs.map((j) => j.id), [jobs]);
-  const asked = order.length ? order : ids;
+  /** Jobs taken out of this queue. Reversible, and never written anywhere. */
+  const [dropped, setDropped] = useState<Set<number>>(new Set());
+
+  const ids = useMemo(
+    () => (order.length ? order : jobs.map((j) => j.id)).filter((id) => !dropped.has(id)),
+    [jobs, order, dropped],
+  );
 
   const preview = useQuery({
-    queryKey: ['plan-preview', asked.join(','), start, order.length > 0],
+    queryKey: ['plan-preview', ids.join(','), start, sort, order.length > 0],
     queryFn: () => api.post<PlanPreview>('/api/work-orders/plan/preview', {
-      ids: asked, start, keep_order: order.length > 0,
+      ids, start, sort, keep_order: order.length > 0,
     }),
     enabled: !!start && ids.length > 0,
+    /*
+     * Reordering changes the key, and without this the table emptied to
+     * *Working it out…* on **every** press of an arrow — so a second press
+     * read no rows and did nothing. Keeping the last answer on screen is what
+     * makes nudging a row feel like moving it rather than reloading a page.
+     */
+    placeholderData: keepPreviousData,
   });
 
   const rows = preview.data?.jobs ?? [];
+  const summary = preview.data?.summary;
   const datable = rows.filter((p) => !p.blocked);
-  const late = datable.filter((p) => p.late).length;
+  const baseYear = (summary?.from || start).slice(0, 4);
 
-  /** Move a row one place, which is what makes the order the planner's own. */
-  const move = (id: number, by: -1 | 1) => {
+  /** Move a row, which is what makes the order the planner's own. */
+  const move = (id: number, to: 'up' | 'down' | 'top') => {
     const list = rows.map((p) => p.id);
     const i = list.indexOf(id);
-    const j = i + by;
-    if (i < 0 || j < 0 || j >= list.length) return;
-    [list[i], list[j]] = [list[j], list[i]];
+    if (i < 0) return;
+    list.splice(i, 1);
+    list.splice(to === 'top' ? 0 : to === 'up' ? Math.max(0, i - 1) : Math.min(list.length, i + 1), 0, id);
     setOrder(list);
   };
 
-  const num = 'whitespace-nowrap py-1.5 pr-2 text-right tabular-nums';
+  const num = 'whitespace-nowrap py-1.5 pr-3 text-right tabular-nums';
+  const arrow = 'rounded px-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:opacity-25 disabled:hover:bg-transparent';
 
   return (
-    <Modal title={`Plan ${jobs.length} job${jobs.length === 1 ? '' : 's'}`} onClose={onClose} wide>
+    <Modal title={`Plan ${ids.length} job${ids.length === 1 ? '' : 's'}`} onClose={onClose} wide="xl">
       <div className="space-y-3">
-        <div className="flex flex-wrap items-end gap-3">
+        {/* What the plan is computed from — two controls, on one line. */}
+        <div className="flex flex-wrap items-end gap-x-4 gap-y-2">
           <label className="text-sm">
             <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Start from</span>
             <Input type="date" className="w-40" value={start} onChange={(e) => setStart(e.target.value)} />
           </label>
-          <p className="text-xs text-slate-500">
+          <label className="text-sm">
+            <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Run in order of</span>
+            <Select
+              className="w-60"
+              value={order.length ? 'manual' : sort}
+              onChange={(e) => {
+                // Picking a rule gives up a hand-made order, which is what the
+                // rule is for — and says so rather than silently keeping both.
+                setOrder([]);
+                setSort(e.target.value as PlanSortKey);
+              }}
+            >
+              {SORTS.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
+              {order.length > 0 && <option value="manual">The order you have put them in</option>}
+            </Select>
+          </label>
+          <p className="max-w-[22rem] pb-1 text-xs text-slate-500">
             One queue, one job at a time, seven days a week. Each job takes
-            what is left to make divided by how fast that product goes —
-            measured from the shifts already booked, or <strong>*</strong> where
-            a figure is typed on the product. Hover a rate to see which.
+            what is <strong>left to make</strong> divided by how fast that
+            product goes.
           </p>
         </div>
+
+        {/* The decision, before the rows rather than under them. */}
+        {summary && (
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
+            <span className="font-semibold text-slate-700">
+              {summary.jobs} job{summary.jobs === 1 ? '' : 's'}
+            </span>
+            <span className="text-slate-500">
+              <strong className="tabular-nums text-slate-700">{fmtQty(summary.pieces)}</strong> pcs
+            </span>
+            <span className="text-slate-500">
+              <strong className="tabular-nums text-slate-700">{summary.days}</strong> production day{summary.days === 1 ? '' : 's'}
+            </span>
+            <span className="tabular-nums text-slate-700">{planSpan(summary.from, summary.to)}</span>
+            <span className="grow" />
+            {summary.late > 0 && (
+              <span className="font-semibold text-red-600" title="These finish after the date the customer was promised.">
+                {summary.late} late
+              </span>
+            )}
+            {summary.blocked > 0 && (
+              <span className="font-semibold text-amber-700" title="Listed below with the reason — they take no slot in the queue.">
+                {summary.blocked} cannot be dated
+              </span>
+            )}
+            {summary.undated > 0 && (
+              <span className="text-slate-500" title="Nothing on file says when the customer needs these, so nothing can say whether the plan is late.">
+                {summary.undated} with no customer date
+              </span>
+            )}
+          </div>
+        )}
 
         {preview.isError && <ErrorText error={preview.error} />}
         {preview.isPending ? (
           <div className="py-6 text-center text-sm text-slate-400">Working it out…</div>
         ) : (
-          <div className="overflow-x-auto">
+          /*
+           * The rows scroll inside the table rather than inside the dialog, so
+           * the summary above and the button below stay on screen at any
+           * length of queue.
+           *
+           * The cap is measured rather than chosen: the dialog's fixed parts
+           * come to about 223px, so a table under `50vh` keeps the whole
+           * dialog inside `Modal`'s own `max-h-[85vh]` down to a 700px-tall
+           * window, and the `44rem` ceiling is what stops it growing past
+           * useful on a very tall one. Past either, the rows scroll and
+           * everything else stays put.
+           */
+          <div className="max-h-[min(50vh,44rem)] overflow-auto rounded-lg border border-slate-200">
             <table className="w-full text-sm">
-              <thead>
+              <thead className="sticky top-0 z-10 bg-white shadow-[0_1px_0_0_rgb(226,232,240)]">
                 <tr className={TH_CLASS}>
-                  <th className="pb-2 pr-2">Job</th>
-                  <th className="pb-2 pr-2">Item</th>
-                  <th className="pb-2 pr-2 text-right">To make</th>
-                  <th className="pb-2 pr-2">Rate</th>
-                  <th className="pb-2 pr-2 text-right">Days</th>
-                  <th className="pb-2 pr-2">Start → Finish</th>
-                  <th className="pb-2 pr-2">Needed</th>
-                  <th className="pb-2" />
+                  <th className="py-2 pl-3 pr-3">Job</th>
+                  <th className="py-2 pr-3">Item</th>
+                  <th className="py-2 pr-3 text-right">To make</th>
+                  <th className="py-2 pr-3 text-right">Rate</th>
+                  <th className="py-2 pr-3 text-right">Days</th>
+                  <th className="py-2 pr-3">Runs</th>
+                  <th className="py-2 pr-3">Needed by</th>
+                  <th className="py-2 pr-2" />
                 </tr>
               </thead>
               <tbody>
-                {rows.map((p, i) => (
-                  <tr key={p.id} className={`border-t border-slate-100 ${p.blocked ? 'text-slate-400' : ''}`}>
-                    {/* The customer under the job number, so neither column
-                        has to be wide enough for both. */}
-                    <td className="whitespace-nowrap py-1.5 pr-2">
-                      <div className="font-medium">{p.number}</div>
-                      <div className="max-w-[8rem] truncate text-xs text-slate-400" title={p.customer_name}>{p.customer_name}</div>
-                    </td>
-                    <td className="max-w-[9rem] truncate py-1.5 pr-2" title={p.item}>{p.item || '—'}</td>
-                    <td className={num}>{fmtQty(p.pieces)}</td>
-                    <td className={`${num} text-xs`} title={rateTitle(p)}>{rateLabel(p)}</td>
-                    <td className={num}>{p.days ?? '—'}</td>
-                    <td className={`py-1.5 pr-2 ${p.late ? 'font-semibold text-red-600' : ''}`}>
-                      {p.blocked
-                        ? <span className="text-xs">{BLOCKED[p.blocked] ?? p.blocked}</span>
-                        : <span className="whitespace-nowrap">{fmtDate(p.planned_start)} → {fmtDate(p.planned_end)}</span>}
-                    </td>
-                    {/* The customer's own date, so a late plan says what it is late against. */}
-                    <td className={`whitespace-nowrap py-1.5 pr-2 text-xs ${p.late ? 'text-red-600' : 'text-slate-400'}`}>
-                      {p.due ? fmtDate(p.due) : '—'}
-                    </td>
-                    <td className="whitespace-nowrap py-1.5 text-right">
-                      <button
-                        className="px-1 text-slate-400 hover:text-slate-700 disabled:opacity-30"
-                        disabled={i === 0}
-                        onClick={() => move(p.id, -1)}
-                        title="Run this one earlier"
-                      >▲</button>
-                      <button
-                        className="px-1 text-slate-400 hover:text-slate-700 disabled:opacity-30"
-                        disabled={i === rows.length - 1}
-                        onClick={() => move(p.id, 1)}
-                        title="Run this one later"
-                      >▼</button>
-                    </td>
-                  </tr>
-                ))}
+                {rows.map((p, i) => {
+                  const doubt = rateDoubt(p);
+                  return (
+                    <tr key={p.id} className={`border-t border-slate-100 ${p.blocked ? 'bg-amber-50/40' : ''}`}>
+                      {/* The customer under the job number, so neither column
+                          has to be wide enough for both. */}
+                      <td className="whitespace-nowrap py-1.5 pl-3 pr-3 align-top">
+                        <div className="font-medium text-slate-700">{p.number}</div>
+                        <div className="max-w-[7.5rem] truncate text-xs text-slate-400" title={`${p.customer_name} · ${p.order_number}`}>
+                          {p.customer_name}
+                        </div>
+                      </td>
+                      <td className="max-w-[9rem] truncate py-1.5 pr-3 align-top" title={p.item}>{p.item || '—'}</td>
+                      <td className={`${num} align-top`}>{fmtQty(p.pieces)}</td>
+
+                      {/* The one input the planner has to be able to disbelieve,
+                          so it states what it was measured over. */}
+                      <td className={`${num} align-top`} title={rateTitle(p)}>
+                        {p.rate ? (
+                          <>
+                            <div>{fmtQty(p.rate.pcs_per_day)}<span className="text-slate-400">/day</span></div>
+                            <div className="text-xs font-normal text-slate-400">
+                              {p.rate.source === 'stated'
+                                ? 'typed'
+                                : `${p.rate.days} day${p.rate.days === 1 ? '' : 's'}`}
+                              {doubt && <span className="ml-1 text-amber-600" title={doubt.why}>· {doubt.mark}</span>}
+                            </div>
+                          </>
+                        ) : (
+                          <span className="text-slate-400">—</span>
+                        )}
+                      </td>
+                      <td className={`${num} align-top`}>{p.days ?? <span className="text-slate-400">—</span>}</td>
+
+                      <td className="py-1.5 pr-3 align-top">
+                        {p.blocked ? (
+                          <span className="text-xs text-amber-700">
+                            {p.blocked === 'no-rate' ? 'No rate for this product' : 'Nothing left to make'}
+                            {p.blocked === 'no-rate' && p.product_id && can('product', 'full') && (
+                              <>
+                                {' · '}
+                                <Link
+                                  className="underline hover:text-amber-900"
+                                  to={`/products?q=${encodeURIComponent(p.item)}&rate=${p.product_id}`}
+                                  onClick={onClose}
+                                >Set one</Link>
+                              </>
+                            )}
+                          </span>
+                        ) : (
+                          <span className="tabular-nums">
+                            {planDay(p.planned_start, baseYear)} <span className="text-slate-400">→</span> {planDay(p.planned_end, baseYear)}
+                          </span>
+                        )}
+                      </td>
+
+                      {/* A date, or **why there is not one** — an em-dash here
+                          reads as a broken column rather than as an absence. */}
+                      <td className="whitespace-nowrap py-1.5 pr-3 align-top text-xs" title={DUE_NOTE[p.due_source]}>
+                        {p.due ? (
+                          <>
+                            <div className={`tabular-nums ${p.late ? 'font-semibold text-red-600' : 'text-slate-500'}`}>
+                              {planDay(p.due, baseYear)}
+                              {p.due_source === 'jobs' && <span className="ml-1 text-slate-400">plan</span>}
+                            </div>
+                            {p.late && <div className="font-semibold text-red-600">{p.late_days}d late</div>}
+                          </>
+                        ) : (
+                          <span className="text-slate-300">not stated</span>
+                        )}
+                      </td>
+
+                      <td className="whitespace-nowrap py-1.5 pr-2 align-top text-right">
+                        {/* A word rather than a glyph: `⤒` beside `▲` is two up
+                            arrows meaning different things, and an uncommon
+                            glyph is drawn by whichever font happens to have it
+                            — the finding the sidebar's own icons record. */}
+                        <button
+                          className="rounded px-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:opacity-25 disabled:hover:bg-transparent"
+                          disabled={i === 0} onClick={() => move(p.id, 'top')} title="Run this one first"
+                        >Top</button>
+                        <button className={arrow} disabled={i === 0} onClick={() => move(p.id, 'up')} title="Run this one earlier">▲</button>
+                        <button className={arrow} disabled={i === rows.length - 1} onClick={() => move(p.id, 'down')} title="Run this one later">▼</button>
+                        <button
+                          className="rounded px-1 text-slate-300 hover:bg-red-50 hover:text-red-500"
+                          onClick={() => setDropped((d) => new Set(d).add(p.id))}
+                          title="Take this job out of the queue — it keeps whatever dates it already has"
+                        >✕</button>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
         )}
 
+        {/* Taking a job out has to be undoable, or it is a decision made by a
+            stray click with the dialog as the only way back. */}
+        {dropped.size > 0 && (
+          <p className="text-xs text-slate-500">
+            {dropped.size} job{dropped.size === 1 ? '' : 's'} taken out of this queue.{' '}
+            <button className="underline hover:text-slate-700" onClick={() => setDropped(new Set())}>Put {dropped.size === 1 ? 'it' : 'them'} back</button>
+          </p>
+        )}
+
         <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 pt-3">
           <div className="text-xs text-slate-500">
-            {late > 0 && (
-              <span className="mr-3 font-semibold text-red-600">
-                {late} would finish after the customer&rsquo;s date
-              </span>
-            )}
             Nothing is saved yet — the dates go onto the list, where you can correct any of them before Save.
           </div>
           <div className="flex items-center gap-2">

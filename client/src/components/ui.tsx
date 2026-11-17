@@ -990,11 +990,19 @@ export function ErrorText({ error }: { error: unknown }) {
   return <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 ring-1 ring-inset ring-red-100">{msg}</div>;
 }
 
-export function Modal({ title, onClose, children, wide }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean }) {
+/**
+ * `wide` takes a third size as well as a boolean. `true` is the 3xl every
+ * wide dialog here has always been; **`'xl'`** is for the one dialog that is
+ * a working table rather than a form — the production planner, whose eight
+ * columns of real planning data would not fit 3xl at this app's 14px root and
+ * so scrolled sideways, which is the one thing a table meant to be read
+ * across must not do. A boolean stays a boolean for every other caller.
+ */
+export function Modal({ title, onClose, children, wide }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean | 'xl' }) {
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 p-4 pt-12" onClick={onClose}>
       <div
-        className={`max-h-[85vh] w-full ${wide ? 'max-w-3xl' : 'max-w-lg'} overflow-y-auto rounded-xl bg-white shadow-xl`}
+        className={`max-h-[85vh] w-full ${wide === 'xl' ? 'max-w-5xl' : wide ? 'max-w-3xl' : 'max-w-lg'} overflow-y-auto rounded-xl bg-white shadow-xl`}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">

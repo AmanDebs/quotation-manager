@@ -1,7 +1,7 @@
 import './helpers/scratch.js';
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { layOutQueue, byDue, type QueueJob } from '../src/services/jobPlan.js';
+import { layOutQueue, byDue, summarise, SORTS, type QueueJob } from '../src/services/jobPlan.js';
 import type { OutputRate } from '../src/services/outputRate.js';
 
 /**
@@ -24,6 +24,7 @@ const job = (o: Partial<QueueJob> = {}): QueueJob => ({
   order_number: o.order_number ?? `SO/Q-${seq}`,
   pieces: o.pieces ?? 1_00_000,
   due: o.due === undefined ? null : o.due,
+  due_source: o.due_source ?? (o.due ? 'order' : 'none'),
 });
 
 const rate = (productId: number, pcsPerDay: number): [number, OutputRate] =>
@@ -155,5 +156,148 @@ describe('the order a queue opens in', () => {
       job({ number: 'WO/2', due: '2026-12-01' }),
     ];
     assert.deepEqual([...rows].sort(byDue).map((j) => j.number), ['WO/1', 'WO/2', 'WO/3']);
+  });
+});
+
+describe('what the whole plan comes to', () => {
+  const rates = new Map([rate(1, 1_00_000), rate(2, 50_000)]);
+
+  /**
+   * The figure over a table has to describe the rows under it. A plan of
+   * three jobs spanning four days says four days, and the span is the first
+   * start to the last finish rather than a count of the rows.
+   */
+  test('is the span, the days and the pieces of what it actually dates', () => {
+    const plan = layOutQueue([
+      job({ pieces: 1_00_000, product_id: 1 }),            // 1 day
+      job({ pieces: 1_50_000, product_id: 2 }),            // 3 days
+    ], rates, '2026-11-20');
+    const s = summarise(plan);
+    assert.equal(s.jobs, 2);
+    assert.equal(s.days, 4);
+    assert.equal(s.pieces, 2_50_000);
+    assert.equal(s.from, '2026-11-20');
+    assert.equal(s.to, '2026-11-23');
+  });
+
+  /**
+   * A job the plan cannot date commits no time, so it is **counted and
+   * nothing else** — adding its pieces to the total would promise work the
+   * plan does not actually schedule.
+   */
+  test('a job it cannot date is counted, never committed', () => {
+    const plan = layOutQueue([
+      job({ pieces: 1_00_000, product_id: 1 }),
+      job({ pieces: 9_99_999, product_id: 99 }),           // no rate
+      job({ pieces: 0, product_id: 1 }),                   // nothing left
+    ], rates, '2026-11-20');
+    const s = summarise(plan);
+    assert.equal(s.jobs, 1);
+    assert.equal(s.blocked, 2);
+    assert.equal(s.pieces, 1_00_000);
+    assert.equal(s.days, 1);
+    assert.equal(s.to, '2026-11-20');
+  });
+
+  /** Nothing datable is a blank span, not a span of the start date. */
+  test('a plan that dates nothing states no span', () => {
+    const s = summarise(layOutQueue([job({ pieces: 1_000, product_id: 99 })], rates, '2026-11-20'));
+    assert.deepEqual([s.jobs, s.blocked, s.from, s.to], [0, 1, '', '']);
+  });
+
+  /**
+   * The two counts a planner decides on, and they are different questions:
+   * *late* is a promise this plan breaks, *undated* is a promise nobody ever
+   * made — which on a book where no screen offers a customer date is most of
+   * them, and reads as a broken column rather than an absence unless it is
+   * said out loud.
+   */
+  test('late and undated are counted apart', () => {
+    const plan = layOutQueue([
+      job({ pieces: 1_00_000, product_id: 1, due: '2026-11-25' }),   // in time
+      job({ pieces: 1_00_000, product_id: 1, due: '2026-11-20' }),   // late
+      job({ pieces: 1_00_000, product_id: 1, due: null }),           // nobody said
+    ], rates, '2026-11-20');
+    const s = summarise(plan);
+    assert.equal(s.late, 1);
+    assert.equal(s.undated, 1);
+  });
+});
+
+describe('how late a late job is', () => {
+  const rates = new Map([rate(1, 1_00_000)]);
+
+  /**
+   * *Three days* and *seven weeks* are different problems, and subtracting
+   * two dates in your head down a column of forty-seven is how a fortnight's
+   * slip goes unnoticed — the order book's own reasoning about its slip
+   * column, one screen over.
+   */
+  test('is stated in days, not left to be worked out', () => {
+    const [p] = layOutQueue(
+      [job({ pieces: 5_00_000, product_id: 1, due: '2026-11-21' })], rates, '2026-11-20');
+    assert.equal(p.planned_end, '2026-11-24');
+    assert.equal(p.late, true);
+    assert.equal(p.late_days, 3);
+  });
+
+  /** Finishing **on** the customer's date is not late, and is not 0 days late either. */
+  test('finishing on the day is not late', () => {
+    const [p] = layOutQueue(
+      [job({ pieces: 1_00_000, product_id: 1, due: '2026-11-20' })], rates, '2026-11-20');
+    assert.equal(p.late, false);
+    assert.equal(p.late_days, 0);
+  });
+
+  /** Early is not negative-late: a job in good time says nothing. */
+  test('and finishing early states nothing', () => {
+    const [p] = layOutQueue(
+      [job({ pieces: 1_00_000, product_id: 1, due: '2026-12-31' })], rates, '2026-11-20');
+    assert.equal(p.late_days, 0);
+  });
+});
+
+describe('the rule a queue opens on', () => {
+  const q = (number: string, o: Partial<QueueJob> = {}) => job({ number, ...o });
+
+  /**
+   * A policy rather than a drag: nudging one place at a time is right for the
+   * last correction and no use on the client's own 47-job screen, where
+   * moving the fortieth row to the front is thirty-nine presses.
+   */
+  test('shortest first clears the floor fastest', () => {
+    const rows = [q('WO/1', { pieces: 5_00_000 }), q('WO/2', { pieces: 10_000 }), q('WO/3', { pieces: 90_000 })];
+    assert.deepEqual([...rows].sort(SORTS.shortest).map((j) => j.number), ['WO/2', 'WO/3', 'WO/1']);
+    assert.deepEqual([...rows].sort(SORTS.longest).map((j) => j.number), ['WO/1', 'WO/3', 'WO/2']);
+  });
+
+  /** One sales order's jobs run together, which is how this plant loads a lorry. */
+  test('by sales order keeps an order together', () => {
+    const rows = [
+      q('WO/1', { order_number: 'SO/9' }),
+      q('WO/2', { order_number: 'SO/1' }),
+      q('WO/3', { order_number: 'SO/9' }),
+    ];
+    assert.deepEqual([...rows].sort(SORTS.order).map((j) => j.number), ['WO/2', 'WO/1', 'WO/3']);
+  });
+
+  /**
+   * Nothing left to make is an absence rather than the smallest job on the
+   * book, so it sorts last under either size rule — otherwise a queue asked
+   * for the shortest first would open on the rows it cannot date at all.
+   */
+  test('a job with nothing left is not the shortest job', () => {
+    const rows = [q('WO/1', { pieces: 0 }), q('WO/2', { pieces: 50_000 })];
+    assert.deepEqual([...rows].sort(SORTS.shortest).map((j) => j.number), ['WO/2', 'WO/1']);
+  });
+
+  /** Ties break on the job number, so one book always lays out one way. */
+  test('a tie is settled, never left to chance', () => {
+    const rows = [q('WO/9', { pieces: 1_000 }), q('WO/1', { pieces: 1_000 })];
+    assert.deepEqual([...rows].sort(SORTS.shortest).map((j) => j.number), ['WO/1', 'WO/9']);
+  });
+
+  test('and the default is still soonest customer date first', () => {
+    assert.equal(SORTS.due, byDue);
   });
 });

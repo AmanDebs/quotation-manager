@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { db } from '../src/db/connection.js';
 import { plannedReport, unscheduledReport, type ReportFilter } from '../src/services/reports.js';
 import { productDemand } from '../src/services/orderLines.js';
+import { ORDER_DUE, ORDER_DUE_SOURCE, ORDER_DUE_FROM_JOBS } from '../src/services/production.js';
 import { makeCustomer } from './helpers/factory.js';
 
 /**
@@ -65,6 +66,95 @@ function plannedCells(customerId: number): Record<string, number> {
 
 const unscheduled = (customerId: number) =>
   unscheduledReport(ALL).rows.filter((r) => r.customer_id === customerId);
+
+/**
+ * A **goods line's own promised date** sits between the two, and the whole of
+ * why is that it is a date somebody gave the buyer where a job date is the
+ * plant's own plan (2026-11-17). The 2026-10-09 repair considered this source
+ * and passed over it on the reasoning that no screen fills it; two things
+ * changed that. `services/orderImport.ts` has written it on every imported
+ * backlog line from the day the importer was built, and the production
+ * planner now draws a customer's date on every row — so a date already on
+ * file and reachable by nobody is the worse answer.
+ *
+ * These read the expression itself rather than one of its screens, because
+ * the two Reports sheets keep a **separate** production-date chain of their
+ * own (`PROD_DATE_SQL`, which carries `orders.scheduled_date` and answers a
+ * question about the plant rather than about a promise). Testing through them
+ * would pass over `ORDER_DUE` entirely — which is how the first cut of these
+ * cases failed for the right reason.
+ */
+describe('a line promised date is a promise, so it beats the floor plan', () => {
+  /** What `ORDER_DUE` and `ORDER_DUE_SOURCE` say about one order. */
+  const dueOf = (orderId: number) => db.prepare(
+    `SELECT ${ORDER_DUE('o')} AS due, ${ORDER_DUE_SOURCE('o')} AS src,
+            ${ORDER_DUE_FROM_JOBS('o')} AS from_jobs
+       FROM orders o WHERE o.id = ?`
+  ).get(orderId) as { due: string | null; src: string; from_jobs: number };
+
+  /** A goods line, with whatever promised date the case is about. */
+  function promisedLine(orderId: number, scheduled: string, o: Partial<{ charge: number; sort: number }> = {}): void {
+    db.prepare(
+      `INSERT INTO order_items (order_id, description, color, qty, unit, unit_price, amount,
+                                total_pcs, is_charge, sort_order, scheduled_date)
+       VALUES (?, 'Preform', 'Natural', 10, 'per 1000', 10, 100, 10000, ?, ?, ?)`
+    ).run(orderId, o.charge ?? 0, o.sort ?? 0, scheduled);
+  }
+
+  test('it is read where the order states no date of its own', () => {
+    const o = order(makeCustomer());
+    promisedLine(o, '2026-10-15');
+    job(o, { plannedEnd: '2026-12-01' });     // the floor's plan, which it beats
+    const d = dueOf(o);
+    assert.equal(d.due, '2026-10-15');
+    assert.equal(d.src, 'line');
+    assert.equal(d.from_jobs, 0, 'a promise was reported as the floor plan');
+  });
+
+  /** The order's own column is the more specific statement and still wins. */
+  test('and the order own date still beats it', () => {
+    const o = order(makeCustomer(), { promised: '2026-10-01' });
+    promisedLine(o, '2026-11-20');
+    assert.equal(dueOf(o).due, '2026-10-01');
+    assert.equal(dueOf(o).src, 'order');
+  });
+
+  /** Latest, by `ORDER_JOB_END`'s rule: the question is when the order is done. */
+  test('the last line to fall due settles the order', () => {
+    const o = order(makeCustomer());
+    promisedLine(o, '2026-10-05', { sort: 0 });
+    promisedLine(o, '2026-10-28', { sort: 1 });
+    assert.equal(dueOf(o).due, '2026-10-28');
+  });
+
+  /** Freight is not goods and has nothing to be promised for. */
+  test('a charge line dates nothing', () => {
+    const o = order(makeCustomer());
+    promisedLine(o, '2026-10-05', { charge: 1 });
+    job(o, { plannedEnd: '2026-12-01' });
+    const d = dueOf(o);
+    assert.equal(d.due, '2026-12-01', 'the freight line dated the order');
+    assert.equal(d.src, 'jobs');
+  });
+
+  /** A blank is not a date, and must not date the order to the start of time. */
+  test('a line stating nothing falls through to the jobs as before', () => {
+    const o = order(makeCustomer());
+    promisedLine(o, '');
+    job(o, { plannedEnd: '2026-12-01' });
+    assert.equal(dueOf(o).due, '2026-12-01');
+    assert.equal(dueOf(o).from_jobs, 1);
+  });
+
+  /** And with nothing anywhere the answer is still NULL, never a blank. */
+  test('and with nothing anywhere it is still no date at all', () => {
+    const o = order(makeCustomer());
+    promisedLine(o, '');
+    const d = dueOf(o);
+    assert.equal(d.due, null);
+    assert.equal(d.src, 'none');
+  });
+});
 
 describe('an order with no date of its own falls through to its jobs', () => {
   test('the latest finish across them is the date it is due', () => {

@@ -10,9 +10,9 @@ import { coaWhere } from '../services/coaRegister.js';
 import {
   coaHeaderFields, coaHeaderError, cleanCoaHeader, buyerOrderFrom,
 } from '../services/coaHeader.js';
-import { progressFor, progressForMany, LIVE_OK, ORDER_DUE } from '../services/production.js';
+import { progressFor, progressForMany, LIVE_OK, ORDER_DUE, ORDER_DUE_SOURCE } from '../services/production.js';
 import { outputRates } from '../services/outputRate.js';
-import { layOutQueue, byDue, type QueueJob } from '../services/jobPlan.js';
+import { layOutQueue, byDue, summarise, SORTS, type QueueJob, type DueSource, type SortKey } from '../services/jobPlan.js';
 import { despatchedByOrder, lastTripForLine } from '../services/despatch.js';
 import { materialCostByWorkOrder } from '../services/costing.js';
 import {
@@ -560,13 +560,17 @@ workOrdersRouter.post('/plan/preview', requirePermission('work_order', 'full'), 
    * second reading of the same columns.
    */
   const orderIds = [...new Set(jobs.map((j) => Number(j.order_id)))];
-  const due = new Map<number, string | null>();
+  const due = new Map<number, { due: string | null; source: DueSource }>();
   if (orderIds.length) {
     const marks = orderIds.map(() => '?').join(',');
     for (const r of db.prepare(
-      `SELECT o.id AS id, ${ORDER_DUE('o')} AS due FROM orders o WHERE o.id IN (${marks})`
+      `SELECT o.id AS id, ${ORDER_DUE('o')} AS due, ${ORDER_DUE_SOURCE('o')} AS src
+         FROM orders o WHERE o.id IN (${marks})`
     ).all(...(orderIds as never[])) as Record<string, unknown>[]) {
-      due.set(Number(r.id), (String(r.due ?? '') || null));
+      due.set(Number(r.id), {
+        due: String(r.due ?? '') || null,
+        source: String(r.src ?? 'none') as DueSource,
+      });
     }
   }
 
@@ -585,7 +589,8 @@ workOrdersRouter.post('/plan/preview', requirePermission('work_order', 'full'), 
      * currency as the rate, which is good pieces.
      */
     pieces: Math.max(0, Number(j.qty_planned ?? 0) - Number(j.made ?? 0)),
-    due: due.get(Number(j.order_id)) ?? null,
+    due: due.get(Number(j.order_id))?.due ?? null,
+    due_source: due.get(Number(j.order_id))?.source ?? 'none',
   }));
 
   /*
@@ -593,9 +598,20 @@ workOrdersRouter.post('/plan/preview', requirePermission('work_order', 'full'), 
    * customer date first, which is where a planner starts. Either way the
    * screen can reorder and ask again, and nothing is written until Save.
    */
-  const ordered = body.keep_order === true ? queue : [...queue].sort(byDue);
+  /*
+   * The planner's own order where they have moved a row, else the rule they
+   * picked. A `sort` this build does not know reads as the default rather
+   * than being refused — the rule every other vocabulary arriving from a
+   * client here follows, and a preview is a read.
+   */
+  const sort = String(body.sort ?? 'due') as SortKey;
+  const ordered = body.keep_order === true ? queue : [...queue].sort(SORTS[sort] ?? byDue);
   const rates = outputRates(ordered.map((j) => j.product_id ?? 0));
-  return res.json({ start, jobs: layOutQueue(ordered, rates, start) });
+  const plan = layOutQueue(ordered, rates, start);
+  // The summary is the server's, not the screen's: it is a fold of the same
+  // rows and a second one on the client is how the figure over a table comes
+  // to describe a different set from the rows under it.
+  return res.json({ start, jobs: plan, summary: summarise(plan) });
 });
 
 workOrdersRouter.post('/plan', requirePermission('work_order', 'full'), (req: AuthedRequest, res) => {

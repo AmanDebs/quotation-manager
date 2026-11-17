@@ -1,4 +1,4 @@
-import { addDaysIso } from './months.js';
+import { addDaysIso, daysBetweenIso } from './months.js';
 import type { OutputRate } from './outputRate.js';
 
 /**
@@ -41,7 +41,17 @@ export interface QueueJob {
   pieces: number;
   /** When the customer needs it (`ORDER_DUE`), or null where nothing says. */
   due: string | null;
+  /**
+   * Where that date came from, so the screen can say whether it is reading a
+   * promise or the plant's own plan, and can tell *nobody has dated this
+   * order* from *this column does not work* — which is what an em-dash on
+   * every row reads as.
+   */
+  due_source: DueSource;
 }
+
+/** @see ORDER_DUE_SOURCE */
+export type DueSource = 'order' | 'line' | 'jobs' | 'none';
 
 /** Why a job could not be dated. Null means it was. */
 export type PlanBlock = 'no-rate' | 'nothing-left';
@@ -54,7 +64,57 @@ export interface PlannedJob extends QueueJob {
   planned_end: string;
   /** The plan finishes after the customer's own date. */
   late: boolean;
+  /**
+   * By how many days — 0 where it is not late. *Three days* and *seven weeks*
+   * are different problems and a planner sorting out a queue has to be able to
+   * tell them apart without subtracting two dates in their head, which is the
+   * same complaint the order book's own slip column answers.
+   */
+  late_days: number;
   blocked: PlanBlock | null;
+}
+
+/**
+ * What the whole plan comes to, so the decision does not sit below however
+ * many rows the queue happens to have. Every figure here is over the jobs
+ * that **can** be dated; the blocked ones are counted and nothing else, since
+ * they occupy no time and commit nothing.
+ */
+export interface PlanSummary {
+  /** Jobs the plan dates, and jobs it cannot. */
+  jobs: number;
+  blocked: number;
+  /** Of the dated ones, how many finish after the customer's date. */
+  late: number;
+  /** How many have no customer date to be judged against at all. */
+  undated: number;
+  /** Pieces the plan commits to making, and the production days to make them. */
+  pieces: number;
+  days: number;
+  /** The span the plan occupies — blank where it dates nothing. */
+  from: string;
+  to: string;
+}
+
+/** Fold a laid-out queue into the figures the planner decides on. */
+export function summarise(plan: PlannedJob[]): PlanSummary {
+  const dated = plan.filter((p) => !p.blocked);
+  return {
+    jobs: dated.length,
+    blocked: plan.length - dated.length,
+    late: dated.filter((p) => p.late).length,
+    // Counted over the dated rows alone: a job nobody can date is already
+    // named for its own reason, and counting it here too would report one
+    // problem twice.
+    undated: dated.filter((p) => !p.due).length,
+    pieces: dated.reduce((sum, p) => sum + p.pieces, 0),
+    days: dated.reduce((sum, p) => sum + (p.days ?? 0), 0),
+    from: dated[0]?.planned_start ?? '',
+    // The last **finish**, which on a queue laid end to end is the last row's
+    // — but taken as a maximum rather than off the tail, so this stays true
+    // of any order the rows arrive in.
+    to: dated.reduce((last, p) => (p.planned_end > last ? p.planned_end : last), ''),
+  };
 }
 
 /**
@@ -87,7 +147,7 @@ export function layOutQueue(
   let cursor = start;
   return jobs.map((j) => {
     const rate = j.product_id ? rates.get(j.product_id) ?? null : null;
-    const base = { ...j, rate, days: null, planned_start: '', planned_end: '', late: false };
+    const base = { ...j, rate, days: null, planned_start: '', planned_end: '', late: false, late_days: 0 };
     if (!(j.pieces > 0)) return { ...base, blocked: 'nothing-left' as const };
     if (!rate || !(rate.pcs_per_day > 0)) return { ...base, blocked: 'no-rate' as const };
 
@@ -98,12 +158,14 @@ export function layOutQueue(
     const planned_start = cursor;
     const planned_end = addDaysIso(planned_start, days - 1);
     cursor = addDaysIso(planned_end, 1);
+    const late = !!j.due && !!planned_end && planned_end > j.due;
     return {
       ...base,
       days,
       planned_start,
       planned_end,
-      late: !!j.due && !!planned_end && planned_end > j.due,
+      late,
+      late_days: late ? daysBetweenIso(j.due as string, planned_end) : 0,
       blocked: null,
     };
   });
@@ -112,3 +174,36 @@ export function layOutQueue(
 /** Soonest customer date first; an order nobody has dated sorts last. */
 export const byDue = (a: QueueJob, b: QueueJob): number =>
   (a.due || '9999').localeCompare(b.due || '9999') || a.number.localeCompare(b.number);
+
+/**
+ * How to open the queue.
+ *
+ * **A policy, not a drag.** Nudging a row a place at a time is right for the
+ * last correction and no use at all for the first pass: the client's own
+ * screen opens on **47** jobs, and moving the fortieth to the front is
+ * thirty-nine presses. A planner picks a rule — by what the customer needs,
+ * by what clears the floor fastest, by keeping one sales order together —
+ * and then nudges the two rows the rule got wrong.
+ *
+ * The rules live here beside `layOutQueue` rather than on the screen, because
+ * a comparator on the client would be a second opinion about the order the
+ * dates were computed in, and the two would be read off one table.
+ */
+export type SortKey = 'due' | 'shortest' | 'longest' | 'order';
+
+/**
+ * Jobs with nothing left to make have no size to be sorted by, and sort last
+ * under either size rule rather than first — a zero is an absence here, not
+ * the smallest job on the book.
+ */
+const size = (j: QueueJob) => (j.pieces > 0 ? j.pieces : Number.MAX_SAFE_INTEGER);
+
+export const SORTS: Record<SortKey, (a: QueueJob, b: QueueJob) => number> = {
+  due: byDue,
+  // Ties break on the job number throughout, so the same book in the same
+  // order always lays out the same way — the total-ordering rule the paged
+  // lists in this app already follow, for the same reason.
+  shortest: (a, b) => size(a) - size(b) || a.number.localeCompare(b.number),
+  longest: (a, b) => size(b) - size(a) || a.number.localeCompare(b.number),
+  order: (a, b) => a.order_number.localeCompare(b.order_number) || a.number.localeCompare(b.number),
+};

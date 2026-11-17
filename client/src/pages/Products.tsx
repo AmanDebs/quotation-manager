@@ -139,6 +139,14 @@ export default function ProductsPage() {
    * than on nothing.
    */
   const [qcParam, setQcParam] = useUrlFilter('qc');
+  /*
+   * And the same door for the **output rate** (2026-11-17). The production
+   * planner cannot date a job whose product has no rate, so it names that row
+   * and links straight here with the product id — the loop the Quality queue
+   * closes the same way, rather than sending somebody to the catalogue to
+   * find the row again.
+   */
+  const [rateParam, setRateParam] = useUrlFilter('rate');
   const [editing, setEditing] = useState<Product | Omit<Product, 'id'> | null>(null);
   const [recipeFor, setRecipeFor] = useState<Product | null>(null);
   const [qcFor, setQcFor] = useState<Product | null>(null);
@@ -166,6 +174,13 @@ export default function ProductsPage() {
     const wanted = products.find((p) => String(p.id) === qcParam);
     if (wanted) setQcFor(wanted);
   }, [qcParam, products]);
+  /** Closing clears the deep link, or Back would reopen the editor. */
+  const closeEditor = () => { setEditing(null); if (rateParam) setRateParam(''); };
+  useEffect(() => {
+    if (!rateParam) return;
+    const wanted = products.find((p) => String(p.id) === rateParam);
+    if (wanted) setEditing(wanted);
+  }, [rateParam, products]);
   /*
    * The gaps in the catalogue, each a count that is also the button that shows
    * them (2026-10-16, the client: *"Is there a way to show products which have
@@ -219,7 +234,7 @@ export default function ProductsPage() {
       'id' in p ? api.put<Product>(`/api/products/${p.id}`, p) : api.post<Product>('/api/products', p),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['products'] });
-      setEditing(null);
+      closeEditor();
     },
   });
 
@@ -422,7 +437,7 @@ export default function ProductsPage() {
       </Card>
 
       {editing && (
-        <Modal title={'id' in editing ? `Edit ${editing.name}` : 'New Product'} onClose={() => setEditing(null)}>
+        <Modal title={'id' in editing ? `Edit ${editing.name}` : 'New Product'} onClose={closeEditor}>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <Field label="Product Name *" className="sm:col-span-2">
               <Input value={editing.name} onChange={(e) => set({ name: e.target.value })} />
@@ -538,7 +553,7 @@ export default function ProductsPage() {
           <div className="mt-4 space-y-2">
             <ErrorText error={save.error} />
             <div className="flex justify-end gap-2">
-              <Button variant="secondary" onClick={() => setEditing(null)}>Cancel</Button>
+              <Button variant="secondary" onClick={closeEditor}>Cancel</Button>
               <Button onClick={() => save.mutate(editing)} disabled={save.isPending || !editing.name.trim()}>
                 {'id' in editing ? 'Save Changes' : 'Create Product'}
               </Button>
