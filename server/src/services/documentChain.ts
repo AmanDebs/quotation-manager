@@ -184,6 +184,96 @@ export function alreadyOrderedError(piId: number | null | undefined): string | n
     + `Open that order, or use Duplicate to raise a fresh proforma from this one.`;
 }
 
+/* ------------------------------------------------------------------ */
+/* Pointing an order at the proforma it was raised from                */
+/* ------------------------------------------------------------------ */
+
+/** The order half of a link, as the route has already read it. */
+export interface LinkOrderRow { id: number; number: string; customer_id: number }
+/** The proforma half. `order_id` is the back-pointer the link lives on. */
+export interface LinkProformaRow {
+  id: number; number: string; customer_id: number; order_id: number | null;
+}
+
+/** The proforma already naming this order, if there is one. */
+export function orderProforma(orderId: number): LockedBy | null {
+  const row = db
+    .prepare('SELECT id, number FROM proforma_invoices WHERE order_id = ? ORDER BY id LIMIT 1')
+    .get(orderId) as { id: number; number: string } | undefined;
+  return row ? { kind: 'proforma invoice', id: row.id, number: row.number } : null;
+}
+
+/**
+ * Attach a proforma to an order that was not booked from it (2026-11-24, the
+ * client looking at a Work Orders list where ten of twelve orders named a
+ * sales order rather than a proforma: *"Let me link one by hand"*).
+ *
+ * The link is written on `POST /orders` and nowhere else, so it exists only
+ * where somebody pressed **Book Sales Order** on the proforma itself — an
+ * order typed straight in, and the whole imported backlog, has none. That is
+ * not a gap in the record so much as a gap in how the record was made, and
+ * until now there was no way to close it: the comment on the order form's own
+ * *Ref. Proforma* field said in as many words that attaching one is done by
+ * booking and there is nothing to edit there.
+ *
+ * **It is the same act as booking, performed later**, so it is held to the
+ * same three rules rather than to a looser set of its own — a second door to
+ * one column that asked less of the caller is how the stricter door comes to
+ * be the one nobody uses. Most specific first.
+ */
+export function proformaLinkError(order: LinkOrderRow, pi: LinkProformaRow): string | null {
+  // The chain runs through one buyer, and everything derived along it — the
+  // advance, the invoices reachable from the order, the dispatch figures — is
+  // nonsense the moment two customers meet in the middle. `linkError`'s rule.
+  if (Number(pi.customer_id) !== Number(order.customer_id)) {
+    return `Proforma ${pi.number} was raised for a different customer, so it cannot be attached `
+      + `to ${order.number}.`;
+  }
+  // A proforma is booked once. Re-pointing one would silently orphan the first
+  // order's dispatch figures — `alreadyOrderedError`'s own sentence, asked
+  // rather than restated, so the two doors refuse in the same words.
+  const taken = alreadyOrderedError(pi.id);
+  if (taken) return taken;
+  // And an order carries one. Two proformas naming one order is the shape that
+  // doubles a job row on the Work Orders list and makes *which proforma covers
+  // this order* unanswerable.
+  const already = orderProforma(order.id);
+  if (already) {
+    return `${order.number} is already attached to proforma ${already.number}. `
+      + `Detach that one first if this is the wrong proforma.`;
+  }
+  return null;
+}
+
+/**
+ * Take the link off again.
+ *
+ * It has to be possible: a proforma attached by mistake freezes that document
+ * and moves its status, and a correction nobody can make is the
+ * trap-with-no-way-out this codebase has built exactly once. Deleting the
+ * order has always done this (see the delete route, which calls
+ * `syncProformaUnordered` and then releases the back-pointer); this is that
+ * half on its own.
+ *
+ * One refusal, and it mirrors the order's own delete guard: a **commercial
+ * invoice** raised against that proforma reaches this order *through* the
+ * link, so severing it would quietly change what the order reports as billed
+ * and dispatched. `dispatchProgress()` walks exactly that path.
+ */
+export function proformaUnlinkError(order: LinkOrderRow, pi: LinkProformaRow): string | null {
+  if (Number(pi.order_id) !== Number(order.id)) {
+    return `Proforma ${pi.number} is not attached to ${order.number}.`;
+  }
+  const inv = db
+    .prepare('SELECT number FROM commercial_invoices WHERE pi_id = ? ORDER BY id LIMIT 1')
+    .get(pi.id) as { number: string } | undefined;
+  if (inv) {
+    return `Invoice ${inv.number} was raised from proforma ${pi.number}, and it reaches `
+      + `${order.number} through this link. Delete that invoice first.`;
+  }
+  return null;
+}
+
 /**
  * Refuse a change to a document that has already been converted.
  *

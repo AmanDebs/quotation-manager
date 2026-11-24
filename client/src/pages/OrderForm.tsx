@@ -20,8 +20,10 @@ import { useUnsavedChanges } from '../lib/useUnsavedChanges';
 import HistoryCard from '../components/HistoryCard';
 import ChecksStrip from '../components/ChecksStrip';
 import PaymentsCard from '../components/PaymentsCard';
+import ProformaLink from '../components/ProformaLink';
 import { taxChoiceOf, taxPatchFor, newLineTaxPct } from '../lib/tax';
 import { useCustomerBook } from '../lib/useCustomerBook';
+import { useCan } from '../App';
 
 interface Draft {
   number?: string;
@@ -92,6 +94,8 @@ export default function OrderFormPage() {
   const [search] = useSearchParams();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  // Only somebody who could have booked this order may attach its proforma.
+  const can = useCan();
   const isNew = !id;
   const fromQuotation = search.get('from_quotation');
   // Booked from a proforma the buyer has confirmed. The prefill returns pi_id,
@@ -338,22 +342,32 @@ export default function OrderFormPage() {
                 />
               </Field>
             )}
-            {/* The proforma this order was booked from.
-                Read-only, and resolved rather than stored: the link lives on
-                proforma_invoices.order_id, not on the order, which is what lets
-                dispatchProgress() walk from an order to the invoices raised
-                through its proforma. Attaching one is done by booking the order
-                from the proforma, so there is nothing to edit here. */}
-            {!isNew && (existing?.proformas?.length ?? 0) > 0 && (
-              <Field label={existing!.proformas!.length === 1 ? 'Ref. Proforma' : 'Ref. Proformas'}>
-                <div className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-sm">
-                  {existing!.proformas!.map((pi, i) => (
-                    <span key={pi.id}>
-                      {i > 0 && ', '}
-                      <Link to={`/proformas/${pi.id}`} className="text-brand-600 hover:underline">{pi.number}</Link>
-                    </span>
-                  ))}
-                </div>
+            {/*
+              The proforma this order was raised from — **resolved, not stored**:
+              the link lives on `proforma_invoices.order_id`, not on the order,
+              which is what lets `dispatchProgress()` walk from an order to the
+              invoices raised through its proforma.
+
+              It used to be read-only, and said so: attaching one was done by
+              booking the order from the proforma and there was nothing to edit
+              here. That left every order typed straight in — and the whole
+              imported backlog — with no proforma to name, which is what the
+              Work Orders grid made visible on 2026-11-24. It is attachable
+              after the fact now; the act, and what it does to the proforma, is
+              `ProformaLink`'s own.
+
+              Drawn on **every** saved order rather than only on one that
+              already has a link: having none is exactly when the control is
+              wanted.
+            */}
+            {!isNew && (
+              <Field label="Ref. Proforma">
+                <ProformaLink
+                  orderId={Number(id)}
+                  attached={existing?.proformas ?? []}
+                  mayEdit={can('order', 'full')}
+                  onChanged={() => queryClient.invalidateQueries({ queryKey: ['orders'] })}
+                />
               </Field>
             )}
             <Field label="Customer *">

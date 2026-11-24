@@ -1244,6 +1244,12 @@ export interface Order {
    */
   batches?: OrderBatch[];
   proformas?: { id: number; number: string; date: string; status: string; grand_total: number }[];
+  /**
+   * What `GET /orders/:id/proforma-options` answers: the proforma already
+   * attached, and this customer's proformas that are free to be. Asked only
+   * when somebody opens the picker — which proforma *could* be attached is not
+   * a question anybody has while reading an order.
+   */
   invoices?: { id: number; number: string; date: string; status: string; grand_total: number }[];
 }
 
@@ -1443,6 +1449,18 @@ export interface PlanPreview {
  * jobs nobody has dated, and jobs that carry a plan and have not started.
  */
 export interface PlanQueue { undated: number[]; dated: number[] }
+
+/** One proforma a sales order could be attached to — see `ProformaLink`. */
+export interface ProformaOption {
+  id: number; number: string; date: string; status: string;
+  currency: string; grand_total: number; is_export: number;
+}
+
+/** What `GET /orders/:id/proforma-options` answers. */
+export interface ProformaOptions {
+  attached: { kind: string; id: number; number: string } | null;
+  options: ProformaOption[];
+}
 
 export interface MaterialSchedule {
   dates: string[];

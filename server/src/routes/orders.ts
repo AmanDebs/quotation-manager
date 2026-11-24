@@ -20,7 +20,9 @@ import { syncOrderJobs } from '../services/orderJobs.js';
 import { notifyJobsRaised, notifyReleased } from '../services/handoffMail.js';
 import { resolveCompanyId } from '../services/companies.js';
 import { listBody, pageRequest } from '../services/pagination.js';
-import { syncProformaOrdered, syncProformaUnordered, alreadyOrderedError } from '../services/documentChain.js';
+import { syncProformaOrdered, syncProformaUnordered, alreadyOrderedError,
+  proformaLinkError, proformaUnlinkError, orderProforma,
+  type LinkOrderRow, type LinkProformaRow } from '../services/documentChain.js';
 import { blockUnapprovedConversion } from '../services/approval.js';
 import { batchesForOrder } from '../services/batch.js';
 import { readyLines } from '../services/dispatchReady.js';
@@ -1206,6 +1208,124 @@ ordersRouter.patch('/:id/production-dates', (req: AuthedRequest, res) => {
   db.prepare(`UPDATE orders SET ${sets.join(', ')} WHERE id = ?`).run(...(params as never[]), id);
   const row = db.prepare('SELECT id, number, promised_date, revised_date FROM orders WHERE id = ?').get(id);
   res.json(row);
+});
+
+/*
+ * Pointing an order at the proforma it was raised from (2026-11-24).
+ *
+ * `POST /orders` writes this link and nothing else did, so it exists only
+ * where somebody booked the order from the proforma — see `proformaLinkError`
+ * for why that leaves most of a real book without one. These three are the
+ * read, the act and the way back.
+ *
+ * The two writes need `order: full` by the mount's own `requireFunction` —
+ * the same cell booking an order carries, which is correct because this **is**
+ * that write, made later. The **read is held to `full` as well**, explicitly
+ * rather than by the mount: it carries proforma numbers, dates and totals out
+ * of a router mounted on `order`, and Logistics and Production read this book
+ * holding `proforma: none`. It is also the picker for an act only `order:
+ * full` can perform, so offering it any wider would be a control that can only
+ * ever produce a refusal. They sit under `/:id/...`, so `/:id` cannot swallow
+ * them.
+ */
+
+/**
+ * The proformas that could be attached to this order.
+ *
+ * Measured on the **server** rather than filtered out of the proforma list on
+ * the client: that list is paged, so a client-side filter would offer whatever
+ * happened to be on the first page. Narrowed to this order's own customer,
+ * since a link across two is refused anyway — a picker that offers what the
+ * save will refuse is the form-offers-what-the-API-refuses trap.
+ *
+ * A **cancelled** proforma is left out. The guard does not refuse one, so this
+ * is the picker being stricter than the API, which is the safe direction: a
+ * dead document is not something anybody means to attach, and one already on
+ * file keeps its link.
+ */
+ordersRouter.get('/:id/proforma-options', requirePermission('order', 'full'), (req: AuthedRequest, res) => {
+  const id = Number(req.params.id);
+  const order = db.prepare('SELECT id, number, customer_id FROM orders WHERE id = ?').get(id) as
+    LinkOrderRow | undefined;
+  if (!order || !canAccessCustomer(req, order.customer_id)) {
+    return res.status(404).json({ error: 'Sales order not found' });
+  }
+  const rows = db.prepare(
+    `SELECT id, number, date, status, currency, grand_total, is_export
+       FROM proforma_invoices
+      WHERE customer_id = ? AND order_id IS NULL AND status <> 'cancelled'
+      ORDER BY date DESC, id DESC`
+  ).all(order.customer_id);
+  res.json({ attached: orderProforma(id), options: rows });
+});
+
+/** Attach one. The same act as booking, performed later. */
+ordersRouter.post('/:id/proforma', (req: AuthedRequest, res) => {
+  const id = Number(req.params.id);
+  const piId = Number((req.body ?? {}).pi_id);
+  const order = db.prepare('SELECT id, number, customer_id FROM orders WHERE id = ?').get(id) as
+    LinkOrderRow | undefined;
+  if (!order || !canAccessCustomer(req, order.customer_id)) {
+    return res.status(404).json({ error: 'Sales order not found' });
+  }
+  if (!Number.isInteger(piId) || piId <= 0) {
+    return res.status(400).json({ error: 'Name the proforma to attach' });
+  }
+  const pi = db.prepare('SELECT id, number, customer_id, order_id FROM proforma_invoices WHERE id = ?')
+    .get(piId) as LinkProformaRow | undefined;
+  // Out of scope reads as not on file, so an id cannot be probed for.
+  if (!pi || !canAccessCustomer(req, pi.customer_id)) {
+    return res.status(404).json({ error: 'Proforma invoice not found' });
+  }
+  const refused = proformaLinkError(order, pi);
+  if (refused) return res.status(409).json({ error: refused });
+  /*
+   * Attaching **freezes** the proforma, exactly as booking does — so it is
+   * held to the same approval gate, or this would be the way round the one
+   * `POST /orders` enforces: an unfinished document would be frozen
+   * unfinished, with nothing left that could fix it. `commit` is true, so a
+   * manager attaching an unapproved proforma approves it in the same action,
+   * which is what booking already does.
+   */
+  const unapproved = blockUnapprovedConversion('proforma_invoices', piId, req);
+  if (unapproved) return res.status(422).json({ error: unapproved });
+
+  transaction(() => {
+    db.prepare('UPDATE proforma_invoices SET order_id = ? WHERE id = ?').run(id, piId);
+    syncProformaOrdered(piId);
+  });
+  res.json({ attached: orderProforma(id) });
+});
+
+/**
+ * And take it off again.
+ *
+ * `syncProformaUnordered` **before** the back-pointer is released, since it is
+ * keyed on the order — the order delete does the two in that order for the
+ * same reason, and reversing them would leave the proforma claiming *Sales
+ * Order Generated* for an order it no longer names.
+ */
+ordersRouter.delete('/:id/proforma/:piId', (req: AuthedRequest, res) => {
+  const id = Number(req.params.id);
+  const piId = Number(req.params.piId);
+  const order = db.prepare('SELECT id, number, customer_id FROM orders WHERE id = ?').get(id) as
+    LinkOrderRow | undefined;
+  if (!order || !canAccessCustomer(req, order.customer_id)) {
+    return res.status(404).json({ error: 'Sales order not found' });
+  }
+  const pi = db.prepare('SELECT id, number, customer_id, order_id FROM proforma_invoices WHERE id = ?')
+    .get(piId) as LinkProformaRow | undefined;
+  if (!pi || !canAccessCustomer(req, pi.customer_id)) {
+    return res.status(404).json({ error: 'Proforma invoice not found' });
+  }
+  const refused = proformaUnlinkError(order, pi);
+  if (refused) return res.status(409).json({ error: refused });
+
+  transaction(() => {
+    syncProformaUnordered(id);
+    db.prepare('UPDATE proforma_invoices SET order_id = NULL WHERE id = ?').run(piId);
+  });
+  res.json({ attached: orderProforma(id) });
 });
 
 ordersRouter.post('/:id/status', (req: AuthedRequest, res) => {
