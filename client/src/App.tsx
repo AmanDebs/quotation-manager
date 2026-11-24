@@ -27,6 +27,7 @@ import FinishedGoodsPage from './pages/FinishedGoods';
 import PackingListsPage from './pages/PackingLists';
 import PackingListFormPage from './pages/PackingListForm';
 import FollowupsPage from './pages/Followups';
+import ProductPlanningPage from './pages/ProductPlanning';
 import WorkOrdersPage from './pages/WorkOrders';
 import WorkOrderDetailPage from './pages/WorkOrderDetail';
 import QcCheckFormPage from './pages/QcCheckForm';
@@ -221,6 +222,7 @@ export const routes: RouteObject[] = [
       { path: '/packing-lists/:id', element: <Needs fn="packing_list"><PackingListFormPage /></Needs> },
       { path: '/followups', element: <Needs fn="followup"><FollowupsPage /></Needs> },
       { path: '/payments', element: <Needs fn="payment"><PaymentsPage /></Needs> },
+      { path: '/product-planning', element: <Needs fn="order"><ProductPlanningPage /></Needs> },
       { path: '/work-orders', element: <Needs fn="work_order"><WorkOrdersPage /></Needs> },
       { path: '/work-orders/:id', element: <Needs fn="work_order"><WorkOrderDetailPage /></Needs> },
       /*

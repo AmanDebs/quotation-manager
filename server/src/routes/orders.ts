@@ -11,6 +11,7 @@ import { advanceBlockError } from '../services/despatchLimits.js';
 import { withStock, orderLines, productDemand, countOrderLines, orderSearchClause,
   lineFacet, isFilterColumn, FILTERABLE, readLineFilters, pivotOrderLines, PIVOT_OTHER,
   type Filters, type OrderLine, type ProductDemand, statusClause } from '../services/orderLines.js';
+import { productPlan, summarisePlan } from '../services/productPlan.js';
 import { buildXlsx, attachmentName, type Column } from '../services/xlsx.js';
 import { allows, requirePermission, type AuthedRequest } from '../middleware/auth.js';
 import { scopeClause, canAccessCustomer, linkError, customerChangeError, raiseForError } from '../middleware/scope.js';
@@ -430,6 +431,32 @@ ordersRouter.get('/lines/pivot', (req: AuthedRequest, res) => {
 ordersRouter.get('/by-product', (req: AuthedRequest, res) => {
   const rows = productDemand(lineFilters(req));
   res.json(allows(req, 'fg') ? withStock(rows) : rows);
+});
+
+/**
+ * The same book folded **product → colour → work order** — the top of the
+ * production planning hierarchy (2026-11-24, the client asking for a
+ * product-wise planning system on exactly that shape).
+ *
+ * It sits here rather than on the work-orders router for one reason worth
+ * stating: **the filters.** `lineFilters` already reads the thirteen column
+ * dropdowns, the export/domestic tabs, the company picker, the status list and
+ * the search box, so this screen narrows exactly as the order book beside it
+ * does and a figure on it can never describe a different set of lines from the
+ * one somebody filtered to. A second hand-built filter is how the two would
+ * come to disagree.
+ *
+ * Declared **above `/:id`**: it is a single-segment path, so Express would
+ * otherwise read "product-plan" as an order id — the trap `/lines` and
+ * `/by-product` above it already sit here for.
+ *
+ * Gated by the mount (`order: view`), which is what Production holds — the
+ * team that reads a production plan. It states quantities and dates and **no
+ * money at all**, so it opens nothing the order book does not already show.
+ */
+ordersRouter.get('/product-plan', (req: AuthedRequest, res) => {
+  const rows = productPlan(lineFilters(req));
+  res.json({ rows, summary: summarisePlan(rows) });
 });
 
 /**

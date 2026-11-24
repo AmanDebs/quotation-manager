@@ -2048,3 +2048,80 @@ export interface CoaSummary {
   shipped: number;
   drafts: number;
 }
+
+/* ------------------------------------------------- product-wise planning */
+
+/**
+ * The production plan read from the top — **product → colour → work order**
+ * (2026-11-24). See `server/src/services/productPlan.ts`: the top two levels
+ * are *derived* from the order lines rather than stored, so a product's
+ * figures are the sum of its colours' by construction and nothing can drift.
+ */
+export interface PlanJob {
+  id: number;
+  number: string;
+  status: string;
+  order_id: number;
+  order_number: string;
+  customer_name: string;
+  qty_planned: number;
+  made: number;
+  balance: number;
+  start: string;
+  end: string;
+  dated: boolean;
+}
+
+export interface ColourPlan {
+  color: string;
+  ordered: number;
+  planned: number;
+  made: number;
+  shipped: number;
+  pending: number;
+  /** Demand no job covers — reconciliation rule 3, reported rather than hidden. */
+  unplanned: number;
+  orders: number;
+  jobs: number;
+  dated: number;
+  next_due: string;
+  work_orders: PlanJob[];
+}
+
+export interface ProductPlan {
+  key: string;
+  product_id: number | null;
+  item: string;
+  code: string;
+  unit: string;
+  ordered: number;
+  planned: number;
+  made: number;
+  shipped: number;
+  pending: number;
+  unplanned: number;
+  orders: number;
+  jobs: number;
+  dated: number;
+  next_due: string;
+  rate: OutputRate | null;
+  /** Production days to clear what is pending; null where there is no rate. */
+  days: number | null;
+  colours: ColourPlan[];
+}
+
+export interface PlanSummary {
+  products: number;
+  colours: number;
+  jobs: number;
+  ordered: number;
+  made: number;
+  pending: number;
+  unplanned: number;
+  no_rate: number;
+}
+
+export interface ProductPlanResponse {
+  rows: ProductPlan[];
+  summary: PlanSummary;
+}

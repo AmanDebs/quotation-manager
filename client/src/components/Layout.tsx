@@ -78,6 +78,12 @@ const NAV: { heading: string; items: NavItem[] }[] = [
   {
     heading: 'Factory',
     items: [
+      // Planning, above the jobs it plans: product -> colour -> work order,
+      // folded off the order lines (2026-11-24). `needs: 'order'` rather than
+      // `work_order` because that is what the route is mounted on -- an entry
+      // offered to somebody the read would refuse is the form-offers-what-the-
+      // API-refuses trap, and Production holds `order: view`.
+      { to: '/product-planning', label: 'Product Planning', icon: 'clipboard', needs: 'order' },
       { to: '/work-orders', label: 'Work Orders', icon: 'wrench', needs: 'work_order' },
       // The whole of quality in one entry: the queue of what is made and not
       // yet certified (which is what it opens on), the certificate register,
