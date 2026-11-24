@@ -233,7 +233,20 @@ export interface Material extends MasterBase {
 }
 export interface Machine extends MasterBase {
   code: string; location_id: number | null; type: 'moulding' | 'assembly' | 'other';
+  /**
+   * A machine **is** the production line (2026-11-24, the client's own answer
+   * when asked). These two are what make it one to plan into: the shifts it
+   * runs in a day, and the minutes a colour change costs on it. Both default
+   * to the plant as it already runs, so a line nobody edits behaves as it did.
+   */
+  shifts_per_day: number; changeover_mins: number;
 }
+
+/**
+ * A day the plant does not run. **No `name`** — a shut-down is the date it
+ * closes, and a name column would be a second label able to disagree with it.
+ */
+export interface Shutdown { id: number; date: string; note: string; active: number }
 export interface Mould extends MasterBase { code: string; cavities: number | null }
 /**
  * A step a job passes through — Assembly, Camera inspection. The seventh

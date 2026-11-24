@@ -176,6 +176,55 @@ export interface QueueShape {
    * knew nothing about the dates already on the floor.
    */
   freeFrom?: string[];
+  /**
+   * Days the plant does not run (`shutdownDates()`), which a job's duration
+   * steps over rather than counting.
+   *
+   * **Passed in rather than read**, so this file stays a pure function over
+   * rows the route has already gathered — the same reason `lanes` and
+   * `freeFrom` are arguments. And **empty by default**, which is what makes
+   * it safe to land on a live book: with nothing in the set every date this
+   * produces is the date it produced before, so the client's own answer that
+   * the plant runs seven days (2026-11-16) still holds until somebody enters
+   * a shut-down.
+   */
+  shutdowns?: Set<string>;
+}
+
+/** Nothing shut, which is the plant as the client described it. */
+const OPEN: Set<string> = new Set();
+
+/**
+ * The first day from `d` the plant is actually open.
+ *
+ * Capped at a year's worth of steps: a calendar with every day shut is a
+ * mistake somebody can make on one screen, and a scheduler that spins on it
+ * would take the whole press down rather than reporting it. Past the cap the
+ * day is returned as it stands, which lands the plan on a shut day — visibly
+ * wrong, where a hang is not.
+ */
+function openFrom(d: string, closed: Set<string>): string {
+  // Normalised through `addDaysIso` first, which answers '' to anything that
+  // is not a date — so a start nobody can read goes on dating nothing rather
+  // than being carried through as itself and printed as a plan. Caught by the
+  // case that already asserted it, which is what that case is for.
+  let day = addDaysIso(d, 0);
+  for (let i = 0; i < 366 && day && closed.has(day); i++) day = addDaysIso(day, 1);
+  return day;
+}
+
+/**
+ * Where a run of `days` **production** days starting on an open day finishes.
+ *
+ * A shut-down inside a run pushes its finish out by a calendar day without
+ * adding to the work, which is the whole point of the list: the job still
+ * takes the days it takes. With nothing shut this is `start + days - 1`
+ * exactly, which is what it has always been.
+ */
+function runEnd(start: string, days: number, closed: Set<string>): string {
+  let day = start;
+  for (let left = days - 1; left > 0; left--) day = openFrom(addDaysIso(day, 1), closed);
+  return day;
 }
 
 /**
@@ -214,6 +263,7 @@ export function layOutQueue(
    * with one line and nothing committed this is `[start]` — the single cursor
    * this function used to carry.
    */
+  const closed = shape.shutdowns ?? OPEN;
   const cursor = Array.from({ length: lanes }, (_, i) => {
     const free = shape.freeFrom?.[i] ?? '';
     return free > start ? free : start;
@@ -236,8 +286,9 @@ export function layOutQueue(
      */
     let lane = 0;
     for (let i = 1; i < lanes; i++) if (cursor[i] < cursor[lane]) lane = i;
-    const planned_start = cursor[lane];
-    const planned_end = addDaysIso(planned_start, days - 1);
+    // The line is free on that day, but the plant may not be open on it.
+    const planned_start = openFrom(cursor[lane], closed);
+    const planned_end = runEnd(planned_start, days, closed);
     cursor[lane] = addDaysIso(planned_end, 1);
     const late = !!j.due && !!planned_end && planned_end > j.due;
     return {

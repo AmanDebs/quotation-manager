@@ -30,8 +30,16 @@ interface FieldSpec {
    * name what is blocking them instead of leaving it to the foreign key.
    */
   oneOf?: readonly string[];
-  /** Used when the field arrives blank, where the column will not accept ''. */
-  fallback?: string;
+  /**
+   * Used when the field arrives blank, where the column will not accept the
+   * blank. For a text column with a CHECK that is `''`; for an `int` column
+   * declared NOT NULL it is the NULL a blank would otherwise become — found
+   * by a `POST /machines` that answered **500 NOT NULL constraint failed**,
+   * which is the fault this file's own `oneOf` exists to stop reaching the
+   * user as one. A field with no fallback keeps its NULL, which is what an
+   * unrecorded cavity count is.
+   */
+  fallback?: string | number;
 }
 
 interface Guard {
@@ -62,8 +70,10 @@ function read(spec: FieldSpec, body: Record<string, unknown>, existing?: Record<
   switch (spec.kind) {
     case 'num':
       return Number(raw ?? 0) || 0;
-    case 'int':
-      return numOrNull(raw);
+    case 'int': {
+      const n = numOrNull(raw);
+      return n === null && spec.fallback !== undefined ? Number(spec.fallback) : n;
+    }
     case 'bool':
       // Absent means "leave as it was", and a new row defaults to active.
       return raw === undefined || raw === null ? 1 : raw ? 1 : 0;
@@ -237,12 +247,43 @@ export const MASTERS: MasterConfig[] = [
       // found by an API call that sent no type and got a 500 for it. The
       // fallback is the column's default, so an omitted type lands there.
       { name: 'type', kind: 'text', oneOf: ['moulding', 'assembly', 'other'], fallback: 'moulding' },
+      // A machine is the production line (2026-11-24, the client's own answer
+      // when asked what a line is). These two are what make it one to plan
+      // into: the shifts it runs in a day, and the minutes a colour change
+      // costs on it. Both default to the plant as it already runs, so a line
+      // nobody edits behaves exactly as it did.
+      { name: 'shifts_per_day', kind: 'int', fallback: 2 },
+      { name: 'changeover_mins', kind: 'int', fallback: 0 },
       { name: 'notes', kind: 'text' },
       activeFlag,
     ],
     guards: [
       { sql: 'SELECT COUNT(*) AS c FROM work_orders WHERE machine_id = ?', message: 'Jobs have been run on this machine — retire it instead of deleting' },
     ],
+  },
+  {
+    /*
+     * Days the plant does not run (2026-11-24).
+     *
+     * A master rather than a setting, because it is a list that grows: a
+     * holiday, a maintenance day, a shut-down week. It rides the generic
+     * router unchanged -- `active` is what makes a shut-down entered by
+     * mistake retirable rather than deleted, and `orderBy` is the date, since
+     * these are read as a calendar rather than as names.
+     *
+     * **No guard.** Nothing references a shut-down by id: the scheduler reads
+     * the dates as a set and steps over them, so deleting one simply opens
+     * that day again.
+     */
+    path: 'shutdowns',
+    table: 'plant_shutdowns',
+    label: 'Shut-down',
+    fields: [
+      { name: 'date', kind: 'text', required: true },
+      { name: 'note', kind: 'text' },
+      activeFlag,
+    ],
+    orderBy: 'date',
   },
   {
     path: 'moulds',

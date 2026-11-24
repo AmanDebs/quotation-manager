@@ -1017,7 +1017,38 @@ CREATE TABLE IF NOT EXISTS machines (
   code TEXT NOT NULL DEFAULT '',
   location_id INTEGER REFERENCES locations(id),
   type TEXT NOT NULL DEFAULT 'moulding' CHECK (type IN ('moulding','assembly','other')),
+  -- A machine is the production line (2026-11-24, the client's own answer when
+  -- asked what a "line" is). These two are what make it one for planning:
+  -- how many shifts a day it runs, and how long it stands idle between a
+  -- colour change. Both default to behaving exactly as the plant did before
+  -- they existed -- two shifts is this desk's own pattern (their COA reads
+  -- 05032026A+B) and a changeover of 0 costs nothing.
+  shifts_per_day INTEGER NOT NULL DEFAULT 2,
+  changeover_mins INTEGER NOT NULL DEFAULT 0,
   notes TEXT NOT NULL DEFAULT '',
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+/*
+ * Days the plant does not run (2026-11-24).
+ *
+ * The client's answer on 2026-11-16 was that the plant runs **seven days**,
+ * which is why `layOutQueue` has no working-day calendar and its arithmetic is
+ * plain addition. The planning brief then asked for working days and holidays,
+ * so this is the smallest thing that answers both: a list that is **empty by
+ * default**, so every date the scheduler produces is exactly what it produced
+ * before until somebody adds a day to it.
+ *
+ * Plant-wide rather than per line: a shut-down here is a holiday or a
+ * maintenance day, and a line that is down on its own is retired or has its
+ * shifts set to zero. `active` is what the generic master list reads, so a
+ * shut-down entered by mistake is retired rather than deleted.
+ */
+CREATE TABLE IF NOT EXISTS plant_shutdowns (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  date TEXT NOT NULL,
+  note TEXT NOT NULL DEFAULT '',
   active INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );

@@ -389,6 +389,16 @@ addColumnIfMissing('products', 'weight_grams', 'REAL');
  * under it — see `services/outputRate.ts` for why that way round.
  */
 addColumnIfMissing('products', 'pcs_per_day', 'REAL');
+/*
+ * A machine is the production line (2026-11-24, the client's own answer when
+ * asked). Both additive and both defaulting to the plant as it already runs:
+ * two shifts a day, which is this desk's own pattern, and no changeover
+ * allowance at all -- so a database migrated from before these existed plans
+ * exactly as it did. No index on either: they are read per line on a list
+ * bounded by the machines in the building.
+ */
+addColumnIfMissing('machines', 'shifts_per_day', 'INTEGER NOT NULL DEFAULT 2');
+addColumnIfMissing('machines', 'changeover_mins', 'INTEGER NOT NULL DEFAULT 0');
 // Make or buy (2026-09-11). Default 1: every product on file was made here as far as the app knew.
 addColumnIfMissing('products', 'made_here', 'INTEGER NOT NULL DEFAULT 1');
 if (addColumnIfMissing('products', 'product_type', "TEXT NOT NULL DEFAULT 'other'")) {

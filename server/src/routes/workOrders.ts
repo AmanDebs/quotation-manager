@@ -14,6 +14,7 @@ import { progressFor, progressForMany, LIVE_OK, ORDER_DUE, ORDER_DUE_SOURCE } fr
 import { outputRates } from '../services/outputRate.js';
 import { layOutQueue, byDue, summarise, SORTS, type QueueJob, type DueSource, type SortKey } from '../services/jobPlan.js';
 import { plantLanes, linesFreeFrom, MAX_LANES } from '../services/plantLoad.js';
+import { shutdownDates, normaliseShift } from '../services/shifts.js';
 import { despatchedByOrder, lastTripForLine } from '../services/despatch.js';
 import { materialCostByWorkOrder } from '../services/costing.js';
 import {
@@ -634,7 +635,11 @@ workOrdersRouter.post('/plan/preview', requirePermission('work_order', 'full'), 
    * outwards is how a re-plan walks the whole book forward a month at a time.
    */
   const lines = linesFreeFrom(lanes, ids);
-  const plan = layOutQueue(ordered, rates, start, { lanes, freeFrom: lines.free_from });
+  // Days the plant does not run. Empty on every book that has entered none,
+  // which is what keeps the client's own seven-day answer (2026-11-16) true
+  // until somebody says otherwise -- see `shutdownDates`.
+  const shutdowns = shutdownDates();
+  const plan = layOutQueue(ordered, rates, start, { lanes, freeFrom: lines.free_from, shutdowns });
   // The summary is the server's, not the screen's: it is a fold of the same
   // rows and a second one on the client is how the figure over a table comes
   // to describe a different set from the rows under it.
@@ -644,6 +649,9 @@ workOrdersRouter.post('/plan/preview', requirePermission('work_order', 'full'), 
     summary: summarise(plan),
     lanes,
     lanes_measured: measured,
+    // So the screen can say a plan stepped over a shut-down rather than
+    // leaving a gap nobody can account for.
+    shutdowns: [...shutdowns].sort(),
     committed_to: lines.committed_to,
     committed_jobs: lines.jobs,
   });
@@ -951,7 +959,7 @@ workOrdersRouter.post('/:id/entries', requirePermission('output', 'full'), (req:
   db.prepare(
     `INSERT INTO production_entries (work_order_id, batch_id, date, shift, qty_ok, qty_reject, operator, notes, created_by)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(id, entryBatch, String(body.date), String(body.shift ?? ''), ok, reject,
+  ).run(id, entryBatch, String(body.date), normaliseShift(body.shift), ok, reject,
     String(body.operator ?? ''), String(body.notes ?? ''), req.user!.id);
 
   // The job first: booked output is what moves it to Running, and the order's

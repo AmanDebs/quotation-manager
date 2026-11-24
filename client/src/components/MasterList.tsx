@@ -16,7 +16,7 @@ import { Button, Input, Textarea, Select, Field, Card, EmptyState, ErrorText, Mo
 export interface MasterField<T> {
   key: keyof T & string;
   label: string;
-  type?: 'text' | 'number' | 'textarea' | 'select';
+  type?: 'text' | 'number' | 'textarea' | 'select' | 'date';
   options?: { value: string | number; label: string }[];
   placeholder?: string;
   /** Span both columns of the modal grid. */
@@ -39,9 +39,17 @@ export interface MasterSpec<T> {
   columns: MasterColumn<T>[];
   fields: MasterField<T>[];
   empty: Record<string, unknown>;
+  /** What to call one row, where `name` is not what identifies it. */
+  label?: (row: T) => string;
 }
 
-interface Row { id: number; name: string; active: number }
+/**
+ * `name` is optional because not every master has one: a plant shut-down is a
+ * **date**, and giving the table a name column to satisfy this type would be
+ * storing a second label able to disagree with it. `label` on the spec says
+ * what to call a row where `name` is not the answer.
+ */
+interface Row { id: number; name?: string; active: number }
 
 export default function MasterList<T extends Row>({ spec, canEdit }: { spec: MasterSpec<T>; canEdit: boolean }) {
   const queryClient = useQueryClient();
@@ -53,6 +61,8 @@ export default function MasterList<T extends Row>({ spec, canEdit }: { spec: Mas
     queryKey: key,
     queryFn: () => api.get<T[]>(`/api/${spec.path}${showRetired ? '?all=1' : ''}`),
   });
+
+  const nameOf = (row: T) => spec.label?.(row) ?? String((row as Row).name ?? '');
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['master', spec.path] });
 
@@ -164,7 +174,7 @@ export default function MasterList<T extends Row>({ spec, canEdit }: { spec: Mas
                         <Button
                           variant="danger"
                           className="ml-1 border-0"
-                          onClick={() => { if (confirm(`Delete ${spec.singular.toLowerCase()} "${row.name}"?`)) remove.mutate(row.id); }}
+                          onClick={() => { if (confirm(`Delete ${spec.singular.toLowerCase()} "${nameOf(row)}"?`)) remove.mutate(row.id); }}
                         >
                           Delete
                         </Button>
@@ -182,7 +192,7 @@ export default function MasterList<T extends Row>({ spec, canEdit }: { spec: Mas
 
       {editing && (
         <Modal
-          title={editing.id ? `Edit ${editing.name}` : `New ${spec.singular}`}
+          title={editing.id ? `Edit ${nameOf(editing as T)}` : `New ${spec.singular}`}
           onClose={() => setEditing(null)}
         >
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -203,6 +213,12 @@ export default function MasterList<T extends Row>({ spec, canEdit }: { spec: Mas
                     <option value="">— none —</option>
                     {(f.options ?? []).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                   </Select>
+                ) : f.type === 'date' ? (
+                  <Input
+                    type="date"
+                    value={String(editing[f.key] ?? '')}
+                    onChange={(e) => set({ [f.key]: e.target.value } as Partial<T>)}
+                  />
                 ) : f.type === 'number' ? (
                   <Input
                     type="number"

@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { WorkOrder } from '../types';
-import { Button, EmptyState, ErrorText, Field, Input, Modal, TH_CLASS } from './ui';
+import { Button, EmptyState, ErrorText, Field, Input, Modal, TH_CLASS, Select } from './ui';
+import { SHIFTS } from './DocFields';
 import { fmtQty, today } from '../lib/format';
 
 /** Shared with the work order's own page, which asks the same thing of one job. */
@@ -41,7 +42,33 @@ export function LogOutput({ job, onClose, onSaved }: { job: WorkOrder; onClose: 
 
       <div className="grid grid-cols-2 gap-2 rounded-md border border-slate-200 bg-slate-50/70 p-3 sm:grid-cols-3 lg:grid-cols-6">
         <Field label="Date"><Input type="date" value={entry.date} onChange={(e) => setEntry({ ...entry, date: e.target.value })} /></Field>
-        <Field label="Shift"><Input value={entry.shift} onChange={(e) => setEntry({ ...entry, shift: e.target.value })} placeholder="A / B" /></Field>
+        {/*
+          A list rather than a box (2026-11-24). `production_entries.shift` has
+          been free text since the table was written, so the same shift reached
+          the book as `A`, `a` and `Shift A` — which is fine for a label and
+          not enough to *measure* a per-shift rate over, which the planner now
+          does. The server upper-cases and trims what it reads, so the three
+          already on file fold together.
+
+          **Only the two, with no escape hatch for an off-list value**, which
+          is the one thing this dialog does *not* need: it only ever creates a
+          new entry — the form resets after each save and nothing here opens an
+          existing one — so `entry.shift` can only be blank, A or B, and an
+          option for a value already on a row could never draw. That would be
+          the dead control this codebase keeps refusing. The **record** still
+          keeps whatever was typed before the list existed: `normaliseShift`
+          trims and upper-cases but never discards, so an entry reading `NIGHT`
+          goes on reading `NIGHT` and is listed below as it stands.
+
+          Blank stays offered, because *nobody wrote it down* is a real answer
+          and is what every entry on the book before today says.
+        */}
+        <Field label="Shift">
+          <Select value={entry.shift} onChange={(e) => setEntry({ ...entry, shift: e.target.value })}>
+            <option value="">— not recorded —</option>
+            {SHIFTS.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+          </Select>
+        </Field>
         <Field label="Good pcs"><Input type="number" min={0} step="any" value={entry.qty_ok || ''} onChange={(e) => setEntry({ ...entry, qty_ok: Number(e.target.value) })} /></Field>
         <Field label="Rejects"><Input type="number" min={0} step="any" value={entry.qty_reject || ''} onChange={(e) => setEntry({ ...entry, qty_reject: Number(e.target.value) })} /></Field>
         <Field label="Operator"><Input value={entry.operator} onChange={(e) => setEntry({ ...entry, operator: e.target.value })} /></Field>

@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
 import { useCan } from '../App';
-import type { Location, Supplier, Transporter, Material, Machine, Mould, Process } from '../types';
+import type { Location, Supplier, Transporter, Material, Machine, Mould, Process, Shutdown } from '../types';
+import { fmtDate } from '../lib/format';
 import { PageHeader, Tabs } from '../components/ui';
 import MasterList, { type MasterSpec } from '../components/MasterList';
 
@@ -176,7 +177,7 @@ const processes: MasterSpec<Process> = {
 };
 
 type TabKey =
-  | 'locations' | 'transporters' | 'materials' | 'machines' | 'moulds' | 'processes';
+  | 'locations' | 'transporters' | 'materials' | 'machines' | 'moulds' | 'processes' | 'shutdowns';
 
 export default function MastersPage() {
   const [tab, setTab] = useState<TabKey>('locations');
@@ -195,12 +196,22 @@ export default function MastersPage() {
     path: 'machines',
     title: 'Machines',
     singular: 'Machine',
-    blurb: 'What runs where. A work order picks one; nothing schedules capacity.',
+    blurb: 'The production lines — what runs where, how many shifts a day it runs, and what a colour change costs on it.',
     columns: [
       { key: 'name', label: 'Name', render: (r) => <span className="font-medium">{r.name}</span> },
       { key: 'code', label: 'Code', render: (r) => dash(r.code) },
       { key: 'location_id', label: 'Plant', render: (r) => (r.location_id ? byId.get(r.location_id) ?? '—' : '—') },
       { key: 'type', label: 'Type', render: (r) => <span className="capitalize">{r.type}</span> },
+      { key: 'shifts_per_day', label: 'Shifts/day', render: (r) => (
+        // Nought is a line deliberately stopped, which is a different thing
+        // from one nobody has set — so it is said rather than dashed out.
+        r.shifts_per_day === 0
+          ? <span className="text-amber-700" title="Not running — no work is planned onto this line">0 — not running</span>
+          : <span className="tabular-nums">{r.shifts_per_day ?? 2}</span>
+      ) },
+      { key: 'changeover_mins', label: 'Changeover', render: (r) => (
+        r.changeover_mins ? <span className="tabular-nums">{r.changeover_mins} min</span> : dash('')
+      ) },
     ],
     fields: [
       { key: 'name', label: 'Name *', wide: true },
@@ -212,9 +223,38 @@ export default function MastersPage() {
         options: locationRows.map((l) => ({ value: l.id, label: l.name })),
       },
       { key: 'type', label: 'Type', type: 'select', options: MACHINE_TYPES },
+      { key: 'shifts_per_day', label: 'Shifts per day', type: 'number' },
+      { key: 'changeover_mins', label: 'Changeover (minutes)', type: 'number' },
       { key: 'notes', label: 'Notes', type: 'textarea', wide: true },
     ],
-    empty: { name: '', code: '', location_id: null, type: 'moulding', notes: '', active: 1 },
+    empty: { name: '', code: '', location_id: null, type: 'moulding',
+             shifts_per_day: 2, changeover_mins: 0, notes: '', active: 1 },
+  };
+
+  /*
+   * Days the plant does not run (2026-11-24).
+   *
+   * **Empty by default**, which is the whole of what makes it safe: the
+   * client's own answer on 2026-11-16 was that the plant runs seven days, so
+   * until a date is entered here every date the planner produces is exactly
+   * the date it produced before. Retiring a shut-down opens its day again.
+   */
+  const shutdowns: MasterSpec<Shutdown> = {
+    path: 'shutdowns',
+    title: 'Plant Shut-downs',
+    singular: 'Shut-down',
+    blurb: 'Days the plant does not run. The planner steps over them; an empty list means seven days a week, as now.',
+    columns: [
+      { key: 'date', label: 'Date', render: (r) => <span className="font-medium">{fmtDate(r.date)}</span> },
+      { key: 'note', label: 'Why', render: (r) => dash(r.note) },
+    ],
+    fields: [
+      { key: 'date', label: 'Date *', type: 'date' },
+      { key: 'note', label: 'Why', wide: true },
+    ],
+    empty: { date: '', note: '', active: 1 },
+    // A shut-down has no name; it is the day it closes.
+    label: (r) => fmtDate(r.date),
   };
 
   return (
@@ -233,6 +273,7 @@ export default function MastersPage() {
           { key: 'machines', label: 'Machines' },
           { key: 'moulds', label: 'Moulds' },
           { key: 'processes', label: 'Processes' },
+          { key: 'shutdowns', label: 'Plant Shut-downs' },
           { key: 'transporters', label: 'Transporters' },
         ]}
       />
@@ -242,6 +283,7 @@ export default function MastersPage() {
       {tab === 'moulds' && <MasterList spec={moulds} canEdit={isManager} />}
       {tab === 'processes' && <MasterList spec={processes} canEdit={isManager} />}
       {tab === 'transporters' && <MasterList spec={transporters} canEdit={isManager} />}
+      {tab === 'shutdowns' && <MasterList spec={shutdowns} canEdit={isManager} />}
     </div>
   );
 }

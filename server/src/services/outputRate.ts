@@ -247,6 +247,133 @@ export function outputRates(productIds: number[]): Map<number, OutputRate> {
 export const outputRateFor = (productId: number | null): OutputRate | null =>
   (productId ? outputRates([productId]).get(productId) ?? null : null);
 
+/* ------------------------------------------------------- per shift, not day */
+
+/**
+ * The same measurement taken **per shift** rather than per day (2026-11-24,
+ * the client's answer when asked where per-shift capacity should come from:
+ * *"measure it, type where missing"*).
+ *
+ * This is an **addition, not an edit**, and the distinction matters: the
+ * comment on `measuredRates` above records that a per-shift rate was
+ * considered and rejected for the day planner, because reading one as a day
+ * would halve every duration. Both exist now and each is used where it
+ * belongs — `layOutQueue` plans in days and asks `outputRates`; the shift
+ * scheduler plans in shifts and asks this.
+ *
+ * **The grouping is the only thing that changes.** One figure per product per
+ * *(date, shift)* instead of per date, then the same median of those figures,
+ * over the same `LIVE_OK` good pieces, with the same two refusals: a shift
+ * that produced nothing good still counts as a zero, and a typical shift of
+ * nothing is no rate at all rather than a rate of zero.
+ *
+ * **An entry carrying no shift is its own shift**, which is honest rather
+ * than tidy: every row booked before the vocabulary existed reads `''`, and a
+ * day holding one such entry really was one booking of unknown length.
+ * Folding those into a named shift would invent a fact; dropping them would
+ * throw away most of the book.
+ */
+const MEASURED_SHIFT_SQL = `
+  SELECT w.product_id AS product_id,
+         e.date       AS date,
+         UPPER(TRIM(e.shift)) AS shift,
+         SUM(${LIVE_OK('e')}) AS pieces
+    FROM production_entries e
+    JOIN work_orders w ON w.id = e.work_order_id
+   WHERE w.product_id IS NOT NULL AND e.date <> ''`;
+
+/** What the shift book says each product makes in one shift. */
+export function measuredShiftRates(productIds: number[]): Map<number, Measured> {
+  const ids = [...new Set(productIds.filter((n) => Number.isInteger(n) && n > 0))];
+  const out = new Map<number, Measured>();
+  if (!ids.length) return out;
+
+  const rows = db.prepare(
+    `${MEASURED_SHIFT_SQL} AND w.product_id IN (${ids.map(() => '?').join(',')})
+      GROUP BY w.product_id, e.date, UPPER(TRIM(e.shift))`
+  ).all(...(ids as never[])) as Record<string, unknown>[];
+
+  const byProduct = new Map<number, { shifts: number[]; last: string }>();
+  for (const r of rows) {
+    const id = Number(r.product_id);
+    const bucket = byProduct.get(id) ?? { shifts: [], last: '' };
+    bucket.shifts.push(Math.max(0, Number(r.pieces) || 0));
+    const d = String(r.date ?? '');
+    if (d > bucket.last) bucket.last = d;
+    byProduct.set(id, bucket);
+  }
+
+  for (const [id, { shifts, last }] of byProduct) {
+    const sorted = [...shifts].sort((a, b) => a - b);
+    const mid = round2(median(sorted));
+    if (!(mid > 0)) continue;
+    const total = sorted.reduce((sum, n) => sum + n, 0);
+    out.set(id, {
+      pcs_per_day: mid,
+      mean_per_day: round2(total / sorted.length),
+      best_day: round2(sorted[sorted.length - 1]),
+      days: sorted.length,
+      last_run: last,
+    });
+  }
+  return out;
+}
+
+/**
+ * The per-shift rate in force for each product, stated beating measured.
+ *
+ * **There is no second typed column, and there must not be.** `pcs_per_day` is
+ * the one figure anybody types, and a product's shift rate is that figure over
+ * the shifts the line runs in a day — so a typed per-shift column would be a
+ * second statement able to contradict the first, which is what this codebase
+ * refuses everywhere (`hours_per_day` on a line is derived for the same
+ * reason). Dividing is a derivation; typing it twice is a disagreement waiting
+ * to happen.
+ *
+ * `shiftsPerDay` is the **line's** own figure, since that is what varies: a
+ * line running one shift makes a day's worth in one. Floored at one, or a line
+ * set to no shifts would divide a rate by zero rather than simply taking no
+ * work — which is the scheduler's decision to make, not this function's.
+ *
+ * Where a stated figure is used the **measured shift rate rides along**, so
+ * the screen can print the override against the thing it overrides — exactly
+ * as `outputRates` does one level up.
+ */
+export function shiftRates(productIds: number[], shiftsPerDay = 2): Map<number, OutputRate> {
+  const per = Math.max(1, Math.floor(shiftsPerDay) || 1);
+  const ids = [...new Set(productIds.filter((n) => Number.isInteger(n) && n > 0))];
+  const out = new Map<number, OutputRate>();
+  if (!ids.length) return out;
+
+  const measured = measuredShiftRates(ids);
+  const stated = db.prepare(
+    `SELECT id, pcs_per_day FROM products WHERE pcs_per_day IS NOT NULL AND pcs_per_day > 0 AND id IN (${ids.map(() => '?').join(',')})`
+  ).all(...(ids as never[])) as Record<string, unknown>[];
+
+  for (const r of stated) {
+    const id = Number(r.id);
+    const perShift = round2((Number(r.pcs_per_day) || 0) / per);
+    // A day rate so small it divides to nothing is no rate per shift, the
+    // never-zero rule one division down: the measurement under it is then the
+    // better answer, and no rate at all is better than a duration of infinity.
+    if (!(perShift > 0)) continue;
+    const evidence = measured.get(id);
+    out.set(id, {
+      product_id: id,
+      pcs_per_day: perShift,
+      source: 'stated',
+      days: 0,
+      last_run: '',
+      ...(evidence ? { measured: evidence } : {}),
+    });
+  }
+  for (const [id, m] of measured) {
+    if (out.has(id)) continue;
+    out.set(id, { product_id: id, source: 'measured', ...m });
+  }
+  return out;
+}
+
 /**
  * How many products the catalogue could state a rate for and does not — the
  * figure behind the Products page's *N with no output rate* chip, in the

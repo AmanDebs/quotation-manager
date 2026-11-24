@@ -462,6 +462,24 @@ export function PortOfLoadingInput({
 }
 
 /**
+ * The shifts the plant runs (2026-11-24).
+ *
+ * **Two, A and B** — the client's own answer when asked, and what their own
+ * certificate already reads (*05032026A+B*). The brief named A/B/C; the paper
+ * named two.
+ *
+ * Compiled in, like `DESK_NAMES` and the INCO and payment-terms lists beside
+ * it: a picker's vocabulary lives where the picker is. The server keeps the
+ * same two in `services/shifts.ts`, which is where the **hours** live — the
+ * client has no use for those, so there is no second copy of anything that
+ * decides a figure.
+ */
+export const SHIFTS = [
+  { value: 'A', label: 'Shift A' },
+  { value: 'B', label: 'Shift B' },
+] as const;
+
+/**
  * The sales desk, in the client's own list (2026-10-07: *"SPOC to be through
  * drop down option — Meisha, Tannistha, Rumela, Sanjib, Ashwin, Prasun"*, then
  * *"Add the same dropdown to Prepared By"*).
