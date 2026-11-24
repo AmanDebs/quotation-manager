@@ -25,6 +25,7 @@ import { enquiriesRouter } from './routes/enquiries.js';
 import { quotationsRouter } from './routes/quotations.js';
 import { ordersRouter } from './routes/orders.js';
 import { workOrdersRouter } from './routes/workOrders.js';
+import { productionRunsRouter } from './routes/productionRuns.js';
 import { purchaseOrdersRouter } from './routes/purchaseOrders.js';
 import { stockRouter } from './routes/stock.js';
 import { despatchesRouter } from './routes/despatches.js';
@@ -109,6 +110,11 @@ app.use('/api/orders', requireAuth, requireFunction('order'), ordersRouter);
  * `work_order` themselves, so nothing is opened by removing it.
  */
 app.use('/api/work-orders', requireAuth, workOrdersRouter);
+// The shift plan. Mounted on `requireAuth` alone with a guard per route: it
+// serves two cells — reading the board is `work_order: view`, planning a run
+// is `full` — and a mount runs before the router, so an exception inside one
+// is impossible. The trap `routes/workOrders.ts` records from both sides.
+app.use('/api/production-runs', productionRunsRouter);
 // Purchasing is manager-only in full: supplier rates are not everyone's
 // business, and committing a spend is not a shop-floor action.
 app.use('/api/purchase-orders', requireAuth, requirePermission('purchasing', 'full'), purchaseOrdersRouter);

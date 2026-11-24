@@ -2138,3 +2138,70 @@ export interface ProductPlanResponse {
   rows: ProductPlan[];
   summary: PlanSummary;
 }
+
+/* ------------------------------------------------------- the shift plan */
+
+/**
+ * What one line is making, in one shift, on one day — the only stored part of
+ * the planning hierarchy (2026-11-24). See `server/src/services/runPlan.ts`:
+ * a run's **product and colour are derived from its allocations**, so one run
+ * is one changeover by construction rather than by a column kept in step.
+ */
+export interface RunAllocation {
+  work_order_id: number;
+  number: string;
+  order_id: number;
+  order_number: string;
+  customer_name: string;
+  qty_planned: number;
+}
+
+export interface ProductionRun {
+  id: number;
+  date: string;
+  machine_id: number;
+  line_name: string;
+  shift: string;
+  notes: string;
+  product_id: number | null;
+  product_name: string;
+  color: string;
+  qty_planned: number;
+  /** What the line can make of it in that shift; null where no rate says. */
+  capacity: number | null;
+  allocations: RunAllocation[];
+}
+
+export interface ProductionLine {
+  id: number;
+  name: string;
+  code: string;
+  location_id: number | null;
+  location_name: string;
+  shifts_per_day: number;
+  changeover_mins: number;
+  hours_per_day: number;
+}
+
+export interface ShiftDef { key: string; label: string; hours: number }
+
+export interface RunSetup { lines: ProductionLine[]; shifts: ShiftDef[] }
+
+/** A job that could join a run — same product and colour as the one named. */
+export interface RunOption {
+  work_order_id: number;
+  number: string;
+  order_id: number;
+  qty_planned: number;
+  made: number;
+  /** Still to make, and of that how much no run has claimed yet. */
+  left: number;
+  unplanned: number;
+}
+
+export interface RunOptions {
+  product_id: number | null;
+  product_name: string;
+  color: string;
+  options: RunOption[];
+}

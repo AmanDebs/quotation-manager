@@ -1031,6 +1031,64 @@ CREATE TABLE IF NOT EXISTS machines (
 );
 
 /*
+ * **The shift plan** (2026-11-24): what one line is making, in one shift, on
+ * one day -- and which work orders that run is for.
+ *
+ * This is the only thing in the whole product-wise planning hierarchy that is
+ * *stored*. Product and colour above it are read off the order lines, and a
+ * job already is one order line, so those reconcile by construction. What no
+ * record could answer is **which line runs what, when** -- so `production_runs`
+ * holds it, and nothing else does.
+ *
+ * **A run's product and colour are derived from its allocations, never
+ * stored.** That is the rule the Work Orders grid already follows about a
+ * colour, and here it is what makes a run mean something: `runError` refuses a
+ * run whose jobs disagree about either, so "one run is one changeover" is true
+ * by construction rather than by a column somebody keeps in step.
+ */
+CREATE TABLE IF NOT EXISTS production_runs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  date TEXT NOT NULL,
+  -- The line. `machines` IS the line list (2026-11-24, the client's own
+  -- answer), which is also why no column had to be added to a work order.
+  machine_id INTEGER NOT NULL REFERENCES machines(id),
+  -- 'A' or 'B' -- see services/shifts.ts. No CHECK, the rule
+  -- products.product_type states: SQLite cannot ALTER one, and a vocabulary
+  -- that may grow a third shift must not need the table rebuilt.
+  shift TEXT NOT NULL DEFAULT 'A',
+  notes TEXT NOT NULL DEFAULT '',
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+/*
+ * What that run is making, and for whom.
+ *
+ * **One row per work order**, so a run serving three of them is three rows --
+ * which is how *"one production batch fulfils multiple work orders"* is
+ * expressed without a quantity ever belonging to two jobs. The client's
+ * reconciliation rule 4 (never duplicate a quantity) is therefore structural
+ * rather than a check somebody has to remember: an allocation names exactly
+ * one job, and a job's whole commitment is the sum of its own rows.
+ */
+CREATE TABLE IF NOT EXISTS run_allocations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  run_id INTEGER NOT NULL REFERENCES production_runs(id) ON DELETE CASCADE,
+  work_order_id INTEGER NOT NULL REFERENCES work_orders(id) ON DELETE CASCADE,
+  -- Pieces of this run that are for this job. Pieces, not billing units: the
+  -- floor counts pieces, as work_orders.qty_planned does.
+  qty_planned REAL NOT NULL DEFAULT 0
+);
+
+-- Both tables are new here, so their indexes belong in this file: the
+-- batches.disposition trap is about an index naming a column that a migration
+-- adds, and there is no migration to race.
+CREATE INDEX IF NOT EXISTS idx_runs_date ON production_runs(date);
+CREATE INDEX IF NOT EXISTS idx_runs_line ON production_runs(machine_id, date);
+CREATE INDEX IF NOT EXISTS idx_alloc_run ON run_allocations(run_id);
+CREATE INDEX IF NOT EXISTS idx_alloc_job ON run_allocations(work_order_id);
+
+/*
  * Days the plant does not run (2026-11-24).
  *
  * The client's answer on 2026-11-16 was that the plant runs **seven days**,

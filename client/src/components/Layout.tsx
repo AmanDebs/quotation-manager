@@ -85,6 +85,17 @@ const NAV: { heading: string; items: NavItem[] }[] = [
       // API-refuses trap, and Production holds `order: view`.
       { to: '/product-planning', label: 'Product Planning', icon: 'clipboard', needs: 'order' },
       { to: '/work-orders', label: 'Work Orders', icon: 'wrench', needs: 'work_order' },
+      // The board the jobs are planned onto: date -> line -> shift. `clock`
+      // rather than a new icon, the sidebar's own rule about drawing one
+      // rather than typing a glyph -- a shift plan is a thing read by time.
+      //
+      // `work_order` because reading the board is reading the floor's own
+      // plan; planning a run is `full`, which the page gates on itself.
+      { to: '/shift-plan', label: 'Shift Plan', icon: 'clock', needs: 'work_order' },
+      // The board the jobs are planned onto: date -> line -> shift.
+      // `work_order` because reading it is reading the floor's own plan;
+      // planning a run is `full`, which the page itself gates on.
+      { to: '/shift-plan', label: 'Shift Plan', icon: 'calendar', needs: 'work_order' },
       // The whole of quality in one entry: the queue of what is made and not
       // yet certified (which is what it opens on), the certificate register,
       // and the inspection history. Labelled *COA* from 2026-10-22 until
