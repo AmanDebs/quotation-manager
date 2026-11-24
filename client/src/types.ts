@@ -439,6 +439,17 @@ export interface WorkOrder {
   notes: string;
   order_number?: string; customer_id?: number; customer_name?: string;
   /**
+   * The proforma the sales order was booked from, where there is one — the
+   * reference the grid leads with (2026-11-24). An order has no `pi_id`, so
+   * this is the back-pointer on `proforma_invoices.order_id` resolved the way
+   * every other reader of that link resolves it.
+   *
+   * Blank or absent on an order booked without one, which is the whole
+   * imported backlog: the grid then falls back to the sales order's own
+   * number rather than printing nothing.
+   */
+  pi_number?: string | null;
+  /**
    * The day the job was raised, already converted to this desk's own date on
    * the server — `created_at` is a **UTC** stamp, and the conversion belongs
    * where the heading filter reads it, so the column and the filter cannot

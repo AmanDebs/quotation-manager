@@ -44,6 +44,37 @@ const LINE_AT_POSITION = `
   ) oi ON oi.order_id = w.order_id AND oi.pos = w.order_line`;
 
 /**
+ * The proforma the sales order was booked from (2026-11-24, the client with
+ * the grid in front of them: *"Instead of sale order number, I want it to be
+ * referenced to proforma Invoice number"*).
+ *
+ * An order has **no `pi_id`**: the link lives on `proforma_invoices.order_id`
+ * and is resolved backwards wherever it is shown, which is the chain's own
+ * shape and what `dispatchProgress()` and `orderAdvance` already walk. So this
+ * is that walk as a join.
+ *
+ * **One row per order, guaranteed by construction.** `POST /orders` claims a
+ * proforma only while its `order_id` is NULL and `duplicate` drops the
+ * back-pointer, so no order should have two — but a plain LEFT JOIN that found
+ * two would silently *double every job on that order*, which is a defect that
+ * reads as the floor having twice the work. The `ROW_NUMBER()` wrapper is the
+ * same shape `LINE_AT_POSITION` above uses and cannot multiply a row whatever
+ * the table holds.
+ *
+ * It is a **join rather than a correlated subquery** because the number is now
+ * on screen, and a number somebody can read and not search for is a search box
+ * that cannot find what the page is showing — `jobSearchClause` reads it in the
+ * inner WHERE, where only real columns are reachable.
+ */
+const PROFORMA_FOR_ORDER = `
+  LEFT JOIN (
+    SELECT order_id, number,
+           ROW_NUMBER() OVER (PARTITION BY order_id ORDER BY id) AS rn
+      FROM proforma_invoices
+     WHERE order_id IS NOT NULL
+  ) pf ON pf.order_id = o.id AND pf.rn = 1`;
+
+/**
  * `order_remarks` is what the desk wrote on the sales order, carried to the
  * floor (2026-09-29, the client: *"Work order does not catch packing
  * instruction / notes captured in sales order — this guide factory team on how
@@ -61,6 +92,10 @@ export const listSql = `
   SELECT w.*, o.number AS order_number, o.customer_id,
          o.date AS order_date,
          o.remarks AS order_remarks,
+         -- The proforma this order was booked from, where there is one. The
+         -- grid leads with it and falls back to the order's own number, so the
+         -- fallback is the server sending nothing rather than a guess here.
+         pf.number AS pi_number,
          -- Who is handling the sales order this job is against (2026-10-15).
          -- Read off the order, like the colour and the instructions: a job has
          -- no SPOC of its own, and giving it one would be a second copy able
@@ -109,7 +144,8 @@ export const listSql = `
   LEFT JOIN moulds md ON md.id = w.mould_id
   LEFT JOIN processes pr ON pr.id = w.process_id
   LEFT JOIN users u ON u.id = w.created_by
-  ${LINE_AT_POSITION}`;
+  ${LINE_AT_POSITION}
+  ${PROFORMA_FOR_ORDER}`;
 
 /**
  * Which headings carry a filter, and what each one filters on (2026-10-13, the
@@ -154,12 +190,16 @@ export type JobFilterColumn = keyof typeof JOB_FILTERABLE;
  * The search box over the floor's list (2026-10-15, the client: *"Add the
  * filter options that are available in sales order in work order too"*).
  *
- * Five columns, and they are what somebody standing in front of this list
- * actually has in hand: a **job number** off a docket, the **sales order**
- * number or the buyer's own **PO number** off a chase, the **customer**, or
- * the **product**. It mirrors `orderSearchClause` one document along —
- * deliberately the same six facts less the colour and the code, both of which
- * are already answerable from a column funnel here.
+ * Six columns, and they are what somebody standing in front of this list
+ * actually has in hand: a **job number** off a docket, the **sales order** or
+ * **proforma** number or the buyer's own **PO number** off a chase, the
+ * **customer**, or the **product**. It mirrors `orderSearchClause` one
+ * document along — deliberately the same facts less the colour and the code,
+ * both of which are already answerable from a column funnel here.
+ *
+ * The proforma joined this list the day the grid started leading with its
+ * number (2026-11-24): a number somebody can read off the screen and not find
+ * by typing it is a search box that cannot answer about its own page.
  *
  * Through `searchClause` like every other search in this app, which is what
  * escapes `%` and `_` (LIKE's own wildcards, so typing either matched every
@@ -167,12 +207,15 @@ export type JobFilterColumn = keyof typeof JOB_FILTERABLE;
  * and an unbracketed `OR` would be a way straight past data scoping.
  *
  * It lives in the **inner** WHERE, over real columns rather than the select's
- * aliases: `o.po_number` is reachable there and nowhere else, and the two
- * aliases it gives up (`item_label`, `color`) each have a heading filter of
- * their own.
+ * aliases: `o.po_number` and `pf.number` are reachable there and nowhere else,
+ * and the two aliases it gives up (`item_label`, `color`) each have a heading
+ * filter of their own.
  */
 export function jobSearchClause(q: string | undefined): { sql: string; params: unknown[] } {
-  return searchClause(['w.number', 'o.number', 'o.po_number', 'c.name', 'p.name'], String(q ?? '').trim());
+  return searchClause(
+    ['w.number', 'o.number', 'pf.number', 'o.po_number', 'c.name', 'p.name'],
+    String(q ?? '').trim(),
+  );
 }
 
 /**

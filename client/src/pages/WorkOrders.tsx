@@ -186,6 +186,33 @@ function readExpandGroups(): boolean {
   try { return localStorage.getItem(FOLD_KEY) === '0'; } catch { return false; }
 }
 
+/**
+ * What the grid calls the order a job is against (2026-11-24, the client:
+ * *"Instead of sale order number, I want it to be referenced to proforma
+ * Invoice number"*).
+ *
+ * The **proforma** where the order was booked from one, which is the document
+ * the desk and the buyer both quote; the **sales order's own number** where it
+ * was not. A fallback rather than an em-dash, because an order booked without
+ * a proforma is not a gap to fill — it is the whole imported backlog, and a
+ * reference nobody can read would leave those rows unidentifiable.
+ *
+ * The hover says **which of the two** it is looking at, the rule the order
+ * book's Promised column follows about a date that came from the floor's plan
+ * rather than from a promise. The link goes to the **sales order** either way,
+ * and deliberately: this page is read by Production, who hold `proforma: none`
+ * under the access matrix, so a link to the proforma would be one that could
+ * only ever answer a refusal to the team that reads this list most — the dead
+ * control this codebase keeps refusing. The hover states where it goes.
+ */
+function orderRef(w: WorkOrder): { label: string; title: string } {
+  const so = w.order_number || '';
+  const pi = w.pi_number || '';
+  return pi
+    ? { label: pi, title: `Proforma ${pi} — opens sales order ${so}` }
+    : { label: so, title: `Sales order ${so} — no proforma was raised for it` };
+}
+
 /** The group's statuses, commonest first — *5 Not planned*, or *3 Scheduled · 2 Running*. */
 function statusMix(group: WorkOrder[]): { status: WorkOrderStatus; n: number }[] {
   const counts = new Map<WorkOrderStatus, number>();
@@ -741,7 +768,7 @@ export default function WorkOrdersPage() {
         )}
         <Input
           className="w-72"
-          placeholder="Search job no., sales order, PO no., customer…"
+          placeholder="Search job no., proforma, sales order, PO no., customer…"
           value={q}
           onChange={(e) => setQ(e.target.value)}
         />
@@ -1047,10 +1074,26 @@ export default function WorkOrdersPage() {
                 const groupPlanned = group.reduce((n, x) => n + (x.qty_planned || 0), 0);
                 const groupMade = group.reduce((n, x) => n + (x.progress?.produced ?? 0), 0);
                 const groupPlannable = group.filter(plannable);
-                /* A header for a group of one repeats the row under it and
-                   says nothing else — see `jobsPerOrder` above. */
                 const grouped = (jobsPerOrder.get(w.order_id) ?? 1) > 1;
-                const header = first && grouped;
+                /** The proforma this order was booked from, else its own number. */
+                const ref = orderRef(w);
+                /*
+                 * **Every order opens a header, a one-job order included**
+                 * (2026-11-24, the client with the two shapes interleaved
+                 * down their own list: *"every order should have same format
+                 * even if the order has single product"*).
+                 *
+                 * This reverses 2026-10-29, which drew a header only for a
+                 * group — on the reasoning that a header for a group of one
+                 * repeats the row beneath it — and it is their call with the
+                 * page in front of them. What that reasoning was right about
+                 * is kept as a rule: **the header's data is drawn for every
+                 * order, and a header control that would duplicate the single
+                 * row under it is not** (the tick and *Set dates for all 1*,
+                 * both below). A one-job order has nothing to fold either, so
+                 * it carries no chevron and is always drawn open.
+                 */
+                const header = first;
                 /* Alternate orders tinted, so a group reads as one block. The
                    ticked colour **replaces** it rather than sitting beside it:
                    two background utilities of equal specificity are settled by
@@ -1112,13 +1155,17 @@ export default function WorkOrdersPage() {
                     */
                     <tr
                       key={`order-${w.order_id}`}
-                      className={`cursor-pointer border-t border-slate-200 bg-brand-100 ${GROUP_BAR}`}
-                      onClick={() => toggleGroup(w.order_id)}
-                      title={open ? `Fold ${w.order_number} back into one row` : `Show the ${group.length} jobs on ${w.order_number}`}
+                      className={`border-t border-slate-200 bg-brand-100 ${GROUP_BAR} ${grouped ? 'cursor-pointer' : ''}`}
+                      onClick={grouped ? () => toggleGroup(w.order_id) : undefined}
+                      title={grouped
+                        ? (open ? `Fold ${ref.label} back into one row` : `Show the ${group.length} jobs on ${ref.label}`)
+                        : undefined}
                     >
                       {planning && mayPlan && (
                         <td className="py-1.5 pr-2" onClick={(e) => e.stopPropagation()}>
-                          {groupPlannable.length > 0 && (
+                          {/* Ticking every job on a one-job order is the tick
+                              on the row directly beneath it — see `header`. */}
+                          {grouped && groupPlannable.length > 0 && (
                             <input
                               type="checkbox"
                               title="Tick every job on this sales order that can be planned"
@@ -1140,17 +1187,26 @@ export default function WorkOrdersPage() {
                           on Progress, which is the view that draws it. */}
                       <td className="py-1.5 pr-3 font-semibold" colSpan={planning ? 4 : 5}>
                         <div className="flex min-w-0 items-center gap-2">
-                          <Icon
-                            name="chevron-right"
-                            size={12}
-                            className={`shrink-0 text-slate-400 transition-transform ${open ? 'rotate-90' : ''}`}
-                          />
+                          {/* A one-job order has nothing to fold, so it draws
+                              no chevron — and keeps its width, or the reference
+                              beside it would start at a different x from the
+                              one on the order above. */}
+                          {grouped ? (
+                            <Icon
+                              name="chevron-right"
+                              size={12}
+                              className={`shrink-0 text-slate-400 transition-transform ${open ? 'rotate-90' : ''}`}
+                            />
+                          ) : (
+                            <span className="w-3 shrink-0" aria-hidden />
+                          )}
                           <Link
                             to={`/orders/${w.order_id}`}
                             className="shrink-0 whitespace-nowrap text-brand-700 hover:underline"
                             onClick={(e) => e.stopPropagation()}
+                            title={ref.title}
                           >
-                            {w.order_number}
+                            {ref.label}
                           </Link>
                           <span className="max-w-[14rem] shrink-0 truncate font-normal text-slate-600" title={w.customer_name || undefined}>
                             {w.customer_name}
@@ -1198,7 +1254,9 @@ export default function WorkOrdersPage() {
                             {groupDue} to confirm
                           </span>
                         )}
-                        {mayPlan && groupPlannable.length > 0 && (
+                        {/* One date across a one-job order is the two boxes on
+                            its own row — see `header`. */}
+                        {mayPlan && groupPlannable.length > 1 && (
                           groupOpen.has(w.order_id) ? (
                             <span className="inline-flex items-center gap-1 align-middle">
                               <Input
@@ -1206,7 +1264,7 @@ export default function WorkOrdersPage() {
                                 autoFocus
                                 className={DATE_INPUT}
                                 value={groupDates[w.order_id]?.start ?? ''}
-                                title={`Start for all ${groupPlannable.length} jobs on ${w.order_number}`}
+                                title={`Start for all ${groupPlannable.length} jobs on ${ref.label}`}
                                 onChange={(e) => setGroupDate(w.order_id, groupPlannable, false, e.target.value)}
                               />
                               <span className="text-slate-300">→</span>
@@ -1214,7 +1272,7 @@ export default function WorkOrdersPage() {
                                 type="date"
                                 className={DATE_INPUT}
                                 value={groupDates[w.order_id]?.end ?? ''}
-                                title={`Finish for all ${groupPlannable.length} jobs on ${w.order_number}`}
+                                title={`Finish for all ${groupPlannable.length} jobs on ${ref.label}`}
                                 onChange={(e) => setGroupDate(w.order_id, groupPlannable, true, e.target.value)}
                               />
                               <button
@@ -1286,7 +1344,7 @@ export default function WorkOrdersPage() {
                       key={w.id}
                       className={`border-b border-slate-100 last:border-0 hover:bg-brand-50/60 ${
                         ticked.has(w.id) ? 'bg-brand-50' : tint
-                      } ${first && !header ? 'border-t border-slate-200' : ''} ${grouped ? MEMBER_BAR : ''}`}
+                      } ${grouped ? MEMBER_BAR : ''}`}
                     >
                       {planning && mayPlan && (
                         <td className="py-2 pr-2">
@@ -1302,33 +1360,12 @@ export default function WorkOrdersPage() {
                       <td className={`whitespace-nowrap py-2 pr-2 font-medium ${grouped ? 'pl-4' : ''}`}>
                         <Link to={`/work-orders/${w.id}`} className="text-brand-600 hover:underline">{w.number}</Link>
                         {/*
-                          The one thing a group header says that the row cannot:
-                          which sales order raised this job. Drawn where there is
-                          no header to say it — a grouped job is indented under
-                          one that does.
-
-                          **Beside the job number, not under it** (2026-11-02,
-                          the client with the two shapes interleaved: *"Make
-                          every row of the same format as the ones which are
-                          condensed"*). It was a second line, and measured, that
-                          second line cost **1px** of row height — so what made
-                          a job row read as a different kind of row from a folded
-                          header was not its height but that it was the one
-                          stacked cell in the table. The header states its order
-                          and its customer side by side on one line; the row now
-                          states its job and its order the same way.
+                          The reference used to be repeated here, beside the job
+                          number, on every order that had no header of its own
+                          (2026-11-02). Every order has one now, so a row that
+                          still carried it would state the same document twice
+                          on consecutive lines — see `header` above.
                         */}
-                        {first && !header && (
-                          <>
-                            <span className="px-1 text-slate-300">·</span>
-                            <Link
-                              to={`/orders/${w.order_id}`}
-                              className="text-[10px] font-normal text-slate-400 hover:text-brand-600 hover:underline"
-                            >
-                              {w.order_number}
-                            </Link>
-                          </>
-                        )}
                       </td>
                       {/* When the job was raised. Already this desk's own date
                           when it arrives — the stamp is UTC and the conversion
