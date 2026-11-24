@@ -198,13 +198,22 @@ describe('a run fits the shift it is in', () => {
       /makes about 50,000 .* in one shift/);
   });
 
-  test('a changeover comes off the shift it is lost in', () => {
+  test('a changeover is the scheduler\'s to charge, not this guard\'s', () => {
+    /*
+     * This asserted 45,000 when it shipped — the line's rate less its 72
+     * minutes — and that was wrong for a reason only measuring found: whether
+     * a run changes anything over depends on what the line ran *before* it,
+     * which a single-run guard cannot see. Charging it here made the guard
+     * refuse `layOutShifts`' own first slot on a line, where there is nothing
+     * to change from. The scheduler charges it; this answers what the line can
+     * physically make.
+     */
     const p = makeProduct('Changeover Cost Cap', 'Natural', 100000);
-    const slow = makeLine('Line With Changeover', 2, 72);  // 72 of 720 minutes = 10%
+    const slow = makeLine('Line With Changeover', 2, 72);
     const j = makeJob({ product: p, color: 'Natural', qty: 500000 });
-    assert.equal(shiftCapacity(p, { id: slow, name: '', shifts_per_day: 2, changeover_mins: 72 } as never), 45000);
-    assert.equal(runError(run({ machine_id: slow, lines: [{ work_order_id: j, qty_planned: 45000 }] })), null);
-    assert.match(String(runError(run({ machine_id: slow, lines: [{ work_order_id: j, qty_planned: 45001 }] }))), /in one shift/);
+    assert.equal(shiftCapacity(p, { id: slow, name: '', shifts_per_day: 2, changeover_mins: 72 } as never), 50000);
+    assert.equal(runError(run({ machine_id: slow, lines: [{ work_order_id: j, qty_planned: 50000 }] })), null);
+    assert.match(String(runError(run({ machine_id: slow, lines: [{ work_order_id: j, qty_planned: 50001 }] }))), /in one shift/);
   });
 
   test('a product with no rate is planned anyway, never refused', () => {

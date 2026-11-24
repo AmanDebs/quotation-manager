@@ -2205,3 +2205,65 @@ export interface RunOptions {
   color: string;
   options: RunOption[];
 }
+
+/* ------------------------------------------- the worked-out shift plan */
+
+/**
+ * A run the scheduler proposes, before anything is written. The same shape a
+ * saved `ProductionRun` has, less the id, plus whether it opens with a
+ * changeover — see `server/src/services/shiftPlan.ts`.
+ */
+export interface ProposedRun {
+  date: string;
+  machine_id: number;
+  line_name: string;
+  shift: string;
+  product_id: number | null;
+  product_name: string;
+  color: string;
+  qty_planned: number;
+  capacity: number;
+  changeover: boolean;
+  allocations: { work_order_id: number; number: string; qty_planned: number }[];
+}
+
+export interface PlannedShiftJob {
+  id: number;
+  number: string;
+  product_name: string;
+  color: string;
+  customer_name: string;
+  order_id: number;
+  order_number: string;
+  pieces: number;
+  due: string | null;
+  due_source: 'order' | 'line' | 'jobs' | 'none';
+  shifts: number;
+  placed: number;
+  planned_start: string;
+  planned_end: string;
+  late: boolean;
+  late_days: number;
+  /** Why it could not be planned, or null. */
+  blocked: 'no-rate' | 'nothing-left' | 'no-line' | null;
+}
+
+export interface ShiftPlanSummary {
+  jobs: number;
+  blocked: number;
+  late: number;
+  undated: number;
+  runs: number;
+  pieces: number;
+  shifts: number;
+  changeovers: number;
+  from: string;
+  to: string;
+}
+
+export interface ShiftPlanPreview {
+  start: string;
+  runs: ProposedRun[];
+  jobs: PlannedShiftJob[];
+  summary: ShiftPlanSummary;
+}

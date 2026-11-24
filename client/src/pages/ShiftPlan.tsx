@@ -4,10 +4,11 @@ import { Link } from 'react-router-dom';
 import { api } from '../api/client';
 import { useCan } from '../App';
 import type { ProductionRun, RunSetup } from '../types';
-import { PageHeader, Card, Input, EmptyState, Select, CAPTION_CLASS, TH_CLASS } from '../components/ui';
+import { PageHeader, Card, Input, Button, EmptyState, Select, CAPTION_CLASS, TH_CLASS } from '../components/ui';
 import { fmtQty, fmtDate, today, addDays } from '../lib/format';
 import { useUrlFilter } from '../lib/useUrlFilter';
 import RunDialog from '../components/RunDialog';
+import ShiftPlanModal from '../components/ShiftPlanModal';
 
 /**
  * The shift plan — a board of what every line is making, shift by shift
@@ -42,6 +43,7 @@ export default function ShiftPlanPage() {
   const [editing, setEditing] = useState<
     { run: ProductionRun | null; seed: { date: string; machine_id: number; shift: string } } | null
   >(null);
+  const [working, setWorking] = useState(false);
 
   const start = from || today();
   const end = to || addDays(start, DEFAULT_DAYS - 1);
@@ -72,6 +74,12 @@ export default function ShiftPlanPage() {
       <PageHeader
         title="Shift Plan"
         subtitle="What each line is making, shift by shift"
+        actions={mayPlan ? (
+          // The press that fills the board. Behind `work_order: full` like
+          // every other control here, so a view-only login sees the plan and
+          // no way to change it.
+          <Button onClick={() => setWorking(true)}>Work out the plan…</Button>
+        ) : undefined}
       />
 
       <div className="flex flex-wrap items-end gap-2">
@@ -174,6 +182,10 @@ export default function ShiftPlanPage() {
         shift, measured from the shift book; a product nobody has run yet shows none and is
         planned anyway.
       </p>
+
+      {working && (
+        <ShiftPlanModal onClose={() => setWorking(false)} onApplied={() => setWorking(false)} />
+      )}
 
       {editing && setup && (
         <RunDialog

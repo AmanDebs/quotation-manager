@@ -162,12 +162,28 @@ export function shiftCapacity(productId: number | null, line: LineFacts): number
   if (!productId) return null;
   const rate = shiftRates([productId], line.shifts_per_day).get(productId);
   if (!rate || !(rate.pcs_per_day > 0)) return null;
-  // A changeover is time the line is not making anything, so it comes off the
-  // shift it is lost in. `changeover_mins` is 0 on a line nobody has set,
-  // which is what makes this arithmetic a no-op until somebody states one.
-  const hours = 12;
-  const usable = Math.max(0, hours * 60 - line.changeover_mins) / (hours * 60);
-  return round2(rate.pcs_per_day * usable);
+  /*
+   * **The changeover is deliberately not charged here**, which reverses how
+   * this shipped on 2026-11-24 and is worth the words.
+   *
+   * It first took `changeover_mins` off every shift, on the reasoning that a
+   * colour change costs the shift it happens in — true, and not something this
+   * function can know. Whether a run changes anything over depends on **what
+   * that line ran before it**, which is a property of the *sequence* rather
+   * than of the run; charging it unconditionally made this guard refuse the
+   * scheduler's own plans, including a line's very first slot, where there is
+   * nothing to change from. Found by measuring: `plan/apply` was refused
+   * *"makes about 45,000 … and this run is for 50,000"* over a run `layOutShifts`
+   * had just worked out at the full rate.
+   *
+   * So the two are one rule again, each owning what it can see: **the
+   * scheduler charges the changeover**, because it knows the order the slots
+   * run in, and **this guard answers what the line can physically make**,
+   * which is the question a single run can be asked on its own. The
+   * alternative — making the guard read its neighbours — is a check another
+   * row's edit can silently invalidate, with nothing to re-run it.
+   */
+  return round2(rate.pcs_per_day);
 }
 
 /**
