@@ -5,7 +5,8 @@ import { scopeClause } from '../middleware/scope.js';
 import { runError, writeRun, runsFor, jobFacts, allocatedByJob, type RunInput }
   from '../services/runPlan.js';
 import { plannedDateError } from '../services/orderJobs.js';
-import { productionLines, SHIFTS, shutdownDates, SHIFT_KEYS } from '../services/shifts.js';
+import { syncJobStatus } from '../services/jobStatus.js';
+import { productionLines, SHIFTS, shutdownDates, SHIFT_KEYS, normaliseShift } from '../services/shifts.js';
 import { layOutShifts, summariseShifts, slotKey, type ShiftJob, type LineSpec }
   from '../services/shiftPlan.js';
 import { shiftRates } from '../services/outputRate.js';
@@ -118,9 +119,17 @@ productionRunsRouter.get('/options', requirePermission('work_order', 'full'), (r
  * the new runs off the committed slots, so it looked right — and `runError`
  * then refused every one of them on *never exceed the work order*: a preview
  * offering what the press refuses, which is the form-offers-what-the-API-
- * refuses trap. Found by pressing twice. It is the same figure
- * `/production-runs/options` calls `unplanned`, so the planner and the picker
- * answer one question.
+ * refuses trap. Found by pressing twice.
+ *
+ * It **asks `allocatedByJob` rather than restating it in SQL**, and that is
+ * not tidiness: the first cut subtracted a `run_allocations` sub-select here,
+ * and when that function learned that a **closed run claims nothing** this
+ * copy did not — so a shift signed off short went on holding its whole claim
+ * in the planner's eyes and the shortfall it was meant to hand back never
+ * appeared, while `/production-runs/options` (which did ask) reported it
+ * correctly. Two readings of one question, disagreeing about the one figure
+ * the execution half turns on. One function, so the planner and the picker
+ * answer one question — which is what this comment claimed all along.
  */
 function queueJobs(req: AuthedRequest, ids?: number[]): ShiftJob[] {
   const scope = scopeClause(req, 'customer_id');
@@ -134,9 +143,7 @@ function queueJobs(req: AuthedRequest, ids?: number[]): ShiftJob[] {
             ${ORDER_DUE('o')} AS due, ${ORDER_DUE_SOURCE('o')} AS due_source,
             w.qty_planned
               - COALESCE((SELECT SUM(${LIVE_OK('e')}) FROM production_entries e
-                           WHERE e.work_order_id = w.id), 0)
-              - COALESCE((SELECT SUM(a.qty_planned) FROM run_allocations a
-                           WHERE a.work_order_id = w.id), 0) AS pieces
+                           WHERE e.work_order_id = w.id), 0) AS pieces
        FROM work_orders w
        JOIN orders o ON o.id = w.order_id
        JOIN customers c ON c.id = o.customer_id
@@ -151,6 +158,8 @@ function queueJobs(req: AuthedRequest, ids?: number[]): ShiftJob[] {
         ${scope.sql ? `AND ${scope.sql}` : ''}`
   ).all(...([...want, ...scope.params] as never[])) as Record<string, unknown>[];
 
+  const committed = allocatedByJob(rows.map((r) => Number(r.id)));
+
   return rows.map((r) => ({
     id: Number(r.id),
     number: String(r.number ?? ''),
@@ -160,7 +169,7 @@ function queueJobs(req: AuthedRequest, ids?: number[]): ShiftJob[] {
     customer_name: String(r.customer_name ?? ''),
     order_id: Number(r.order_id),
     order_number: String(r.order_number ?? ''),
-    pieces: Math.max(0, Number(r.pieces) || 0),
+    pieces: Math.max(0, (Number(r.pieces) || 0) - (committed.get(Number(r.id)) ?? 0)),
     due: String(r.due ?? '') || null,
     due_source: String(r.due_source ?? 'none') as DueSource,
     current: {
@@ -353,6 +362,139 @@ productionRunsRouter.put('/:id', requirePermission('work_order', 'full'), (req: 
   const refused = runError(input, id, { sql: scope.sql, params: scope.params });
   if (refused) return res.status(409).json({ error: refused });
   transaction(() => writeRun(input, req.user?.id ?? null, id));
+  res.json(one(id));
+});
+
+/**
+ * One run, read whole — the plan and what came of it.
+ *
+ * Declared **above** the `/:id` write routes for no reason of Express's (they
+ * are different verbs) but beside them so the three read as one group. Scoped
+ * through `exists`, so a run on another desk's book is a **404 rather than a
+ * 403** and an id cannot be probed for.
+ */
+productionRunsRouter.get('/:id', requirePermission('work_order'), (req: AuthedRequest, res) => {
+  const scope = scopeClause(req, 'customer_id');
+  const run = runsFor({ scopeSql: scope.sql || undefined, scopeParams: scope.params })
+    .find((r) => r.id === Number(req.params.id));
+  if (!run) return res.status(404).json({ error: 'Run not found' });
+  res.json(run);
+});
+
+/**
+ * **Record what ran** — the execution half of the shift plan (2026-11-24).
+ *
+ * The supervisor's screen asks about a *shift*, not a job: here is Shift A on
+ * IMM-01, it was planned for 50,000 across two work orders, what actually
+ * happened? So one press books an entry per job, each carrying the run it was
+ * against — which is what makes planned-against-actual answerable per shift
+ * at all. `POST /work-orders/:id/entries` is untouched and is still how output
+ * is booked against a job with no run behind it.
+ *
+ * **`output: full`, not `work_order`.** Booking what was made is the floor's
+ * act and has its own cell, which is exactly the split the matrix draws:
+ * Production books its shifts without being able to re-plan the board.
+ *
+ * Downtime is recorded **once for the shift** rather than per job — the line
+ * was down, not the work order — and is written against the first entry, so
+ * summing it over a run never counts one stoppage twice.
+ */
+productionRunsRouter.post('/:id/entries', requirePermission('output', 'full'), (req: AuthedRequest, res) => {
+  const id = Number(req.params.id);
+  const scope = scopeClause(req, 'customer_id');
+  const run = runsFor({ scopeSql: scope.sql || undefined, scopeParams: scope.params })
+    .find((r) => r.id === id);
+  if (!run) return res.status(404).json({ error: 'Run not found' });
+
+  const body = req.body ?? {};
+  const date = String(body.date ?? run.date);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    return res.status(400).json({ error: 'That production date could not be read' });
+  }
+  const rows = Array.isArray(body.lines) ? body.lines as Record<string, unknown>[] : [];
+  const planned = new Set(run.allocations.map((a) => a.work_order_id));
+  const lines = rows.map((r) => ({
+    work_order_id: Number(r.work_order_id),
+    qty_ok: Number(r.qty_ok) || 0,
+    qty_reject: Number(r.qty_reject) || 0,
+  })).filter((r) => r.qty_ok !== 0 || r.qty_reject !== 0);
+
+  for (const l of lines) {
+    // A job not on this run cannot have been made by it — booking one would
+    // put output against a shift that was never planning to make it, and the
+    // run's own figures would then describe work it never held.
+    if (!planned.has(l.work_order_id)) {
+      return res.status(409).json({ error: 'That work order is not on this run.' });
+    }
+    if (l.qty_ok < 0 || l.qty_reject < 0) {
+      return res.status(400).json({ error: 'Pieces made and rejected cannot be negative.' });
+    }
+  }
+  const downtime = Math.max(0, Math.floor(Number(body.downtime_mins) || 0));
+  if (!lines.length && !downtime) {
+    // A shift that made nothing and lost no time is a shift nobody needs to
+    // record. Saying so beats writing a row of zeroes nobody can read.
+    return res.status(400).json({
+      error: 'Nothing to record: give at least one work order a figure, or state the downtime.',
+    });
+  }
+
+  const shift = normaliseShift(run.shift);
+  const ins = db.prepare(
+    `INSERT INTO production_entries
+       (work_order_id, run_id, date, shift, qty_ok, qty_reject, downtime_mins, operator, notes, created_by)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  );
+  const operator = String(body.operator ?? '');
+  const notes = String(body.notes ?? '');
+  transaction(() => {
+    if (!lines.length) {
+      // Downtime with nothing made is still a fact about the shift, so it is
+      // written against the run's first job rather than lost.
+      ins.run(run.allocations[0].work_order_id, id, date, shift, 0, 0, downtime, operator, notes,
+        req.user?.id ?? null);
+      return;
+    }
+    lines.forEach((l, i) => {
+      ins.run(l.work_order_id, id, date, shift, l.qty_ok, l.qty_reject,
+        // Once for the shift, on the first row: the line was down, not the
+        // work order, and spreading it would count one stoppage twice.
+        i === 0 ? downtime : 0, operator, notes, req.user?.id ?? null);
+    });
+  });
+
+  // Booked output moves a job's own status, and the order's with it — the
+  // same two calls `POST /work-orders/:id/entries` makes, for its reasons.
+  for (const jobId of new Set(lines.map((l) => l.work_order_id))) syncJobStatus(jobId);
+  for (const orderId of new Set(run.allocations.map((a) => a.order_id))) syncOrderStatus(orderId);
+
+  res.status(201).json(one(id));
+});
+
+/**
+ * Sign a shift off, or take the signature back.
+ *
+ * **This is what gives a shortfall to the planner.** While a run is open its
+ * allocations are a claim on the work orders, so a shift planned for 50,000
+ * that made 40,000 leaves the job reading as fully planned with 10,000
+ * committed to a day that has passed. Closing it drops the claim;
+ * `allocatedByJob` stops counting it, what was made is in the shift book
+ * already, and the difference is back in the planner's queue **by
+ * construction** — there is no shortfall record anywhere to keep in step.
+ *
+ * **No guard on what was made.** A shift that produced nothing because the
+ * line was down all day is exactly the one that most needs closing, and
+ * refusing it would leave the whole quantity stranded on a past date.
+ *
+ * Reopening is always allowed: a signature is not an artefact out in the
+ * world, and one given by mistake with no way back is the trap this codebase
+ * has built once already.
+ */
+productionRunsRouter.post('/:id/close', requirePermission('output', 'full'), (req: AuthedRequest, res) => {
+  const id = Number(req.params.id);
+  if (!exists(id, req)) return res.status(404).json({ error: 'Run not found' });
+  const done = req.body?.open === true ? '' : 'done';
+  db.prepare('UPDATE production_runs SET status = ? WHERE id = ?').run(done, id);
   res.json(one(id));
 });
 

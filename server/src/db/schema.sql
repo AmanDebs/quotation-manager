@@ -1056,6 +1056,23 @@ CREATE TABLE IF NOT EXISTS production_runs (
   -- products.product_type states: SQLite cannot ALTER one, and a vocabulary
   -- that may grow a third shift must not need the table rebuilt.
   shift TEXT NOT NULL DEFAULT 'A',
+  /*
+   * Whether the shift has been run and signed off: '' or 'done' (2026-11-24).
+   *
+   * **This is what gives a shortfall back to the planner.** A run's allocation
+   * is a claim on a work order, so while it stands the job reads as planned
+   * even if the shift made half of it -- and the missing half would be
+   * committed to a slot that has already passed. Closing the run drops its
+   * allocations out of what counts as planned; what was actually made is
+   * already in the shift book, so the difference reappears in the queue by
+   * construction and the scheduler puts it in a later shift. No second record
+   * of a shortfall, and nothing to keep in step.
+   *
+   * The allocation is **kept rather than trimmed to actual**, so what was
+   * planned and what was made stay two facts and the run can still be read
+   * against itself. No CHECK, the rule products.product_type states.
+   */
+  status TEXT NOT NULL DEFAULT '',
   notes TEXT NOT NULL DEFAULT '',
   created_by INTEGER REFERENCES users(id),
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -1087,6 +1104,11 @@ CREATE INDEX IF NOT EXISTS idx_runs_date ON production_runs(date);
 CREATE INDEX IF NOT EXISTS idx_runs_line ON production_runs(machine_id, date);
 CREATE INDEX IF NOT EXISTS idx_alloc_run ON run_allocations(run_id);
 CREATE INDEX IF NOT EXISTS idx_alloc_job ON run_allocations(work_order_id);
+-- The index on production_entries(run_id) is NOT here: this file runs top to
+-- bottom and that table is created five hundred lines further down, so an
+-- index naming it from up here kills the boot. It lives in connection.ts with
+-- the migration that adds the column -- the batches.disposition trap, met
+-- again from the other direction.
 
 /*
  * Days the plant does not run (2026-11-24).
@@ -1506,10 +1528,27 @@ CREATE TABLE IF NOT EXISTS production_entries (
   -- Which lot this shift's output went into. Nullable: every entry booked
   -- before batches existed has none, and a job need not be batched at all.
   batch_id INTEGER REFERENCES batches(id) ON DELETE SET NULL,
+  /*
+   * The planned run this output was booked against (2026-11-24).
+   *
+   * Nullable, so every entry booked before the board existed is untouched and
+   * output can still be booked against a job with no run at all -- which is
+   * what `POST /work-orders/:id/entries` has always done.
+   *
+   * **ON DELETE SET NULL, never CASCADE.** Deleting a *plan* must not delete
+   * what was actually made: the shift book is the record of the floor, and a
+   * planner tidying the board is not saying a day's production never
+   * happened. The entry simply stops naming a run.
+   */
+  run_id INTEGER REFERENCES production_runs(id) ON DELETE SET NULL,
   date TEXT NOT NULL,
   shift TEXT NOT NULL DEFAULT '',
   qty_ok REAL NOT NULL DEFAULT 0,
   qty_reject REAL NOT NULL DEFAULT 0,
+  -- Minutes the line was down in this shift. Asked for in the planning brief
+  -- and recorded nowhere before; 0 on every entry on file, which is honest --
+  -- nobody was asked, so nobody said.
+  downtime_mins INTEGER NOT NULL DEFAULT 0,
   operator TEXT NOT NULL DEFAULT '',
   notes TEXT NOT NULL DEFAULT '',
   created_by INTEGER REFERENCES users(id),

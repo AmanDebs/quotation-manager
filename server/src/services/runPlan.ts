@@ -112,19 +112,86 @@ export function jobFacts(ids: number[], scope?: { sql: string; params: unknown[]
  * commitment and must not refuse their own replacement. The same rule
  * `despatchLimitError` states about re-saving an unchanged trip, and
  * `linesFreeFrom` about re-planning a job.
+ *
+ * **A closed run claims nothing**, which is the whole of how a shortfall gets
+ * back to the planner. A run that was planned for 50,000 and made 40,000 goes
+ * on holding a claim for 50,000 while it is open — so the job reads as fully
+ * planned, and 10,000 of it is committed to a shift that has already passed.
+ * Signing the run off drops that claim; what was made is in the shift book
+ * already, so the difference reappears in the queue **by construction** and
+ * the scheduler puts it in a later shift. There is no second record of a
+ * shortfall anywhere, and so nothing to keep in step.
  */
 export function allocatedByJob(jobIds: number[], exceptRunId?: number): Map<number, number> {
   const want = [...new Set(jobIds.filter((n) => Number.isInteger(n) && n > 0))];
   const out = new Map<number, number>();
   if (!want.length) return out;
   const rows = db.prepare(
-    `SELECT work_order_id, SUM(qty_planned) AS qty
-       FROM run_allocations
-      WHERE work_order_id IN (${want.map(() => '?').join(',')})
-        ${exceptRunId ? 'AND run_id <> ?' : ''}
-      GROUP BY work_order_id`
+    `SELECT a.work_order_id, SUM(a.qty_planned) AS qty
+       FROM run_allocations a
+       JOIN production_runs r ON r.id = a.run_id
+      WHERE a.work_order_id IN (${want.map(() => '?').join(',')})
+        AND r.status <> 'done'
+        ${exceptRunId ? 'AND a.run_id <> ?' : ''}
+      GROUP BY a.work_order_id`
   ).all(...([...want, ...(exceptRunId ? [exceptRunId] : [])] as never[])) as Record<string, unknown>[];
   for (const r of rows) out.set(Number(r.work_order_id), round2(Number(r.qty) || 0));
+  return out;
+}
+
+/** What a run actually made, against what it was planned for. */
+export interface RunActual {
+  /** Good pieces, scrapped lots dropped (`LIVE_OK`), and rejects beside them. */
+  made: number;
+  rejected: number;
+  /** Minutes the line was down across the shift. */
+  downtime_mins: number;
+  /** Shift entries booked against this run. */
+  entries: number;
+  /** Per work order, so a shared run says whose pieces were whose. */
+  byJob: Map<number, { made: number; rejected: number }>;
+}
+
+/**
+ * What was booked against each of these runs.
+ *
+ * Read from `production_entries` through `run_id` and nowhere else — a run
+ * stores no figure of its own, so correcting a mis-keyed shift corrects the
+ * run by construction, which is the rule `production.ts` states about every
+ * roll-up of output in this app.
+ *
+ * `LIVE_OK`, so a **scrapped lot does not count as made** here either: the
+ * shift ran and the pieces exist, but they are not good ones, and a run that
+ * read as complete over condemned output would close a shortfall that is
+ * real.
+ */
+export function runActuals(runIds: number[]): Map<number, RunActual> {
+  const want = [...new Set(runIds.filter((n) => Number.isInteger(n) && n > 0))];
+  const out = new Map<number, RunActual>();
+  if (!want.length) return out;
+  const rows = db.prepare(
+    `SELECT e.run_id, e.work_order_id,
+            SUM(${LIVE_OK('e')}) AS made,
+            SUM(e.qty_reject) AS rejected,
+            SUM(e.downtime_mins) AS downtime,
+            COUNT(*) AS entries
+       FROM production_entries e
+      WHERE e.run_id IN (${want.map(() => '?').join(',')})
+      GROUP BY e.run_id, e.work_order_id`
+  ).all(...(want as never[])) as Record<string, unknown>[];
+
+  for (const r of rows) {
+    const id = Number(r.run_id);
+    const cur = out.get(id) ?? { made: 0, rejected: 0, downtime_mins: 0, entries: 0, byJob: new Map() };
+    const made = round2(Number(r.made) || 0);
+    const rejected = round2(Number(r.rejected) || 0);
+    cur.made = round2(cur.made + made);
+    cur.rejected = round2(cur.rejected + rejected);
+    cur.downtime_mins += Number(r.downtime) || 0;
+    cur.entries += Number(r.entries) || 0;
+    cur.byJob.set(Number(r.work_order_id), { made, rejected });
+    out.set(id, cur);
+  }
   return out;
 }
 
@@ -345,6 +412,22 @@ export interface RunRow {
   line_name: string;
   shift: string;
   notes: string;
+  /** '' while the shift is still to come or still running, else 'done'. */
+  status: string;
+  /**
+   * What was booked against it. **Derived from the shift book**, never stored
+   * — a run holds no figure of its own, so correcting a mis-keyed shift
+   * corrects the run.
+   */
+  made: number;
+  rejected: number;
+  downtime_mins: number;
+  /**
+   * Planned less made, floored — what this shift did not get to. It is a
+   * figure to read rather than a record: closing the run is what gives it
+   * back to the planner.
+   */
+  shortfall: number;
   /** Derived from the allocations — a run states neither of its own. */
   product_id: number | null;
   product_name: string;
@@ -359,6 +442,9 @@ export interface RunRow {
     order_number: string;
     customer_name: string;
     qty_planned: number;
+    /** What this job actually got out of this run. */
+    made: number;
+    rejected: number;
   }[];
 }
 
@@ -397,7 +483,7 @@ export function runsFor(f: RunFilters = {}): RunRow[] {
   }
 
   const runs = db.prepare(
-    `SELECT r.id, r.date, r.machine_id, r.shift, r.notes, COALESCE(m.name, '') AS line_name
+    `SELECT r.id, r.date, r.machine_id, r.shift, r.notes, r.status, COALESCE(m.name, '') AS line_name
        FROM production_runs r
        LEFT JOIN machines m ON m.id = r.machine_id
       ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
@@ -428,27 +514,46 @@ export function runsFor(f: RunFilters = {}): RunRow[] {
       order_number: String(a.order_number ?? ''),
       customer_name: String(a.customer_name ?? ''),
       qty_planned: round2(Number(a.qty_planned) || 0),
+      made: 0,
+      rejected: 0,
     });
     byRun.set(Number(a.run_id), list);
     jobIds.push(Number(a.work_order_id));
   }
 
   const facts = jobFacts(jobIds);
+  const actuals = runActuals(ids);
   return runs.map((r) => {
-    const mine = byRun.get(Number(r.id)) ?? [];
+    const id = Number(r.id);
+    const mine = byRun.get(id) ?? [];
     const first = mine.length ? facts.get(mine[0].work_order_id) : undefined;
     const line = lineFacts(Number(r.machine_id));
+    const actual = actuals.get(id);
+    const planned = round2(mine.reduce((sum, a) => sum + a.qty_planned, 0));
+    const made = actual?.made ?? 0;
+    for (const a of mine) {
+      const got = actual?.byJob.get(a.work_order_id);
+      a.made = got?.made ?? 0;
+      a.rejected = got?.rejected ?? 0;
+    }
     return {
-      id: Number(r.id),
+      id,
       date: String(r.date ?? ''),
       machine_id: Number(r.machine_id),
       line_name: String(r.line_name ?? ''),
       shift: String(r.shift ?? ''),
       notes: String(r.notes ?? ''),
+      status: String(r.status ?? ''),
+      made,
+      rejected: actual?.rejected ?? 0,
+      downtime_mins: actual?.downtime_mins ?? 0,
+      // Floored: an over-run is not a negative shortfall, which is
+      // `progressFor`'s own rule about the same subtraction.
+      shortfall: round2(Math.max(0, planned - made)),
       product_id: first?.product_id ?? null,
       product_name: first?.product_name ?? '',
       color: first?.color ?? '',
-      qty_planned: round2(mine.reduce((sum, a) => sum + a.qty_planned, 0)),
+      qty_planned: planned,
       capacity: line ? shiftCapacity(first?.product_id ?? null, line) : null,
       allocations: mine,
     };

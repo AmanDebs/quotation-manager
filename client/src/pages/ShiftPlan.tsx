@@ -8,6 +8,7 @@ import { PageHeader, Card, Input, Button, EmptyState, Select, CAPTION_CLASS, TH_
 import { fmtQty, fmtDate, today, addDays } from '../lib/format';
 import { useUrlFilter } from '../lib/useUrlFilter';
 import RunDialog from '../components/RunDialog';
+import RunActualDialog from '../components/RunActualDialog';
 import ShiftPlanModal from '../components/ShiftPlanModal';
 
 /**
@@ -37,6 +38,10 @@ function daysBetween(from: string, to: string): string[] {
 export default function ShiftPlanPage() {
   const can = useCan();
   const mayPlan = can('work_order', 'full');
+  // Booking what was made is the floor's own cell, not the planner's — which
+  // is exactly the split the access matrix draws: Production records its
+  // shifts without being able to re-plan the board.
+  const mayLog = can('output', 'full');
   const [from, setFrom] = useUrlFilter('from');
   const [to, setTo] = useUrlFilter('to');
   const [lineFilter, setLineFilter] = useUrlFilter('machine_id');
@@ -44,6 +49,8 @@ export default function ShiftPlanPage() {
     { run: ProductionRun | null; seed: { date: string; machine_id: number; shift: string } } | null
   >(null);
   const [working, setWorking] = useState(false);
+  /** The run whose actuals are being recorded, if any. */
+  const [recording, setRecording] = useState<number | null>(null);
 
   const start = from || today();
   const end = to || addDays(start, DEFAULT_DAYS - 1);
@@ -67,7 +74,23 @@ export default function ShiftPlanPage() {
   const byCell = new Map(runs.map((r) => [`${r.date}|${r.machine_id}|${r.shift}`, r]));
 
   const planned = runs.reduce((sum, r) => sum + r.qty_planned, 0);
+  const made = runs.reduce((sum, r) => sum + r.made, 0);
   const lineDays = runs.length;
+  /*
+   * Shifts that **ran and fell short** and nobody has signed off: the
+   * planner's own to-do, since signing one off is what frees the balance.
+   * Counted over the board in view, which is what the figures beside it
+   * describe.
+   *
+   * It asks whether the shift started, not only whether `shortfall` is above
+   * zero — on a shift nobody has booked anything against yet that figure is
+   * the whole plan, so without this the count read as every future shift on
+   * the board being behind. Found by rendering it.
+   */
+  const toSign = runs.filter(
+    (r) => r.status !== 'done' && r.shortfall > 0
+      && (r.made > 0 || r.rejected > 0 || r.downtime_mins > 0),
+  ).length;
 
   return (
     <div className="space-y-4">
@@ -101,7 +124,13 @@ export default function ShiftPlanPage() {
         <div className="ml-auto text-xs text-slate-500">
           <strong className="text-slate-900">{runs.length}</strong> run{runs.length === 1 ? '' : 's'}
           {' · '}<strong className="tabular-nums text-slate-900">{fmtQty(planned)}</strong> pieces planned
+          {made > 0 && (
+            <>{' · '}<strong className="tabular-nums text-slate-900">{fmtQty(made)}</strong> made</>
+          )}
           {' · '}{lineDays} shift{lineDays === 1 ? '' : 's'} committed
+          {toSign > 0 && (
+            <>{' · '}<strong className="text-amber-700">{toSign}</strong> short and not signed off</>
+          )}
         </div>
       </div>
 
@@ -151,6 +180,7 @@ export default function ShiftPlanPage() {
                                   onOpen={mayPlan
                                     ? () => setEditing({ run, seed: { date: day, machine_id: l.id, shift: s.key } })
                                     : undefined}
+                                  onRecord={mayLog ? () => setRecording(run.id) : undefined}
                                 />
                               ) : mayPlan ? (
                                 <button
@@ -180,11 +210,26 @@ export default function ShiftPlanPage() {
         A run may serve several work orders, and each one&rsquo;s share is its own, so no piece is
         ever planned twice. <strong>Of</strong> is what that line can make of that product in one
         shift, measured from the shift book; a product nobody has run yet shows none and is
-        planned anyway.
+        planned anyway. What a shift <strong>made</strong> is read from the shift book too, so
+        correcting a mis-keyed entry corrects the board. <strong>Signing a shift off</strong> is
+        what hands anything it did not make back to the planner, which is why a shift that fell
+        short stays on the board until somebody does.
       </p>
 
       {working && (
         <ShiftPlanModal onClose={() => setWorking(false)} onApplied={() => setWorking(false)} />
+      )}
+
+      {recording !== null && runs.some((r) => r.id === recording) && (
+        <RunActualDialog
+          /* Read from the board's own query rather than re-fetched, so the
+             figures in the dialog and the figures in the cell behind it are
+             one answer — and the dialog follows a booking without a refetch
+             of its own, the list being invalidated by the press. */
+          run={runs.find((r) => r.id === recording)!}
+          mayLog={mayLog}
+          onClose={() => setRecording(null)}
+        />
       )}
 
       {editing && setup && (
@@ -200,37 +245,97 @@ export default function ShiftPlanPage() {
   );
 }
 
-/** One planned run, as a cell reads it. */
-function RunCell({ run, onOpen }: { run: ProductionRun; onOpen?: () => void }) {
+/**
+ * One run, as a cell reads it: what is being made, how it is going, and the
+ * two acts that belong to it.
+ *
+ * The figures **switch from the plan to the record** the moment anything is
+ * booked — before that the question is *can this shift take it*, so the cell
+ * reads against capacity; afterwards it is *did it*, so the cell reads against
+ * the plan. A cell showing both would be four numbers in an inch.
+ */
+function RunCell({ run, onOpen, onRecord }: {
+  run: ProductionRun;
+  onOpen?: () => void;
+  onRecord?: () => void;
+}) {
   // Over capacity is a fact about the plan rather than a refusal here — the
   // server refuses one on the way in, but a line's rate can be corrected
   // afterwards, and a plan that quietly stopped saying so would be worse.
   const over = run.capacity !== null && run.qty_planned > run.capacity;
+  const started = run.made > 0 || run.rejected > 0 || run.downtime_mins > 0;
+  const done = run.status === 'done';
   const body = (
     <>
       <div className="font-medium text-slate-900">
         {run.product_name || 'Custom item'}
         {run.color && <span className="ml-1.5 font-normal text-slate-500">{run.color}</span>}
       </div>
-      <div className={`tabular-nums ${over ? 'text-amber-700' : 'text-slate-600'}`}>
-        {fmtQty(run.qty_planned)}
-        {run.capacity !== null
-          ? <span className="text-slate-400"> of {fmtQty(run.capacity)}</span>
-          : <span className="text-slate-300" title="No output rate for this product yet"> · no rate</span>}
-      </div>
+      {started ? (
+        <div className="tabular-nums text-slate-600">
+          {fmtQty(run.made)}
+          <span className="text-slate-400"> of {fmtQty(run.qty_planned)}</span>
+          {run.shortfall > 0 && (
+            <span className={done ? 'ml-1 text-slate-400' : 'ml-1 font-semibold text-amber-700'}
+              title={done
+                ? 'Signed off short — the balance went back to the planner'
+                : `${fmtQty(run.shortfall)} not made. Signing this shift off hands it back to the planner.`}
+            >−{fmtQty(run.shortfall)}</span>
+          )}
+        </div>
+      ) : (
+        <div className={`tabular-nums ${over ? 'text-amber-700' : 'text-slate-600'}`}>
+          {fmtQty(run.qty_planned)}
+          {run.capacity !== null
+            ? <span className="text-slate-400"> of {fmtQty(run.capacity)}</span>
+            : <span className="text-slate-300" title="No output rate for this product yet"> · no rate</span>}
+        </div>
+      )}
       <div className="text-[10px] text-slate-400">
         {run.allocations.length} work order{run.allocations.length === 1 ? '' : 's'}
         {run.allocations.length > 0 && ` · ${run.allocations.map((a) => a.number).join(', ')}`}
       </div>
     </>
   );
+  /* `done` is a tick rather than a pill: on a board of fifty cells a pill per
+     signed-off shift would be the loudest thing on the page, and what the
+     mark has to say is only that this one is closed. */
+  const mark = done ? (
+    <span className="text-[10px] text-slate-400" title="Signed off">&#10003; signed off</span>
+  ) : null;
+
+  /* Recording is a control of its own rather than a second meaning for the
+     cell: opening the run plans it, and the two are different acts on
+     different permission cells. Quiet until the row is hovered, the rule the
+     line-items editor's own remove button records — except once a shift has
+     fallen short and not been signed off, which is the one state somebody is
+     looking for. */
+  const actions = (onRecord || mark) && (
+    <div className="mt-0.5 flex items-center gap-2">
+      {onRecord && (
+        <button
+          type="button"
+          className={`rounded px-1 text-[10px] hover:bg-brand-50 hover:text-brand-600 ${
+            !done && run.shortfall > 0 && started ? 'text-brand-600' : 'text-slate-400'
+          }`}
+          onClick={onRecord}
+          title={done ? 'What this shift made' : 'Record what this shift made'}
+        >{started ? 'what ran' : 'record'}</button>
+      )}
+      {mark}
+    </div>
+  );
+
   return onOpen ? (
-    <button
-      type="button"
-      className="w-full rounded px-1.5 py-1 text-left hover:bg-brand-50"
-      onClick={onOpen}
-      title="Open this run"
-    >{body}</button>
+    <div className="px-0.5">
+      <button
+        type="button"
+        className="w-full rounded px-1 py-1 text-left hover:bg-brand-50"
+        onClick={onOpen}
+        title="Open this run"
+      >{body}</button>
+      {actions}
+    </div>
   ) : (
     <div className="px-1.5 py-1">
       {body}
@@ -241,6 +346,7 @@ function RunCell({ run, onOpen }: { run: ProductionRun; onOpen?: () => void }) {
           </Link>
         ))}
       </div>
+      {actions}
     </div>
   );
 }

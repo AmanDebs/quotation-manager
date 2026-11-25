@@ -2154,6 +2154,9 @@ export interface RunAllocation {
   order_number: string;
   customer_name: string;
   qty_planned: number;
+  /** What this job actually got out of this run — read from the shift book. */
+  made: number;
+  rejected: number;
 }
 
 export interface ProductionRun {
@@ -2169,6 +2172,18 @@ export interface ProductionRun {
   qty_planned: number;
   /** What the line can make of it in that shift; null where no rate says. */
   capacity: number | null;
+  /**
+   * '' while the shift is still to come or still running, 'done' once it has
+   * been signed off. Signing off is what hands an unmade balance back to the
+   * planner, so it is a state rather than a tidy-up.
+   */
+  status: string;
+  /** What was booked against it. Derived from the shift book, never stored. */
+  made: number;
+  rejected: number;
+  downtime_mins: number;
+  /** Planned less made, floored. What this shift did not get to. */
+  shortfall: number;
   allocations: RunAllocation[];
 }
 

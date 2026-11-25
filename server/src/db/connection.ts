@@ -399,6 +399,25 @@ addColumnIfMissing('products', 'pcs_per_day', 'REAL');
  */
 addColumnIfMissing('machines', 'shifts_per_day', 'INTEGER NOT NULL DEFAULT 2');
 addColumnIfMissing('machines', 'changeover_mins', 'INTEGER NOT NULL DEFAULT 0');
+/*
+ * The execution half of the shift plan (2026-11-24).
+ *
+ * `run_id` carries its foreign key through `ALTER TABLE` because its default
+ * is NULL, the rule `company_id` had to work around -- and it is **SET NULL**
+ * rather than CASCADE, so deleting a plan never deletes what was made.
+ * `downtime_mins` and `status` both default to what every row already means:
+ * no downtime recorded, and a run nobody has signed off.
+ *
+ * The index on `run_id` goes **here, after the migration**, not in
+ * `schema.sql` -- the `batches.disposition` trap, where an index naming a
+ * column a migration adds killed the boot on a database migrated from an
+ * earlier version.
+ */
+addColumnIfMissing('production_entries', 'run_id',
+  'INTEGER REFERENCES production_runs(id) ON DELETE SET NULL');
+addColumnIfMissing('production_entries', 'downtime_mins', 'INTEGER NOT NULL DEFAULT 0');
+addColumnIfMissing('production_runs', 'status', "TEXT NOT NULL DEFAULT ''");
+db.exec('CREATE INDEX IF NOT EXISTS idx_entries_run ON production_entries(run_id)');
 // Make or buy (2026-09-11). Default 1: every product on file was made here as far as the app knew.
 addColumnIfMissing('products', 'made_here', 'INTEGER NOT NULL DEFAULT 1');
 if (addColumnIfMissing('products', 'product_type', "TEXT NOT NULL DEFAULT 'other'")) {
