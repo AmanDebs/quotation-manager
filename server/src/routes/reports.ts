@@ -11,6 +11,12 @@ import {
   type BookDoc, type BookGroupBy, type BookReport,
 } from '../services/reports.js';
 import { priceHistory, type PriceHistory } from '../services/priceHistory.js';
+import {
+  pivotProduction, PROD_OTHER, SHIFT_LABELS,
+  type ProductionFilter, type ProductionPivot,
+} from '../services/productionReport.js';
+import { productionLines } from '../services/shifts.js';
+import { db } from '../db/connection.js';
 
 /**
  * The Reports page's four sheets. Mounted on `requireAuth` alone and guarded
@@ -372,4 +378,118 @@ reportsRouter.get('/price-history/export', (req: AuthedRequest, res) => {
     { header: 'Amount', value: (r) => Number(r.amount ?? 0), type: 'money' },
   ];
   return sendXlsx(res, `Price history ${out.product_name}`.trim(), cols, rows);
+});
+
+/* ------------------------------------------------------------------ *
+ * Production — the plan against what came of it.
+ * ------------------------------------------------------------------ */
+
+/**
+ * The production sheet's own filters.
+ *
+ * Deliberately **not** `lineFilters`: that reads the order book's thirteen
+ * column dropdowns, which are facts about an order line, where this sheet is
+ * read over *runs*. What the brief asked to filter by — date, product,
+ * colour, work order, line and shift — is exactly what a run and its
+ * allocation carry, so they are read here and nowhere else.
+ *
+ * Scoped through the order behind the job, like the board itself, so a run on
+ * a customer this login cannot see is not on its sheet either.
+ */
+function productionFilter(req: AuthedRequest): ProductionFilter {
+  const scope = scopeClause(req, 'customer_id');
+  const num = (v: unknown) => (Number(v) > 0 ? Number(v) : undefined);
+  return {
+    from: String(req.query.from ?? '') || undefined,
+    to: String(req.query.to ?? '') || undefined,
+    machine_id: num(req.query.machine_id),
+    product_id: num(req.query.product_id),
+    work_order_id: num(req.query.work_order_id),
+    shift: String(req.query.shift ?? '') || undefined,
+    // Present-and-empty is a real answer — the allocations stating no colour
+    // — where an absent key is no filter at all. The distinction
+    // `URLSearchParams.get` draws between '' and null, which the book's own
+    // tick lists already rely on.
+    color: req.query.color === undefined ? undefined : String(req.query.color),
+    signed: String(req.query.signed ?? '') || undefined,
+    scopeSql: scope.sql || undefined,
+    scopeParams: scope.params,
+  };
+}
+
+const productionOpts = (req: AuthedRequest) => ({
+  rows: [String(req.query.rows ?? ''), String(req.query.rows2 ?? '')],
+  column: String(req.query.col ?? ''),
+  measure: String(req.query.measure ?? ''),
+});
+
+/**
+ * **`work_order`, the cell the board itself is read on.** The sheet is the
+ * same facts folded, so gating it differently would either refuse somebody
+ * their own board or open it to a role that may not see one. `view` is
+ * enough: nothing here writes.
+ */
+reportsRouter.get('/production', requirePermission('work_order'), (req: AuthedRequest, res) => {
+  res.json(pivotProduction(productionFilter(req), productionOpts(req)));
+});
+
+/**
+ * What a raw dimension value reads as on paper.
+ *
+ * On screen the page labels these, since it already owns the words for its
+ * own controls — but a spreadsheet has no page, and a column headed `3` says
+ * nothing. So the three whose raw value is an id or a code are spelled out
+ * here. `productionNames` reads the two catalogues once rather than per cell.
+ */
+function productionNames(): { product: Map<string, string>; line: Map<string, string> } {
+  const product = new Map<string, string>();
+  for (const r of db.prepare('SELECT id, name FROM products').all() as Record<string, unknown>[]) {
+    product.set(String(r.id), String(r.name ?? ''));
+  }
+  const line = new Map(productionLines().map((l) => [String(l.id), l.name]));
+  return { product, line };
+}
+
+reportsRouter.get('/production/export', requirePermission('work_order'), (req: AuthedRequest, res) => {
+  const p: ProductionPivot = pivotProduction(productionFilter(req), productionOpts(req));
+  const names = productionNames();
+  const value = (dim: string, k: string): string => {
+    if (dim === 'product') return names.product.get(k) ?? k;
+    if (dim === 'line') return names.line.get(k) ?? k;
+    if (dim === 'shift') return SHIFT_LABELS[k] ?? k;
+    if (dim === 'signed') return k === 'done' ? 'Signed off' : 'Open';
+    return k;
+  };
+  const label = (dim: string) => (k: string) =>
+    (k === PROD_OTHER ? 'Other' : value(dim, k) || '(blank)');
+  const colLabel = label(p.column);
+  const dimLabel = (k: string) => p.dimensions.find((d) => d.key === k)?.label ?? k;
+
+  const cols: Column<Row>[] = [
+    ...p.rows.map((k, i) => ({
+      header: dimLabel(k),
+      value: (r: Row) => String(r[`k${i}`] ?? ''),
+    })),
+    ...p.columns.map((c) => ({
+      header: colLabel(c),
+      // Blank, never zero — a cell nothing fell into is not a nil figure.
+      value: (r: Row) => (r[`c:${c}`] as number | undefined) ?? null,
+      type: 'number' as const,
+    })),
+    { header: 'Total', value: (r: Row) => r.total as number, type: 'number' },
+  ];
+
+  const rows: Row[] = [];
+  for (const g of p.grids) {
+    for (const r of g.rows) {
+      const row: Row = { total: r.total };
+      r.keys.forEach((k, i) => { row[`k${i}`] = label(p.rows[i])(k); });
+      for (const c of p.columns) if (r.cells[c] != null) row[`c:${c}`] = r.cells[c];
+      rows.push(row);
+    }
+    const total: Row = { total: g.total, k0: 'Grand Total' };
+    for (const c of p.columns) if (g.cells[c] != null) total[`c:${c}`] = g.cells[c];
+    rows.push(total);
+  }
+  sendXlsx(res, 'Production', cols, rows);
 });

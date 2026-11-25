@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom';
 import type { OrderPivot as Pivot, OrderPivotRow, PivotDimension } from '../types';
 import { Card, EmptyState, TH_CLASS, CAPTION_CLASS } from './ui';
-import { fmtMoneyRound, fmtQty, monthLabel, monthEnd } from '../lib/format';
+import { fmtMoneyRound, fmtQty, fmtDate, monthLabel, monthEnd } from '../lib/format';
 
 /**
  * The order book folded whichever way was asked for.
@@ -31,12 +31,33 @@ import { fmtMoneyRound, fmtQty, monthLabel, monthEnd } from '../lib/format';
  */
 const OTHER = '\u0000';
 
-export function OrderPivot({ pivot, params, label }: {
+export function OrderPivot({
+  pivot, params, label,
+  target = { path: '/orders', preset: { view: 'lines' } },
+  unit = 'order line',
+  distinct = { orders: 'sales order' },
+}: {
   pivot: Pivot;
-  /** The book's current filters, so drilling through keeps them. */
+  /** The sheet's current filters, so drilling through keeps them. */
   params: URLSearchParams;
   /** How a raw value reads — the page owns the vocabulary for its own pills. */
   label: (dim: string, value: string) => string;
+  /**
+   * Where a cell drills to. It defaults to the order book, which is what this
+   * grid was written for — the **production** sheet hands it its own, since
+   * the two fold different records and a cell that drilled into the order
+   * book from a shift plan would land somewhere that does not add up to it.
+   */
+  target?: { path: string; preset?: Record<string, string> };
+  /** What one folded row is, for the footnote. */
+  unit?: string;
+  /**
+   * Measures whose cells are a **distinct count**, keyed to the noun. Those
+   * do not add across cells — a thing falling in two cells is counted in
+   * each, while the grand total has its own set — so the sheet says so
+   * rather than leaving somebody to find it by adding a row up.
+   */
+  distinct?: Record<string, string>;
 }) {
   const dim = (key: string) => pivot.dimensions.find((d) => d.key === key);
   const rowDims = pivot.rows.map(dim).filter((d): d is PivotDimension => !!d);
@@ -49,7 +70,10 @@ export function OrderPivot({ pivot, params, label }: {
   const colLabel = (key: string) => {
     if (key === OTHER) return `Other (${pivot.folded})`;
     if (!colDim) return '';
-    return colDim.kind === 'month' && key ? monthLabel(key) : label(colDim.key, key);
+    if (!key) return colDim.kind === 'month' || colDim.kind === 'date' ? 'Not dated' : '(blank)';
+    if (colDim.kind === 'month') return monthLabel(key);
+    if (colDim.kind === 'date') return fmtDate(key);
+    return label(colDim.key, key);
   };
 
   /**
@@ -60,7 +84,7 @@ export function OrderPivot({ pivot, params, label }: {
    */
   const href = (row: OrderPivotRow, colKey?: string): string | null => {
     const q = new URLSearchParams(params);
-    q.set('view', 'lines');
+    for (const [k, v] of Object.entries(target.preset ?? {})) q.set(k, v);
     q.delete('page');
     const apply = (d: PivotDimension, value: string): boolean => {
       if (!d.param) return false;
@@ -69,6 +93,14 @@ export function OrderPivot({ pivot, params, label }: {
         if (!value) return false;
         q.set(`${d.param}_from`, `${value}-01`);
         q.set(`${d.param}_to`, monthEnd(value));
+        return true;
+      }
+      // A single day narrows both ends to itself, so the list behind the cell
+      // is that day and not the whole window the sheet was read over.
+      if (d.kind === 'date') {
+        if (!value) return false;
+        q.set('from', value);
+        q.set('to', value);
         return true;
       }
       // A tick list takes a blank as a real value — the rows with nothing
@@ -82,7 +114,7 @@ export function OrderPivot({ pivot, params, label }: {
       if (colKey === OTHER || !colDim) return null;
       if (!apply(colDim, colKey)) return null;
     }
-    return `/orders?${q}`;
+    return `${target.path}?${q}`;
   };
 
   const show = (v: number | undefined, currency: string) => {
@@ -107,7 +139,15 @@ export function OrderPivot({ pivot, params, label }: {
     );
   };
 
-  const lines = (n: number) => `${fmtQty(n)} line${n === 1 ? '' : 's'} — open them`;
+  const lines = (n: number) => `${fmtQty(n)} ${unit}${n === 1 ? '' : 's'} — open them`;
+
+  /** How a row's own dimension value reads in its cell. */
+  const rowText = (d: PivotDimension, raw: string) => {
+    if (!raw) return d.kind === 'month' || d.kind === 'date' ? 'Not dated' : '(blank)';
+    if (d.kind === 'month') return monthLabel(raw);
+    if (d.kind === 'date') return fmtDate(raw);
+    return label(d.key, raw);
+  };
 
   if (!pivot.grids.length) {
     return (
@@ -146,9 +186,7 @@ export function OrderPivot({ pivot, params, label }: {
                     // order number down a group.
                     const same = i > 0 && g.rows[i - 1].keys[j] === r.keys[j]
                       && rowDims.slice(0, j).every((_, k) => g.rows[i - 1].keys[k] === r.keys[k]);
-                    const text = r.keys[j]
-                      ? (d.kind === 'month' ? monthLabel(r.keys[j]) : label(d.key, r.keys[j]))
-                      : (d.kind === 'month' ? 'Not dated' : '(blank)');
+                    const text = rowText(d, r.keys[j]);
                     return (
                       <td
                         key={d.key}
@@ -181,7 +219,7 @@ export function OrderPivot({ pivot, params, label }: {
         </Card>
       ))}
       <p className="text-xs text-slate-400">
-        {measure?.label} over {fmtQty(pivot.lines)} order line{pivot.lines === 1 ? '' : 's'}
+        {measure?.label} over {fmtQty(pivot.lines)} {unit}{pivot.lines === 1 ? '' : 's'}
         {pivot.money && pivot.grids.length > 1
           ? ' — one sheet per currency, because money only adds up within one.'
           : '.'}
@@ -190,9 +228,9 @@ export function OrderPivot({ pivot, params, label }: {
             into <em>Other</em>, which is counted but not broken down.
           </>
         )}
-        {pivot.measure === 'orders' && (
-          <> {' '}A sales order is counted once in each cell however many of its lines fall there,
-            so the figures do not add across cells.
+        {distinct[pivot.measure] && (
+          <> {' '}A {distinct[pivot.measure]} is counted once in each cell however many of
+            its {unit}s fall there, so the figures do not add across cells.
           </>
         )}
       </p>

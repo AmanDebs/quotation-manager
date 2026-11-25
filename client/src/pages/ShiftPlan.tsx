@@ -45,6 +45,13 @@ export default function ShiftPlanPage() {
   const [from, setFrom] = useUrlFilter('from');
   const [to, setTo] = useUrlFilter('to');
   const [lineFilter, setLineFilter] = useUrlFilter('machine_id');
+  /*
+   * The route has taken `shift` since it was written and nothing sent it.
+   * It earns its control twice over: a plant that runs nights reads one shift
+   * at a time, and it is what lets the production sheet's **Shift** cells
+   * drill here — a cell may only link where the destination can narrow to it.
+   */
+  const [shiftFilter, setShiftFilter] = useUrlFilter('shift');
   const [editing, setEditing] = useState<
     { run: ProductionRun | null; seed: { date: string; machine_id: number; shift: string } } | null
   >(null);
@@ -62,13 +69,19 @@ export default function ShiftPlanPage() {
 
   const params = new URLSearchParams({ from: start, to: end });
   if (lineFilter) params.set('machine_id', lineFilter);
+  if (shiftFilter) params.set('shift', shiftFilter);
   const { data: runs = [], isPending } = useQuery<ProductionRun[]>({
-    queryKey: ['production-runs', start, end, lineFilter],
+    queryKey: ['production-runs', start, end, lineFilter, shiftFilter],
     queryFn: () => api.get<ProductionRun[]>(`/api/production-runs?${params.toString()}`),
   });
 
   const lines = (setup?.lines ?? []).filter((l) => !lineFilter || l.id === Number(lineFilter));
-  const shifts = setup?.shifts ?? [];
+  /*
+   * Narrowed here as well as on the server: the grid draws a column per
+   * shift whether or not a run falls in it, so filtering the rows alone
+   * would leave an empty Shift B column headed as though it ran.
+   */
+  const shifts = (setup?.shifts ?? []).filter((s) => !shiftFilter || s.key === shiftFilter);
   const days = daysBetween(start, end);
   // Keyed on the cell, so drawing the grid is a lookup rather than a scan.
   const byCell = new Map(runs.map((r) => [`${r.date}|${r.machine_id}|${r.shift}`, r]));
@@ -119,6 +132,13 @@ export default function ShiftPlanPage() {
           <Select className="w-52" value={lineFilter} onChange={(e) => setLineFilter(e.target.value)}>
             <option value="">All lines</option>
             {(setup?.lines ?? []).map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+          </Select>
+        </div>
+        <div>
+          <div className={CAPTION_CLASS}>Shift</div>
+          <Select className="w-36" value={shiftFilter} onChange={(e) => setShiftFilter(e.target.value)}>
+            <option value="">All shifts</option>
+            {(setup?.shifts ?? []).map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
           </Select>
         </div>
         <div className="ml-auto text-xs text-slate-500">

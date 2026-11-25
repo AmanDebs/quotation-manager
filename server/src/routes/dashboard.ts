@@ -2,6 +2,9 @@ import { Router } from 'express';
 import { db } from '../db/connection.js';
 import { allows, type AuthedRequest } from '../middleware/auth.js';
 import { readyLines } from '../services/dispatchReady.js';
+import { productionRows, summariseProduction } from '../services/productionReport.js';
+import { todayInKolkata } from '../services/despatchLimits.js';
+import { addDaysIso } from '../services/months.js';
 import { scopeClause } from '../middleware/scope.js';
 import { receivedByInvoice, advanceAppliedByInvoice, sameCurrency } from '../services/receivables.js';
 import { PIECES_ORDERED_SQL } from '../services/totals.js';
@@ -941,6 +944,87 @@ dashboardRouter.get('/', (req: AuthedRequest, res) => {
     })()
     : undefined;
 
+  /**
+   * **The floor today** — what the lines are on and how it is going
+   * (2026-11-25, the brief's management dashboard read as a morning card
+   * rather than as a sixth sheet: the Reports tab answers *how did the
+   * quarter go*, and this answers *what is on the line now*).
+   *
+   * Three days: yesterday, today and tomorrow. Yesterday is in it because
+   * **a shift that fell short and nobody signed off is the one thing on this
+   * card somebody has to act on**, and it is a day old by the time anybody
+   * reads a dashboard; tomorrow because what is set up matters before the
+   * shift starts.
+   *
+   * **The date range filter is ignored**, like every other morning card: what
+   * is on the line now is a question about now. The company filter is
+   * honoured, so the figures still partition the group.
+   *
+   * `work_order: view` — the same cell the board is read on, and **absent
+   * rather than empty** for a login without it, the rule `despatchAttention`
+   * states: a figure the caller may not read is not sent, so the client never
+   * holds a second copy of the access table.
+   */
+  const floor = allows(req, 'work_order') ? (() => {
+    const today = todayInKolkata();
+    const scope = scopeClause(req, 'customer_id');
+    const where: string[] = [];
+    const params: unknown[] = [];
+    if (scope.sql) { where.push(scope.sql); params.push(...scope.params); }
+    if (companyId) { where.push('o.company_id = ?'); params.push(companyId); }
+    const rows = productionRows({
+      from: addDaysIso(today, -1),
+      to: addDaysIso(today, 1),
+      scopeSql: where.length ? where.join(' AND ') : undefined,
+      scopeParams: params,
+    });
+    /*
+     * One line per run rather than per allocation — the card is read as
+     * *what is each line on*, and a shared run drawn twice would read as two
+     * shifts. The work orders ride along as a count.
+     */
+    const byRun = new Map<number, typeof rows>();
+    for (const r of rows) {
+      const mine = byRun.get(r.run_id) ?? [];
+      mine.push(r);
+      byRun.set(r.run_id, mine);
+    }
+    const shifts = [...byRun.values()].map((mine) => {
+      const first = mine[0];
+      const planned = mine.reduce((n, r) => n + r.planned, 0);
+      const made = mine.reduce((n, r) => n + r.made, 0);
+      return {
+        run_id: first.run_id,
+        date: first.date,
+        line_name: first.line_name,
+        shift: first.shift,
+        product_name: first.product_name,
+        color: first.color,
+        jobs: mine.length,
+        signed: first.signed,
+        planned,
+        made,
+        // Floored: an over-run is not a negative shortfall.
+        short: Math.max(0, planned - made),
+        started: made > 0 || mine.some((r) => r.rejected > 0) || first.downtime_mins > 0,
+      };
+    }).sort((a, b) => a.date.localeCompare(b.date) || a.line_name.localeCompare(b.line_name)
+      || a.shift.localeCompare(b.shift));
+    /*
+     * **A shift still running is not waiting on anybody**, which is a
+     * different question from the summary's `awaiting` and so has a name of
+     * its own. `summariseProduction` states a fact about the record — ran,
+     * fell short, still open — and is right to count today's; this is a
+     * to-do, and telling somebody to sign off a shift that has not finished
+     * is advice they should not take. Found by measuring: today's half-made
+     * shift was being counted and prompted on.
+     */
+    const toSign = shifts.filter(
+      (sh) => sh.date < today && sh.started && sh.signed !== 'done' && sh.short > 0,
+    ).length;
+    return { today, shifts, toSign, summary: summariseProduction(rows) };
+  })() : undefined;
+
   res.json({
     counts, countsByCurrency, quotationsByStatus, ordersByStatus, businessSplit, quotedByMonth, invoicedByMonth,
     receivedByMonth,
@@ -954,5 +1038,6 @@ dashboardRouter.get('/', (req: AuthedRequest, res) => {
     ...(pipeline ? { pipeline } : {}),
     ...(unplannedDue ? { unplannedDue } : {}),
     ...(readyToDispatch ? { readyToDispatch } : {}),
+    ...(floor ? { floor } : {}),
   });
 });

@@ -5,7 +5,7 @@ import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
 } from 'recharts';
 import { api } from '../api/client';
-import type { Followup, DashboardLayout, ReadyLine } from '../types';
+import type { Followup, DashboardLayout, ReadyLine, FloorToday, FloorShift } from '../types';
 import { useCan, useUser, usePatchUser } from '../App';
 import { Button, Card, Input, Select, PageHeader, Modal, CAPTION_CLASS, TH_CLASS } from '../components/ui';
 import { Icon } from '../components/icons';
@@ -185,6 +185,12 @@ interface DashboardData {
    * server rather than by `useCan()` here.
    */
   readyToDispatch?: { rows: ReadyLine[]; ready: number; held: number };
+  /**
+   * The floor's next three days. **Absent, not empty**, for a login without
+   * `work_order` — the rule every gated key on this payload follows, decided
+   * on the server so the client never holds a second copy of the matrix.
+   */
+  floor?: FloorToday;
   /** Jobs nobody has planned on orders due within a fortnight. */
   unplannedDue?: { id: number; number: string; order_id: number; order_number: string; customer_name: string; due: string; qty_planned: number }[];
   // Optional for the same reason: an older server simply has no factory card.
@@ -1048,6 +1054,48 @@ export default function DashboardPage() {
             <p className="pt-2 text-xs text-amber-700">
               {data.readyToDispatch.held} more {data.readyToDispatch.held === 1 ? 'line is' : 'lines are'} made but held —
               {' '}<Link to="/despatches?view=ready" className="underline">see why</Link>.
+            </p>
+          )}
+        </Card>
+      ),
+    }] : []),
+    /*
+     * **The floor today** — yesterday, today and tomorrow, one row per shift.
+     *
+     * Yesterday is in it because a shift that **fell short and nobody signed
+     * off** is the one thing on this card somebody has to act on, and it is a
+     * day old by the time a dashboard is read; tomorrow because what is set
+     * up matters before the shift starts. The Reports tab answers *how did
+     * the quarter go*; this answers *what is on the line now*.
+     */
+    ...(data.floor ? [{
+      id: 'floor',
+      title: 'On the line',
+      span: 2 as const,
+      allClear: data.floor.shifts.length === 0
+        ? 'Nothing is planned on any line for today or tomorrow'
+        : undefined,
+      body: (
+        <Card
+          title="On the line"
+          actions={<Link to="/shift-plan" className="text-xs text-brand-600 hover:underline">Board</Link>}
+        >
+          {data.floor.shifts.length === 0 ? (
+            <p className={EMPTY}>Nothing is planned for today or tomorrow.</p>
+          ) : (
+            <div className="space-y-1">
+              {data.floor.shifts.map((sh) => (
+                <FloorRow key={sh.run_id} shift={sh} today={data.floor!.today} />
+              ))}
+            </div>
+          )}
+          {data.floor.toSign > 0 && (
+            <p className="pt-2 text-xs text-amber-700">
+              {data.floor.toSign} {data.floor.toSign === 1 ? 'shift' : 'shifts'} ran
+              short and {data.floor.toSign === 1 ? 'has' : 'have'} not been signed off — what
+              {' '}{data.floor.toSign === 1 ? 'it' : 'they'} did not make is still held on
+              {' '}{data.floor.toSign === 1 ? 'that day' : 'those days'}.
+              {' '}<Link to="/shift-plan" className="underline">Sign off</Link>.
             </p>
           )}
         </Card>
@@ -2039,5 +2087,52 @@ export default function DashboardPage() {
         </Modal>
       )}
     </div>
+  );
+}
+
+/**
+ * One shift on the floor card.
+ *
+ * The figures **switch from the plan to the record** once anything is booked,
+ * which is the board's own rule one screen over: before that the question is
+ * *what is it set up for*, afterwards *how did it go*. A shift that has not
+ * started reads its plan rather than `0 of 50,000`, which on tomorrow's row
+ * would say a line was behind before it had run.
+ */
+function FloorRow({ shift, today }: { shift: FloorShift; today: string }) {
+  const when = shift.date === today ? 'Today'
+    : shift.date < today ? 'Yesterday' : 'Tomorrow';
+  /*
+   * Amber only where the gap is **final**: a shift still running is behind
+   * nothing, and today's row already says `21,000 of 50,000`. Marking it
+   * would be telling somebody a line was short before it had finished.
+   */
+  const behind = shift.date < today && shift.started && shift.signed !== 'done' && shift.short > 0;
+  return (
+    <Link
+      to="/shift-plan"
+      className="flex items-baseline gap-2 rounded px-1 py-1 text-xs hover:bg-slate-50"
+      title={`${shift.line_name}, ${shift.shift ? `Shift ${shift.shift}` : 'shift'} — ${fmtDate(shift.date)}`}
+    >
+      <span className="w-20 shrink-0 text-slate-400">{when}</span>
+      <span className="w-28 shrink-0 font-medium text-slate-700">
+        {shift.line_name}{shift.shift && <span className="text-slate-400"> {shift.shift}</span>}
+      </span>
+      <span className="min-w-0 flex-1 truncate text-slate-600">
+        {shift.product_name || 'Custom item'}
+        {shift.color && <span className="text-slate-400"> · {shift.color}</span>}
+        {shift.jobs > 1 && <span className="text-slate-400"> · {shift.jobs} work orders</span>}
+      </span>
+      <span className="shrink-0 tabular-nums text-slate-700">
+        {shift.started ? (
+          <>{fmtQty(shift.made)}<span className="text-slate-400"> of {fmtQty(shift.planned)}</span></>
+        ) : fmtQty(shift.planned)}
+      </span>
+      {/* Amber only where somebody has to do something: a shift that ran
+          short and is still open. Signed off, the balance has already gone
+          back to the planner and there is nothing left to act on. */}
+      {behind && <span className="shrink-0 font-semibold text-amber-700">&minus;{fmtQty(shift.short)}</span>}
+      {shift.signed === 'done' && <span className="shrink-0 text-slate-300" title="Signed off">&#10003;</span>}
+    </Link>
   );
 }

@@ -1308,9 +1308,9 @@ export interface PaymentRegisterSummary {
 export interface PivotDimension {
   key: string;
   label: string;
-  /** The order book's own query key a cell links through; `''` where it cannot. */
+  /** The sheet's own query key a cell links through; `''` where it cannot. */
   param: string;
-  kind: 'values' | 'plain' | 'month';
+  kind: 'values' | 'plain' | 'month' | 'date';
 }
 export interface PivotMeasure { key: string; label: string; money: boolean }
 export interface OrderPivotRow {
@@ -1342,6 +1342,63 @@ export interface OrderPivot {
   /** The vocabulary, sent with the answer so the pickers hold no second copy. */
   dimensions: PivotDimension[];
   measures: PivotMeasure[];
+}
+
+/**
+ * The production record folded (`services/productionReport.ts`) — the shape
+ * the order pivot already has, so `OrderPivot` draws both rather than a third
+ * copy of a grid. It carries no currency, so there is one grid; what it adds
+ * is the strip over the sheet, which describes the **filtered set** whatever
+ * the fold is.
+ */
+export interface ProductionSummary {
+  runs: number;
+  allocations: number;
+  planned: number;
+  made: number;
+  rejected: number;
+  short: number;
+  downtime_mins: number;
+  /** Shifts that ran, fell short and nobody has signed off. */
+  awaiting: number;
+}
+
+/** One shift on the dashboard's floor card — a run, with what came of it. */
+export interface FloorShift {
+  run_id: number;
+  date: string;
+  line_name: string;
+  shift: string;
+  product_name: string;
+  color: string;
+  /** Work orders sharing this shift. */
+  jobs: number;
+  /** '' while open, 'done' once signed off. */
+  signed: string;
+  planned: number;
+  made: number;
+  short: number;
+  /** Whether anything at all has been booked against it yet. */
+  started: boolean;
+}
+
+export interface FloorToday {
+  /** Kolkata's day, which is what the three-day window is measured from. */
+  today: string;
+  shifts: FloorShift[];
+  /**
+   * Shifts whose **day has passed** that ran short and are still open — the
+   * card's to-do. Deliberately not `summary.awaiting`, which states the same
+   * fact about the record without asking whether the shift has finished: a
+   * shift still running is not waiting on anybody.
+   */
+  toSign: number;
+  summary: ProductionSummary;
+}
+
+export interface ProductionPivot extends Omit<OrderPivot, 'money'> {
+  money: false;
+  summary: ProductionSummary;
 }
 
 /** The Reports page's pivots (`services/reports.ts`): rows are customer × SPOC × currency. */

@@ -20,6 +20,8 @@ import { useCompanies } from '../components/CompanySelect';
 import { useCan } from '../App';
 import { fmtMoney, fmtMoneyRound, fmtQty, fmtRate, rateBasis, fmtDate, fiscalYearRange, monthLabel, monthEnd, MONTHS } from '../lib/format';
 import { useUrlFilter } from '../lib/useUrlFilter';
+import { OrderPivot } from '../components/OrderPivot';
+import type { ProductionPivot, RunSetup } from '../types';
 
 /**
  * The desk's own pivot sheets, drawn from the book rather than kept in Excel
@@ -41,7 +43,7 @@ import { useUrlFilter } from '../lib/useUrlFilter';
  * date columns are the server's: a month with nothing in it is still a
  * column, so the sheet reads Apr…Mar with the gaps visible.
  */
-type View = 'planned' | 'unscheduled' | 'dispatch' | 'due' | 'book' | 'price-history';
+type View = 'planned' | 'unscheduled' | 'dispatch' | 'due' | 'book' | 'price-history' | 'production';
 
 const TABS: { key: View; label: string; needs: string; subtitle: string }[] = [
   { key: 'planned', label: 'Planned for production', needs: 'proforma', subtitle: 'Proformas with a sales order booked, by the date production is planned for' },
@@ -60,7 +62,25 @@ const TABS: { key: View; label: string; needs: string; subtitle: string }[] = [
    * spans the three selling documents and the server decides per kind.
    */
   { key: 'price-history', label: 'Price history', needs: 'order', subtitle: 'What one product has been priced at over time, and to whom — every rate shown per 1000 pieces' },
+  /*
+   * `work_order`, the cell the shift plan board itself is read on: the sheet
+   * is the same facts folded, so gating it differently would either refuse
+   * somebody their own board or open it to a role that may not see one.
+   */
+  { key: 'production', label: 'Production', needs: 'work_order', subtitle: 'What each shift was planned for and what came of it — folded by product, colour, work order, line, shift or date' },
 ];
+
+/**
+ * The production sheet's own defaults: product down the side, pieces planned.
+ *
+ * **The column axis deliberately has none.** It is the one picker with a
+ * meaningful empty value — *no column at all* — and a default would make
+ * that indistinguishable from *nothing chosen yet*, so the control would read
+ * `—` over a sheet folded by month. Found by rendering it. The order book's
+ * own pivot answers the same way, so the two read alike, and `Month` is one
+ * click away and carried in the URL once it is picked.
+ */
+const PROD_DEFAULTS = { rows: 'product', measure: 'planned' };
 
 /**
  * The last two years, ending today — the window the price history opens on.
@@ -126,6 +146,15 @@ export default function ReportsPage() {
   // product's trend for one buyer is a link somebody can send.
   const [product, setProduct] = useUrlFilter('product');
   const [customerId, setCustomerId] = useUrlFilter('customer_id');
+  /* The production sheet: which window and line, and how it is folded. The
+     shape lives in the URL like every filter here, so a sheet can be
+     bookmarked and sent. */
+  const [machineId, setMachineId] = useUrlFilter('machine_id');
+  const [shift, setShift] = useUrlFilter('shift');
+  const [prodRows, setProdRows] = useUrlFilter('rows');
+  const [prodRows2, setProdRows2] = useUrlFilter('rows2');
+  const [prodCol, setProdCol] = useUrlFilter('col');
+  const [prodMeasure, setProdMeasure] = useUrlFilter('measure');
   const companies = useCompanies();
   const fy = fiscalYearRange();
   const twoYears = lastTwoYears();
@@ -135,9 +164,17 @@ export default function ReportsPage() {
     queryKey: ['customers', ''], queryFn: () => api.get<Customer[]>('/api/customers'),
     enabled: view === 'price-history',
   });
+  /* The price history picks a product with it; the production sheet **names**
+     one, since that fold's raw value is the id a cell drills through on. */
   const { data: catalogue = [] } = useQuery({
     queryKey: ['products', ''], queryFn: () => api.get<Product[]>('/api/products'),
-    enabled: view === 'price-history',
+    enabled: view === 'price-history' || view === 'production',
+  });
+  /* The lines and the shift vocabulary, so the two pickers below name what
+     the plant actually runs rather than a list kept here. */
+  const { data: runSetup } = useQuery<RunSetup>({
+    queryKey: ['run-setup'], queryFn: () => api.get<RunSetup>('/api/production-runs/setup'),
+    enabled: view === 'production',
   });
 
   const params = new URLSearchParams();
@@ -150,6 +187,20 @@ export default function ReportsPage() {
     if (to) params.set('to', to);
   }
   if (view === 'book' && by) params.set('by', by);
+  if (view === 'production') {
+    // The window the boxes are showing, whether or not it was typed — a
+    // default the form draws has to be the one the server answers.
+    params.set('from', from || fy.from);
+    params.set('to', to || fy.to);
+    if (machineId) params.set('machine_id', machineId);
+    if (shift) params.set('shift', shift);
+    // Always sent, so the sheet the URL describes is the sheet drawn: a
+    // picker whose value is implied by its absence cannot be linked to.
+    params.set('rows', prodRows || PROD_DEFAULTS.rows);
+    if (prodRows2) params.set('rows2', prodRows2);
+    if (prodCol) params.set('col', prodCol);
+    params.set('measure', prodMeasure || PROD_DEFAULTS.measure);
+  }
   if (view === 'price-history') {
     if (product) params.set('product', product);
     if (customerId) params.set('customer_id', customerId);
@@ -161,7 +212,7 @@ export default function ReportsPage() {
   const query = params.toString();
   const { data, isPending } = useQuery({
     queryKey: ['report', view, query],
-    queryFn: () => api.get<ReportPivot | DispatchReport | DueReport | BookReport | PriceHistory>(`/api/reports/${view}${query ? `?${query}` : ''}`),
+    queryFn: () => api.get<ReportPivot | DispatchReport | DueReport | BookReport | PriceHistory | ProductionPivot>(`/api/reports/${view}${query ? `?${query}` : ''}`),
     // Without a product the price history has no question to answer, and
     // the route refuses it — so nothing is asked until one is picked.
     enabled: tabs.length > 0 && (view !== 'price-history' || !!product),
@@ -189,11 +240,25 @@ export default function ReportsPage() {
    */
   const bookData = view === 'book' ? (data as BookReport | undefined) : undefined;
   const priceData = view === 'price-history' ? (data as PriceHistory | undefined) : undefined;
+  /*
+   * Production carries **no money at all**, so it has neither a currency to
+   * block by nor a SPOC to narrow by — a shift belongs to a line, not to a
+   * person. Both controls are therefore absent on it rather than drawn empty.
+   */
+  const prodData = view === 'production' ? (data as ProductionPivot | undefined) : undefined;
+  const prodDrillParams = (() => {
+    const p = new URLSearchParams();
+    p.set('from', from || fy.from);
+    p.set('to', to || fy.to);
+    if (machineId) p.set('machine_id', machineId);
+    if (shift) p.set('shift', shift);
+    return p;
+  })();
   const currencyRows: { currency: string }[] = bookData
     ? bookData.totals.flatMap((t) => Array.from({ length: t.lines }, () => ({ currency: t.currency })))
     : priceData
       ? priceData.series.flatMap((s) => s.points.map((p) => ({ currency: p.currency })))
-      : !data || view === 'book' || view === 'price-history'
+      : !data || view === 'book' || view === 'price-history' || view === 'production'
         ? []
         : 'groups' in data
           ? (data as DueReport).groups
@@ -206,7 +271,7 @@ export default function ReportsPage() {
    * groups' own invoices — one list, so the picker offers exactly who is on
    * the sheet in front of it whichever sheet that is.
    */
-  const spocs = !data || view === 'book' || view === 'price-history'
+  const spocs = !data || view === 'book' || view === 'price-history' || view === 'production'
     ? []
     : 'groups' in data
       ? [...new Set((data as DueReport).groups.flatMap((g) => [...g.invoices, ...g.undated.invoices]).map((i) => i.spoc))].sort()
@@ -313,6 +378,30 @@ export default function ReportsPage() {
             <Input type="date" className="w-40" value={to || fy.to} onChange={(e) => setTo(e.target.value === fy.to ? '' : e.target.value)} />
           </>
         )}
+        {view === 'production' && (
+          <>
+            <Input type="date" className="w-40" value={from || fy.from} onChange={(e) => setFrom(e.target.value === fy.from ? '' : e.target.value)} />
+            <span className="text-sm text-slate-400">to</span>
+            <Input type="date" className="w-40" value={to || fy.to} onChange={(e) => setTo(e.target.value === fy.to ? '' : e.target.value)} />
+            {/*
+              Only two controls narrow this sheet, and that is the design
+              rather than a gap: **a filter picks the window and a dimension
+              cuts it**. Product, colour, work order and shift are all down
+              the side or across the top, where the fold shows every value at
+              once instead of one — which is what *colour-wise breakup* and
+              *work order progress* actually ask for. The server takes all six
+              as filters, so a link can still narrow to one of them.
+            */}
+            <Select className="w-44" value={machineId} onChange={(e) => setMachineId(e.target.value)}>
+              <option value="">All lines</option>
+              {(runSetup?.lines ?? []).map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+            </Select>
+            <Select className="w-36" value={shift} onChange={(e) => setShift(e.target.value)}>
+              <option value="">All shifts</option>
+              {(runSetup?.shifts ?? []).map((sh) => <option key={sh.key} value={sh.key}>{sh.label}</option>)}
+            </Select>
+          </>
+        )}
         {/*
           Offered on the Due list too since its rows carry a SPOC: a column
           somebody can read and not filter by, on a page where every other
@@ -354,12 +443,73 @@ export default function ReportsPage() {
           )}
       </div>
 
+      {/*
+        The shape pickers sit on a **labelled row of their own**, not in the
+        filter row above — the call the order book's own pivot records: four
+        unlabelled selects among the filters read as four more filters, when
+        the shape is the opposite of a filter. It says how what is left is
+        folded, not which rows are left.
+      */}
+      {view === 'production' && prodData && (
+        <div className="mb-3 flex flex-wrap items-end gap-2">
+          <div>
+            <div className={CAPTION_CLASS}>Down the side</div>
+            <Select className="w-44" value={prodRows || PROD_DEFAULTS.rows} onChange={(e) => setProdRows(e.target.value)}>
+              {prodData.dimensions.map((d) => <option key={d.key} value={d.key}>{d.label}</option>)}
+            </Select>
+          </div>
+          <div>
+            <div className={CAPTION_CLASS}>and then by…</div>
+            <Select className="w-44" value={prodRows2} onChange={(e) => setProdRows2(e.target.value)}>
+              <option value="">—</option>
+              {prodData.dimensions.map((d) => <option key={d.key} value={d.key}>{d.label}</option>)}
+            </Select>
+          </div>
+          <div>
+            <div className={CAPTION_CLASS}>Across the top</div>
+            <Select className="w-44" value={prodCol} onChange={(e) => setProdCol(e.target.value)}>
+              <option value="">—</option>
+              {prodData.dimensions.map((d) => <option key={d.key} value={d.key}>{d.label}</option>)}
+            </Select>
+          </div>
+          <div>
+            <div className={CAPTION_CLASS}>Showing</div>
+            <Select className="w-48" value={prodMeasure || PROD_DEFAULTS.measure} onChange={(e) => setProdMeasure(e.target.value)}>
+              {prodData.measures.map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
+            </Select>
+          </div>
+          <ProductionStrip summary={prodData.summary} />
+        </div>
+      )}
+
       {view === 'price-history' && !product ? (
         <EmptyState message="Pick a product to see what it has been priced at, and to whom." />
       ) : isPending || !data ? (
         <div className="py-8 text-center text-sm text-slate-400">Loading…</div>
       ) : view === 'price-history' ? (
         <PriceChart report={data as PriceHistory} currencies={present} listUrl={listUrl} />
+      ) : view === 'production' ? (
+        <OrderPivot
+          pivot={data as ProductionPivot}
+          /*
+           * The sheet's **filters**, not its shape: `rows`, `col` and
+           * `measure` say how this grid is folded and mean nothing on a
+           * board, so carrying them through would put four dead keys on
+           * every cell's URL.
+           */
+          params={prodDrillParams}
+          label={(dim, value) => productionLabel(dim, value, runSetup, catalogue)}
+          /*
+           * A cell drills into the **board**, not the order book: these are
+           * runs rather than order lines, and a link that landed on a list
+           * which does not add up to the figure it was clicked from is worse
+           * than no link — the rule this grid already states about a
+           * dimension the destination cannot filter on.
+           */
+          target={{ path: '/shift-plan' }}
+          unit="work order share"
+          distinct={{ runs: 'shift' }}
+        />
       ) : view === 'book' ? (
         <BookTable report={data as BookReport} currencies={present} listUrl={listUrl} />
       ) : view === 'due' ? (
@@ -1195,4 +1345,52 @@ function PriceTooltip({ active, payload, currency }: {
       {!p.live && <div className="mt-1 text-amber-700">{p.status} — offered, not sold at</div>}
     </div>
   );
+}
+
+/**
+ * What the whole filtered set comes to, whatever the fold is — the rule every
+ * figure-over-a-table in this app follows, so switching the rows cannot move
+ * these numbers.
+ *
+ * `awaiting` is the one that is a **to-do rather than a measurement**: shifts
+ * that ran, fell short and nobody has signed off, which is what holds a
+ * balance on a day that has passed instead of returning it to the planner.
+ */
+function ProductionStrip({ summary }: { summary: ProductionPivot['summary'] }) {
+  const pct = summary.planned > 0 ? Math.round((summary.made / summary.planned) * 100) : null;
+  return (
+    <div className="ml-auto text-xs text-slate-500">
+      <strong className="text-slate-900">{summary.runs}</strong> shift{summary.runs === 1 ? '' : 's'}
+      {' · '}<strong className="tabular-nums text-slate-900">{fmtQty(summary.planned)}</strong> planned
+      {' · '}<strong className="tabular-nums text-slate-900">{fmtQty(summary.made)}</strong> made
+      {pct !== null && <span className="text-slate-400"> ({pct}%)</span>}
+      {summary.short > 0 && (
+        <>{' · '}<span className="tabular-nums">{fmtQty(summary.short)}</span> not made</>
+      )}
+      {summary.downtime_mins > 0 && (
+        <>{' · '}<span className="tabular-nums">{fmtQty(summary.downtime_mins)}</span> min down</>
+      )}
+      {summary.awaiting > 0 && (
+        <>{' · '}<strong className="text-amber-700">{summary.awaiting}</strong> short and not signed off</>
+      )}
+    </div>
+  );
+}
+
+/**
+ * How a raw production dimension value reads.
+ *
+ * The server sends the **raw** value because that is what a cell drills
+ * through on; the page owns the words, which is the rule `OrderPivot` states
+ * about its own pills. Three of them are an id or a code, and the lists that
+ * name them are already on this page for the two pickers above.
+ */
+function productionLabel(
+  dim: string, value: string, setup: RunSetup | undefined, catalogue: Product[],
+): string {
+  if (dim === 'product') return catalogue.find((p) => String(p.id) === value)?.name ?? value;
+  if (dim === 'line') return setup?.lines.find((l) => String(l.id) === value)?.name ?? value;
+  if (dim === 'shift') return setup?.shifts.find((sh) => sh.key === value)?.label ?? value;
+  if (dim === 'signed') return value === 'done' ? 'Signed off' : 'Open';
+  return value;
 }
